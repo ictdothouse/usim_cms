@@ -1,0 +1,12 @@
+{
+  "name": "usim-cms",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @usim-cms/api dev",
+    "dev:admin": "pnpm --filter @usim-cms/admin dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
