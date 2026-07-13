@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, boolean, unique } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, jsonb, timestamp, boolean, unique, integer } from "drizzle-orm/pg-core";
 
 export const pages = pgTable("pages", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -26,6 +26,21 @@ export const posts = pgTable("posts", {
   publishedAt: timestamp("published_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Upload registry per tenant (tenant schema): one row per file stored via
+// storage.ts. The file itself lives on disk/S3; this table is what the admin
+// media manager lists and deletes. Only ever queried from the protected
+// scope, so RLS requires app.authenticated even for SELECT
+// (migrations/0004_create_media.sql).
+export const media = pgTable("media", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  filename: text("filename").notNull(), // stored name inside the tenant folder
+  originalName: text("original_name").notNull(),
+  url: text("url").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Control-plane registry of known tenant hosts, always in the "public"

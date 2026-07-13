@@ -4,7 +4,7 @@ import Fastify, { type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
@@ -23,7 +23,7 @@ import {
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
-import { uploadFile, localUploadsDir, isLocalDriver } from "./storage.js";
+import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storage.js";
 
 const GLOBAL_THEME_HOST = "";
 
@@ -54,7 +54,7 @@ await app.register(cors, {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "x-tenant-host"],
 });
-await app.register(multipart);
+await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 // Only serves files when STORAGE_DRIVER=local (default) — an S3-backed
 // upload returns a full external URL and doesn't need this at all.
 if (isLocalDriver) {
@@ -244,16 +244,56 @@ await app.register(async (protectedScope) => {
   // Stores uploaded images (banners, etc.) on local disk under a per-tenant
   // folder. Served back publicly at the returned URL — that's expected for
   // site assets, not a tenant-isolation break (no read of any DB data here).
+  // No svg in the allowlist on purpose: svg can carry scripts.
+  const ALLOWED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+  const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
+
   protectedScope.post("/api/media", async (req, reply) => {
     const file = await req.file();
     if (!file) {
       reply.code(400);
       return { error: "file required (multipart/form-data, field name 'file')" };
     }
-    const safeTenant = req.tenantHost.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    if (!ALLOWED_MEDIA_TYPES.has(file.mimetype)) {
+      reply.code(415);
+      return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp only)` };
+    }
+    const safeTenant = tenantFolder(req.tenantHost);
     const filename = `${randomUUID()}${path.extname(file.filename)}`;
     const { url } = await uploadFile(safeTenant, filename, file.file);
-    return { url };
+    // Busboy truncates the stream at the multipart fileSize limit rather
+    // than erroring — detect it after the fact and refuse the partial file.
+    if (file.file.truncated) {
+      await deleteFile(safeTenant, filename);
+      reply.code(413);
+      return { error: "file too large (max 5 MB)" };
+    }
+    const [item] = await req.db
+      .insert(schema.media)
+      .values({
+        filename,
+        originalName: file.filename,
+        url,
+        mimeType: file.mimetype,
+        sizeBytes: file.file.bytesRead,
+      })
+      .returning();
+    return { url, item };
+  });
+
+  protectedScope.get("/api/media", async (req) => ({
+    items: await req.db.select().from(schema.media).orderBy(desc(schema.media.createdAt)),
+  }));
+
+  protectedScope.delete("/api/media/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [row] = await req.db.delete(schema.media).where(eq(schema.media.id, id)).returning();
+    if (!row) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    await deleteFile(tenantFolder(req.tenantHost), row.filename);
+    return { deleted: true, id };
   });
 
   // A dept admin can only ever write their own row here — the global row is

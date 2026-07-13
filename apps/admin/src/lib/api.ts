@@ -77,6 +77,12 @@ export async function uploadMedia(tenantHost: string, token: string, file: File)
   return body.url as string;
 }
 
+export const listMedia = (tenantHost: string, token: string) =>
+  request("/api/media", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+
+export const deleteMedia = (tenantHost: string, token: string, id: string) =>
+  request(`/api/media/${id}`, tenantHost, token, { method: "DELETE" });
+
 // Superadmin-only portal management (no x-tenant-host — these aren't scoped
 // to one tenant).
 export const listPortalTenants = (token: string) =>

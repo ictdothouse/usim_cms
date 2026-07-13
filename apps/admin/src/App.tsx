@@ -3,6 +3,7 @@ import {
   ChevronRight,
   FileText,
   Globe,
+  Image as ImageIcon,
   Languages,
   Layers,
   LayoutDashboard,
@@ -616,6 +617,94 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
   );
 }
 
+// ---------- Media library ----------
+function MediaManager({ tenantHost, token }: { tenantHost: string; token: string }) {
+  const { t } = useT();
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  const [uploading, setUploading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setItems(await api.listMedia(tenantHost, token));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, [tenantHost]);
+
+  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      await api.uploadMedia(tenantHost, token, file);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function copyUrl(m: Record<string, unknown>) {
+    await navigator.clipboard.writeText(api.API_URL + (m.url as string));
+    setCopiedId(m.id as string);
+    setTimeout(() => setCopiedId(null), 1500);
+  }
+
+  async function remove(id: string) {
+    if (!confirm(t("media-delete-confirm"))) return;
+    try {
+      await api.deleteMedia(tenantHost, token, id);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+        <ImageIcon className="h-4 w-4 text-accent" /> {t("media-title")}
+      </h2>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <label className={`${btnGhost} inline-block cursor-pointer`}>
+        {uploading ? t("uploading") : t("media-upload")}
+        <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={onFileChosen} />
+      </label>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {items.map((m) => (
+          <div key={m.id as string} className={`${card} overflow-hidden`}>
+            <img src={api.API_URL + (m.url as string)} alt={m.originalName as string} className="h-24 w-full object-cover" />
+            <div className="space-y-1.5 p-2">
+              <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
+                {m.originalName as string}
+              </p>
+              <p className="text-[10px] text-sub">{Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB</p>
+              <div className="flex items-center justify-between">
+                <button onClick={() => copyUrl(m)} className="text-[10px] font-semibold text-accent hover:underline">
+                  {copiedId === m.id ? t("media-copied") : t("media-copy")}
+                </button>
+                <button onClick={() => remove(m.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {items.length === 0 && <p className="text-xs text-sub">{t("media-empty")}</p>}
+    </section>
+  );
+}
+
 // ---------- Theme (shared form for per-site and global) ----------
 function ThemeForm({
   title,
@@ -1084,6 +1173,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
                     <>
                       <PagesPanel tenantHost={siteHost} token={session.token} />
                       <PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={session.token} />
+                      <MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={session.token} />
                       {isSuper && (
                         <ThemeForm
                           key={siteHost}
