@@ -192,3 +192,23 @@ guna `<input type="color">` native (tiada library).
 - **Media:** upload → senarai → padam; validasi MIME tolak fail salah; pilih dari picker isi banner post.
 - **Isolasi:** data tenant-a tak nampak dari tenant-b; RLS tolak write tanpa auth.
 - **Admin:** login + semua tab render dengan token reka bentuk konsisten.
+
+---
+
+## 12. Ditangguh → spec susulan "Superadmin Control Plane"
+
+Tiga ciri baharu diminta (2026-07-13) **tidak** termasuk dalam spec ini. Ia bergantung pada `posts` /
+`media` / collections wujud dahulu, jadi dibina **selepas** spec ini siap, sebagai satu spec berasingan.
+Keputusan reka bentuk yang sudah dikunci untuk spec susulan itu:
+
+1. **Kawalan role & permission (superadmin → admin tenant).** Model: **toggle keupayaan per-user** (bukan
+   custom-role + matrix penuh). Superadmin hidup/mati set keupayaan tetap untuk setiap user tenant (cth.
+   `posts.write`, `media.upload`, `users.manage`). Simpan senarai keupayaan pada user; **wire** ke
+   `CollectionConfig.access` dalam `generic-crud.ts` (kini didefinisi tapi tak dikuatkuasakan).
+2. **Tarik konten mana-mana → pasang di mana-mana page.** Model: **copy-on-place** — snapshot blok konten
+   (artikel/banner) ke dalam `layout` page sasaran, **bukan** rujukan silang-schema langsung (kekalkan
+   isolasi schema-per-tenant). Superadmin sahaja.
+3. **Clone tenant satu-klik + import/export.** Clone = cipta schema + salin baris terpilih dari schema
+   sumber (dengan pilihan konten mana). Export/import = sirikan konten tenant ke JSON dan sebaliknya.
+
+Butiran penuh (skema, endpoint, UI, fasa) ditulis dalam spec susulan bila spec ini selesai dilaksana.
