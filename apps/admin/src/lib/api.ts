@@ -40,6 +40,9 @@ export const publishPage = (tenantHost: string, token: string, id: string) =>
 export const updatePage = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
   request(`/api/pages/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
 
+export const deletePage = (tenantHost: string, token: string, id: string) =>
+  request(`/api/pages/${id}`, tenantHost, token, { method: "DELETE" });
+
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);
 
