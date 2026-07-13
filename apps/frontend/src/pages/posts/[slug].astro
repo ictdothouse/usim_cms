@@ -1,0 +1,33 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getPostBySlug, getTheme } from "../../lib/api";
+
+// Same tenant resolution as [...slug].astro: Host header, with the
+// DEV_TENANT_HOST fallback for plain-localhost `astro dev` only.
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost =
+  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+    ? (import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    : rawHost;
+
+const post = await getPostBySlug(tenantHost, Astro.params.slug!);
+if (!post) {
+  return new Response("Not found", { status: 404 });
+}
+const theme = await getTheme(tenantHost);
+---
+<BaseLayout title={post.title} ogImage={post.bannerImageUrl} theme={theme}>
+  <article style="max-width:44rem;margin:0 auto;padding:2rem 1rem;">
+    {post.bannerImageUrl && (
+      <img src={post.bannerImageUrl} alt="" style="width:100%;border-radius:0.75rem;margin-bottom:1.5rem;" />
+    )}
+    <h1 style="color:var(--color-primary,#1d1d1f);">{post.title}</h1>
+    {post.publishedAt && (
+      <p style="color:#86868b;font-size:0.85rem;">
+        {new Date(post.publishedAt).toLocaleDateString("ms-MY", { day: "numeric", month: "long", year: "numeric" })}
+      </p>
+    )}
+    {/* body is sanitized server-side on every write (apps/api posts beforeChange) */}
+    <div set:html={post.body} />
+  </article>
+</BaseLayout>

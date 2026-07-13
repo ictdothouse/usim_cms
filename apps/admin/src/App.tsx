@@ -7,11 +7,14 @@ import {
   Layers,
   LayoutDashboard,
   LogOut,
+  Newspaper,
   Palette,
   Rss,
   Trash2,
   Users as UsersIcon,
 } from "lucide-react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
@@ -25,8 +28,8 @@ function loadSession(): Session | null {
 
 // ---------- i18n ----------
 const I18nCtx = createContext<{ lang: Lang; t: (k: Key) => string }>({
-  lang: "ms",
-  t: (k) => dict.ms[k],
+  lang: "en",
+  t: (k) => dict.en[k],
 });
 const useT = () => useContext(I18nCtx);
 
@@ -386,6 +389,233 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   );
 }
 
+// ---------- Posts (rich-text articles) ----------
+function PostEditor({
+  post,
+  tenantHost,
+  token,
+  onSaved,
+  onClose,
+}: {
+  post: Record<string, unknown>;
+  tenantHost: string;
+  token: string;
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useT();
+  const [title, setTitle] = useState(post.title as string);
+  const [excerpt, setExcerpt] = useState((post.excerpt as string | null) ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content: (post.body as string) || "<p></p>",
+  });
+
+  async function save() {
+    setSaving(true);
+    try {
+      await api.updatePost(tenantHost, token, post.id as string, {
+        title,
+        excerpt,
+        body: editor?.getHTML() ?? "",
+      });
+      onSaved();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const tool = (active: boolean) =>
+    `rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
+      active ? "bg-accent text-white" : "bg-canvas text-body hover:text-ink"
+    }`;
+
+  return (
+    <div className="space-y-3 rounded-lg border border-line/30 bg-canvas/40 p-4">
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input className={inputCls} placeholder={t("posts-excerpt")} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} />
+      {editor && (
+        <div className="flex gap-1.5">
+          <button type="button" className={tool(editor.isActive("bold"))} onClick={() => editor.chain().focus().toggleBold().run()}>
+            B
+          </button>
+          <button type="button" className={`${tool(editor.isActive("italic"))} italic`} onClick={() => editor.chain().focus().toggleItalic().run()}>
+            I
+          </button>
+          <button
+            type="button"
+            className={tool(editor.isActive("heading", { level: 2 }))}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          >
+            H2
+          </button>
+          <button type="button" className={tool(editor.isActive("bulletList"))} onClick={() => editor.chain().focus().toggleBulletList().run()}>
+            • List
+          </button>
+        </div>
+      )}
+      <EditorContent
+        editor={editor}
+        className="rounded-lg border border-line/30 bg-white px-3 py-2 text-xs text-ink [&_.ProseMirror]:min-h-[160px] [&_.ProseMirror]:outline-none [&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5"
+      />
+      <div className="flex gap-2">
+        <button onClick={save} disabled={saving} className={btnPrimary}>
+          {saving ? t("blocks-saving") : t("posts-save")}
+        </button>
+        <button onClick={onClose} className={btnGhost}>
+          {t("posts-close")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
+  const { t } = useT();
+  const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [slug, setSlug] = useState("");
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setPosts(await api.getPosts(tenantHost, token));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, [tenantHost]);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      await api.createPost(tenantHost, token, { slug, title });
+      setSlug("");
+      setTitle("");
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function setStatus(p: Record<string, unknown>, status: "draft" | "published") {
+    try {
+      await api.updatePost(tenantHost, token, p.id as string, {
+        status,
+        publishedAt: status === "published" ? new Date().toISOString() : null,
+      });
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function share(id: string) {
+    try {
+      await api.sharePost(tenantHost, token, id);
+      alert(t("posts-shared"));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm(t("posts-delete-confirm"))) return;
+    try {
+      await api.deletePost(tenantHost, token, id);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+        <Newspaper className="h-4 w-4 text-accent" /> {t("posts-title")}
+      </h2>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
+        <input className={inputCls} placeholder={t("pages-slug")} value={slug} onChange={(e) => setSlug(e.target.value)} required />
+        <input className={inputCls} placeholder={t("pages-name")} value={title} onChange={(e) => setTitle(e.target.value)} required />
+        <button type="submit" className={`${btnPrimary} shrink-0`}>
+          {t("posts-create")}
+        </button>
+      </form>
+      <ul className={`${card} divide-y divide-line/20`}>
+        {posts.map((p) => {
+          const published = p.status === "published";
+          return (
+            <li key={p.id as string} className="px-4 py-3 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <span className="font-semibold text-ink">{p.title as string}</span>
+                  <span className="font-mono text-sub">/posts/{p.slug as string}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      published ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+                    }`}
+                  >
+                    {published ? t("posts-published") : t("posts-draft")}
+                  </span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <button
+                    onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
+                    className="font-semibold text-accent hover:underline"
+                  >
+                    {editingId === p.id ? t("posts-close") : t("posts-edit")}
+                  </button>
+                  <button
+                    onClick={() => setStatus(p, published ? "draft" : "published")}
+                    className="font-semibold text-body hover:underline"
+                  >
+                    {published ? t("posts-unpublish") : t("posts-publish")}
+                  </button>
+                  {published && (
+                    <button onClick={() => share(p.id as string)} className="font-semibold text-body hover:underline">
+                      {t("posts-share")}
+                    </button>
+                  )}
+                  <button onClick={() => remove(p.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50" title={t("pages-delete")}>
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </span>
+              </div>
+              {editingId === p.id && (
+                <div className="mt-3">
+                  <PostEditor
+                    key={p.id as string}
+                    post={p}
+                    tenantHost={tenantHost}
+                    token={token}
+                    onClose={() => setEditingId(null)}
+                    onSaved={async () => {
+                      setEditingId(null);
+                      await refresh();
+                    }}
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
+        {posts.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("posts-empty")}</li>}
+      </ul>
+    </section>
+  );
+}
+
 // ---------- Theme (shared form for per-site and global) ----------
 function ThemeForm({
   title,
@@ -740,7 +970,7 @@ function NavButton({ tab, active, onClick }: { tab: Tab; active: boolean; onClic
 }
 
 function Shell({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [lang, setLang] = useState<Lang>("ms");
+  const [lang, setLang] = useState<Lang>("en");
   const t = (k: Key) => dict[lang][k];
   const isSuper = session.role === "superadmin";
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -853,6 +1083,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
                   {siteHost && (
                     <>
                       <PagesPanel tenantHost={siteHost} token={session.token} />
+                      <PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={session.token} />
                       {isSuper && (
                         <ThemeForm
                           key={siteHost}

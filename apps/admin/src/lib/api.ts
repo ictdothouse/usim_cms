@@ -43,6 +43,21 @@ export const updatePage = (tenantHost: string, token: string, id: string, data: 
 export const deletePage = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}`, tenantHost, token, { method: "DELETE" });
 
+export const getPosts = (tenantHost: string, token: string) =>
+  request("/api/posts", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+
+export const createPost = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
+  request("/api/posts", tenantHost, token, { method: "POST", body: JSON.stringify(data) });
+
+export const updatePost = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
+  request(`/api/posts/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
+
+export const deletePost = (tenantHost: string, token: string, id: string) =>
+  request(`/api/posts/${id}`, tenantHost, token, { method: "DELETE" });
+
+export const sharePost = (tenantHost: string, token: string, id: string) =>
+  request(`/api/posts/${id}/publish`, tenantHost, token, { method: "POST" });
+
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);
 

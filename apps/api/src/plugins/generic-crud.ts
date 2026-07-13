@@ -1,12 +1,17 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { sql } from "drizzle-orm";
 import type { CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
 
 // Registers generic CRUD routes for a collection under /api/:collectionSlug,
 // so individual collections don't need hand-written route handlers.
-// TODO: wire access() checks, beforeChange/afterChange hooks, and request-body
-// validation into each handler (collections without a `table` stay stubbed).
+// TODO: wire access() checks and afterChange hooks into each handler
+// (collections without a `table` stay stubbed).
+
+async function applyBeforeChange(config: CollectionConfig, req: FastifyRequest): Promise<unknown> {
+  if (!config.hooks?.beforeChange) return req.body;
+  return config.hooks.beforeChange(req.body, { role: req.user?.role, department: req.tenantHost });
+}
 //
 // Split public (read, anonymous website visitors) from protected (write,
 // logged-in webmaster/superadmin) — register each on the matching scope in
@@ -42,7 +47,8 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
         reply.code(501);
         return { error: "not implemented" };
       }
-      const [item] = await req.db.insert(table).values(req.body as never).returning();
+      const data = await applyBeforeChange(config, req);
+      const [item] = await req.db.insert(table).values(data as never).returning();
       reply.code(201);
       return { collection: config.slug, item };
     },
@@ -78,9 +84,10 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       return { error: "not implemented" };
     }
     const { id } = req.params as { id: string };
+    const data = await applyBeforeChange(config, req);
     const [item] = await req.db
       .update(table)
-      .set(req.body as never)
+      .set(data as never)
       .where(sql`id = ${id}`)
       .returning();
     if (!item) {

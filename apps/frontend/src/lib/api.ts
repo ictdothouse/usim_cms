@@ -24,6 +24,23 @@ export async function getPageBySlug(tenantHost: string, slug: string): Promise<P
   return items.find((p) => p.slug === slug) ?? null;
 }
 
+export interface Post {
+  id: string;
+  slug: string;
+  title: string;
+  body: string; // sanitized HTML (apps/api sanitizes on write)
+  excerpt: string | null;
+  bannerImageUrl: string | null;
+  publishedAt: string | null;
+}
+
+// Public scope only returns status='published' rows (RLS policy in
+// apps/api migrations/0003_create_posts.sql).
+export async function getPostBySlug(tenantHost: string, slug: string): Promise<Post | null> {
+  const { items } = await apiGet<{ items: Post[] }>("/api/posts", tenantHost);
+  return items.find((p) => p.slug === slug) ?? null;
+}
+
 export async function getTheme(tenantHost: string): Promise<Record<string, unknown>> {
   const { theme } = await apiGet<{ theme: Record<string, unknown> }>("/api/theme", tenantHost);
   return theme;

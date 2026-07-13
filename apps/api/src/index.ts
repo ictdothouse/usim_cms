@@ -21,6 +21,7 @@ import {
   listUsers,
   createUser,
 } from "./db/tenant-pool.js";
+import sanitizeHtml from "sanitize-html";
 import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
 import { uploadFile, localUploadsDir, isLocalDriver } from "./storage.js";
 
@@ -163,6 +164,51 @@ const pagesCollection: CollectionConfig = {
   },
 };
 
+// body is author-written HTML rendered raw on the public site — sanitize at
+// this trust boundary on every write, whatever the client sent.
+const sanitizePostBody = (data: unknown) => {
+  const record = data as Record<string, unknown>;
+  // JSON gives an ISO string; Drizzle timestamp columns need a Date.
+  if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
+  record.updatedAt = new Date();
+  if (typeof record.body === "string") {
+    record.body = sanitizeHtml(record.body, {
+      allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
+      allowedAttributes: { ...sanitizeHtml.defaults.allowedAttributes, img: ["src", "alt"] },
+    });
+  }
+  return record;
+};
+
+const postsCollection: CollectionConfig = {
+  slug: "posts",
+  table: schema.posts,
+  createSchema: {
+    type: "object",
+    required: ["slug", "title"],
+    additionalProperties: false,
+    properties: {
+      slug: { type: "string", minLength: 1 },
+      title: { type: "string", minLength: 1 },
+      body: { type: "string" },
+      excerpt: { type: "string" },
+      bannerImageUrl: { type: "string" },
+      status: { type: "string", enum: ["draft", "published"] },
+    },
+  },
+  shareable: {
+    title: (row) => row.title as string,
+    excerpt: (row) => (row.excerpt as string | null) ?? "",
+    link: (row, tenantHost) => `https://${tenantHost}/posts/${row.slug as string}`,
+  },
+  access: {
+    read: () => true,
+  },
+  hooks: {
+    beforeChange: sanitizePostBody,
+  },
+};
+
 async function readMergedTheme(req: FastifyRequest) {
   const rows = await req.db
     .select()
@@ -183,6 +229,7 @@ async function readMergedTheme(req: FastifyRequest) {
 await app.register(async (publicScope) => {
   await tenantPlugin(publicScope);
   registerPublicCollectionRoutes(publicScope, pagesCollection);
+  registerPublicCollectionRoutes(publicScope, postsCollection);
   publicScope.get("/api/theme", async (req) => ({ theme: await readMergedTheme(req) }));
 });
 
@@ -192,6 +239,7 @@ await app.register(async (protectedScope) => {
   await tenantPlugin(protectedScope);
   await requireTenantAuth(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, pagesCollection);
+  registerProtectedCollectionRoutes(protectedScope, postsCollection);
 
   // Stores uploaded images (banners, etc.) on local disk under a per-tenant
   // folder. Served back publicly at the returned URL — that's expected for

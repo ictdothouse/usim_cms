@@ -11,6 +11,23 @@ export const pages = pgTable("pages", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// News/article content per tenant. body is sanitized HTML from the admin
+// rich-text editor (see the posts collection's beforeChange hook). Public
+// visibility is enforced by RLS: anonymous SELECT only sees status='published'
+// (migrations/0003_create_posts.sql).
+export const posts = pgTable("posts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  excerpt: text("excerpt"),
+  bannerImageUrl: text("banner_image_url"),
+  status: text("status").notNull().default("draft"), // "draft" | "published"
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Control-plane registry of known tenant hosts, always in the "public"
 // schema. Resolved via search_path (tenant schema first, "public" fallback
 // after) rather than an explicit qualifier, since Drizzle disallows
