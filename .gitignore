@@ -8,3 +8,4 @@ build/
 .DS_Store
 *.tsbuildinfo
 apps/api/uploads/
+.astro/

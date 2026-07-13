@@ -73,8 +73,21 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
   });
 
   app.patch(`${base}/:id`, async (req, reply) => {
-    reply.code(501);
-    return { error: "not implemented" };
+    if (!table) {
+      reply.code(501);
+      return { error: "not implemented" };
+    }
+    const { id } = req.params as { id: string };
+    const [item] = await req.db
+      .update(table)
+      .set(req.body as never)
+      .where(sql`id = ${id}`)
+      .returning();
+    if (!item) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return { collection: config.slug, item };
   });
 
   app.delete(`${base}/:id`, async (req, reply) => {

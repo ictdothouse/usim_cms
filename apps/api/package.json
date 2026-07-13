@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:setup-role": "tsx --env-file=.env scripts/setup-db-role.ts",
     "tenant:add": "tsx --env-file=.env scripts/add-tenant.ts",
     "theme:set-global": "tsx --env-file=.env scripts/set-global-theme.ts",
     "user:add": "tsx --env-file=.env scripts/add-user.ts"

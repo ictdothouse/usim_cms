@@ -1,0 +1,16 @@
+---
+interface Props {
+  title?: string;
+  subtitle?: string;
+  imageUrl?: string;
+}
+const { title, subtitle, imageUrl } = Astro.props;
+---
+<section class="hero" style={imageUrl ? `background-image:url(${imageUrl})` : undefined}>
+  {title && <h1>{title}</h1>}
+  {subtitle && <p>{subtitle}</p>}
+</section>
+
+<style>
+  .hero { padding: 4rem 2rem; background-size: cover; background-position: center; }
+</style>

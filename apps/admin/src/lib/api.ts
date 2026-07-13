@@ -7,7 +7,11 @@ export interface Session {
 }
 
 async function request(path: string, tenantHost: string | null, token: string | null, init?: RequestInit) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
+  // Fastify's JSON body parser rejects an empty body when this header is
+  // set (FST_ERR_CTP_EMPTY_JSON_BODY) — only send it when there's a body
+  // (publishPage and any future bodyless call has none).
+  if (init?.body) headers["Content-Type"] = "application/json";
   if (tenantHost) headers["x-tenant-host"] = tenantHost;
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
@@ -32,6 +36,9 @@ export const createPage = (tenantHost: string, token: string, data: { slug: stri
 
 export const publishPage = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}/publish`, tenantHost, token, { method: "POST" });
+
+export const updatePage = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
+  request(`/api/pages/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
 
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { sql } from "drizzle-orm";
 import { verifySession, type SessionPayload } from "../db/auth.js";
 
 declare module "fastify" {
@@ -24,6 +25,9 @@ export async function requireTenantAuth(app: FastifyInstance) {
       return reply.code(403).send({ error: "Not authorized for this tenant" });
     }
     req.user = session;
+    // Flips the RLS write policies open for this request's pooled
+    // connection (see tenant.ts's reset + migrations/0002_pages_rls.sql).
+    await req.db.execute(sql`SET SESSION app.authenticated = 'true'`);
   });
 }
 

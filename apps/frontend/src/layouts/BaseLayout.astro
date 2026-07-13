@@ -1,0 +1,30 @@
+---
+interface Props {
+  title: string;
+  ogImage?: string | null;
+  theme: Record<string, unknown>;
+}
+const { title, ogImage, theme } = Astro.props;
+// site_theme.settings is an open JSONB bag (superadmin/webmaster-defined);
+// only a couple of well-known keys map to CSS vars for now.
+const themeVars = [
+  theme.primaryColor ? `--color-primary:${theme.primaryColor}` : null,
+  theme.fontFamily ? `--font-family:${theme.fontFamily}` : null,
+]
+  .filter(Boolean)
+  .join(";");
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta property="og:title" content={title} />
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
+  </head>
+  <body style={`font-family:var(--font-family, system-ui, sans-serif)`}>
+    <slot />
+  </body>
+</html>

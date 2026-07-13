@@ -63,8 +63,160 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
   );
 }
 
+// MVP block builder: hero/text/image, add/remove/reorder only.
+// ponytail: reorder via up/down buttons, not a drag lib — dnd-kit is the
+// upgrade path if drag UX is actually wanted later, but two buttons are a
+// smaller diff for the same capability.
+interface Block {
+  type: string;
+  props: Record<string, string>;
+}
+
+const BLOCK_TYPES: Record<string, { label: string; fields: Array<{ key: string; label: string }> }> = {
+  hero: {
+    label: "Hero",
+    fields: [
+      { key: "title", label: "Title" },
+      { key: "subtitle", label: "Subtitle" },
+      { key: "imageUrl", label: "Image URL" },
+    ],
+  },
+  text: {
+    label: "Text",
+    fields: [{ key: "content", label: "Content" }],
+  },
+  image: {
+    label: "Image",
+    fields: [
+      { key: "imageUrl", label: "Image URL" },
+      { key: "alt", label: "Alt text" },
+    ],
+  },
+};
+
+function BlockBuilder({
+  page,
+  tenantHost,
+  token,
+  onClose,
+  onSaved,
+}: {
+  page: Record<string, unknown>;
+  tenantHost: string;
+  token: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [blocks, setBlocks] = useState<Block[]>(() => (page.layout as Block[] | undefined) ?? []);
+  const [addType, setAddType] = useState("hero");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function addBlock() {
+    setBlocks([...blocks, { type: addType, props: {} }]);
+  }
+
+  function removeBlock(i: number) {
+    setBlocks(blocks.filter((_, idx) => idx !== i));
+  }
+
+  function moveBlock(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= blocks.length) return;
+    const next = [...blocks];
+    [next[i], next[j]] = [next[j], next[i]];
+    setBlocks(next);
+  }
+
+  function setField(i: number, key: string, value: string) {
+    const next = [...blocks];
+    next[i] = { ...next[i], props: { ...next[i].props, [key]: value } };
+    setBlocks(next);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.updatePage(tenantHost, token, page.id as string, { layout: blocks });
+      onSaved();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded border bg-slate-50 p-3">
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {blocks.length === 0 && <p className="text-sm text-slate-400">No blocks yet.</p>}
+      {blocks.map((block, i) => (
+        <div key={i} className="space-y-2 rounded border bg-white p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">{BLOCK_TYPES[block.type]?.label ?? block.type}</span>
+            <div className="flex gap-2 text-xs">
+              <button onClick={() => moveBlock(i, -1)} disabled={i === 0} className="underline disabled:opacity-30">
+                Up
+              </button>
+              <button
+                onClick={() => moveBlock(i, 1)}
+                disabled={i === blocks.length - 1}
+                className="underline disabled:opacity-30"
+              >
+                Down
+              </button>
+              <button onClick={() => removeBlock(i)} className="text-red-600 underline">
+                Remove
+              </button>
+            </div>
+          </div>
+          {(BLOCK_TYPES[block.type]?.fields ?? []).map((f) => (
+            <label key={f.key} className="block text-xs">
+              {f.label}
+              <input
+                className="mt-1 w-full rounded border px-2 py-1 text-sm"
+                value={block.props[f.key] ?? ""}
+                onChange={(e) => setField(i, f.key, e.target.value)}
+              />
+            </label>
+          ))}
+        </div>
+      ))}
+      <div className="flex items-center gap-2">
+        <select
+          className="rounded border px-2 py-1 text-sm"
+          value={addType}
+          onChange={(e) => setAddType(e.target.value)}
+        >
+          {Object.entries(BLOCK_TYPES).map(([key, t]) => (
+            <option key={key} value={key}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        <button onClick={addBlock} className="rounded border px-2 py-1 text-sm">
+          + Add block
+        </button>
+        <span className="flex-1" />
+        <button onClick={onClose} className="rounded px-2 py-1 text-sm text-slate-600">
+          Close
+        </button>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save blocks"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState("");
@@ -152,14 +304,38 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
       </form>
       <ul className="divide-y rounded border bg-white">
         {pages.map((p) => (
-          <li key={p.id as string} className="flex items-center justify-between px-3 py-2 text-sm">
-            <span>
-              <span className="font-medium">{p.title as string}</span>{" "}
-              <span className="text-slate-400">/{p.slug as string}</span>
-            </span>
-            <button onClick={() => publish(p.id as string)} className="text-slate-600 underline">
-              Publish to portal
-            </button>
+          <li key={p.id as string} className="px-3 py-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span>
+                <span className="font-medium">{p.title as string}</span>{" "}
+                <span className="text-slate-400">/{p.slug as string}</span>
+              </span>
+              <span className="flex gap-3">
+                <button
+                  onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
+                  className="text-slate-600 underline"
+                >
+                  {editingId === p.id ? "Close blocks" : "Edit blocks"}
+                </button>
+                <button onClick={() => publish(p.id as string)} className="text-slate-600 underline">
+                  Publish to portal
+                </button>
+              </span>
+            </div>
+            {editingId === p.id && (
+              <div className="mt-2">
+                <BlockBuilder
+                  page={p}
+                  tenantHost={tenantHost}
+                  token={token}
+                  onClose={() => setEditingId(null)}
+                  onSaved={async () => {
+                    setEditingId(null);
+                    await refresh();
+                  }}
+                />
+              </div>
+            )}
           </li>
         ))}
         {pages.length === 0 && <li className="px-3 py-2 text-sm text-slate-400">No pages yet.</li>}
