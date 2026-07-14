@@ -27,6 +27,35 @@ import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storag
 
 const GLOBAL_THEME_HOST = "";
 
+const THEME_COLOR_KEYS = ["primaryColor", "secondaryColor", "backgroundColor", "textColor"] as const;
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+// Letters/digits/space only — this string ends up inside a Google Fonts URL
+// built by apps/frontend, so it must not carry `/`, `?`, `<`, etc.
+const FONT_FAMILY_RE = /^[A-Za-z0-9 ]*$/;
+
+// Shared by both theme write routes (per-tenant + global). site_theme.settings
+// is an open JSONB bag but only these 6 keys are ever read by apps/frontend
+// (BaseLayout.astro) — reject anything else instead of silently storing it.
+function validateThemeSettings(settings: Record<string, unknown>): string | null {
+  const allowed = new Set([...THEME_COLOR_KEYS, "fontFamily", "logoUrl"]);
+  for (const key of Object.keys(settings)) {
+    if (!allowed.has(key)) return `unknown theme key: ${key}`;
+  }
+  for (const key of THEME_COLOR_KEYS) {
+    const value = settings[key];
+    if (value !== undefined && value !== "" && !HEX_COLOR_RE.test(value as string)) {
+      return `${key} must be a hex color like #003399`;
+    }
+  }
+  if (settings.fontFamily !== undefined && !FONT_FAMILY_RE.test(settings.fontFamily as string)) {
+    return "fontFamily must contain only letters, digits, and spaces";
+  }
+  if (settings.logoUrl !== undefined && typeof settings.logoUrl !== "string") {
+    return "logoUrl must be a string";
+  }
+  return null;
+}
+
 const app = Fastify({ logger: true });
 
 // Without this, one uncaught error anywhere takes down all 50 tenants at
@@ -100,7 +129,13 @@ app.get("/api/portal/theme", async () => {
 // they live at the root, gated by verifySuperadmin instead of tenantPlugin.
 app.put("/api/portal/theme", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
-  await setGlobalTheme(req.body as Record<string, unknown>);
+  const settings = req.body as Record<string, unknown>;
+  const error = validateThemeSettings(settings);
+  if (error) {
+    reply.code(400);
+    return { error };
+  }
+  await setGlobalTheme(settings);
   return { saved: true };
 });
 
@@ -298,8 +333,13 @@ await app.register(async (protectedScope) => {
 
   // A dept admin can only ever write their own row here — the global row is
   // out of reach from this scope.
-  protectedScope.put("/api/theme", async (req) => {
+  protectedScope.put("/api/theme", async (req, reply) => {
     const settings = req.body as Record<string, unknown>;
+    const error = validateThemeSettings(settings);
+    if (error) {
+      reply.code(400);
+      return { error };
+    }
     await req.db
       .insert(schema.siteTheme)
       .values({ tenantHost: req.tenantHost, settings })

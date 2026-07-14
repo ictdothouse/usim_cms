@@ -6,13 +6,19 @@ interface Props {
 }
 const { title, ogImage, theme } = Astro.props;
 // site_theme.settings is an open JSONB bag (superadmin/webmaster-defined);
-// only a couple of well-known keys map to CSS vars for now.
+// apps/api validates these 6 keys on write (index.ts validateThemeSettings),
+// so this layout only has to wire them, not re-validate them.
 const themeVars = [
   theme.primaryColor ? `--color-primary:${theme.primaryColor}` : null,
+  theme.secondaryColor ? `--color-secondary:${theme.secondaryColor}` : null,
+  theme.backgroundColor ? `--color-bg:${theme.backgroundColor}` : null,
+  theme.textColor ? `--color-text:${theme.textColor}` : null,
   theme.fontFamily ? `--font-family:${theme.fontFamily}` : null,
 ]
   .filter(Boolean)
   .join(";");
+const fontFamily = typeof theme.fontFamily === "string" ? theme.fontFamily : "";
+const logoUrl = typeof theme.logoUrl === "string" ? theme.logoUrl : "";
 ---
 <!doctype html>
 <html lang="en">
@@ -22,9 +28,18 @@ const themeVars = [
     <title>{title}</title>
     <meta property="og:title" content={title} />
     {ogImage && <meta property="og:image" content={ogImage} />}
+    {fontFamily && (
+      <link
+        rel="stylesheet"
+        href={`https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}&display=swap`}
+      />
+    )}
     <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
   </head>
-  <body style={`font-family:var(--font-family, system-ui, sans-serif)`}>
+  <body
+    style={`font-family:var(--font-family, system-ui, sans-serif);background:var(--color-bg, inherit);color:var(--color-text, inherit)`}
+  >
+    {logoUrl && <img src={logoUrl} alt="" height="40" />}
     <slot />
   </body>
 </html>

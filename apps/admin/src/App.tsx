@@ -704,22 +704,48 @@ function ThemeForm({
 }) {
   const { t } = useT();
   const [primaryColor, setPrimaryColor] = useState("");
+  const [secondaryColor, setSecondaryColor] = useState("");
+  const [backgroundColor, setBackgroundColor] = useState("");
+  const [textColor, setTextColor] = useState("");
+  const [fontFamily, setFontFamily] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void load().then((th) => {
       setPrimaryColor(th.primaryColor ?? "");
+      setSecondaryColor(th.secondaryColor ?? "");
+      setBackgroundColor(th.backgroundColor ?? "");
+      setTextColor(th.textColor ?? "");
+      setFontFamily(th.fontFamily ?? "");
       setLogoUrl(th.logoUrl ?? "");
     });
   }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await save({ primaryColor, logoUrl });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    setError(null);
+    try {
+      await save({ primaryColor, secondaryColor, backgroundColor, textColor, fontFamily, logoUrl });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
+
+  const colorField = (label: string, value: string, onChange: (v: string) => void) => (
+    <label className="block text-xs font-medium text-body">
+      {label}
+      <input
+        type="color"
+        className="mt-1 block h-9 w-16 cursor-pointer rounded border border-line/30"
+        value={value || "#000000"}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
 
   return (
     <section className="space-y-3">
@@ -728,15 +754,26 @@ function ThemeForm({
       </h2>
       {desc && <p className="text-xs text-sub">{desc}</p>}
       <form onSubmit={submit} className={`${card} max-w-sm space-y-3 p-4`}>
+        <div className="flex flex-wrap gap-3">
+          {colorField(t("theme-primary"), primaryColor, setPrimaryColor)}
+          {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor)}
+          {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
+          {colorField(t("theme-text"), textColor, setTextColor)}
+        </div>
         <label className="block text-xs font-medium text-body">
-          {t("theme-primary")}
+          {t("theme-font")}
           <input
             className={`${inputCls} mt-1`}
-            value={primaryColor}
-            onChange={(e) => setPrimaryColor(e.target.value)}
-            placeholder="#0a5c36"
+            value={fontFamily}
+            onChange={(e) => setFontFamily(e.target.value)}
+            placeholder="Noto Sans"
           />
         </label>
+        {fontFamily && (
+          <p className="text-sm" style={{ fontFamily }}>
+            {t("theme-font-preview")}
+          </p>
+        )}
         <label className="block text-xs font-medium text-body">
           {t("theme-logo")}
           <input className={`${inputCls} mt-1`} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} />
@@ -745,6 +782,7 @@ function ThemeForm({
           {t("theme-save")}
         </button>
         {saved && <span className="ml-2 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
+        {error && <p className="text-xs text-red-600">{error}</p>}
       </form>
     </section>
   );
