@@ -14,8 +14,10 @@ import {
   Trash2,
   Users as UsersIcon,
 } from "lucide-react";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import { useCreateBlockNote } from "@blocknote/react";
+import { BlockNoteView } from "@blocknote/mantine";
+import "@blocknote/core/fonts/inter.css";
+import "@blocknote/mantine/style.css";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
@@ -409,10 +411,19 @@ function PostEditor({
   const [excerpt, setExcerpt] = useState((post.excerpt as string | null) ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content: (post.body as string) || "<p></p>",
+  const editor = useCreateBlockNote({
+    uploadFile: async (file: File) => {
+      const url = await api.uploadMedia(tenantHost, token, file);
+      // local driver returns a relative /uploads/... path — make it absolute
+      // so it renders in the editor and on the public site
+      return url.startsWith("http") ? url : api.API_URL + url;
+    },
   });
+
+  useEffect(() => {
+    const blocks = editor.tryParseHTMLToBlocks((post.body as string) || "");
+    editor.replaceBlocks(editor.document, blocks);
+  }, [editor]);
 
   async function save() {
     setSaving(true);
@@ -420,7 +431,7 @@ function PostEditor({
       await api.updatePost(tenantHost, token, post.id as string, {
         title,
         excerpt,
-        body: editor?.getHTML() ?? "",
+        body: await editor.blocksToHTMLLossy(editor.document),
       });
       onSaved();
     } catch (err) {
@@ -430,40 +441,14 @@ function PostEditor({
     }
   }
 
-  const tool = (active: boolean) =>
-    `rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-      active ? "bg-accent text-white" : "bg-canvas text-body hover:text-ink"
-    }`;
-
   return (
     <div className="space-y-3 rounded-lg border border-line/30 bg-canvas/40 p-4">
       {error && <p className="text-xs text-red-600">{error}</p>}
       <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
       <input className={inputCls} placeholder={t("posts-excerpt")} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} />
-      {editor && (
-        <div className="flex gap-1.5">
-          <button type="button" className={tool(editor.isActive("bold"))} onClick={() => editor.chain().focus().toggleBold().run()}>
-            B
-          </button>
-          <button type="button" className={`${tool(editor.isActive("italic"))} italic`} onClick={() => editor.chain().focus().toggleItalic().run()}>
-            I
-          </button>
-          <button
-            type="button"
-            className={tool(editor.isActive("heading", { level: 2 }))}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-          >
-            H2
-          </button>
-          <button type="button" className={tool(editor.isActive("bulletList"))} onClick={() => editor.chain().focus().toggleBulletList().run()}>
-            • List
-          </button>
-        </div>
-      )}
-      <EditorContent
-        editor={editor}
-        className="rounded-lg border border-line/30 bg-white px-3 py-2 text-xs text-ink [&_.ProseMirror]:min-h-[160px] [&_.ProseMirror]:outline-none [&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5"
-      />
+      <div className="rounded-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[240px]">
+        <BlockNoteView editor={editor} theme="light" />
+      </div>
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className={btnPrimary}>
           {saving ? t("blocks-saving") : t("posts-save")}
