@@ -1,0 +1,44 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import HeroBlock from "../components/HeroBlock.astro";
+import TextBlock from "../components/TextBlock.astro";
+import ImageBlock from "../components/ImageBlock.astro";
+import GenericBlock from "../components/GenericBlock.astro";
+import { getPageBySlug, getTheme } from "../lib/api";
+
+// Single instance, ~50 real department domains: tenant identity is always
+// the request's Host header, never subdomain parsing or build-time config
+// (see CLAUDE.md). "home" is this site's convention for the root page,
+// since apps/api's pages.slug is NOT NULL.
+//
+// ponytail: `astro dev` has no real department domain to hit, so plain
+// localhost falls back to DEV_TENANT_HOST — dev convenience only
+// (import.meta.env.DEV is false in `astro build`/`preview`), never affects
+// a real deployment. Upgrade path: none needed, real domains never hit this.
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost =
+  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+    ? (import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    : rawHost;
+const slug = Astro.params.slug || "home";
+
+const page = await getPageBySlug(tenantHost, slug);
+if (!page) {
+  return new Response("Not found", { status: 404 });
+}
+const theme = await getTheme(tenantHost);
+---
+<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme}>
+  {page.layout.map((block) => {
+    switch (block.type) {
+      case "hero":
+        return <HeroBlock {...(block.props ?? {})} />;
+      case "text":
+        return <TextBlock {...(block.props ?? {})} />;
+      case "image":
+        return <ImageBlock {...(block.props ?? {})} />;
+      default:
+        return <GenericBlock type={block.type} props={block.props} />;
+    }
+  })}
+</BaseLayout>

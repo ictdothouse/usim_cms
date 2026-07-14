@@ -1,0 +1,11 @@
+---
+// ponytail: fallback for block types without a dedicated component yet.
+// Upgrade path: add a <TypeBlock>.astro and a case in [...slug].astro's
+// block-type switch as the admin block builder grows real block types.
+interface Props {
+  type: string;
+  props?: Record<string, unknown>;
+}
+const { type, props } = Astro.props;
+---
+<pre class="unknown-block">{type}: {JSON.stringify(props ?? {}, null, 2)}</pre>

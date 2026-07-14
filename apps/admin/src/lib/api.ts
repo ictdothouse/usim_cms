@@ -7,7 +7,11 @@ export interface Session {
 }
 
 async function request(path: string, tenantHost: string | null, token: string | null, init?: RequestInit) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
+  // Fastify's JSON body parser rejects an empty body when this header is
+  // set (FST_ERR_CTP_EMPTY_JSON_BODY) — only send it when there's a body
+  // (publishPage and any future bodyless call has none).
+  if (init?.body) headers["Content-Type"] = "application/json";
   if (tenantHost) headers["x-tenant-host"] = tenantHost;
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
@@ -33,6 +37,27 @@ export const createPage = (tenantHost: string, token: string, data: { slug: stri
 export const publishPage = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}/publish`, tenantHost, token, { method: "POST" });
 
+export const updatePage = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
+  request(`/api/pages/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
+
+export const deletePage = (tenantHost: string, token: string, id: string) =>
+  request(`/api/pages/${id}`, tenantHost, token, { method: "DELETE" });
+
+export const getPosts = (tenantHost: string, token: string) =>
+  request("/api/posts", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+
+export const createPost = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
+  request("/api/posts", tenantHost, token, { method: "POST", body: JSON.stringify(data) });
+
+export const updatePost = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
+  request(`/api/posts/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
+
+export const deletePost = (tenantHost: string, token: string, id: string) =>
+  request(`/api/posts/${id}`, tenantHost, token, { method: "DELETE" });
+
+export const sharePost = (tenantHost: string, token: string, id: string) =>
+  request(`/api/posts/${id}/publish`, tenantHost, token, { method: "POST" });
+
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);
 
@@ -52,6 +77,12 @@ export async function uploadMedia(tenantHost: string, token: string, file: File)
   return body.url as string;
 }
 
+export const listMedia = (tenantHost: string, token: string) =>
+  request("/api/media", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+
+export const deleteMedia = (tenantHost: string, token: string, id: string) =>
+  request(`/api/media/${id}`, tenantHost, token, { method: "DELETE" });
+
 // Superadmin-only portal management (no x-tenant-host — these aren't scoped
 // to one tenant).
 export const listPortalTenants = (token: string) =>
@@ -68,8 +99,29 @@ export const listPortalUsers = (token: string) =>
 
 export const createPortalUser = (
   token: string,
-  data: { email: string; password: string; role: string; tenantHost?: string },
+  data: { email: string; password: string; role: string; tenantHost?: string; roleId?: string | null },
 ) => request("/api/portal/users", null, token, { method: "POST", body: JSON.stringify(data) });
+
+export const updatePortalUserRole = (token: string, id: string, roleId: string | null) =>
+  request(`/api/portal/users/${id}`, null, token, {
+    method: "PATCH",
+    body: JSON.stringify({ roleId }),
+  });
+
+export const listPortalRoles = (token: string) =>
+  request("/api/portal/roles", null, token).then((b) => b.roles as Array<Record<string, unknown>>);
+
+export const createPortalRole = (token: string, name: string, permissions: string[]) =>
+  request("/api/portal/roles", null, token, { method: "POST", body: JSON.stringify({ name, permissions }) });
+
+export const updatePortalRole = (token: string, id: string, permissions: string[]) =>
+  request(`/api/portal/roles/${id}`, null, token, {
+    method: "PATCH",
+    body: JSON.stringify({ permissions }),
+  });
+
+export const deletePortalRole = (token: string, id: string) =>
+  request(`/api/portal/roles/${id}`, null, token, { method: "DELETE" });
 
 export const getGlobalTheme = (token: string) =>
   request("/api/portal/theme", null, token).then((b) => b.theme as Record<string, string>);

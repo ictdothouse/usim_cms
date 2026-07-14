@@ -2,3 +2,7 @@ packages:
   - "apps/*"
 allowBuilds:
   esbuild: true
+  sharp: false
+overrides:
+  "@mantine/core": "^8.3.18"
+  "@mantine/hooks": "^8.3.18"

@@ -1,10 +1,10 @@
 import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
-import { S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 export interface UploadResult {
@@ -54,6 +54,16 @@ async function uploadS3(tenantFolder: string, filename: string, stream: Readable
 
 export function uploadFile(tenantFolder: string, filename: string, stream: Readable): Promise<UploadResult> {
   return DRIVER === "s3" ? uploadS3(tenantFolder, filename, stream) : uploadLocal(tenantFolder, filename, stream);
+}
+
+export async function deleteFile(tenantFolder: string, filename: string): Promise<void> {
+  if (DRIVER === "s3") {
+    const bucket = process.env.S3_BUCKET;
+    if (!bucket) throw new Error("S3_BUCKET not configured (set S3_BUCKET env var)");
+    await getS3Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: `${tenantFolder}/${filename}` }));
+    return;
+  }
+  await rm(path.join(localUploadsDir, tenantFolder, filename), { force: true });
 }
 
 export const isLocalDriver = DRIVER === "local";

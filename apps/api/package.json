@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');fs.cpSync('src/db/migrations','dist/db/migrations',{recursive:true});fs.copyFileSync('src/db/bootstrap-public.sql','dist/db/bootstrap-public.sql')\"",
     "start": "node --env-file=.env dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:setup-role": "tsx --env-file=.env scripts/setup-db-role.ts",
     "tenant:add": "tsx --env-file=.env scripts/add-tenant.ts",
     "theme:set-global": "tsx --env-file=.env scripts/set-global-theme.ts",
     "user:add": "tsx --env-file=.env scripts/add-user.ts"
@@ -22,11 +23,13 @@
     "@fastify/static": "^9.3.0",
     "drizzle-orm": "^0.36.4",
     "fastify": "^5.1.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "sanitize-html": "^2.17.6"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/pg": "^8.11.10",
+    "@types/sanitize-html": "^2.16.1",
     "drizzle-kit": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
