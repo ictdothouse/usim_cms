@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import Fastify, { type FastifyRequest } from "fastify";
+import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -26,12 +26,12 @@ import {
   createRole,
   updateRole,
   deleteRole,
+  getMergedTheme,
+  setTenantTheme,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storage.js";
-
-const GLOBAL_THEME_HOST = "";
 
 // Fixed permission matrix (resource.action) a superadmin composes into named
 // roles (schema.ts's roles.permissions) and assigns per webmaster user — see
@@ -187,12 +187,16 @@ app.get("/api/portal/tenants", async (req, reply) => {
 
 app.post("/api/portal/tenants", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
-  const { host, departmentName } = req.body as { host?: string; departmentName?: string };
+  const { host, departmentName, dbUrl } = req.body as {
+    host?: string;
+    departmentName?: string;
+    dbUrl?: string;
+  };
   if (!host || !departmentName) {
     reply.code(400);
     return { error: "host and departmentName required" };
   }
-  await createTenant(host, departmentName);
+  await createTenant(host, departmentName, dbUrl || null);
   return { created: true };
 });
 
@@ -341,20 +345,6 @@ const postsCollection: CollectionConfig = {
   },
 };
 
-async function readMergedTheme(req: FastifyRequest) {
-  const rows = await req.db
-    .select()
-    .from(schema.siteTheme)
-    .where(eq(schema.siteTheme.tenantHost, GLOBAL_THEME_HOST));
-  const global = (rows[0]?.settings as Record<string, unknown>) ?? {};
-  const [tenantRow] = await req.db
-    .select()
-    .from(schema.siteTheme)
-    .where(eq(schema.siteTheme.tenantHost, req.tenantHost));
-  const tenant = (tenantRow?.settings as Record<string, unknown>) ?? {};
-  return { ...global, ...tenant };
-}
-
 // Public scope: tenant resolution only, no login required — this is what
 // anonymous website visitors (and the apps/frontend renderer) hit. Only GET
 // routes live here; never put a write route in this scope.
@@ -362,7 +352,9 @@ await app.register(async (publicScope) => {
   await tenantPlugin(publicScope);
   registerPublicCollectionRoutes(publicScope, pagesCollection);
   registerPublicCollectionRoutes(publicScope, postsCollection);
-  publicScope.get("/api/theme", async (req) => ({ theme: await readMergedTheme(req) }));
+  // Theme lives in the control-plane DB, not the tenant DB — req.db's own
+  // site_theme copy is always empty under DB-per-tenant.
+  publicScope.get("/api/theme", async (req) => ({ theme: await getMergedTheme(req.tenantHost) }));
 });
 
 // Protected scope: tenant resolution + login required — this is what the
@@ -437,7 +429,8 @@ await app.register(async (protectedScope) => {
   });
 
   // A dept admin can only ever write their own row here — the global row is
-  // out of reach from this scope.
+  // out of reach from this scope. Writes to the control-plane site_theme
+  // table (never req.db — see the public GET above).
   protectedScope.put("/api/theme", async (req, reply) => {
     if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "theme.write")) {
       reply.code(403);
@@ -449,13 +442,7 @@ await app.register(async (protectedScope) => {
       reply.code(400);
       return { error };
     }
-    await req.db
-      .insert(schema.siteTheme)
-      .values({ tenantHost: req.tenantHost, settings })
-      .onConflictDoUpdate({
-        target: schema.siteTheme.tenantHost,
-        set: { settings, updatedAt: new Date() },
-      });
+    await setTenantTheme(req.tenantHost, settings);
     return { saved: true };
   });
 });

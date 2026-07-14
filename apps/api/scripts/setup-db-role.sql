@@ -5,13 +5,18 @@
 -- Postgres superusers (and any BYPASSRLS role) ignore RLS unconditionally,
 -- even with FORCE ROW LEVEL SECURITY, so running the app as "postgres" (the
 -- common local-dev default) makes those policies a silent no-op.
+-- CREATEDB: tenant-pool.ts auto-creates one database per tenant host
+-- (tenant_<host>) on the control-plane server when tenants.db_url is null.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'usim_cms_app') THEN
-    CREATE ROLE usim_cms_app LOGIN PASSWORD 'usim_cms_app' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+    CREATE ROLE usim_cms_app LOGIN PASSWORD 'usim_cms_app' NOSUPERUSER NOBYPASSRLS CREATEDB NOCREATEROLE;
   END IF;
 END
 $$;
+
+-- Upgrade path for roles created before DB-per-tenant existed.
+ALTER ROLE usim_cms_app CREATEDB;
 
 DO $$
 BEGIN

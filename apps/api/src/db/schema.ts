@@ -52,6 +52,11 @@ export const tenants = pgTable("tenants", {
   host: text("host").notNull().unique(),
   departmentName: text("department_name").notNull(),
   active: boolean("active").notNull().default(true),
+  // Where this tenant's own database lives. Null = same Postgres server as
+  // the control-plane DATABASE_URL, database name tenant_<host> (derived in
+  // tenant-pool.ts). Set explicitly to move a tenant to another DB server —
+  // topology is data here, never code.
+  dbUrl: text("db_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
