@@ -94,5 +94,10 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull(), // "superadmin" | "webmaster"
   tenantHost: text("tenant_host"),
+  // Fixed set of capability strings (e.g. "posts.write", "media.upload",
+  // "users.manage") a superadmin toggles per webmaster user. Superadmin role
+  // always bypasses these checks (see hasCapability in index.ts) — this
+  // column is only ever consulted for webmaster sessions.
+  capabilities: text("capabilities").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

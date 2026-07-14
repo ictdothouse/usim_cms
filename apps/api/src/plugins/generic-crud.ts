@@ -1,16 +1,34 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sql } from "drizzle-orm";
-import type { CollectionConfig } from "../collections/config-types.js";
+import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
 
 // Registers generic CRUD routes for a collection under /api/:collectionSlug,
 // so individual collections don't need hand-written route handlers.
-// TODO: wire access() checks and afterChange hooks into each handler
-// (collections without a `table` stay stubbed).
+// TODO: wire afterChange hooks into each handler (collections without a
+// `table` stay stubbed).
+
+function accessArgs(req: FastifyRequest): AccessArgs {
+  return { role: req.user?.role, department: req.tenantHost, capabilities: req.user?.capabilities };
+}
+
+// Undefined access fn = allowed (matches pagesCollection, which never
+// defines write access checks) — only a defined fn that returns false blocks.
+async function checkAccess(
+  fn: ((args: AccessArgs) => boolean | Promise<boolean>) | undefined,
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean> {
+  if (!fn) return true;
+  if (await fn(accessArgs(req))) return true;
+  reply.code(403);
+  reply.send({ error: "forbidden" });
+  return false;
+}
 
 async function applyBeforeChange(config: CollectionConfig, req: FastifyRequest): Promise<unknown> {
   if (!config.hooks?.beforeChange) return req.body;
-  return config.hooks.beforeChange(req.body, { role: req.user?.role, department: req.tenantHost });
+  return config.hooks.beforeChange(req.body, accessArgs(req));
 }
 //
 // Split public (read, anonymous website visitors) from protected (write,
@@ -47,6 +65,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
         reply.code(501);
         return { error: "not implemented" };
       }
+      if (!(await checkAccess(config.access?.create, req, reply))) return;
       const data = await applyBeforeChange(config, req);
       const [item] = await req.db.insert(table).values(data as never).returning();
       reply.code(201);
@@ -83,6 +102,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       reply.code(501);
       return { error: "not implemented" };
     }
+    if (!(await checkAccess(config.access?.update, req, reply))) return;
     const { id } = req.params as { id: string };
     const data = await applyBeforeChange(config, req);
     const [item] = await req.db
@@ -102,6 +122,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       reply.code(501);
       return { error: "not implemented" };
     }
+    if (!(await checkAccess(config.access?.delete, req, reply))) return;
     const { id } = req.params as { id: string };
     const [item] = await req.db.delete(table).where(sql`id = ${id}`).returning();
     if (!item) {

@@ -4,6 +4,7 @@ import type { FastifySchema } from "fastify";
 export interface AccessArgs {
   role?: string;
   department?: string;
+  capabilities?: string[];
 }
 
 export type AccessFn = (args: AccessArgs) => boolean | Promise<boolean>;

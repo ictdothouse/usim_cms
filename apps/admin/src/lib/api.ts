@@ -99,8 +99,14 @@ export const listPortalUsers = (token: string) =>
 
 export const createPortalUser = (
   token: string,
-  data: { email: string; password: string; role: string; tenantHost?: string },
+  data: { email: string; password: string; role: string; tenantHost?: string; capabilities?: string[] },
 ) => request("/api/portal/users", null, token, { method: "POST", body: JSON.stringify(data) });
+
+export const updatePortalUserCapabilities = (token: string, id: string, capabilities: string[]) =>
+  request(`/api/portal/users/${id}`, null, token, {
+    method: "PATCH",
+    body: JSON.stringify({ capabilities }),
+  });
 
 export const getGlobalTheme = (token: string) =>
   request("/api/portal/theme", null, token).then((b) => b.theme as Record<string, string>);

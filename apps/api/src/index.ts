@@ -8,7 +8,7 @@ import { desc, eq } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
-import type { CollectionConfig } from "./collections/config-types.js";
+import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
 import * as schema from "./db/schema.js";
 import {
   closePool,
@@ -20,12 +20,19 @@ import {
   createTenant,
   listUsers,
   createUser,
+  updateUserCapabilities,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storage.js";
 
 const GLOBAL_THEME_HOST = "";
+
+// Superadmin bypasses every capability check — capabilities are only ever
+// consulted for webmaster sessions (see users.capabilities in schema.ts).
+function hasCapability(args: AccessArgs, capability: string): boolean {
+  return args.role === "superadmin" || (args.capabilities ?? []).includes(capability);
+}
 
 const THEME_COLOR_KEYS = ["primaryColor", "secondaryColor", "backgroundColor", "textColor"] as const;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -108,6 +115,7 @@ app.post("/api/auth/login", async (req, reply) => {
     email: user.email,
     role: user.role as "superadmin" | "webmaster",
     tenantHost: user.tenantHost,
+    capabilities: (user.capabilities as string[] | null) ?? [],
   });
   return { token, role: user.role, tenantHost: user.tenantHost };
 });
@@ -160,20 +168,51 @@ app.get("/api/portal/users", async (req, reply) => {
   return { users: await listUsers() };
 });
 
+// Fixed capability set (spec's Superadmin Control Plane §12: "toggle
+// keupayaan per-user", not a custom-role matrix) — reject anything else.
+const KNOWN_CAPABILITIES = new Set(["posts.write", "media.upload", "users.manage"]);
+function validateCapabilities(capabilities: unknown): string | null {
+  if (capabilities === undefined) return null;
+  if (!Array.isArray(capabilities) || !capabilities.every((c) => typeof c === "string")) {
+    return "capabilities must be a string array";
+  }
+  const unknown = capabilities.find((c) => !KNOWN_CAPABILITIES.has(c));
+  return unknown ? `unknown capability: ${unknown}` : null;
+}
+
 app.post("/api/portal/users", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
-  const { email, password, role, tenantHost } = req.body as {
+  const { email, password, role, tenantHost, capabilities } = req.body as {
     email?: string;
     password?: string;
     role?: string;
     tenantHost?: string;
+    capabilities?: string[];
   };
   if (!email || !password || !role || (role === "webmaster" && !tenantHost)) {
     reply.code(400);
     return { error: "email, password, role required (tenantHost required for webmaster)" };
   }
-  await createUser(email, hashPassword(password), role, tenantHost ?? null);
+  const capError = validateCapabilities(capabilities);
+  if (capError) {
+    reply.code(400);
+    return { error: capError };
+  }
+  await createUser(email, hashPassword(password), role, tenantHost ?? null, capabilities ?? []);
   return { created: true };
+});
+
+app.patch("/api/portal/users/:id", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const { capabilities } = req.body as { capabilities?: string[] };
+  const capError = validateCapabilities(capabilities);
+  if (capError) {
+    reply.code(400);
+    return { error: capError };
+  }
+  await updateUserCapabilities(id, capabilities ?? []);
+  return { saved: true };
 });
 
 const pagesCollection: CollectionConfig = {
@@ -238,6 +277,9 @@ const postsCollection: CollectionConfig = {
   },
   access: {
     read: () => true,
+    create: (a) => hasCapability(a, "posts.write"),
+    update: (a) => hasCapability(a, "posts.write"),
+    delete: (a) => hasCapability(a, "posts.write"),
   },
   hooks: {
     beforeChange: sanitizePostBody,
@@ -284,6 +326,10 @@ await app.register(async (protectedScope) => {
   const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   protectedScope.post("/api/media", async (req, reply) => {
+    if (!hasCapability({ role: req.user.role, capabilities: req.user.capabilities }, "media.upload")) {
+      reply.code(403);
+      return { error: "missing media.upload capability" };
+    }
     const file = await req.file();
     if (!file) {
       reply.code(400);

@@ -859,6 +859,13 @@ function TenantsPanel({ token }: { token: string }) {
 }
 
 // ---------- Users ----------
+const CAPABILITIES = ["posts.write", "media.upload", "users.manage"] as const;
+const CAPABILITY_LABEL_KEY: Record<(typeof CAPABILITIES)[number], Key> = {
+  "posts.write": "cap-posts-write",
+  "media.upload": "cap-media-upload",
+  "users.manage": "cap-users-manage",
+};
+
 function UsersPanel({ token }: { token: string }) {
   const { t } = useT();
   const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
@@ -866,6 +873,7 @@ function UsersPanel({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"webmaster" | "superadmin">("webmaster");
   const [tenantHost, setTenantHost] = useState("");
+  const [capabilities, setCapabilities] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -878,10 +886,22 @@ function UsersPanel({ token }: { token: string }) {
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api.createPortalUser(token, { email, password, role, tenantHost: tenantHost || undefined });
+      await api.createPortalUser(token, { email, password, role, tenantHost: tenantHost || undefined, capabilities });
       setEmail("");
       setPassword("");
       setTenantHost("");
+      setCapabilities([]);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function toggleCapability(u: Record<string, unknown>, cap: string) {
+    const current = (u.capabilities as string[] | null) ?? [];
+    const next = current.includes(cap) ? current.filter((c) => c !== cap) : [...current, cap];
+    try {
+      await api.updatePortalUserCapabilities(token, u.id as string, next);
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -928,6 +948,22 @@ function UsersPanel({ token }: { token: string }) {
             required
           />
         )}
+        {role === "webmaster" && (
+          <div className="flex w-full flex-wrap items-center gap-3 text-xs text-body">
+            {CAPABILITIES.map((cap) => (
+              <label key={cap} className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={capabilities.includes(cap)}
+                  onChange={(e) =>
+                    setCapabilities((prev) => (e.target.checked ? [...prev, cap] : prev.filter((c) => c !== cap)))
+                  }
+                />
+                {t(CAPABILITY_LABEL_KEY[cap])}
+              </label>
+            ))}
+          </div>
+        )}
         <button type="submit" className={btnPrimary}>
           {t("users-create")}
         </button>
@@ -939,6 +975,7 @@ function UsersPanel({ token }: { token: string }) {
               <th className="px-4 py-3">{t("users-email")}</th>
               <th className="px-4 py-3">Role</th>
               <th className="px-4 py-3">Tenant</th>
+              <th className="px-4 py-3">{t("users-capabilities")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line/20 text-xs text-ink">
@@ -958,6 +995,29 @@ function UsersPanel({ token }: { token: string }) {
                   </span>
                 </td>
                 <td className="px-4 py-3 font-mono text-[11px] text-sub">{(u.tenantHost as string) ?? "—"}</td>
+                <td className="px-4 py-3">
+                  {u.role === "superadmin" ? (
+                    <span className="text-[10px] text-sub">{t("cap-all")}</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {CAPABILITIES.map((cap) => {
+                        const on = ((u.capabilities as string[] | null) ?? []).includes(cap);
+                        return (
+                          <button
+                            key={cap}
+                            type="button"
+                            onClick={() => toggleCapability(u, cap)}
+                            className={`rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors ${
+                              on ? "bg-accent/10 text-accent" : "bg-canvas text-sub"
+                            }`}
+                          >
+                            {t(CAPABILITY_LABEL_KEY[cap])}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

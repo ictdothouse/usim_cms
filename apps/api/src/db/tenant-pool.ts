@@ -161,6 +161,7 @@ export async function listUsers() {
         email: schema.users.email,
         role: schema.users.role,
         tenantHost: schema.users.tenantHost,
+        capabilities: schema.users.capabilities,
         createdAt: schema.users.createdAt,
       })
       .from(schema.users);
@@ -169,15 +170,32 @@ export async function listUsers() {
   }
 }
 
-export async function createUser(email: string, passwordHash: string, role: string, tenantHost: string | null) {
+export async function createUser(
+  email: string,
+  passwordHash: string,
+  role: string,
+  tenantHost: string | null,
+  capabilities: string[] = [],
+) {
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
     await db
       .insert(schema.users)
-      .values({ email, passwordHash, role, tenantHost })
-      .onConflictDoUpdate({ target: schema.users.email, set: { passwordHash, role, tenantHost } });
+      .values({ email, passwordHash, role, tenantHost, capabilities })
+      .onConflictDoUpdate({ target: schema.users.email, set: { passwordHash, role, tenantHost, capabilities } });
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateUserCapabilities(id: string, capabilities: string[]) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.update(schema.users).set({ capabilities }).where(eq(schema.users.id, id));
   } finally {
     client.release();
   }
