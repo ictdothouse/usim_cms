@@ -84,6 +84,18 @@ export const siteTheme = pgTable("site_theme", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Named permission sets a superadmin defines and assigns to webmaster users
+// (public schema, like tenants/users). `permissions` is a fixed set of
+// "resource.action" strings (see PERMISSIONS in index.ts) — superadmin role
+// always bypasses these checks (see hasPermission in index.ts), so a role's
+// permissions are only ever consulted for webmaster sessions.
+export const roles = pgTable("roles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  permissions: text("permissions").array().notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Local (non-SSO) login for v1, also "public" schema. tenantHost is null for
 // superadmin (access to every tenant); required for webmaster (locked to
 // exactly that one tenant). Entra ID SSO can be added later as a second way
@@ -94,10 +106,9 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull(), // "superadmin" | "webmaster"
   tenantHost: text("tenant_host"),
-  // Fixed set of capability strings (e.g. "posts.write", "media.upload",
-  // "users.manage") a superadmin toggles per webmaster user. Superadmin role
-  // always bypasses these checks (see hasCapability in index.ts) — this
-  // column is only ever consulted for webmaster sessions.
-  capabilities: text("capabilities").array().notNull().default([]),
+  // Null = no permissions yet (webmaster) / irrelevant (superadmin, which
+  // always bypasses role checks). Set null on delete: losing a role means
+  // losing its permissions, not losing the account.
+  roleId: uuid("role_id").references(() => roles.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

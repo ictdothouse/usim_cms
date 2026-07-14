@@ -23,7 +23,7 @@ export interface SessionPayload {
   email: string;
   role: "superadmin" | "webmaster";
   tenantHost: string | null;
-  capabilities: string[];
+  permissions: string[];
 }
 
 // Simple HMAC-signed session token — no JWT library needed for a same-app

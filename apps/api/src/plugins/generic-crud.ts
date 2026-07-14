@@ -9,7 +9,7 @@ import { publishSharedContent } from "../db/tenant-pool.js";
 // `table` stay stubbed).
 
 function accessArgs(req: FastifyRequest): AccessArgs {
-  return { role: req.user?.role, department: req.tenantHost, capabilities: req.user?.capabilities };
+  return { role: req.user?.role, department: req.tenantHost, permissions: req.user?.permissions };
 }
 
 // Undefined access fn = allowed (matches pagesCollection, which never
@@ -78,6 +78,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       reply.code(501);
       return { error: "not implemented" };
     }
+    if (!(await checkAccess(config.access?.update, req, reply))) return;
     const { id } = req.params as { id: string };
     const [row] = await req.db.select().from(table).where(sql`id = ${id}`);
     if (!row) {

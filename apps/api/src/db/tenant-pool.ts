@@ -161,7 +161,7 @@ export async function listUsers() {
         email: schema.users.email,
         role: schema.users.role,
         tenantHost: schema.users.tenantHost,
-        capabilities: schema.users.capabilities,
+        roleId: schema.users.roleId,
         createdAt: schema.users.createdAt,
       })
       .from(schema.users);
@@ -175,7 +175,7 @@ export async function createUser(
   passwordHash: string,
   role: string,
   tenantHost: string | null,
-  capabilities: string[] = [],
+  roleId: string | null = null,
 ) {
   const client = await pool.connect();
   try {
@@ -183,19 +183,78 @@ export async function createUser(
     const db = drizzle(client, { schema });
     await db
       .insert(schema.users)
-      .values({ email, passwordHash, role, tenantHost, capabilities })
-      .onConflictDoUpdate({ target: schema.users.email, set: { passwordHash, role, tenantHost, capabilities } });
+      .values({ email, passwordHash, role, tenantHost, roleId })
+      .onConflictDoUpdate({ target: schema.users.email, set: { passwordHash, role, tenantHost, roleId } });
   } finally {
     client.release();
   }
 }
 
-export async function updateUserCapabilities(id: string, capabilities: string[]) {
+export async function updateUserRole(id: string, roleId: string | null) {
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    await db.update(schema.users).set({ capabilities }).where(eq(schema.users.id, id));
+    await db.update(schema.users).set({ roleId }).where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+export async function listRoles() {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    return db.select().from(schema.roles);
+  } finally {
+    client.release();
+  }
+}
+
+export async function createRole(name: string, permissions: string[]) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.insert(schema.roles).values({ name, permissions });
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateRole(id: string, permissions: string[]) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.update(schema.roles).set({ permissions }).where(eq(schema.roles.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteRole(id: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.delete(schema.roles).where(eq(schema.roles.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+// Superadmin sessions never consult this (hasPermission in index.ts always
+// bypasses); webmasters with no role assigned get zero permissions.
+export async function getRolePermissions(roleId: string | null): Promise<string[]> {
+  if (!roleId) return [];
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [role] = await db.select().from(schema.roles).where(eq(schema.roles.id, roleId));
+    return (role?.permissions as string[] | undefined) ?? [];
   } finally {
     client.release();
   }

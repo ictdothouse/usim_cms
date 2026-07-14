@@ -20,7 +20,12 @@ import {
   createTenant,
   listUsers,
   createUser,
-  updateUserCapabilities,
+  updateUserRole,
+  getRolePermissions,
+  listRoles,
+  createRole,
+  updateRole,
+  deleteRole,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
@@ -28,10 +33,38 @@ import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storag
 
 const GLOBAL_THEME_HOST = "";
 
-// Superadmin bypasses every capability check — capabilities are only ever
-// consulted for webmaster sessions (see users.capabilities in schema.ts).
-function hasCapability(args: AccessArgs, capability: string): boolean {
-  return args.role === "superadmin" || (args.capabilities ?? []).includes(capability);
+// Fixed permission matrix (resource.action) a superadmin composes into named
+// roles (schema.ts's roles.permissions) and assigns per webmaster user — see
+// docs/superpowers/specs/2026-07-13-admin-branding-features-design.md §12,
+// superseded 2026-07-14 from a per-user capability toggle to this full role
+// system per user request. "users.manage" stays a stored-but-unenforced
+// placeholder: no tenant-scoped multi-user endpoint exists yet to gate.
+const PERMISSIONS = new Set([
+  "pages.create",
+  "pages.update",
+  "pages.delete",
+  "posts.create",
+  "posts.update",
+  "posts.delete",
+  "media.upload",
+  "media.delete",
+  "theme.write",
+  "users.manage",
+]);
+
+// Superadmin bypasses every permission check — a role's permissions are only
+// ever consulted for webmaster sessions.
+function hasPermission(args: AccessArgs, permission: string): boolean {
+  return args.role === "superadmin" || (args.permissions ?? []).includes(permission);
+}
+
+function validatePermissions(permissions: unknown): string | null {
+  if (permissions === undefined) return null;
+  if (!Array.isArray(permissions) || !permissions.every((p) => typeof p === "string")) {
+    return "permissions must be a string array";
+  }
+  const unknown = permissions.find((p) => !PERMISSIONS.has(p));
+  return unknown ? `unknown permission: ${unknown}` : null;
 }
 
 const THEME_COLOR_KEYS = ["primaryColor", "secondaryColor", "backgroundColor", "textColor"] as const;
@@ -115,7 +148,7 @@ app.post("/api/auth/login", async (req, reply) => {
     email: user.email,
     role: user.role as "superadmin" | "webmaster",
     tenantHost: user.tenantHost,
-    capabilities: (user.capabilities as string[] | null) ?? [],
+    permissions: await getRolePermissions(user.roleId as string | null),
   });
   return { token, role: user.role, tenantHost: user.tenantHost };
 });
@@ -168,51 +201,70 @@ app.get("/api/portal/users", async (req, reply) => {
   return { users: await listUsers() };
 });
 
-// Fixed capability set (spec's Superadmin Control Plane §12: "toggle
-// keupayaan per-user", not a custom-role matrix) — reject anything else.
-const KNOWN_CAPABILITIES = new Set(["posts.write", "media.upload", "users.manage"]);
-function validateCapabilities(capabilities: unknown): string | null {
-  if (capabilities === undefined) return null;
-  if (!Array.isArray(capabilities) || !capabilities.every((c) => typeof c === "string")) {
-    return "capabilities must be a string array";
-  }
-  const unknown = capabilities.find((c) => !KNOWN_CAPABILITIES.has(c));
-  return unknown ? `unknown capability: ${unknown}` : null;
-}
-
 app.post("/api/portal/users", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
-  const { email, password, role, tenantHost, capabilities } = req.body as {
+  const { email, password, role, tenantHost, roleId } = req.body as {
     email?: string;
     password?: string;
     role?: string;
     tenantHost?: string;
-    capabilities?: string[];
+    roleId?: string | null;
   };
   if (!email || !password || !role || (role === "webmaster" && !tenantHost)) {
     reply.code(400);
     return { error: "email, password, role required (tenantHost required for webmaster)" };
   }
-  const capError = validateCapabilities(capabilities);
-  if (capError) {
-    reply.code(400);
-    return { error: capError };
-  }
-  await createUser(email, hashPassword(password), role, tenantHost ?? null, capabilities ?? []);
+  await createUser(email, hashPassword(password), role, tenantHost ?? null, roleId ?? null);
   return { created: true };
 });
 
 app.patch("/api/portal/users/:id", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   const { id } = req.params as { id: string };
-  const { capabilities } = req.body as { capabilities?: string[] };
-  const capError = validateCapabilities(capabilities);
-  if (capError) {
-    reply.code(400);
-    return { error: capError };
-  }
-  await updateUserCapabilities(id, capabilities ?? []);
+  const { roleId } = req.body as { roleId?: string | null };
+  await updateUserRole(id, roleId ?? null);
   return { saved: true };
+});
+
+app.get("/api/portal/roles", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  return { roles: await listRoles() };
+});
+
+app.post("/api/portal/roles", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { name, permissions } = req.body as { name?: string; permissions?: string[] };
+  if (!name) {
+    reply.code(400);
+    return { error: "name required" };
+  }
+  const permError = validatePermissions(permissions);
+  if (permError) {
+    reply.code(400);
+    return { error: permError };
+  }
+  await createRole(name, permissions ?? []);
+  return { created: true };
+});
+
+app.patch("/api/portal/roles/:id", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const { permissions } = req.body as { permissions?: string[] };
+  const permError = validatePermissions(permissions);
+  if (permError) {
+    reply.code(400);
+    return { error: permError };
+  }
+  await updateRole(id, permissions ?? []);
+  return { saved: true };
+});
+
+app.delete("/api/portal/roles/:id", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  await deleteRole(id);
+  return { deleted: true, id };
 });
 
 const pagesCollection: CollectionConfig = {
@@ -235,6 +287,9 @@ const pagesCollection: CollectionConfig = {
   },
   access: {
     read: () => true,
+    create: (a) => hasPermission(a, "pages.create"),
+    update: (a) => hasPermission(a, "pages.update"),
+    delete: (a) => hasPermission(a, "pages.delete"),
   },
 };
 
@@ -277,9 +332,9 @@ const postsCollection: CollectionConfig = {
   },
   access: {
     read: () => true,
-    create: (a) => hasCapability(a, "posts.write"),
-    update: (a) => hasCapability(a, "posts.write"),
-    delete: (a) => hasCapability(a, "posts.write"),
+    create: (a) => hasPermission(a, "posts.create"),
+    update: (a) => hasPermission(a, "posts.update"),
+    delete: (a) => hasPermission(a, "posts.delete"),
   },
   hooks: {
     beforeChange: sanitizePostBody,
@@ -326,9 +381,9 @@ await app.register(async (protectedScope) => {
   const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   protectedScope.post("/api/media", async (req, reply) => {
-    if (!hasCapability({ role: req.user.role, capabilities: req.user.capabilities }, "media.upload")) {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
       reply.code(403);
-      return { error: "missing media.upload capability" };
+      return { error: "missing media.upload permission" };
     }
     const file = await req.file();
     if (!file) {
@@ -367,6 +422,10 @@ await app.register(async (protectedScope) => {
   }));
 
   protectedScope.delete("/api/media/:id", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.delete")) {
+      reply.code(403);
+      return { error: "missing media.delete permission" };
+    }
     const { id } = req.params as { id: string };
     const [row] = await req.db.delete(schema.media).where(eq(schema.media.id, id)).returning();
     if (!row) {
@@ -380,6 +439,10 @@ await app.register(async (protectedScope) => {
   // A dept admin can only ever write their own row here — the global row is
   // out of reach from this scope.
   protectedScope.put("/api/theme", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "theme.write")) {
+      reply.code(403);
+      return { error: "missing theme.write permission" };
+    }
     const settings = req.body as Record<string, unknown>;
     const error = validateThemeSettings(settings);
     if (error) {

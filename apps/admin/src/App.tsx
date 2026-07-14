@@ -11,6 +11,7 @@ import {
   Newspaper,
   Palette,
   Rss,
+  ShieldCheck,
   Trash2,
   Users as UsersIcon,
 } from "lucide-react";
@@ -859,25 +860,45 @@ function TenantsPanel({ token }: { token: string }) {
 }
 
 // ---------- Users ----------
-const CAPABILITIES = ["posts.write", "media.upload", "users.manage"] as const;
-const CAPABILITY_LABEL_KEY: Record<(typeof CAPABILITIES)[number], Key> = {
-  "posts.write": "cap-posts-write",
-  "media.upload": "cap-media-upload",
-  "users.manage": "cap-users-manage",
+const PERMISSIONS = [
+  "pages.create",
+  "pages.update",
+  "pages.delete",
+  "posts.create",
+  "posts.update",
+  "posts.delete",
+  "media.upload",
+  "media.delete",
+  "theme.write",
+  "users.manage",
+] as const;
+const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
+  "pages.create": "perm-pages-create",
+  "pages.update": "perm-pages-update",
+  "pages.delete": "perm-pages-delete",
+  "posts.create": "perm-posts-create",
+  "posts.update": "perm-posts-update",
+  "posts.delete": "perm-posts-delete",
+  "media.upload": "perm-media-upload",
+  "media.delete": "perm-media-delete",
+  "theme.write": "perm-theme-write",
+  "users.manage": "perm-users-manage",
 };
 
 function UsersPanel({ token }: { token: string }) {
   const { t } = useT();
   const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
+  const [roles, setRoles] = useState<Array<Record<string, unknown>>>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"webmaster" | "superadmin">("webmaster");
   const [tenantHost, setTenantHost] = useState("");
-  const [capabilities, setCapabilities] = useState<string[]>([]);
+  const [roleId, setRoleId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
     setUsers(await api.listPortalUsers(token));
+    setRoles(await api.listPortalRoles(token));
   }
   useEffect(() => {
     void refresh();
@@ -886,22 +907,26 @@ function UsersPanel({ token }: { token: string }) {
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api.createPortalUser(token, { email, password, role, tenantHost: tenantHost || undefined, capabilities });
+      await api.createPortalUser(token, {
+        email,
+        password,
+        role,
+        tenantHost: tenantHost || undefined,
+        roleId: roleId || null,
+      });
       setEmail("");
       setPassword("");
       setTenantHost("");
-      setCapabilities([]);
+      setRoleId("");
       await refresh();
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
-  async function toggleCapability(u: Record<string, unknown>, cap: string) {
-    const current = (u.capabilities as string[] | null) ?? [];
-    const next = current.includes(cap) ? current.filter((c) => c !== cap) : [...current, cap];
+  async function assignRole(u: Record<string, unknown>, newRoleId: string) {
     try {
-      await api.updatePortalUserCapabilities(token, u.id as string, next);
+      await api.updatePortalUserRole(token, u.id as string, newRoleId || null);
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -949,20 +974,18 @@ function UsersPanel({ token }: { token: string }) {
           />
         )}
         {role === "webmaster" && (
-          <div className="flex w-full flex-wrap items-center gap-3 text-xs text-body">
-            {CAPABILITIES.map((cap) => (
-              <label key={cap} className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  checked={capabilities.includes(cap)}
-                  onChange={(e) =>
-                    setCapabilities((prev) => (e.target.checked ? [...prev, cap] : prev.filter((c) => c !== cap)))
-                  }
-                />
-                {t(CAPABILITY_LABEL_KEY[cap])}
-              </label>
+          <select
+            className="rounded-lg border border-line/30 bg-white px-2 py-2 text-xs outline-none"
+            value={roleId}
+            onChange={(e) => setRoleId(e.target.value)}
+          >
+            <option value="">{t("users-role-none")}</option>
+            {roles.map((r) => (
+              <option key={r.id as string} value={r.id as string}>
+                {r.name as string}
+              </option>
             ))}
-          </div>
+          </select>
         )}
         <button type="submit" className={btnPrimary}>
           {t("users-create")}
@@ -975,7 +998,7 @@ function UsersPanel({ token }: { token: string }) {
               <th className="px-4 py-3">{t("users-email")}</th>
               <th className="px-4 py-3">Role</th>
               <th className="px-4 py-3">Tenant</th>
-              <th className="px-4 py-3">{t("users-capabilities")}</th>
+              <th className="px-4 py-3">{t("users-role")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line/20 text-xs text-ink">
@@ -999,29 +1022,142 @@ function UsersPanel({ token }: { token: string }) {
                   {u.role === "superadmin" ? (
                     <span className="text-[10px] text-sub">{t("cap-all")}</span>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {CAPABILITIES.map((cap) => {
-                        const on = ((u.capabilities as string[] | null) ?? []).includes(cap);
-                        return (
-                          <button
-                            key={cap}
-                            type="button"
-                            onClick={() => toggleCapability(u, cap)}
-                            className={`rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors ${
-                              on ? "bg-accent/10 text-accent" : "bg-canvas text-sub"
-                            }`}
-                          >
-                            {t(CAPABILITY_LABEL_KEY[cap])}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <select
+                      className="rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px] outline-none"
+                      value={(u.roleId as string | null) ?? ""}
+                      onChange={(e) => assignRole(u, e.target.value)}
+                    >
+                      <option value="">{t("users-role-none")}</option>
+                      {roles.map((r) => (
+                        <option key={r.id as string} value={r.id as string}>
+                          {r.name as string}
+                        </option>
+                      ))}
+                    </select>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+// ---------- Roles & Permissions ----------
+function RolesPanel({ token }: { token: string }) {
+  const { t } = useT();
+  const [roles, setRoles] = useState<Array<Record<string, unknown>>>([]);
+  const [name, setName] = useState("");
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setRoles(await api.listPortalRoles(token));
+  }
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      await api.createPortalRole(token, name, permissions);
+      setName("");
+      setPermissions([]);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function togglePermission(r: Record<string, unknown>, perm: string) {
+    const current = (r.permissions as string[] | null) ?? [];
+    const next = current.includes(perm) ? current.filter((p) => p !== perm) : [...current, perm];
+    try {
+      await api.updatePortalRole(token, r.id as string, next);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm(t("roles-delete-confirm"))) return;
+    try {
+      await api.deletePortalRole(token, id);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+        <ShieldCheck className="h-4 w-4 text-accent" /> {t("roles-title")}
+      </h2>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <form onSubmit={create} className={`${card} max-w-xl space-y-3 p-4`}>
+        <input
+          className={inputCls}
+          placeholder={t("roles-name")}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+        <div className="grid grid-cols-2 gap-2 text-xs text-body sm:grid-cols-3">
+          {PERMISSIONS.map((perm) => (
+            <label key={perm} className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={permissions.includes(perm)}
+                onChange={(e) =>
+                  setPermissions((prev) => (e.target.checked ? [...prev, perm] : prev.filter((p) => p !== perm)))
+                }
+              />
+              {t(PERMISSION_LABEL_KEY[perm])}
+            </label>
+          ))}
+        </div>
+        <button type="submit" className={btnPrimary}>
+          {t("roles-create")}
+        </button>
+      </form>
+      {roles.length === 0 && <p className="text-xs text-sub">{t("roles-empty")}</p>}
+      <div className="space-y-3">
+        {roles.map((r) => (
+          <div key={r.id as string} className={`${card} space-y-2 p-4`}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-ink">{r.name as string}</h3>
+              <button
+                onClick={() => remove(r.id as string)}
+                className="rounded p-1 text-red-500 hover:bg-red-50"
+                title={t("roles-delete")}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {PERMISSIONS.map((perm) => {
+                const on = ((r.permissions as string[] | null) ?? []).includes(perm);
+                return (
+                  <button
+                    key={perm}
+                    type="button"
+                    onClick={() => togglePermission(r, perm)}
+                    className={`rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors ${
+                      on ? "bg-accent/10 text-accent" : "bg-canvas text-sub"
+                    }`}
+                  >
+                    {t(PERMISSION_LABEL_KEY[perm])}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -1112,13 +1248,91 @@ function Dashboard({ session }: { session: Session }) {
   );
 }
 
+// ---------- Content Manager (Pages/Posts/Media/Theme sub-tabs) ----------
+type ContentSubTab = "pages" | "posts" | "media" | "theme";
+
+function ContentManager({
+  isSuper,
+  siteHost,
+  setSiteHost,
+  tenants,
+  token,
+}: {
+  isSuper: boolean;
+  siteHost: string;
+  setSiteHost: (host: string) => void;
+  tenants: Array<Record<string, unknown>>;
+  token: string;
+}) {
+  const { t } = useT();
+  const [subTab, setSubTab] = useState<ContentSubTab>("pages");
+  const subTabs: Array<{ id: ContentSubTab; labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: "pages", labelKey: "pages-title", icon: FileText },
+    { id: "posts", labelKey: "posts-title", icon: Newspaper },
+    { id: "media", labelKey: "media-title", icon: ImageIcon },
+    ...(isSuper ? [{ id: "theme" as const, labelKey: "theme-title" as const, icon: Palette }] : []),
+  ];
+
+  return (
+    <div className="space-y-6">
+      {isSuper && (
+        <div className="max-w-sm space-y-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("content-site")}</label>
+          <select
+            className="w-full rounded-lg border border-line/30 bg-white px-3 py-2 text-xs outline-none"
+            value={siteHost}
+            onChange={(e) => setSiteHost(e.target.value)}
+          >
+            <option value="">{t("content-pick")}</option>
+            {tenants.map((tn) => (
+              <option key={tn.id as string} value={tn.host as string}>
+                {tn.departmentName as string} — {tn.host as string}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {siteHost && (
+        <>
+          <div className="flex gap-1.5 border-b border-line/30 pb-2">
+            {subTabs.map(({ id, labelKey, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setSubTab(id)}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  subTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
+              </button>
+            ))}
+          </div>
+          {subTab === "pages" && <PagesPanel tenantHost={siteHost} token={token} />}
+          {subTab === "posts" && <PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />}
+          {subTab === "media" && <MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />}
+          {subTab === "theme" && isSuper && (
+            <ThemeForm
+              key={siteHost}
+              title={t("theme-title")}
+              desc={t("theme-desc")}
+              load={() => api.getTheme(siteHost, token)}
+              save={(s) => api.putTheme(siteHost, token, s)}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ---------- Shell (sidebar + header, prototype layout) ----------
-type Tab = "dashboard" | "multisite" | "users" | "content" | "theme" | "global-theme" | "feed";
+type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "global-theme" | "feed";
 
 const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = {
   dashboard: { labelKey: "tab-dashboard", icon: LayoutDashboard },
   multisite: { labelKey: "tab-multisite", icon: Layers },
   users: { labelKey: "tab-users", icon: UsersIcon },
+  roles: { labelKey: "tab-roles", icon: ShieldCheck },
   content: { labelKey: "tab-content", icon: FileText },
   theme: { labelKey: "tab-theme", icon: Palette },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
@@ -1154,7 +1368,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
     if (isSuper) void api.listPortalTenants(session.token).then(setTenants);
   }, [isSuper, session.token]);
 
-  const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users"] : ["dashboard"];
+  const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles"] : ["dashboard"];
   const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme"];
 
   return (
@@ -1233,42 +1447,15 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
               {tab === "dashboard" && <Dashboard session={session} />}
               {tab === "multisite" && isSuper && <TenantsPanel token={session.token} />}
               {tab === "users" && isSuper && <UsersPanel token={session.token} />}
+              {tab === "roles" && isSuper && <RolesPanel token={session.token} />}
               {tab === "content" && (
-                <div className="space-y-6">
-                  {isSuper && (
-                    <div className="max-w-sm space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("content-site")}</label>
-                      <select
-                        className="w-full rounded-lg border border-line/30 bg-white px-3 py-2 text-xs outline-none"
-                        value={siteHost}
-                        onChange={(e) => setSiteHost(e.target.value)}
-                      >
-                        <option value="">{t("content-pick")}</option>
-                        {tenants.map((tn) => (
-                          <option key={tn.id as string} value={tn.host as string}>
-                            {tn.departmentName as string} — {tn.host as string}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  {siteHost && (
-                    <>
-                      <PagesPanel tenantHost={siteHost} token={session.token} />
-                      <PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={session.token} />
-                      <MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={session.token} />
-                      {isSuper && (
-                        <ThemeForm
-                          key={siteHost}
-                          title={t("theme-title")}
-                          desc={t("theme-desc")}
-                          load={() => api.getTheme(siteHost, session.token)}
-                          save={(s) => api.putTheme(siteHost, session.token, s)}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
+                <ContentManager
+                  isSuper={isSuper}
+                  siteHost={siteHost}
+                  setSiteHost={setSiteHost}
+                  tenants={tenants}
+                  token={session.token}
+                />
               )}
               {tab === "theme" && !isSuper && session.tenantHost && (
                 <ThemeForm
