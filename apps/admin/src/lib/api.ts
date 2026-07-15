@@ -44,6 +44,16 @@ export async function setup(input: {
   return { token: body.token, role: body.role, tenantHost: body.tenantHost };
 }
 
+// Superadmin "view as" — swaps in the target webmaster's real session
+// (their own permissions/tenant), not a synthetic all-access preview.
+export async function impersonateUser(token: string, userId: string): Promise<Session> {
+  const body = await request("/api/portal/impersonate", null, token, {
+    method: "POST",
+    body: JSON.stringify({ userId }),
+  });
+  return { token: body.token, role: body.role, tenantHost: body.tenantHost };
+}
+
 export async function login(email: string, password: string): Promise<Session> {
   const body = await request("/api/auth/login", null, null, {
     method: "POST",
@@ -88,8 +98,11 @@ export const getTheme = (tenantHost: string, token: string) =>
 export const putTheme = (tenantHost: string, token: string, settings: Record<string, string>) =>
   request("/api/theme", tenantHost, token, { method: "PUT", body: JSON.stringify(settings) });
 
-export async function uploadMedia(tenantHost: string, token: string, file: File): Promise<string> {
+export async function uploadMedia(tenantHost: string, token: string, file: File, folderId?: string | null): Promise<string> {
   const form = new FormData();
+  // folderId MUST be appended before "file": the API reads it off busboy's
+  // fields-seen-so-far at the point it opens the file stream.
+  if (folderId) form.append("folderId", folderId);
   form.append("file", file);
   const res = await fetch(`${API_URL}/api/media`, {
     method: "POST",
@@ -101,11 +114,29 @@ export async function uploadMedia(tenantHost: string, token: string, file: File)
   return body.url as string;
 }
 
-export const listMedia = (tenantHost: string, token: string) =>
-  request("/api/media", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+export const listMedia = (tenantHost: string, token: string, folderId?: string | null) =>
+  request(folderId ? `/api/media?folderId=${folderId}` : "/api/media", tenantHost, token).then(
+    (b) => b.items as Array<Record<string, unknown>>,
+  );
+
+export const updateMedia = (
+  tenantHost: string,
+  token: string,
+  id: string,
+  data: { originalName?: string; altText?: string | null; description?: string | null; folderId?: string | null },
+) => request(`/api/media/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
 
 export const deleteMedia = (tenantHost: string, token: string, id: string) =>
   request(`/api/media/${id}`, tenantHost, token, { method: "DELETE" });
+
+export const listMediaFolders = (tenantHost: string, token: string) =>
+  request("/api/media/folders", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+
+export const createMediaFolder = (tenantHost: string, token: string, name: string) =>
+  request("/api/media/folders", tenantHost, token, { method: "POST", body: JSON.stringify({ name }) });
+
+export const deleteMediaFolder = (tenantHost: string, token: string, id: string) =>
+  request(`/api/media/folders/${id}`, tenantHost, token, { method: "DELETE" });
 
 // Superadmin-only portal management (no x-tenant-host — these aren't scoped
 // to one tenant).

@@ -24,6 +24,10 @@ export interface SessionPayload {
   role: "superadmin" | "webmaster";
   tenantHost: string | null;
   permissions: string[];
+  // Set only on a superadmin's "view as" token (see /api/portal/impersonate)
+  // — the superadmin's own email, for audit trails on actions taken while
+  // impersonating.
+  impersonatedBy?: string;
 }
 
 // Simple HMAC-signed session token — no JWT library needed for a same-app

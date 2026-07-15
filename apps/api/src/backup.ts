@@ -30,12 +30,13 @@ function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[]
 
 export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
-  let pages, posts, media;
+  let pages, posts, media, mediaFolders;
   try {
-    [pages, posts, media] = await Promise.all([
+    [pages, posts, media, mediaFolders] = await Promise.all([
       db.select().from(schema.pages),
       db.select().from(schema.posts),
       db.select().from(schema.media),
+      db.select().from(schema.mediaFolders),
     ]);
   } finally {
     release();
@@ -46,7 +47,7 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
         version: BACKUP_VERSION,
         sourceHost: host,
         exportedAt: new Date().toISOString(),
-        tables: { pages, posts, media },
+        tables: { pages, posts, media, mediaFolders },
         theme: await getTenantTheme(host),
       }),
     ),
@@ -74,7 +75,13 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
   }
   const backup = JSON.parse(raw) as {
     version: number;
-    tables: { pages: Record<string, unknown>[]; posts: Record<string, unknown>[]; media: Record<string, unknown>[] };
+    tables: {
+      pages: Record<string, unknown>[];
+      posts: Record<string, unknown>[];
+      media: Record<string, unknown>[];
+      // Older backups (pre-media-folders) won't have this key.
+      mediaFolders?: Record<string, unknown>[];
+    };
     theme: Record<string, unknown> | null;
   };
   if (backup.version !== BACKUP_VERSION) throw new Error(`Unsupported backup version ${backup.version}`);
@@ -82,11 +89,14 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
   const { db, release } = await getTenantConnection(host);
   try {
     // Full replace, not merge — a restore means "make the tenant look like
-    // the backup". Wipe in FK-safe order (none exist today, but cheap).
+    // the backup". Wipe in FK-safe order: media references media_folders.
     await db.delete(schema.media);
     await db.delete(schema.posts);
     await db.delete(schema.pages);
-    const { pages, posts, media } = backup.tables;
+    await db.delete(schema.mediaFolders);
+    const { pages, posts, media, mediaFolders = [] } = backup.tables;
+    if (mediaFolders.length)
+      await db.insert(schema.mediaFolders).values(reviveDates(mediaFolders) as (typeof schema.mediaFolders.$inferInsert)[]);
     if (pages.length) await db.insert(schema.pages).values(reviveDates(pages) as (typeof schema.pages.$inferInsert)[]);
     if (posts.length) await db.insert(schema.posts).values(reviveDates(posts) as (typeof schema.posts.$inferInsert)[]);
     if (media.length) await db.insert(schema.media).values(reviveDates(media) as (typeof schema.media.$inferInsert)[]);

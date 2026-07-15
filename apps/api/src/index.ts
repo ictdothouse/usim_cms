@@ -4,7 +4,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
@@ -315,6 +315,42 @@ app.delete("/api/portal/roles/:id", async (req, reply) => {
   return { deleted: true, id };
 });
 
+// "View as" — issues a token that IS the target webmaster's real session
+// (their userId/permissions), so the superadmin sees exactly what that
+// person sees (their own media, their own role's tab visibility), not a
+// synthetic all-access preview. impersonatedBy rides along in the token for
+// audit; nothing today reads it back out, but every mutating route already
+// takes req.user.userId off the token, so it lands in the DB for free the
+// moment something needs it.
+app.post("/api/portal/impersonate", async (req, reply) => {
+  const admin = verifySuperadmin(req, reply);
+  if (!admin) return;
+  const { userId } = req.body as { userId?: string };
+  if (!userId) {
+    reply.code(400);
+    return { error: "userId required" };
+  }
+  const target = (await listUsers()).find((u) => u.id === userId);
+  if (!target) {
+    reply.code(404);
+    return { error: "user not found" };
+  }
+  if (target.role !== "webmaster") {
+    reply.code(400);
+    return { error: "can only impersonate a webmaster" };
+  }
+  const permissions = await getRolePermissions(target.roleId as string | null);
+  const token = signSession({
+    userId: target.id as string,
+    email: target.email as string,
+    role: "webmaster",
+    tenantHost: target.tenantHost as string | null,
+    permissions,
+    impersonatedBy: admin.email,
+  });
+  return { token, role: "webmaster" as const, tenantHost: target.tenantHost as string | null };
+});
+
 // Backup / restore / static export — superadmin-only, root scope like the
 // rest of /api/portal (tenant comes from the URL, not x-tenant-host).
 app.get("/api/portal/tenants/:host/backup", async (req, reply) => {
@@ -473,6 +509,13 @@ await app.register(async (protectedScope) => {
       reply.code(400);
       return { error: "file required (multipart/form-data, field name 'file')" };
     }
+    // folderId must be appended to the FormData BEFORE the file field —
+    // busboy only exposes fields that arrived ahead of the file stream here.
+    let folderId: string | null = null;
+    const folderField = file.fields.folderId;
+    if (folderField && !Array.isArray(folderField) && folderField.type === "field") {
+      folderId = (folderField.value as string) || null;
+    }
     if (!ALLOWED_MEDIA_TYPES.has(file.mimetype)) {
       reply.code(415);
       return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp only)` };
@@ -495,14 +538,55 @@ await app.register(async (protectedScope) => {
         url,
         mimeType: file.mimetype,
         sizeBytes: file.file.bytesRead,
+        folderId,
+        uploadedBy: req.user.userId,
+        uploadedByEmail: req.user.email,
       })
       .returning();
     return { url, item };
   });
 
-  protectedScope.get("/api/media", async (req) => ({
-    items: await req.db.select().from(schema.media).orderBy(desc(schema.media.createdAt)),
-  }));
+  // A webmaster only ever sees/edits/deletes files they personally uploaded
+  // — other webmasters on the same tenant are invisible to each other here.
+  // Superadmin (browsing via the content-manager site picker, or a portal
+  // tool) is the one role that still sees the whole tenant's library.
+  const ownershipFilter = (req: { user: { role: string; userId: string } }) =>
+    req.user.role === "superadmin" ? undefined : eq(schema.media.uploadedBy, req.user.userId);
+
+  protectedScope.get("/api/media", async (req) => {
+    const { folderId } = req.query as { folderId?: string };
+    const conditions = [ownershipFilter(req), folderId ? eq(schema.media.folderId, folderId) : undefined].filter(
+      (c): c is Exclude<typeof c, undefined> => c !== undefined,
+    );
+    const query = req.db.select().from(schema.media).orderBy(desc(schema.media.createdAt));
+    const items = conditions.length ? await query.where(and(...conditions)) : await query;
+    return { items };
+  });
+
+  protectedScope.patch("/api/media/:id", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
+      reply.code(403);
+      return { error: "missing media.upload permission" };
+    }
+    const { id } = req.params as { id: string };
+    const body = req.body as {
+      originalName?: string;
+      altText?: string | null;
+      description?: string | null;
+      folderId?: string | null;
+    };
+    const idFilter = ownershipFilter(req);
+    const [item] = await req.db
+      .update(schema.media)
+      .set({ ...body, updatedAt: new Date() })
+      .where(idFilter ? and(eq(schema.media.id, id), idFilter) : eq(schema.media.id, id))
+      .returning();
+    if (!item) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    return { item };
+  });
 
   protectedScope.delete("/api/media/:id", async (req, reply) => {
     if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.delete")) {
@@ -510,12 +594,50 @@ await app.register(async (protectedScope) => {
       return { error: "missing media.delete permission" };
     }
     const { id } = req.params as { id: string };
-    const [row] = await req.db.delete(schema.media).where(eq(schema.media.id, id)).returning();
+    const idFilter = ownershipFilter(req);
+    const [row] = await req.db
+      .delete(schema.media)
+      .where(idFilter ? and(eq(schema.media.id, id), idFilter) : eq(schema.media.id, id))
+      .returning();
     if (!row) {
       reply.code(404);
       return { error: "not found" };
     }
     await deleteFile(tenantFolder(req.tenantHost), row.filename);
+    return { deleted: true, id };
+  });
+
+  protectedScope.get("/api/media/folders", async (req) => ({
+    items: await req.db.select().from(schema.mediaFolders).orderBy(schema.mediaFolders.name),
+  }));
+
+  protectedScope.post("/api/media/folders", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
+      reply.code(403);
+      return { error: "missing media.upload permission" };
+    }
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) {
+      reply.code(400);
+      return { error: "name required" };
+    }
+    const [item] = await req.db.insert(schema.mediaFolders).values({ name: name.trim() }).returning();
+    return { item };
+  });
+
+  protectedScope.delete("/api/media/folders/:id", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.delete")) {
+      reply.code(403);
+      return { error: "missing media.delete permission" };
+    }
+    const { id } = req.params as { id: string };
+    // Files inside fall back to "no folder" (folder_id ON DELETE SET NULL) —
+    // deleting a folder organizes, never bulk-deletes files.
+    const [row] = await req.db.delete(schema.mediaFolders).where(eq(schema.mediaFolders.id, id)).returning();
+    if (!row) {
+      reply.code(404);
+      return { error: "not found" };
+    }
     return { deleted: true, id };
   });
 

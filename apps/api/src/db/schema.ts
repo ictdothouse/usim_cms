@@ -28,11 +28,20 @@ export const posts = pgTable("posts", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Flat, non-nested folders for organizing the media library — a name only,
+// membership lives on media.folderId. No parentId: nobody asked for nested
+// folders, and flat is one JOIN instead of a recursive query.
+export const mediaFolders = pgTable("media_folders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Upload registry per tenant (tenant schema): one row per file stored via
 // storage.ts. The file itself lives on disk/S3; this table is what the admin
 // media manager lists and deletes. Only ever queried from the protected
 // scope, so RLS requires app.authenticated even for SELECT
-// (migrations/0004_create_media.sql).
+// (migrations/0004_create_media.sql, extended by 0005_media_folders.sql).
 export const media = pgTable("media", {
   id: uuid("id").primaryKey().defaultRandom(),
   filename: text("filename").notNull(), // stored name inside the tenant folder
@@ -40,7 +49,18 @@ export const media = pgTable("media", {
   url: text("url").notNull(),
   mimeType: text("mime_type").notNull(),
   sizeBytes: integer("size_bytes").notNull().default(0),
+  folderId: uuid("folder_id").references(() => mediaFolders.id, { onDelete: "set null" }),
+  altText: text("alt_text"),
+  description: text("description"),
+  // Who uploaded this file, within the tenant. No FK: users live in the
+  // control-plane database, media lives in the tenant's own database (DB-
+  // per-tenant), and Postgres can't FK across databases. Nullable so rows
+  // from before this column existed don't break; a webmaster never sees
+  // those (see index.ts's /api/media ownership filter).
+  uploadedBy: text("uploaded_by"),
+  uploadedByEmail: text("uploaded_by_email"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Control-plane registry of known tenant hosts, always in the "public"

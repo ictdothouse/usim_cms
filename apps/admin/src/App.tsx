@@ -24,6 +24,7 @@ import {
   ListChecks,
   ListOrdered,
   Palette,
+  Pencil,
   Quote,
   Rss,
   Settings as SettingsIcon,
@@ -805,14 +806,26 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
 // ---------- Media library ----------
 function MediaManager({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const [folders, setFolders] = useState<Array<Record<string, unknown>>>([]);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = all files
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ originalName: "", altText: "", description: "", folderId: "" });
   const [error, setError] = useState<string | null>(null);
 
-  async function refresh() {
+  async function refreshFolders() {
     try {
-      setItems(await api.listMedia(tenantHost, token));
+      setFolders(await api.listMediaFolders(tenantHost, token));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function refreshItems() {
+    try {
+      setItems(await api.listMedia(tenantHost, token, activeFolder));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -820,16 +833,20 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   useEffect(() => {
-    void refresh();
+    void refreshFolders();
   }, [tenantHost]);
+
+  useEffect(() => {
+    void refreshItems();
+  }, [tenantHost, activeFolder]);
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
     try {
-      await api.uploadMedia(tenantHost, token, file);
-      await refresh();
+      await api.uploadMedia(tenantHost, token, file, activeFolder);
+      await refreshItems();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -848,7 +865,55 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
     if (!confirm(t("media-delete-confirm"))) return;
     try {
       await api.deleteMedia(tenantHost, token, id);
-      await refresh();
+      await refreshItems();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function addFolder() {
+    const name = prompt(t("media-new-folder-prompt"));
+    if (!name?.trim()) return;
+    try {
+      await api.createMediaFolder(tenantHost, token, name.trim());
+      await refreshFolders();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function removeFolder(id: string) {
+    if (!confirm(t("media-delete-folder-confirm"))) return;
+    try {
+      await api.deleteMediaFolder(tenantHost, token, id);
+      if (activeFolder === id) setActiveFolder(null);
+      await refreshFolders();
+      await refreshItems();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function startEdit(m: Record<string, unknown>) {
+    setEditingId(m.id as string);
+    setEditForm({
+      originalName: (m.originalName as string) ?? "",
+      altText: (m.altText as string) ?? "",
+      description: (m.description as string) ?? "",
+      folderId: (m.folderId as string) ?? "",
+    });
+  }
+
+  async function saveEdit(id: string) {
+    try {
+      await api.updateMedia(tenantHost, token, id, {
+        originalName: editForm.originalName,
+        altText: editForm.altText || null,
+        description: editForm.description || null,
+        folderId: editForm.folderId || null,
+      });
+      setEditingId(null);
+      await refreshItems();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -860,6 +925,28 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
         <ImageIcon className="h-4 w-4 text-accent" /> {t("media-title")}
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setActiveFolder(null)}
+          className={`rounded-full px-3 py-1 text-[11px] font-medium ${activeFolder === null ? "bg-accent text-white" : "bg-canvas text-sub"}`}
+        >
+          {t("media-all-files")}
+        </button>
+        {folders.map((f) => (
+          <span
+            key={f.id as string}
+            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium ${activeFolder === f.id ? "bg-accent text-white" : "bg-canvas text-sub"}`}
+          >
+            <button onClick={() => setActiveFolder(f.id as string)}>{f.name as string}</button>
+            <button onClick={() => removeFolder(f.id as string)} className="opacity-60 hover:opacity-100">
+              &times;
+            </button>
+          </span>
+        ))}
+        <button onClick={addFolder} className="rounded-full px-3 py-1 text-[11px] font-medium text-accent hover:underline">
+          {t("media-new-folder")}
+        </button>
+      </div>
       <label className={`${btnGhost} inline-block cursor-pointer`}>
         {uploading ? t("uploading") : t("media-upload")}
         <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={onFileChosen} />
@@ -867,21 +954,72 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {items.map((m) => (
           <div key={m.id as string} className={`${card} overflow-hidden`}>
-            <img src={api.API_URL + (m.url as string)} alt={m.originalName as string} className="h-24 w-full object-cover" />
-            <div className="space-y-1.5 p-2">
-              <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
-                {m.originalName as string}
-              </p>
-              <p className="text-[10px] text-sub">{Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB</p>
-              <div className="flex items-center justify-between">
-                <button onClick={() => copyUrl(m)} className="text-[10px] font-semibold text-accent hover:underline">
-                  {copiedId === m.id ? t("media-copied") : t("media-copy")}
-                </button>
-                <button onClick={() => remove(m.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+            <img src={api.API_URL + (m.url as string)} alt={(m.altText as string) || (m.originalName as string)} className="h-24 w-full object-cover" />
+            {editingId === m.id ? (
+              <div className="space-y-1.5 p-2">
+                <input
+                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                  placeholder={t("media-name-label")}
+                  value={editForm.originalName}
+                  onChange={(e) => setEditForm({ ...editForm, originalName: e.target.value })}
+                />
+                <input
+                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                  placeholder={t("media-alt-label")}
+                  value={editForm.altText}
+                  onChange={(e) => setEditForm({ ...editForm, altText: e.target.value })}
+                />
+                <textarea
+                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                  placeholder={t("media-description-label")}
+                  value={editForm.description}
+                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                />
+                <select
+                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                  value={editForm.folderId}
+                  onChange={(e) => setEditForm({ ...editForm, folderId: e.target.value })}
+                >
+                  <option value="">{t("media-all-files")}</option>
+                  {folders.map((f) => (
+                    <option key={f.id as string} value={f.id as string}>
+                      {f.name as string}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setEditingId(null)} className="text-[10px] text-sub hover:underline">
+                    {t("media-cancel")}
+                  </button>
+                  <button onClick={() => saveEdit(m.id as string)} className="text-[10px] font-semibold text-accent hover:underline">
+                    {t("media-save")}
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-1.5 p-2">
+                <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
+                  {m.originalName as string}
+                </p>
+                <p className="text-[10px] text-sub">
+                  {Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB ·{" "}
+                  {new Date(m.createdAt as string).toLocaleDateString()}
+                </p>
+                <div className="flex items-center justify-between">
+                  <button onClick={() => copyUrl(m)} className="text-[10px] font-semibold text-accent hover:underline">
+                    {copiedId === m.id ? t("media-copied") : t("media-copy")}
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => startEdit(m)} className="rounded p-1 text-sub hover:bg-canvas">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => remove(m.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1084,7 +1222,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "users.manage": "perm-users-manage",
 };
 
-function UsersPanel({ token }: { token: string }) {
+function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
   const { t } = useT();
   const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
   const [roles, setRoles] = useState<Array<Record<string, unknown>>>([]);
@@ -1094,6 +1232,14 @@ function UsersPanel({ token }: { token: string }) {
   const [tenantHost, setTenantHost] = useState("");
   const [roleId, setRoleId] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  async function impersonate(u: Record<string, unknown>) {
+    try {
+      onImpersonate(await api.impersonateUser(token, u.id as string));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   async function refresh() {
     setUsers(await api.listPortalUsers(token));
@@ -1198,6 +1344,7 @@ function UsersPanel({ token }: { token: string }) {
               <th className="px-4 py-3">Role</th>
               <th className="px-4 py-3">Tenant</th>
               <th className="px-4 py-3">{t("users-role")}</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody className="divide-y divide-line/20 text-xs text-ink">
@@ -1233,6 +1380,13 @@ function UsersPanel({ token }: { token: string }) {
                         </option>
                       ))}
                     </select>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {u.role === "webmaster" && (
+                    <button onClick={() => impersonate(u)} className="text-[10px] font-semibold text-accent hover:underline">
+                      {t("users-impersonate")}
+                    </button>
                   )}
                 </td>
               </tr>
@@ -1641,7 +1795,19 @@ function NavButton({ tab, active, onClick }: { tab: Tab; active: boolean; onClic
   );
 }
 
-function Shell({ session, onLogout }: { session: Session; onLogout: () => void }) {
+function Shell({
+  session,
+  onLogout,
+  onImpersonate,
+  impersonating,
+  onExitImpersonation,
+}: {
+  session: Session;
+  onLogout: () => void;
+  onImpersonate: (s: Session) => void;
+  impersonating: boolean;
+  onExitImpersonation: () => void;
+}) {
   const [lang, setLang] = useState<Lang>("en");
   const t = (k: Key) => dict[lang][k];
   const isSuper = session.role === "superadmin";
@@ -1659,7 +1825,18 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
-      <div className="flex h-screen overflow-hidden bg-canvas font-sans text-ink antialiased">
+      <div className="flex h-screen flex-col overflow-hidden bg-canvas font-sans text-ink antialiased">
+        {impersonating && (
+          <div className="flex shrink-0 items-center justify-center gap-3 bg-warn px-4 py-1.5 text-[11px] font-semibold text-white">
+            <span>
+              {t("impersonate-banner")} {session.tenantHost} ({session.role})
+            </span>
+            <button onClick={onExitImpersonation} className="rounded-full bg-white/20 px-2.5 py-0.5 hover:bg-white/30">
+              {t("impersonate-exit")}
+            </button>
+          </div>
+        )}
+        <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
         <aside className="flex h-full w-64 shrink-0 flex-col border-r border-line/50 bg-white">
           <div className="flex items-center gap-3 border-b border-line/30 p-6">
@@ -1700,7 +1877,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
         </aside>
 
         {/* Main */}
-        <div className="flex h-screen flex-1 flex-col overflow-hidden bg-white">
+        <div className="flex flex-1 flex-col overflow-hidden bg-white">
           <header className="flex shrink-0 items-center justify-between border-b border-line/40 bg-white px-8 py-4">
             <div className="flex items-center gap-3">
               <span className="text-xs font-bold uppercase tracking-wider text-sub">{t("header-workspace")}</span>
@@ -1732,7 +1909,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
             <div className="mx-auto max-w-7xl space-y-6 pb-10">
               {tab === "dashboard" && <Dashboard session={session} />}
               {tab === "multisite" && isSuper && <TenantsPanel token={session.token} />}
-              {tab === "users" && isSuper && <UsersPanel token={session.token} />}
+              {tab === "users" && isSuper && <UsersPanel token={session.token} onImpersonate={onImpersonate} />}
               {tab === "roles" && isSuper && <RolesPanel token={session.token} />}
               {tab === "content" && (
                 <ContentManager
@@ -1759,13 +1936,23 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
             </div>
           </main>
         </div>
+        </div>
       </div>
     </I18nCtx.Provider>
   );
 }
 
+const IMPERSONATOR_KEY = "usim_cms_impersonator";
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
+  // Set only while a superadmin is "viewing as" a webmaster — the stashed
+  // superadmin session to restore on exit. Persisted so a page refresh
+  // mid-impersonation doesn't strand the admin in the webmaster's view.
+  const [adminSession, setAdminSession] = useState<Session | null>(() => {
+    const raw = localStorage.getItem(IMPERSONATOR_KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  });
   // null = still checking; a fresh install has zero users, so the wizard
   // must win the race against LoginForm rather than flash it on load.
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
@@ -1776,7 +1963,26 @@ export default function App() {
 
   function logout() {
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(IMPERSONATOR_KEY);
     setSession(null);
+    setAdminSession(null);
+  }
+
+  function impersonate(target: Session) {
+    if (session) {
+      localStorage.setItem(IMPERSONATOR_KEY, JSON.stringify(session));
+      setAdminSession(session);
+    }
+    localStorage.setItem(SESSION_KEY, JSON.stringify(target));
+    setSession(target);
+  }
+
+  function exitImpersonation() {
+    if (!adminSession) return;
+    localStorage.setItem(SESSION_KEY, JSON.stringify(adminSession));
+    localStorage.removeItem(IMPERSONATOR_KEY);
+    setSession(adminSession);
+    setAdminSession(null);
   }
 
   if (!session) {
@@ -1784,5 +1990,18 @@ export default function App() {
     if (needsSetup) return <SetupWizard onDone={setSession} />;
     return <LoginForm onLogin={setSession} />;
   }
-  return <Shell session={session} onLogout={logout} />;
+  return (
+    <Shell
+      // Forces a full remount on every session swap (login/impersonate/exit)
+      // — Shell's siteHost/tab state only initializes from session on mount,
+      // and without this a same-instance prop swap leaves both stuck on
+      // whatever the previous session had (wrong x-tenant-host, dead tabs).
+      key={session.token}
+      session={session}
+      onLogout={logout}
+      onImpersonate={impersonate}
+      impersonating={adminSession !== null}
+      onExitImpersonation={exitImpersonation}
+    />
+  );
 }
