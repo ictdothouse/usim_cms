@@ -373,6 +373,20 @@ export async function getMergedTheme(tenantHost: string): Promise<Record<string,
   }
 }
 
+// Raw tenant row only (no global merge) — backup/restore wants exactly what
+// this tenant owns, nothing inherited.
+export async function getTenantTheme(tenantHost: string): Promise<Record<string, unknown> | null> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.select().from(schema.siteTheme).where(eq(schema.siteTheme.tenantHost, tenantHost));
+    return (row?.settings as Record<string, unknown>) ?? null;
+  } finally {
+    client.release();
+  }
+}
+
 export async function setTenantTheme(tenantHost: string, settings: Record<string, unknown>): Promise<void> {
   const client = await pool.connect();
   try {

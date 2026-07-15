@@ -31,6 +31,19 @@ async function request(path: string, tenantHost: string | null, token: string | 
   return body;
 }
 
+export const getSetupStatus = () =>
+  request("/api/setup/status", null, null).then((b) => b.needsSetup as boolean);
+
+export async function setup(input: {
+  email: string;
+  password: string;
+  host?: string;
+  departmentName?: string;
+}): Promise<Session> {
+  const body = await request("/api/setup", null, null, { method: "POST", body: JSON.stringify(input) });
+  return { token: body.token, role: body.role, tenantHost: body.tenantHost };
+}
+
 export async function login(email: string, password: string): Promise<Session> {
   const body = await request("/api/auth/login", null, null, {
     method: "POST",
@@ -118,6 +131,42 @@ export const updatePortalUserRole = (token: string, id: string, roleId: string |
     method: "PATCH",
     body: JSON.stringify({ roleId }),
   });
+
+// Binary downloads (backup / static export) — plain <a href> can't carry the
+// Authorization header, so fetch to a blob and click a synthetic link.
+async function downloadZip(path: string, token: string, fallbackName: string) {
+  const res = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { error?: string });
+    throw new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
+  }
+  const name = res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export const downloadTenantBackup = (token: string, host: string) =>
+  downloadZip(`/api/portal/tenants/${host}/backup`, token, `backup-${host}.zip`);
+
+export const downloadStaticExport = (token: string, host: string) =>
+  downloadZip(`/api/portal/tenants/${host}/static-export`, token, `static-${host}.zip`);
+
+export async function restoreTenantBackup(token: string, host: string, file: File): Promise<number> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/portal/tenants/${host}/restore`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error ?? "Restore failed");
+  return body.restored as number;
+}
 
 export const listPortalRoles = (token: string) =>
   request("/api/portal/roles", null, token).then((b) => b.roles as Array<Record<string, unknown>>);

@@ -1,0 +1,75 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
+      POSTGRES_DB: usim_cms
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Runs once, only on an empty data dir: creates the non-superuser
+      # usim_cms_app role the RLS policies require (see CLAUDE.md / the
+      # script's own header for why superuser connections can't use them).
+      - ./apps/api/scripts/setup-db-role.sql:/docker-entrypoint-initdb.d/01-setup-db-role.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      PORT: 3000
+      # Static export renders pages through the frontend container.
+      FRONTEND_INTERNAL_URL: http://frontend:4321
+    ports:
+      - "3000:3000"
+    volumes:
+      - api-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # Internal Docker network call, api container-to-container — not the
+      # browser-facing VITE_API_URL the admin's build uses.
+      API_URL: http://api:3000
+      PORT: 4321
+    ports:
+      - "4321:4321"
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+        VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:-http://localhost:4321}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  db-data:
+  api-uploads:

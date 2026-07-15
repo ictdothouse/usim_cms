@@ -26,6 +26,7 @@ import {
   Palette,
   Quote,
   Rss,
+  Settings as SettingsIcon,
   ShieldCheck,
   Strikethrough,
   Trash2,
@@ -62,6 +63,92 @@ const btnPrimary =
 const btnGhost =
   "rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink transition-colors hover:bg-[#e8e8ed]";
 const card = "rounded-xl border border-line/40 bg-white";
+
+// ---------- Setup wizard (first-run only, see /api/setup) ----------
+function SetupWizard({ onDone }: { onDone: (s: Session) => void }) {
+  const { t } = useT();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [host, setHost] = useState("");
+  const [departmentName, setDepartmentName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await api.setup({
+        email,
+        password,
+        host: host || undefined,
+        departmentName: host ? departmentName : undefined,
+      });
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      onDone(session);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-canvas font-sans text-ink antialiased">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-line/30 bg-white p-8 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-accent to-[#00c6ff] text-sm font-bold text-white shadow-sm">
+            U
+          </div>
+          <div>
+            <h1 className="font-display text-sm font-bold tracking-tight">{t("setup-title")}</h1>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
+          </div>
+        </div>
+        <p className="text-xs text-sub">{t("setup-desc")}</p>
+        <input
+          className={inputCls}
+          type="email"
+          placeholder={t("login-email")}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <input
+          className={inputCls}
+          type="password"
+          placeholder={t("login-password")}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={8}
+        />
+        <input
+          className={inputCls}
+          type="text"
+          placeholder={t("setup-host")}
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+        />
+        {host && (
+          <input
+            className={inputCls}
+            type="text"
+            placeholder={t("setup-department")}
+            value={departmentName}
+            onChange={(e) => setDepartmentName(e.target.value)}
+            required
+          />
+        )}
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>
+          {busy ? t("setup-busy") : t("setup-submit")}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 // ---------- Login ----------
 function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
@@ -1438,7 +1525,7 @@ function ContentManager({
 }
 
 // ---------- Shell (sidebar + header, prototype layout) ----------
-type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "global-theme" | "feed";
+type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "global-theme" | "feed" | "settings";
 
 const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = {
   dashboard: { labelKey: "tab-dashboard", icon: LayoutDashboard },
@@ -1449,7 +1536,94 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   theme: { labelKey: "tab-theme", icon: Palette },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
+  settings: { labelKey: "tab-settings", icon: SettingsIcon },
 };
+
+// ---------- Settings (superadmin: backup / restore / static export) ----------
+function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Record<string, unknown>> }) {
+  const { t } = useT();
+  const [host, setHost] = useState<string>("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function run(action: string, fn: () => Promise<void>) {
+    setBusy(action);
+    setMsg(null);
+    setErr(null);
+    try {
+      await fn();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const sections: Array<{ key: string; title: Key; desc: Key; btn: Key; onClick: () => void }> = [
+    {
+      key: "backup",
+      title: "settings-backup-title",
+      desc: "settings-backup-desc",
+      btn: "settings-backup-btn",
+      onClick: () => void run("backup", () => api.downloadTenantBackup(token, host)),
+    },
+    {
+      key: "static",
+      title: "settings-static-title",
+      desc: "settings-static-desc",
+      btn: "settings-static-btn",
+      onClick: () => void run("static", () => api.downloadStaticExport(token, host)),
+    },
+  ];
+
+  function pickRestoreFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".zip";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (!window.confirm(t("settings-restore-confirm"))) return;
+      void run("restore", async () => {
+        await api.restoreTenantBackup(token, host, file);
+        setMsg(t("settings-restore-done"));
+      });
+    };
+    input.click();
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <select className={inputCls} value={host} onChange={(e) => setHost(e.target.value)}>
+        <option value="">{t("settings-tenant")}</option>
+        {tenants.map((tn) => (
+          <option key={tn.host as string} value={tn.host as string}>
+            {(tn.departmentName as string) || (tn.host as string)}
+          </option>
+        ))}
+      </select>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {msg && <p className="text-xs text-green-700">{msg}</p>}
+      {sections.map((s) => (
+        <div key={s.key} className={`${card} space-y-2 p-5`}>
+          <h3 className="text-xs font-bold text-ink">{t(s.title)}</h3>
+          <p className="text-xs text-sub">{t(s.desc)}</p>
+          <button disabled={!host || busy !== null} onClick={s.onClick} className={btnPrimary}>
+            {busy === s.key ? t("settings-busy") : t(s.btn)}
+          </button>
+        </div>
+      ))}
+      <div className={`${card} space-y-2 p-5`}>
+        <h3 className="text-xs font-bold text-ink">{t("settings-restore-title")}</h3>
+        <p className="text-xs text-sub">{t("settings-restore-desc")}</p>
+        <button disabled={!host || busy !== null} onClick={pickRestoreFile} className={btnPrimary}>
+          {busy === "restore" ? t("settings-busy") : t("settings-restore-btn")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function NavButton({ tab, active, onClick }: { tab: Tab; active: boolean; onClick: () => void }) {
   const { t } = useT();
@@ -1480,7 +1654,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
     if (isSuper) void api.listPortalTenants(session.token).then(setTenants);
   }, [isSuper, session.token]);
 
-  const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles"] : ["dashboard"];
+  const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings"] : ["dashboard"];
   const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme"];
 
   return (
@@ -1581,6 +1755,7 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
                 <ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} />
               )}
               {tab === "feed" && isSuper && <PortalFeedPanel token={session.token} />}
+              {tab === "settings" && isSuper && <SettingsPanel token={session.token} tenants={tenants} />}
             </div>
           </main>
         </div>
@@ -1591,12 +1766,23 @@ function Shell({ session, onLogout }: { session: Session; onLogout: () => void }
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
+  // null = still checking; a fresh install has zero users, so the wizard
+  // must win the race against LoginForm rather than flash it on load.
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!session) api.getSetupStatus().then(setNeedsSetup).catch(() => setNeedsSetup(false));
+  }, [session]);
 
   function logout() {
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
   }
 
-  if (!session) return <LoginForm onLogin={setSession} />;
+  if (!session) {
+    if (needsSetup === null) return null;
+    if (needsSetup) return <SetupWizard onDone={setSession} />;
+    return <LoginForm onLogin={setSession} />;
+  }
   return <Shell session={session} onLogout={logout} />;
 }

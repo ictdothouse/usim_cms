@@ -2,6 +2,14 @@
 // see apps/api/src/index.ts's public route registration). tenantHost comes
 // from the incoming request's Host header, forwarded as x-tenant-host.
 const API_URL = import.meta.env.API_URL ?? "http://localhost:3000";
+const FETCH_TIMEOUT_MS = 5000;
+
+// ponytail: in-memory stale-while-revalidate cache. CLAUDE.md: single
+// instance, not one deployment per tenant, so one process-local Map is
+// enough — lost on restart/deploy, add Redis if this ever runs multi-instance.
+// Goal: an API blip never surfaces as a visitor-facing error page, only a
+// slightly stale page.
+const cache = new Map<string, unknown>();
 
 export interface Page {
   id: string;
@@ -12,11 +20,24 @@ export interface Page {
 }
 
 async function apiGet<T>(path: string, tenantHost: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { "x-tenant-host": tenantHost },
-  });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
-  return res.json() as Promise<T>;
+  const key = `${tenantHost}${path}`;
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      headers: { "x-tenant-host": tenantHost },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+    const data = (await res.json()) as T;
+    cache.set(key, data);
+    return data;
+  } catch (err) {
+    const cached = cache.get(key);
+    if (cached !== undefined) {
+      console.error(`apiGet: ${key} failed, serving stale cache`, err);
+      return cached as T;
+    }
+    throw err;
+  }
 }
 
 export async function getPageBySlug(tenantHost: string, slug: string): Promise<Page | null> {

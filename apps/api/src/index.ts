@@ -31,6 +31,7 @@ import {
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
+import { exportTenantBackup, importTenantBackup, exportStaticSite } from "./backup.js";
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storage.js";
 
 // Fixed permission matrix (resource.action) a superadmin composes into named
@@ -131,6 +132,49 @@ if (isLocalDriver) {
 }
 
 app.get("/health", async () => ({ status: "ok" }));
+
+// First-run bootstrap: creates the very first superadmin (chicken-and-egg —
+// every other user-management route requires an existing superadmin token).
+// Self-disabling: once any user row exists, both routes permanently refuse,
+// so this is only ever a live unauthenticated endpoint on a brand-new install.
+app.get("/api/setup/status", async () => {
+  const users = await listUsers();
+  return { needsSetup: users.length === 0 };
+});
+
+app.post("/api/setup", async (req, reply) => {
+  const users = await listUsers();
+  if (users.length > 0) {
+    reply.code(403);
+    return { error: "Setup already completed" };
+  }
+  const { email, password, host, departmentName } = req.body as {
+    email?: string;
+    password?: string;
+    host?: string;
+    departmentName?: string;
+  };
+  if (!email || !password) {
+    reply.code(400);
+    return { error: "email and password required" };
+  }
+  if (host && !departmentName) {
+    reply.code(400);
+    return { error: "departmentName required when host is set" };
+  }
+  await createUser(email, hashPassword(password), "superadmin", null, null);
+  if (host) {
+    await createTenant(host, departmentName!, null);
+  }
+  const token = signSession({
+    userId: (await findUserByEmail(email))!.id,
+    email,
+    role: "superadmin",
+    tenantHost: null,
+    permissions: [],
+  });
+  return { token, role: "superadmin", tenantHost: null };
+});
 
 app.post("/api/auth/login", async (req, reply) => {
   const { email, password } = req.body as { email?: string; password?: string };
@@ -269,6 +313,53 @@ app.delete("/api/portal/roles/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
   await deleteRole(id);
   return { deleted: true, id };
+});
+
+// Backup / restore / static export — superadmin-only, root scope like the
+// rest of /api/portal (tenant comes from the URL, not x-tenant-host).
+app.get("/api/portal/tenants/:host/backup", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  const zip = await exportTenantBackup(host);
+  reply
+    .type("application/zip")
+    .header("Content-Disposition", `attachment; filename="backup-${host}-${new Date().toISOString().slice(0, 10)}.zip"`);
+  return reply.send(Buffer.from(zip));
+});
+
+app.post("/api/portal/tenants/:host/restore", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  // Per-call limit override: backups carry a tenant's whole media library,
+  // so the global 5 MB multipart cap is far too small here.
+  const file = await req.file({ limits: { fileSize: 500 * 1024 * 1024 } });
+  if (!file) {
+    reply.code(400);
+    return { error: "backup zip required (multipart/form-data, field name 'file')" };
+  }
+  const buf = await file.toBuffer();
+  try {
+    const { restored } = await importTenantBackup(host, new Uint8Array(buf));
+    return { restored: restored.length, host };
+  } catch (err) {
+    reply.code(400);
+    return { error: (err as Error).message };
+  }
+});
+
+app.get("/api/portal/tenants/:host/static-export", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  try {
+    const zip = await exportStaticSite(host);
+    reply
+      .type("application/zip")
+      .header("Content-Disposition", `attachment; filename="static-${host}-${new Date().toISOString().slice(0, 10)}.zip"`);
+    return reply.send(Buffer.from(zip));
+  } catch (err) {
+    reply.code(502);
+    return { error: (err as Error).message };
+  }
 });
 
 const pagesCollection: CollectionConfig = {
