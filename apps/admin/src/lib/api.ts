@@ -1,5 +1,16 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
+// Base for the "View" link on a page/post. In production each tenant IS its
+// own real domain (tenantHost), so no separate frontend URL is needed there.
+// Locally there's one shared `astro dev` server, so this points at it with
+// a `?__tenant=` override (see apps/frontend's [...slug].astro) letting the
+// admin preview any local tenant, not just whichever one DEV_TENANT_HOST names.
+const FRONTEND_DEV_URL = import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:4321";
+export const previewUrl = (tenantHost: string, slug: string) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL)
+    ? `${FRONTEND_DEV_URL}/${slug}?__tenant=${encodeURIComponent(tenantHost)}`
+    : `https://${tenantHost}/${slug}`;
+
 export interface Session {
   token: string;
   role: "superadmin" | "webmaster";

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sql } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
+import { verifySession } from "../db/auth.js";
 
 // Registers generic CRUD routes for a collection under /api/:collectionSlug,
 // so individual collections don't need hand-written route handlers.
@@ -35,12 +36,27 @@ async function applyBeforeChange(config: CollectionConfig, req: FastifyRequest):
 // logged-in webmaster/superadmin) — register each on the matching scope in
 // index.ts. A public website has no login session, so GET must never sit
 // behind requireTenantAuth.
+// Both anonymous website visitors and the logged-in admin panel read
+// through this same GET (registerProtectedCollectionRoutes has no GET of
+// its own — see the RLS comment on posts_select in
+// migrations/0003_create_posts.sql: one shared read path, draft visibility
+// keyed off whether the request carries a valid matching bearer token).
+async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return;
+  const session = verifySession(header.slice("Bearer ".length));
+  if (!session) return;
+  if (session.role === "webmaster" && session.tenantHost !== req.tenantHost) return;
+  await req.db.execute(sql`SET SESSION app.authenticated = 'true'`);
+}
+
 export function registerPublicCollectionRoutes(app: FastifyInstance, config: CollectionConfig) {
   const base = `/api/${config.slug}`;
   const { table } = config;
 
   app.get(base, async (req) => {
     if (!table) return { collection: config.slug, items: [] };
+    await elevateIfAuthenticated(req);
     const items = await req.db.select().from(table);
     return { collection: config.slug, items };
   });
@@ -48,6 +64,7 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
   app.get(`${base}/:id`, async (req) => {
     const { id } = req.params as { id: string };
     if (!table) return { collection: config.slug, id, item: null };
+    await elevateIfAuthenticated(req);
     const [item] = await req.db.select().from(table).where(sql`id = ${id}`);
     return { collection: config.slug, id, item: item ?? null };
   });

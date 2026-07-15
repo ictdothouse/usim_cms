@@ -9,10 +9,27 @@ import {
   LayoutDashboard,
   LogOut,
   Newspaper,
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Bold,
+  Code,
+  ExternalLink,
+  Heading1,
+  Heading2,
+  Heading3,
+  Italic,
+  Link2,
+  List,
+  ListChecks,
+  ListOrdered,
   Palette,
+  Quote,
   Rss,
   ShieldCheck,
+  Strikethrough,
   Trash2,
+  Underline,
   Users as UsersIcon,
 } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
@@ -353,6 +370,14 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                 <span className="font-mono text-sub">/{p.slug as string}</span>
               </span>
               <span className="flex items-center gap-3">
+                <a
+                  href={api.previewUrl(tenantHost, p.slug as string)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 font-semibold text-body hover:underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> {t("pages-view")}
+                </a>
                 <button
                   onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
                   className="font-semibold text-accent hover:underline"
@@ -390,6 +415,90 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         {pages.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("pages-empty")}</li>}
       </ul>
     </section>
+  );
+}
+
+// ---------- Rich-text toolbar (fixed bar, not just Notion-style slash/hover) ----------
+// BlockNote's own selection popup + slash menu stay as-is (kept per request) —
+// this adds a persistent bar above the editor for people used to a
+// Word/Google Docs-style always-visible toolbar instead of "/"-commands.
+function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNote> }) {
+  const [, forceUpdate] = useState(0);
+  useEffect(() => editor.onSelectionChange(() => forceUpdate((n) => n + 1)), [editor]);
+
+  const active = editor.getActiveStyles();
+  const block = editor.getTextCursorPosition()?.block;
+
+  const styleBtn = (icon: React.ReactNode, key: "bold" | "italic" | "underline" | "strike" | "code", title: string) => (
+    <button
+      type="button"
+      title={title}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => editor.toggleStyles({ [key]: true })}
+      className={`rounded p-1.5 hover:bg-canvas ${active[key] ? "bg-canvas text-accent" : "text-body"}`}
+    >
+      {icon}
+    </button>
+  );
+
+  const blockBtn = (icon: React.ReactNode, type: string, props: Record<string, unknown>, title: string) => (
+    <button
+      type="button"
+      title={title}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => block && editor.updateBlock(block, { type, props } as never)}
+      className={`rounded p-1.5 hover:bg-canvas ${block?.type === type ? "bg-canvas text-accent" : "text-body"}`}
+    >
+      {icon}
+    </button>
+  );
+
+  const alignBtn = (icon: React.ReactNode, alignment: "left" | "center" | "right", title: string) => (
+    <button
+      type="button"
+      title={title}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => block && editor.updateBlock(block, { props: { textAlignment: alignment } } as never)}
+      className={`rounded p-1.5 hover:bg-canvas ${(block?.props as Record<string, unknown>)?.textAlignment === alignment ? "bg-canvas text-accent" : "text-body"}`}
+    >
+      {icon}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-wrap items-center gap-0.5 rounded-t-lg border border-b-0 border-line/30 bg-canvas/40 p-1.5">
+      {styleBtn(<Bold className="h-3.5 w-3.5" />, "bold", "Bold")}
+      {styleBtn(<Italic className="h-3.5 w-3.5" />, "italic", "Italic")}
+      {styleBtn(<Underline className="h-3.5 w-3.5" />, "underline", "Underline")}
+      {styleBtn(<Strikethrough className="h-3.5 w-3.5" />, "strike", "Strikethrough")}
+      {styleBtn(<Code className="h-3.5 w-3.5" />, "code", "Code")}
+      <span className="mx-1 h-4 w-px bg-line/30" />
+      {blockBtn(<Heading1 className="h-3.5 w-3.5" />, "heading", { level: 1 }, "Heading 1")}
+      {blockBtn(<Heading2 className="h-3.5 w-3.5" />, "heading", { level: 2 }, "Heading 2")}
+      {blockBtn(<Heading3 className="h-3.5 w-3.5" />, "heading", { level: 3 }, "Heading 3")}
+      {blockBtn(<Quote className="h-3.5 w-3.5" />, "quote", {}, "Quote")}
+      <span className="mx-1 h-4 w-px bg-line/30" />
+      {blockBtn(<List className="h-3.5 w-3.5" />, "bulletListItem", {}, "Bullet list")}
+      {blockBtn(<ListOrdered className="h-3.5 w-3.5" />, "numberedListItem", {}, "Numbered list")}
+      {blockBtn(<ListChecks className="h-3.5 w-3.5" />, "checkListItem", {}, "Checklist")}
+      <span className="mx-1 h-4 w-px bg-line/30" />
+      {alignBtn(<AlignLeft className="h-3.5 w-3.5" />, "left", "Align left")}
+      {alignBtn(<AlignCenter className="h-3.5 w-3.5" />, "center", "Align center")}
+      {alignBtn(<AlignRight className="h-3.5 w-3.5" />, "right", "Align right")}
+      <span className="mx-1 h-4 w-px bg-line/30" />
+      <button
+        type="button"
+        title="Link"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          const url = window.prompt("URL:");
+          if (url) editor.createLink(url);
+        }}
+        className="rounded p-1.5 text-body hover:bg-canvas"
+      >
+        <Link2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
   );
 }
 
@@ -447,8 +556,11 @@ function PostEditor({
       {error && <p className="text-xs text-red-600">{error}</p>}
       <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
       <input className={inputCls} placeholder={t("posts-excerpt")} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} />
-      <div className="rounded-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[240px]">
-        <BlockNoteView editor={editor} theme="light" />
+      <div>
+        <EditorToolbar editor={editor} />
+        <div className="rounded-b-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[240px]">
+          <BlockNoteView editor={editor} theme="light" />
+        </div>
       </div>
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className={btnPrimary}>

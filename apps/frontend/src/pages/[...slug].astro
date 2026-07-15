@@ -12,13 +12,15 @@ import { getPageBySlug, getTheme } from "../lib/api";
 // since apps/api's pages.slug is NOT NULL.
 //
 // ponytail: `astro dev` has no real department domain to hit, so plain
-// localhost falls back to DEV_TENANT_HOST — dev convenience only
-// (import.meta.env.DEV is false in `astro build`/`preview`), never affects
-// a real deployment. Upgrade path: none needed, real domains never hit this.
+// localhost falls back to DEV_TENANT_HOST, or a `?__tenant=` override (used
+// by the admin panel's per-page "View" link so any of several local tenants
+// can be previewed, not just whichever one DEV_TENANT_HOST names) — dev
+// convenience only (import.meta.env.DEV is false in `astro build`/`preview`),
+// never affects a real deployment.
 const rawHost = Astro.request.headers.get("host") ?? "";
 const tenantHost =
   import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
-    ? (import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
     : rawHost;
 const slug = Astro.params.slug || "home";
 
