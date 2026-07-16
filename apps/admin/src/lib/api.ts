@@ -6,22 +6,35 @@ export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 // a `?__tenant=` override (see apps/frontend's [...slug].astro) letting the
 // admin preview any local tenant, not just whichever one DEV_TENANT_HOST names.
 const FRONTEND_DEV_URL = import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:4321";
-export const previewUrl = (tenantHost: string, slug: string) =>
-  /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL)
-    ? `${FRONTEND_DEV_URL}/${slug}?__tenant=${encodeURIComponent(tenantHost)}`
-    : `https://${tenantHost}/${slug}`;
+// previewToken is optional — a short-lived, read-only token minted by
+// getPagePreviewToken() (never the admin's real session bearer, which
+// doesn't expire — see apps/api's auth.ts) to preview a draft page before
+// it's published. apps/frontend forwards it as a Bearer header to apps/api,
+// whose public GET elevates to authenticated visibility for it (see
+// generic-crud.ts's elevateIfAuthenticated); requireTenantAuth refuses it on
+// every write route.
+export const previewUrl = (tenantHost: string, slug: string, previewToken?: string) => {
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
+  const query = new URLSearchParams({
+    ...(isLocal ? { __tenant: tenantHost } : {}),
+    ...(previewToken ? { token: previewToken } : {}),
+  }).toString();
+  const base = isLocal ? `${FRONTEND_DEV_URL}/${slug}` : `https://${tenantHost}/${slug}`;
+  return query ? `${base}?${query}` : base;
+};
 
 export interface Session {
   token: string;
   role: "superadmin" | "webmaster";
   tenantHost: string | null;
+  tenantHosts: string[];
 }
 
 async function request(path: string, tenantHost: string | null, token: string | null, init?: RequestInit) {
   const headers: Record<string, string> = {};
   // Fastify's JSON body parser rejects an empty body when this header is
   // set (FST_ERR_CTP_EMPTY_JSON_BODY) — only send it when there's a body
-  // (publishPage and any future bodyless call has none).
+  // (sharePage and any future bodyless call has none).
   if (init?.body) headers["Content-Type"] = "application/json";
   if (tenantHost) headers["x-tenant-host"] = tenantHost;
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -41,7 +54,7 @@ export async function setup(input: {
   departmentName?: string;
 }): Promise<Session> {
   const body = await request("/api/setup", null, null, { method: "POST", body: JSON.stringify(input) });
-  return { token: body.token, role: body.role, tenantHost: body.tenantHost };
+  return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHost ? [body.tenantHost] : [] };
 }
 
 // Superadmin "view as" — swaps in the target webmaster's real session
@@ -51,7 +64,7 @@ export async function impersonateUser(token: string, userId: string): Promise<Se
     method: "POST",
     body: JSON.stringify({ userId }),
   });
-  return { token: body.token, role: body.role, tenantHost: body.tenantHost };
+  return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
 }
 
 export async function login(email: string, password: string): Promise<Session> {
@@ -59,7 +72,7 @@ export async function login(email: string, password: string): Promise<Session> {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  return { token: body.token, role: body.role, tenantHost: body.tenantHost };
+  return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
 }
 
 export const getPages = (tenantHost: string, token: string) =>
@@ -68,7 +81,11 @@ export const getPages = (tenantHost: string, token: string) =>
 export const createPage = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
   request("/api/pages", tenantHost, token, { method: "POST", body: JSON.stringify(data) });
 
-export const publishPage = (tenantHost: string, token: string, id: string) =>
+// Mints a short-lived, read-only token for previewUrl() — see its comment.
+export const getPagePreviewToken = (tenantHost: string, token: string, id: string) =>
+  request(`/api/pages/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
+
+export const sharePage = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}/publish`, tenantHost, token, { method: "POST" });
 
 export const updatePage = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
@@ -135,6 +152,9 @@ export const listMediaFolders = (tenantHost: string, token: string) =>
 export const createMediaFolder = (tenantHost: string, token: string, name: string) =>
   request("/api/media/folders", tenantHost, token, { method: "POST", body: JSON.stringify({ name }) });
 
+export const renameMediaFolder = (tenantHost: string, token: string, id: string, name: string) =>
+  request(`/api/media/folders/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify({ name }) });
+
 export const deleteMediaFolder = (tenantHost: string, token: string, id: string) =>
   request(`/api/media/folders/${id}`, tenantHost, token, { method: "DELETE" });
 
@@ -154,13 +174,25 @@ export const listPortalUsers = (token: string) =>
 
 export const createPortalUser = (
   token: string,
-  data: { email: string; password: string; role: string; tenantHost?: string; roleId?: string | null },
+  data: {
+    email: string;
+    password: string;
+    role: string;
+    tenantHosts?: string[];
+    roleId?: string | null;
+    extraPermissions?: string[];
+  },
 ) => request("/api/portal/users", null, token, { method: "POST", body: JSON.stringify(data) });
 
-export const updatePortalUserRole = (token: string, id: string, roleId: string | null) =>
+export const updatePortalUserRole = (
+  token: string,
+  id: string,
+  roleId: string | null,
+  extraPermissions?: string[],
+) =>
   request(`/api/portal/users/${id}`, null, token, {
     method: "PATCH",
-    body: JSON.stringify({ roleId }),
+    body: JSON.stringify({ roleId, extraPermissions }),
   });
 
 // Binary downloads (backup / static export) — plain <a href> can't carry the
@@ -205,10 +237,10 @@ export const listPortalRoles = (token: string) =>
 export const createPortalRole = (token: string, name: string, permissions: string[]) =>
   request("/api/portal/roles", null, token, { method: "POST", body: JSON.stringify({ name, permissions }) });
 
-export const updatePortalRole = (token: string, id: string, permissions: string[]) =>
+export const updatePortalRole = (token: string, id: string, permissions: string[], name?: string) =>
   request(`/api/portal/roles/${id}`, null, token, {
     method: "PATCH",
-    body: JSON.stringify({ permissions }),
+    body: JSON.stringify({ permissions, name }),
   });
 
 export const deletePortalRole = (token: string, id: string) =>

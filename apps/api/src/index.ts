@@ -51,12 +51,17 @@ const PERMISSIONS = new Set([
   "media.delete",
   "theme.write",
   "users.manage",
+  "sites.multi",
 ]);
 
 // Superadmin bypasses every permission check — a role's permissions are only
 // ever consulted for webmaster sessions.
 function hasPermission(args: AccessArgs, permission: string): boolean {
   return args.role === "superadmin" || (args.permissions ?? []).includes(permission);
+}
+
+function mergePermissions(rolePermissions: string[], extraPermissions: string[] | null): string[] {
+  return Array.from(new Set([...rolePermissions, ...(extraPermissions ?? [])]));
 }
 
 function validatePermissions(permissions: unknown): string | null {
@@ -192,9 +197,13 @@ app.post("/api/auth/login", async (req, reply) => {
     email: user.email,
     role: user.role as "superadmin" | "webmaster",
     tenantHost: user.tenantHost,
-    permissions: await getRolePermissions(user.roleId as string | null),
+    tenantHosts: (user.tenantHosts as string[] | null) ?? [],
+    permissions: mergePermissions(
+      await getRolePermissions(user.roleId as string | null),
+      user.extraPermissions as string[] | null,
+    ),
   });
-  return { token, role: user.role, tenantHost: user.tenantHost };
+  return { token, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
 });
 
 // Cross-department aggregator (portal), reads public.shared_content directly
@@ -251,26 +260,46 @@ app.get("/api/portal/users", async (req, reply) => {
 
 app.post("/api/portal/users", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
-  const { email, password, role, tenantHost, roleId } = req.body as {
+  const { email, password, role, tenantHost, tenantHosts, roleId, extraPermissions } = req.body as {
     email?: string;
     password?: string;
     role?: string;
     tenantHost?: string;
+    tenantHosts?: string[];
     roleId?: string | null;
+    extraPermissions?: string[];
   };
-  if (!email || !password || !role || (role === "webmaster" && !tenantHost)) {
+  const hosts = tenantHosts?.length ? tenantHosts : tenantHost ? [tenantHost] : [];
+  if (!email || !password || !role || (role === "webmaster" && hosts.length === 0)) {
     reply.code(400);
-    return { error: "email, password, role required (tenantHost required for webmaster)" };
+    return { error: "email, password, role required (at least one site required for webmaster)" };
   }
-  await createUser(email, hashPassword(password), role, tenantHost ?? null, roleId ?? null);
+  const permError = validatePermissions(extraPermissions);
+  if (permError) {
+    reply.code(400);
+    return { error: permError };
+  }
+  if (hosts.length > 1) {
+    const effective = mergePermissions(await getRolePermissions(roleId ?? null), extraPermissions ?? []);
+    if (!effective.includes("sites.multi")) {
+      reply.code(400);
+      return { error: "role/permissions don't allow multiple sites" };
+    }
+  }
+  await createUser(email, hashPassword(password), role, hosts[0] ?? null, roleId ?? null, hosts, extraPermissions ?? []);
   return { created: true };
 });
 
 app.patch("/api/portal/users/:id", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   const { id } = req.params as { id: string };
-  const { roleId } = req.body as { roleId?: string | null };
-  await updateUserRole(id, roleId ?? null);
+  const { roleId, extraPermissions } = req.body as { roleId?: string | null; extraPermissions?: string[] };
+  const permError = validatePermissions(extraPermissions);
+  if (permError) {
+    reply.code(400);
+    return { error: permError };
+  }
+  await updateUserRole(id, roleId ?? null, extraPermissions);
   return { saved: true };
 });
 
@@ -298,13 +327,17 @@ app.post("/api/portal/roles", async (req, reply) => {
 app.patch("/api/portal/roles/:id", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   const { id } = req.params as { id: string };
-  const { permissions } = req.body as { permissions?: string[] };
+  const { permissions, name } = req.body as { permissions?: string[]; name?: string };
+  if (name !== undefined && !name.trim()) {
+    reply.code(400);
+    return { error: "name cannot be empty" };
+  }
   const permError = validatePermissions(permissions);
   if (permError) {
     reply.code(400);
     return { error: permError };
   }
-  await updateRole(id, permissions ?? []);
+  await updateRole(id, permissions ?? [], name);
   return { saved: true };
 });
 
@@ -339,16 +372,25 @@ app.post("/api/portal/impersonate", async (req, reply) => {
     reply.code(400);
     return { error: "can only impersonate a webmaster" };
   }
-  const permissions = await getRolePermissions(target.roleId as string | null);
+  const permissions = mergePermissions(
+    await getRolePermissions(target.roleId as string | null),
+    target.extraPermissions as string[] | null,
+  );
   const token = signSession({
     userId: target.id as string,
     email: target.email as string,
     role: "webmaster",
     tenantHost: target.tenantHost as string | null,
+    tenantHosts: (target.tenantHosts as string[] | null) ?? [],
     permissions,
     impersonatedBy: admin.email,
   });
-  return { token, role: "webmaster" as const, tenantHost: target.tenantHost as string | null };
+  return {
+    token,
+    role: "webmaster" as const,
+    tenantHost: target.tenantHost as string | null,
+    tenantHosts: (target.tenantHosts as string[] | null) ?? [],
+  };
 });
 
 // Backup / restore / static export — superadmin-only, root scope like the
@@ -398,6 +440,16 @@ app.get("/api/portal/tenants/:host/static-export", async (req, reply) => {
   }
 });
 
+// publishedAt arrives as an ISO string over JSON; Drizzle's timestamp column
+// needs a Date. Same conversion as sanitizePostBody, plus the updatedAt bump
+// posts already gets and pages never did.
+const pagesBeforeChange = (data: unknown) => {
+  const record = data as Record<string, unknown>;
+  if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
+  record.updatedAt = new Date();
+  return record;
+};
+
 const pagesCollection: CollectionConfig = {
   slug: "pages",
   table: schema.pages,
@@ -410,6 +462,7 @@ const pagesCollection: CollectionConfig = {
       title: { type: "string", minLength: 1 },
       layout: { type: "array" },
       bannerImageUrl: { type: "string" },
+      status: { type: "string", enum: ["draft", "published"] },
     },
   },
   shareable: {
@@ -421,6 +474,9 @@ const pagesCollection: CollectionConfig = {
     create: (a) => hasPermission(a, "pages.create"),
     update: (a) => hasPermission(a, "pages.update"),
     delete: (a) => hasPermission(a, "pages.delete"),
+  },
+  hooks: {
+    beforeChange: pagesBeforeChange,
   },
 };
 
@@ -490,6 +546,24 @@ await app.register(async (protectedScope) => {
   await tenantPlugin(protectedScope);
   await requireTenantAuth(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, pagesCollection);
+
+  // Mints a short-lived, read-only token for the admin's page "View" link —
+  // never the real session bearer (see auth.ts's previewOnly/exp and
+  // requireTenantAuth's rejection of it). Scoped to this tenant only, same
+  // granularity as every other read check here (no per-row ACL exists).
+  const PREVIEW_TOKEN_TTL_MS = 5 * 60 * 1000;
+  protectedScope.post("/api/pages/:id/preview-token", async (req) => {
+    const token = signSession({
+      userId: req.user.userId,
+      email: req.user.email,
+      role: req.user.role,
+      tenantHost: req.tenantHost,
+      permissions: [],
+      previewOnly: true,
+      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+    });
+    return { token };
+  });
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
 
   // Stores uploaded images (banners, etc.) on local disk under a per-tenant
@@ -576,9 +650,17 @@ await app.register(async (protectedScope) => {
       folderId?: string | null;
     };
     const idFilter = ownershipFilter(req);
+    // Allowlist fields explicitly — body is only TS-cast, not runtime
+    // validated, so spreading it into .set() would let a caller overwrite
+    // any column (uploadedBy, url, mimeType, ...) via extra JSON fields.
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.originalName !== undefined) updates.originalName = body.originalName;
+    if (body.altText !== undefined) updates.altText = body.altText;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.folderId !== undefined) updates.folderId = body.folderId;
     const [item] = await req.db
       .update(schema.media)
-      .set({ ...body, updatedAt: new Date() })
+      .set(updates)
       .where(idFilter ? and(eq(schema.media.id, id), idFilter) : eq(schema.media.id, id))
       .returning();
     if (!item) {
@@ -622,6 +704,29 @@ await app.register(async (protectedScope) => {
       return { error: "name required" };
     }
     const [item] = await req.db.insert(schema.mediaFolders).values({ name: name.trim() }).returning();
+    return { item };
+  });
+
+  protectedScope.patch("/api/media/folders/:id", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
+      reply.code(403);
+      return { error: "missing media.upload permission" };
+    }
+    const { id } = req.params as { id: string };
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) {
+      reply.code(400);
+      return { error: "name required" };
+    }
+    const [item] = await req.db
+      .update(schema.mediaFolders)
+      .set({ name: name.trim() })
+      .where(eq(schema.mediaFolders.id, id))
+      .returning();
+    if (!item) {
+      reply.code(404);
+      return { error: "not found" };
+    }
     return { item };
   });
 

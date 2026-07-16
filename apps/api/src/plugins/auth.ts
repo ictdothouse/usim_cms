@@ -21,7 +21,15 @@ export async function requireTenantAuth(app: FastifyInstance) {
     if (!session) {
       return reply.code(401).send({ error: "Invalid or expired token" });
     }
-    if (session.role === "webmaster" && session.tenantHost !== req.tenantHost) {
+    // A preview token (see /api/pages/:id/preview-token) is read-only by
+    // design — it must never reach a write/protected route, even though it
+    // carries a real role/tenantHost that would otherwise pass every check
+    // below.
+    if (session.previewOnly) {
+      return reply.code(403).send({ error: "Preview token cannot be used here" });
+    }
+    const allowedHosts = session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []);
+    if (session.role === "webmaster" && !allowedHosts.includes(req.tenantHost)) {
       return reply.code(403).send({ error: "Not authorized for this tenant" });
     }
     req.user = session;
@@ -42,6 +50,10 @@ export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): Sess
   const session = verifySession(header.slice("Bearer ".length));
   if (!session) {
     reply.code(401).send({ error: "Invalid or expired token" });
+    return null;
+  }
+  if (session.previewOnly) {
+    reply.code(403).send({ error: "Preview token cannot be used here" });
     return null;
   }
   if (session.role !== "superadmin") {

@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   FileText,
+  Folder,
   Globe,
   Image as ImageIcon,
   Languages,
@@ -9,6 +10,9 @@ import {
   LayoutDashboard,
   LogOut,
   Newspaper,
+  Search,
+  UploadCloud,
+  X,
   AlignCenter,
   AlignLeft,
   AlignRight,
@@ -46,7 +50,11 @@ const SESSION_KEY = "usim_cms_session";
 
 function loadSession(): Session | null {
   const raw = localStorage.getItem(SESSION_KEY);
-  return raw ? (JSON.parse(raw) as Session) : null;
+  if (!raw) return null;
+  const session = JSON.parse(raw) as Session;
+  // Sessions cached before tenantHosts existed won't have it — log back in
+  // to get a fresh one, but don't crash on the stale cached shape meanwhile.
+  return { ...session, tenantHosts: session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []) };
 }
 
 // ---------- i18n ----------
@@ -360,11 +368,26 @@ function BlockBuilder({
 }
 
 // ---------- Pages ----------
+// Derives a URL-safe slug from a title (lowercase, non-alphanumerics -> "-",
+// no leading/trailing "-"). Used to auto-fill the slug field as the admin
+// types a title — the field stays a normal input, so it can still be edited
+// by hand afterwards.
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [slug, setSlug] = useState("");
+  // Once the admin edits the slug field directly, stop overwriting it from
+  // the title so a deliberate edit never gets clobbered by later typing.
+  const [slugTouched, setSlugTouched] = useState(false);
   const [title, setTitle] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -401,6 +424,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
     try {
       await api.createPage(tenantHost, token, { slug, title, ...(bannerImageUrl ? { bannerImageUrl } : {}) });
       setSlug("");
+      setSlugTouched(false);
       setTitle("");
       setBannerImageUrl("");
       await refresh();
@@ -409,11 +433,46 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
     }
   }
 
-  async function publish(id: string) {
+  // Draft/published visibility toggle (RLS-enforced, see
+  // migrations/0007_pages_status.sql) — distinct from share(), which copies
+  // the page into the cross-department portal pool.
+  async function setStatus(p: Record<string, unknown>, status: "draft" | "published") {
     try {
-      await api.publishPage(tenantHost, token, id);
-      alert(t("pages-published"));
+      await api.updatePage(tenantHost, token, p.id as string, {
+        status,
+        publishedAt: status === "published" ? new Date().toISOString() : null,
+      });
+      await refresh();
     } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function share(id: string) {
+    try {
+      await api.sharePage(tenantHost, token, id);
+      alert(t("pages-shared"));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // Published pages are already publicly visible, no token needed. A draft
+  // only opens for the admin because a short-lived, read-only preview token
+  // is minted just for this click — never the admin's own session bearer,
+  // which never expires (see apps/api's auth.ts).
+  async function preview(p: Record<string, unknown>) {
+    // Open the tab synchronously, in direct response to the click, then
+    // navigate it once the token resolves — opening it only after the
+    // `await` below would get silently blocked as a non-gesture popup by
+    // some browsers.
+    const win = window.open("", "_blank", "noreferrer");
+    try {
+      const previewToken =
+        p.status === "published" ? undefined : await api.getPagePreviewToken(tenantHost, token, p.id as string);
+      if (win) win.location.href = api.previewUrl(tenantHost, p.slug as string, previewToken);
+    } catch (err) {
+      win?.close();
       setError((err as Error).message);
     }
   }
@@ -428,6 +487,22 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
     }
   }
 
+  // "home" is the frontend's reserved slug for a tenant's root page (see
+  // apps/frontend's [...slug].astro) — only one page may hold it at a time,
+  // so making a new page home demotes whichever page currently has it.
+  async function setHome(id: string) {
+    try {
+      const prevHome = pages.find((x) => x.slug === "home" && x.id !== id);
+      if (prevHome) {
+        await api.updatePage(tenantHost, token, prevHome.id as string, { slug: `home-${(prevHome.id as string).slice(0, 8)}` });
+      }
+      await api.updatePage(tenantHost, token, id, { slug: "home" });
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   return (
     <section className="space-y-4">
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
@@ -436,8 +511,26 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
       {error && <p className="text-xs text-red-600">{error}</p>}
       <form onSubmit={create} className={`${card} space-y-3 p-4`}>
         <div className="flex gap-2">
-          <input className={inputCls} placeholder={t("pages-slug")} value={slug} onChange={(e) => setSlug(e.target.value)} required />
-          <input className={inputCls} placeholder={t("pages-name")} value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <input
+            className={inputCls}
+            placeholder={t("pages-slug")}
+            value={slug}
+            onChange={(e) => {
+              setSlug(e.target.value);
+              setSlugTouched(true);
+            }}
+            required
+          />
+          <input
+            className={inputCls}
+            placeholder={t("pages-name")}
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              if (!slugTouched) setSlug(slugify(e.target.value));
+            }}
+            required
+          />
         </div>
         <label className="block text-xs font-medium text-body">
           {t("pages-banner")}
@@ -450,31 +543,54 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         </button>
       </form>
       <ul className={`${card} divide-y divide-line/20`}>
-        {pages.map((p) => (
+        {pages.map((p) => {
+          const published = p.status === "published";
+          return (
           <li key={p.id as string} className="px-4 py-3 text-xs">
             <div className="flex items-center justify-between">
-              <span>
-                <span className="font-semibold text-ink">{p.title as string}</span>{" "}
+              <span className="flex items-center gap-2">
+                <span className="font-semibold text-ink">{p.title as string}</span>
                 <span className="font-mono text-sub">/{p.slug as string}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    published ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+                  }`}
+                >
+                  {published ? t("pages-published") : t("pages-draft")}
+                </span>
+                {p.slug === "home" && (
+                  <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">{t("pages-is-home")}</span>
+                )}
               </span>
               <span className="flex items-center gap-3">
-                <a
-                  href={api.previewUrl(tenantHost, p.slug as string)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  onClick={() => preview(p)}
                   className="flex items-center gap-1 font-semibold text-body hover:underline"
                 >
                   <ExternalLink className="h-3.5 w-3.5" /> {t("pages-view")}
-                </a>
+                </button>
+                {p.slug !== "home" && (
+                  <button onClick={() => setHome(p.id as string)} className="font-semibold text-body hover:underline">
+                    {t("pages-set-home")}
+                  </button>
+                )}
                 <button
                   onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
                   className="font-semibold text-accent hover:underline"
                 >
                   {editingId === p.id ? t("pages-close") : t("pages-edit")}
                 </button>
-                <button onClick={() => publish(p.id as string)} className="font-semibold text-body hover:underline">
-                  {t("pages-publish")}
+                <button
+                  onClick={() => setStatus(p, published ? "draft" : "published")}
+                  className="font-semibold text-body hover:underline"
+                >
+                  {published ? t("pages-unpublish") : t("pages-publish")}
                 </button>
+                {published && (
+                  <button onClick={() => share(p.id as string)} className="font-semibold text-body hover:underline">
+                    {t("pages-share")}
+                  </button>
+                )}
                 <button
                   onClick={() => remove(p.id as string)}
                   className="rounded p-1 text-red-500 hover:bg-red-50"
@@ -499,7 +615,8 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
               </div>
             )}
           </li>
-        ))}
+          );
+        })}
         {pages.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("pages-empty")}</li>}
       </ul>
     </section>
@@ -806,14 +923,22 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
 // ---------- Media library ----------
 function MediaManager({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [folders, setFolders] = useState<Array<Record<string, unknown>>>([]);
-  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = all files
+  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = root (all folders + unfiled)
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ originalName: "", altText: "", description: "", folderId: "" });
   const [error, setError] = useState<string | null>(null);
+  const [addingFolder, setAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState("");
 
   async function refreshFolders() {
     try {
@@ -825,7 +950,9 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
 
   async function refreshItems() {
     try {
-      setItems(await api.listMedia(tenantHost, token, activeFolder));
+      // Fetch the whole library once — folder counts and the root/folder
+      // views below are all derived client-side from this one list.
+      setItems(await api.listMedia(tenantHost, token));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -834,25 +961,53 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
 
   useEffect(() => {
     void refreshFolders();
+    void refreshItems();
   }, [tenantHost]);
 
-  useEffect(() => {
-    void refreshItems();
-  }, [tenantHost, activeFolder]);
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of items) {
+      const fid = m.folderId as string | null;
+      if (fid) counts.set(fid, (counts.get(fid) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
 
-  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const visibleItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    // A query searches the whole library, not just the open folder — a
+    // folder-scoped filter would hide matches that live elsewhere and look
+    // like search is broken.
+    return items
+      .filter((m) => q || ((m.folderId as string | null) ?? null) === activeFolder)
+      .filter((m) => !q || (m.originalName as string).toLowerCase().includes(q));
+  }, [items, activeFolder, search]);
+
+  async function uploadFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
     setUploading(true);
     try {
-      await api.uploadMedia(tenantHost, token, file, activeFolder);
+      for (const file of list) {
+        await api.uploadMedia(tenantHost, token, file, activeFolder);
+      }
       await refreshItems();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setUploading(false);
-      e.target.value = "";
     }
+  }
+
+  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) await uploadFiles(e.target.files);
+    e.target.value = "";
+  }
+
+  async function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    await uploadFiles(e.dataTransfer.files);
   }
 
   async function copyUrl(m: Record<string, unknown>) {
@@ -861,10 +1016,41 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
     setTimeout(() => setCopiedId(null), 1500);
   }
 
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) =>
+      prev.size === visibleItems.length ? new Set() : new Set(visibleItems.map((m) => m.id as string)),
+    );
+  }
+
   async function remove(id: string) {
     if (!confirm(t("media-delete-confirm"))) return;
     try {
       await api.deleteMedia(tenantHost, token, id);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      await refreshItems();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function bulkDelete() {
+    if (!confirm(t("media-bulk-delete-confirm"))) return;
+    try {
+      for (const id of selected) await api.deleteMedia(tenantHost, token, id);
+      setSelected(new Set());
       await refreshItems();
     } catch (err) {
       setError((err as Error).message);
@@ -872,10 +1058,22 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   async function addFolder() {
-    const name = prompt(t("media-new-folder-prompt"));
-    if (!name?.trim()) return;
+    if (!newFolderName.trim()) return;
     try {
-      await api.createMediaFolder(tenantHost, token, name.trim());
+      await api.createMediaFolder(tenantHost, token, newFolderName.trim());
+      setNewFolderName("");
+      setAddingFolder(false);
+      await refreshFolders();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function renameFolder(f: Record<string, unknown>) {
+    if (!editingFolderName.trim()) return;
+    try {
+      await api.renameMediaFolder(tenantHost, token, f.id as string, editingFolderName.trim());
+      setEditingFolderId(null);
       await refreshFolders();
     } catch (err) {
       setError((err as Error).message);
@@ -919,111 +1117,264 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
     }
   }
 
+  const activeFolderName = activeFolder ? (folders.find((f) => f.id === activeFolder)?.name as string | undefined) : null;
+
   return (
     <section className="space-y-4">
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <ImageIcon className="h-4 w-4 text-accent" /> {t("media-title")}
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          onClick={() => setActiveFolder(null)}
-          className={`rounded-full px-3 py-1 text-[11px] font-medium ${activeFolder === null ? "bg-accent text-white" : "bg-canvas text-sub"}`}
-        >
-          {t("media-all-files")}
-        </button>
-        {folders.map((f) => (
-          <span
-            key={f.id as string}
-            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium ${activeFolder === f.id ? "bg-accent text-white" : "bg-canvas text-sub"}`}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1 text-xs">
+          <button
+            onClick={() => setActiveFolder(null)}
+            className={activeFolder === null ? "font-semibold text-ink" : "text-sub hover:text-ink"}
           >
-            <button onClick={() => setActiveFolder(f.id as string)}>{f.name as string}</button>
-            <button onClick={() => removeFolder(f.id as string)} className="opacity-60 hover:opacity-100">
-              &times;
+            {t("media-all-files")}
+          </button>
+          {activeFolderName && (
+            <>
+              <ChevronRight className="h-3 w-3 text-sub" />
+              <span className="font-semibold text-ink">{activeFolderName}</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sub" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("media-search-placeholder")}
+              className={`${inputCls} py-1.5 pl-8`}
+            />
+          </div>
+          {addingFolder ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                className="rounded border border-line/30 px-1.5 py-1 text-xs outline-none"
+                placeholder={t("media-new-folder-prompt")}
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addFolder();
+                  if (e.key === "Escape") setAddingFolder(false);
+                }}
+                autoFocus
+              />
+              <button onClick={addFolder} className="text-xs font-semibold text-accent hover:underline">
+                {t("media-save")}
+              </button>
+              <button onClick={() => setAddingFolder(false)} className="text-xs text-sub hover:underline">
+                {t("media-cancel")}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setAddingFolder(true)} className={btnGhost}>
+              + {t("media-new-folder")}
             </button>
-          </span>
-        ))}
-        <button onClick={addFolder} className="rounded-full px-3 py-1 text-[11px] font-medium text-accent hover:underline">
-          {t("media-new-folder")}
-        </button>
+          )}
+        </div>
       </div>
-      <label className={`${btnGhost} inline-block cursor-pointer`}>
-        {uploading ? t("uploading") : t("media-upload")}
-        <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={onFileChosen} />
-      </label>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {items.map((m) => (
-          <div key={m.id as string} className={`${card} overflow-hidden`}>
-            <img src={api.API_URL + (m.url as string)} alt={(m.altText as string) || (m.originalName as string)} className="h-24 w-full object-cover" />
-            {editingId === m.id ? (
-              <div className="space-y-1.5 p-2">
-                <input
-                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
-                  placeholder={t("media-name-label")}
-                  value={editForm.originalName}
-                  onChange={(e) => setEditForm({ ...editForm, originalName: e.target.value })}
-                />
-                <input
-                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
-                  placeholder={t("media-alt-label")}
-                  value={editForm.altText}
-                  onChange={(e) => setEditForm({ ...editForm, altText: e.target.value })}
-                />
-                <textarea
-                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
-                  placeholder={t("media-description-label")}
-                  value={editForm.description}
-                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                />
-                <select
-                  className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
-                  value={editForm.folderId}
-                  onChange={(e) => setEditForm({ ...editForm, folderId: e.target.value })}
-                >
-                  <option value="">{t("media-all-files")}</option>
-                  {folders.map((f) => (
-                    <option key={f.id as string} value={f.id as string}>
-                      {f.name as string}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => setEditingId(null)} className="text-[10px] text-sub hover:underline">
-                    {t("media-cancel")}
-                  </button>
-                  <button onClick={() => saveEdit(m.id as string)} className="text-[10px] font-semibold text-accent hover:underline">
-                    {t("media-save")}
-                  </button>
+
+      {activeFolder === null && !search.trim() && folders.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-sub">{t("media-folders-heading")}</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {folders.map((f) => (
+              <div
+                key={f.id as string}
+                onClick={() => setActiveFolder(f.id as string)}
+                className={`${card} group flex cursor-pointer flex-col gap-2 p-3 transition-colors hover:border-accent/50`}
+              >
+                <div className="flex items-start justify-between">
+                  <Folder className="h-7 w-7 text-accent/70" />
+                  {editingFolderId !== f.id && (
+                    <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          setEditingFolderId(f.id as string);
+                          setEditingFolderName(f.name as string);
+                        }}
+                        className="rounded p-1 text-sub hover:bg-canvas"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => removeFolder(f.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-1.5 p-2">
-                <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
-                  {m.originalName as string}
-                </p>
-                <p className="text-[10px] text-sub">
-                  {Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB ·{" "}
-                  {new Date(m.createdAt as string).toLocaleDateString()}
-                </p>
-                <div className="flex items-center justify-between">
-                  <button onClick={() => copyUrl(m)} className="text-[10px] font-semibold text-accent hover:underline">
-                    {copiedId === m.id ? t("media-copied") : t("media-copy")}
-                  </button>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => startEdit(m)} className="rounded p-1 text-sub hover:bg-canvas">
-                      <Pencil className="h-3.5 w-3.5" />
+                {editingFolderId === f.id ? (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      className="w-full rounded border border-line/30 px-1.5 py-0.5 text-xs outline-none"
+                      value={editingFolderName}
+                      onChange={(e) => setEditingFolderName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void renameFolder(f);
+                        if (e.key === "Escape") setEditingFolderId(null);
+                      }}
+                      autoFocus
+                    />
+                    <button onClick={() => renameFolder(f)} className="text-[10px] font-semibold text-accent hover:underline">
+                      {t("media-save")}
                     </button>
-                    <button onClick={() => remove(m.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
-                      <Trash2 className="h-3.5 w-3.5" />
+                    <button onClick={() => setEditingFolderId(null)} className="text-[10px] text-sub hover:underline">
+                      {t("media-cancel")}
                     </button>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <p className="truncate text-xs font-semibold text-ink">{f.name as string}</p>
+                    <p className="text-[10px] text-sub">
+                      {folderCounts.get(f.id as string) ?? 0} {t("media-items-suffix")}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-sub">{t("media-assets-heading")}</p>
+
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
+            dragOver ? "border-accent bg-accent/5" : "border-line/50 hover:border-accent/50"
+          }`}
+        >
+          <UploadCloud className="h-6 w-6 text-accent" />
+          <p className="text-xs font-medium text-ink">{uploading ? t("uploading") : t("media-dropzone-title")}</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            className="hidden"
+            onChange={onFileChosen}
+          />
+        </div>
+
+        {visibleItems.length > 0 && (
+          <div className="flex items-center justify-between text-xs">
+            <label className="flex items-center gap-1.5 text-sub">
+              <input
+                type="checkbox"
+                checked={selected.size > 0 && selected.size === visibleItems.length}
+                onChange={toggleSelectAll}
+              />
+              {selected.size > 0 ? `${selected.size} ${t("media-selected-suffix")}` : t("media-select-all")}
+            </label>
+            {selected.size > 0 && (
+              <div className="flex items-center gap-3">
+                <button onClick={() => setSelected(new Set())} className="flex items-center gap-1 text-sub hover:text-ink">
+                  <X className="h-3 w-3" /> {t("media-clear-selection")}
+                </button>
+                <button onClick={bulkDelete} className="font-semibold text-red-600 hover:underline">
+                  {t("media-bulk-delete")}
+                </button>
               </div>
             )}
           </div>
-        ))}
+        )}
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {visibleItems.map((m) => (
+            <div key={m.id as string} className={`${card} group relative overflow-hidden`}>
+              <input
+                type="checkbox"
+                checked={selected.has(m.id as string)}
+                onChange={() => toggleSelect(m.id as string)}
+                className="absolute left-1.5 top-1.5 z-10 h-3.5 w-3.5"
+              />
+              <img
+                src={api.API_URL + (m.url as string)}
+                alt={(m.altText as string) || (m.originalName as string)}
+                className="h-24 w-full object-cover"
+              />
+              {editingId === m.id ? (
+                <div className="space-y-1.5 p-2">
+                  <input
+                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    placeholder={t("media-name-label")}
+                    value={editForm.originalName}
+                    onChange={(e) => setEditForm({ ...editForm, originalName: e.target.value })}
+                  />
+                  <input
+                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    placeholder={t("media-alt-label")}
+                    value={editForm.altText}
+                    onChange={(e) => setEditForm({ ...editForm, altText: e.target.value })}
+                  />
+                  <textarea
+                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    placeholder={t("media-description-label")}
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  />
+                  <select
+                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    value={editForm.folderId}
+                    onChange={(e) => setEditForm({ ...editForm, folderId: e.target.value })}
+                  >
+                    <option value="">{t("media-all-files")}</option>
+                    {folders.map((f) => (
+                      <option key={f.id as string} value={f.id as string}>
+                        {f.name as string}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setEditingId(null)} className="text-[10px] text-sub hover:underline">
+                      {t("media-cancel")}
+                    </button>
+                    <button onClick={() => saveEdit(m.id as string)} className="text-[10px] font-semibold text-accent hover:underline">
+                      {t("media-save")}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5 p-2">
+                  <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
+                    {m.originalName as string}
+                  </p>
+                  <p className="text-[10px] text-sub">
+                    {Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB ·{" "}
+                    {new Date(m.createdAt as string).toLocaleDateString()}
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <button onClick={() => copyUrl(m)} className="text-[10px] font-semibold text-accent hover:underline">
+                      {copiedId === m.id ? t("media-copied") : t("media-copy")}
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => startEdit(m)} className="rounded p-1 text-sub hover:bg-canvas">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => remove(m.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {visibleItems.length === 0 && <p className="text-xs text-sub">{t("media-empty")}</p>}
       </div>
-      {items.length === 0 && <p className="text-xs text-sub">{t("media-empty")}</p>}
     </section>
   );
 }
@@ -1133,6 +1484,7 @@ function TenantsPanel({ token }: { token: string }) {
   const [host, setHost] = useState("");
   const [departmentName, setDepartmentName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [manageHost, setManageHost] = useState<string | null>(null);
 
   async function refresh() {
     setTenants(await api.listPortalTenants(token));
@@ -1151,6 +1503,39 @@ function TenantsPanel({ token }: { token: string }) {
     } catch (err) {
       setError((err as Error).message);
     }
+  }
+
+  const managed = tenants.find((tn) => tn.host === manageHost);
+  if (managed) {
+    return (
+      <section className="space-y-4">
+        <button onClick={() => setManageHost(null)} className="flex items-center gap-1 text-xs font-semibold text-sub hover:text-ink">
+          <ChevronRight className="h-3.5 w-3.5 rotate-180" /> {t("tenants-back")}
+        </button>
+        <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+          <Globe className="h-4 w-4 text-accent" /> {t("tenants-manage-title")}: {managed.departmentName as string}
+        </h2>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        <div className={`${card} space-y-2 p-5`}>
+          <p className="font-mono text-xs text-sub">{managed.host as string}</p>
+          <p className="text-xs text-sub">
+            {managed.active ? (
+              <span className="text-ok">Aktif</span>
+            ) : (
+              <span className="text-sub">{t("tenants-suspended")}</span>
+            )}
+          </p>
+          <a
+            href={api.previewUrl(managed.host as string, "home")}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${btnGhost} inline-flex items-center gap-1.5`}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
+          </a>
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -1189,6 +1574,22 @@ function TenantsPanel({ token }: { token: string }) {
             </div>
             <h3 className="text-sm font-semibold leading-snug text-ink">{tn.departmentName as string}</h3>
             <p className="mt-1 truncate font-mono text-xs text-sub">{tn.host as string}</p>
+            <div className="mt-4 flex items-center gap-2">
+              <a
+                href={api.previewUrl(tn.host as string, "home")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${btnGhost} flex-1 justify-center inline-flex items-center gap-1.5 py-1.5`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
+              </a>
+              <button
+                onClick={() => setManageHost(tn.host as string)}
+                className={`${btnPrimary} flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-1.5`}
+              >
+                <SettingsIcon className="h-3.5 w-3.5" /> {t("tenants-manage")}
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -1208,6 +1609,7 @@ const PERMISSIONS = [
   "media.delete",
   "theme.write",
   "users.manage",
+  "sites.multi",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -1220,18 +1622,28 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "media.delete": "perm-media-delete",
   "theme.write": "perm-theme-write",
   "users.manage": "perm-users-manage",
+  "sites.multi": "perm-sites-multi",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
   const { t } = useT();
   const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
   const [roles, setRoles] = useState<Array<Record<string, unknown>>>([]);
+  const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"webmaster" | "superadmin">("webmaster");
-  const [tenantHost, setTenantHost] = useState("");
+  const [tenantHosts, setTenantHosts] = useState<string[]>([]);
   const [roleId, setRoleId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingPerms, setEditingPerms] = useState<string[]>([]);
+
+  const selectedRole = roles.find((r) => r.id === roleId);
+  const canMultiSite = ((selectedRole?.permissions as string[] | undefined) ?? []).includes("sites.multi");
+  useEffect(() => {
+    if (!canMultiSite && tenantHosts.length > 1) setTenantHosts((prev) => prev.slice(0, 1));
+  }, [canMultiSite, tenantHosts.length]);
 
   async function impersonate(u: Record<string, unknown>) {
     try {
@@ -1244,6 +1656,7 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
   async function refresh() {
     setUsers(await api.listPortalUsers(token));
     setRoles(await api.listPortalRoles(token));
+    setTenants(await api.listPortalTenants(token));
   }
   useEffect(() => {
     void refresh();
@@ -1256,12 +1669,12 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
         email,
         password,
         role,
-        tenantHost: tenantHost || undefined,
+        tenantHosts: tenantHosts.length ? tenantHosts : undefined,
         roleId: roleId || null,
       });
       setEmail("");
       setPassword("");
-      setTenantHost("");
+      setTenantHosts([]);
       setRoleId("");
       await refresh();
     } catch (err) {
@@ -1272,6 +1685,15 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
   async function assignRole(u: Record<string, unknown>, newRoleId: string) {
     try {
       await api.updatePortalUserRole(token, u.id as string, newRoleId || null);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function setUserExtraPermissions(u: Record<string, unknown>, perms: string[]) {
+    try {
+      await api.updatePortalUserRole(token, u.id as string, (u.roleId as string | null) ?? null, perms);
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -1301,33 +1723,65 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        <select
-          className="rounded-lg border border-line/30 bg-white px-2 py-2 text-xs outline-none"
-          value={role}
-          onChange={(e) => setRole(e.target.value as "webmaster" | "superadmin")}
-        >
-          <option value="webmaster">webmaster</option>
-          <option value="superadmin">superadmin</option>
-        </select>
-        {role === "webmaster" && (
-          <input
-            className={`${inputCls} w-auto`}
-            placeholder={t("users-tenant")}
-            value={tenantHost}
-            onChange={(e) => setTenantHost(e.target.value)}
-            required
-          />
-        )}
-        {role === "webmaster" && (
+        <div className="flex flex-col gap-0.5">
+          <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-account-type")}</label>
           <select
             className="rounded-lg border border-line/30 bg-white px-2 py-2 text-xs outline-none"
-            value={roleId}
-            onChange={(e) => setRoleId(e.target.value)}
+            value={role}
+            onChange={(e) => setRole(e.target.value as "webmaster" | "superadmin")}
           >
-            <option value="">{t("users-role-none")}</option>
-            {roles.map((r) => (
-              <option key={r.id as string} value={r.id as string}>
-                {r.name as string}
+            <option value="webmaster">{t("role-webmaster-label")}</option>
+            <option value="superadmin">{t("role-superadmin-label")}</option>
+          </select>
+        </div>
+        {role === "webmaster" && (
+          <div className="flex flex-col gap-0.5">
+            <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-role")}</label>
+            <select
+              className="rounded-lg border border-line/30 bg-white px-2 py-2 text-xs outline-none"
+              value={roleId}
+              onChange={(e) => setRoleId(e.target.value)}
+            >
+              <option value="">{t("users-role-none")}</option>
+              {roles.map((r) => (
+                <option key={r.id as string} value={r.id as string}>
+                  {r.name as string}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {role === "webmaster" && canMultiSite && (
+          <div className="flex max-w-xs flex-wrap gap-x-3 gap-y-1 rounded-lg border border-line/30 bg-white px-3 py-2 text-[11px] text-body">
+            {tenants.map((tn) => (
+              <label key={tn.id as string} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={tenantHosts.includes(tn.host as string)}
+                  onChange={(e) =>
+                    setTenantHosts((prev) =>
+                      e.target.checked
+                        ? [...prev, tn.host as string]
+                        : prev.filter((h) => h !== (tn.host as string)),
+                    )
+                  }
+                />
+                {tn.departmentName as string} — {tn.host as string}
+              </label>
+            ))}
+          </div>
+        )}
+        {role === "webmaster" && !canMultiSite && (
+          <select
+            className={`${inputCls} w-auto`}
+            value={tenantHosts[0] ?? ""}
+            onChange={(e) => setTenantHosts(e.target.value ? [e.target.value] : [])}
+            required
+          >
+            <option value="">{t("content-pick")}</option>
+            {tenants.map((tn) => (
+              <option key={tn.id as string} value={tn.host as string}>
+                {tn.departmentName as string} — {tn.host as string}
               </option>
             ))}
           </select>
@@ -1341,9 +1795,10 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
           <thead>
             <tr className="border-b border-line/30 bg-canvas text-[10px] font-bold uppercase tracking-wider text-sub">
               <th className="px-4 py-3">{t("users-email")}</th>
-              <th className="px-4 py-3">Role</th>
-              <th className="px-4 py-3">Tenant</th>
+              <th className="px-4 py-3">{t("users-account-type")}</th>
+              <th className="px-4 py-3">{t("users-tenant")}</th>
               <th className="px-4 py-3">{t("users-role")}</th>
+              <th className="px-4 py-3">{t("users-extra-perms")}</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -1363,7 +1818,9 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                     {u.role as string}
                   </span>
                 </td>
-                <td className="px-4 py-3 font-mono text-[11px] text-sub">{(u.tenantHost as string) ?? "—"}</td>
+                <td className="px-4 py-3 font-mono text-[11px] text-sub">
+                  {((u.tenantHosts as string[] | null) ?? []).join(", ") || (u.tenantHost as string) || "—"}
+                </td>
                 <td className="px-4 py-3">
                   {u.role === "superadmin" ? (
                     <span className="text-[10px] text-sub">{t("cap-all")}</span>
@@ -1381,6 +1838,64 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                       ))}
                     </select>
                   )}
+                </td>
+                <td className="px-4 py-3">
+                  {u.role === "webmaster" &&
+                    (editingId === (u.id as string) ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex flex-wrap gap-x-2 gap-y-1">
+                          {PERMISSIONS.map((perm) => (
+                            <label key={perm} className="flex items-center gap-1 text-[10px]">
+                              <input
+                                type="checkbox"
+                                checked={editingPerms.includes(perm)}
+                                onChange={(e) =>
+                                  setEditingPerms((prev) =>
+                                    e.target.checked ? [...prev, perm] : prev.filter((p) => p !== perm),
+                                  )
+                                }
+                              />
+                              {t(PERMISSION_LABEL_KEY[perm])}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              await setUserExtraPermissions(u, editingPerms);
+                              setEditingId(null);
+                            }}
+                            className="text-[10px] font-semibold text-accent hover:underline"
+                          >
+                            {t("media-save")}
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="text-[10px] font-semibold text-sub hover:underline"
+                          >
+                            {t("media-cancel")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-sub">
+                          {((u.extraPermissions as string[] | null) ?? []).length
+                            ? ((u.extraPermissions as string[]).map((p) => t(PERMISSION_LABEL_KEY[p as (typeof PERMISSIONS)[number]])).join(", "))
+                            : "—"}
+                        </span>
+                        <button
+                          onClick={() => {
+                            setEditingId(u.id as string);
+                            setEditingPerms((u.extraPermissions as string[] | null) ?? []);
+                          }}
+                          className="text-sub hover:text-ink"
+                          title={t("media-edit")}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {u.role === "webmaster" && (
@@ -1405,9 +1920,22 @@ function RolesPanel({ token }: { token: string }) {
   const [name, setName] = useState("");
   const [permissions, setPermissions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editingRoleName, setEditingRoleName] = useState("");
 
   async function refresh() {
     setRoles(await api.listPortalRoles(token));
+  }
+
+  async function renameRole(r: Record<string, unknown>) {
+    if (!editingRoleName.trim()) return;
+    try {
+      await api.updatePortalRole(token, r.id as string, (r.permissions as string[] | null) ?? [], editingRoleName.trim());
+      setEditingRoleId(null);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
   useEffect(() => {
     void refresh();
@@ -1483,7 +2011,40 @@ function RolesPanel({ token }: { token: string }) {
         {roles.map((r) => (
           <div key={r.id as string} className={`${card} space-y-2 p-4`}>
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-ink">{r.name as string}</h3>
+              {editingRoleId === (r.id as string) ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    className="rounded border border-line/30 px-1.5 py-0.5 text-xs outline-none"
+                    value={editingRoleName}
+                    onChange={(e) => setEditingRoleName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void renameRole(r);
+                      if (e.key === "Escape") setEditingRoleId(null);
+                    }}
+                    autoFocus
+                  />
+                  <button onClick={() => renameRole(r)} className="text-[10px] font-semibold text-accent hover:underline">
+                    {t("media-save")}
+                  </button>
+                  <button onClick={() => setEditingRoleId(null)} className="text-[10px] font-semibold text-sub hover:underline">
+                    {t("media-cancel")}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-xs font-semibold text-ink">{r.name as string}</h3>
+                  <button
+                    onClick={() => {
+                      setEditingRoleId(r.id as string);
+                      setEditingRoleName(r.name as string);
+                    }}
+                    className="text-sub hover:text-ink"
+                    title={t("media-edit")}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
               <button
                 onClick={() => remove(r.id as string)}
                 className="rounded p-1 text-red-500 hover:bg-red-50"
@@ -1606,12 +2167,14 @@ type ContentSubTab = "pages" | "posts" | "media" | "theme";
 
 function ContentManager({
   isSuper,
+  showSitePicker,
   siteHost,
   setSiteHost,
   tenants,
   token,
 }: {
   isSuper: boolean;
+  showSitePicker: boolean;
   siteHost: string;
   setSiteHost: (host: string) => void;
   tenants: Array<Record<string, unknown>>;
@@ -1628,7 +2191,7 @@ function ContentManager({
 
   return (
     <div className="space-y-6">
-      {isSuper && (
+      {showSitePicker && (
         <div className="max-w-sm space-y-1">
           <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("content-site")}</label>
           <select
@@ -1820,6 +2383,14 @@ function Shell({
     if (isSuper) void api.listPortalTenants(session.token).then(setTenants);
   }, [isSuper, session.token]);
 
+  // Webmaster with more than one assigned site gets the same site picker a
+  // superadmin sees, restricted to just their own sites (no departmentName
+  // available for these, host doubles as the label).
+  const siteOptions = isSuper
+    ? tenants
+    : session.tenantHosts.map((h) => ({ id: h, host: h, departmentName: h }));
+  const showSitePicker = isSuper || session.tenantHosts.length > 1;
+
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings"] : ["dashboard"];
   const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme"];
 
@@ -1914,9 +2485,10 @@ function Shell({
               {tab === "content" && (
                 <ContentManager
                   isSuper={isSuper}
+                  showSitePicker={showSitePicker}
                   siteHost={siteHost}
                   setSiteHost={setSiteHost}
-                  tenants={tenants}
+                  tenants={siteOptions}
                   token={session.token}
                 />
               )}

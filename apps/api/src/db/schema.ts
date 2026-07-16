@@ -7,6 +7,8 @@ export const pages = pgTable("pages", {
   // Dynamic block layout for the page, e.g. [{ type: "hero", props: {...} }, ...]
   layout: jsonb("layout").notNull().default([]),
   bannerImageUrl: text("banner_image_url"),
+  status: text("status").notNull().default("draft"), // "draft" | "published"
+  publishedAt: timestamp("published_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -131,9 +133,16 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull(), // "superadmin" | "webmaster"
   tenantHost: text("tenant_host"),
+  // Full list of tenants this webmaster can switch into — always includes
+  // tenantHost (kept as the default/first pick). Superadmin ignores this
+  // (already unrestricted).
+  tenantHosts: text("tenant_hosts").array().notNull().default([]),
   // Null = no permissions yet (webmaster) / irrelevant (superadmin, which
   // always bypasses role checks). Set null on delete: losing a role means
   // losing its permissions, not losing the account.
   roleId: uuid("role_id").references(() => roles.id, { onDelete: "set null" }),
+  // Per-user permissions on top of the role's — for one-off grants that
+  // don't warrant a whole new named role.
+  extraPermissions: text("extra_permissions").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

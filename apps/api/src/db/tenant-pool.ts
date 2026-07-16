@@ -228,7 +228,9 @@ export async function listUsers() {
         email: schema.users.email,
         role: schema.users.role,
         tenantHost: schema.users.tenantHost,
+        tenantHosts: schema.users.tenantHosts,
         roleId: schema.users.roleId,
+        extraPermissions: schema.users.extraPermissions,
         createdAt: schema.users.createdAt,
       })
       .from(schema.users);
@@ -243,6 +245,8 @@ export async function createUser(
   role: string,
   tenantHost: string | null,
   roleId: string | null = null,
+  tenantHosts: string[] = tenantHost ? [tenantHost] : [],
+  extraPermissions: string[] = [],
 ) {
   const client = await pool.connect();
   try {
@@ -250,19 +254,25 @@ export async function createUser(
     const db = drizzle(client, { schema });
     await db
       .insert(schema.users)
-      .values({ email, passwordHash, role, tenantHost, roleId })
-      .onConflictDoUpdate({ target: schema.users.email, set: { passwordHash, role, tenantHost, roleId } });
+      .values({ email, passwordHash, role, tenantHost, tenantHosts, roleId, extraPermissions })
+      .onConflictDoUpdate({
+        target: schema.users.email,
+        set: { passwordHash, role, tenantHost, tenantHosts, roleId, extraPermissions },
+      });
   } finally {
     client.release();
   }
 }
 
-export async function updateUserRole(id: string, roleId: string | null) {
+export async function updateUserRole(id: string, roleId: string | null, extraPermissions?: string[]) {
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    await db.update(schema.users).set({ roleId }).where(eq(schema.users.id, id));
+    await db
+      .update(schema.users)
+      .set(extraPermissions === undefined ? { roleId } : { roleId, extraPermissions })
+      .where(eq(schema.users.id, id));
   } finally {
     client.release();
   }
@@ -290,12 +300,15 @@ export async function createRole(name: string, permissions: string[]) {
   }
 }
 
-export async function updateRole(id: string, permissions: string[]) {
+export async function updateRole(id: string, permissions: string[], name?: string) {
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    await db.update(schema.roles).set({ permissions }).where(eq(schema.roles.id, id));
+    await db
+      .update(schema.roles)
+      .set(name === undefined ? { permissions } : { permissions, name })
+      .where(eq(schema.roles.id, id));
   } finally {
     client.release();
   }

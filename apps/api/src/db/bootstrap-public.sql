@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS "public"."users" (
 	"password_hash" text NOT NULL,
 	"role" text NOT NULL,
 	"tenant_host" text,
+	"tenant_hosts" text[] DEFAULT '{}' NOT NULL,
+	"extra_permissions" text[] DEFAULT '{}' NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 
@@ -50,3 +52,9 @@ CREATE TABLE IF NOT EXISTS "public"."roles" (
 -- (users/roles moved here from migrations/0005+0006, which now only ever
 -- replay into tenant databases where these tables don't belong).
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "role_id" uuid REFERENCES "public"."roles"("id") ON DELETE SET NULL;
+
+-- Upgrade path for control-plane DBs bootstrapped before tenant_hosts/
+-- extra_permissions existed (multi-site users + per-user extra grants).
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "tenant_hosts" text[] DEFAULT '{}' NOT NULL;
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "extra_permissions" text[] DEFAULT '{}' NOT NULL;
+UPDATE "public"."users" SET "tenant_hosts" = ARRAY["tenant_host"] WHERE "tenant_host" IS NOT NULL AND cardinality("tenant_hosts") = 0;

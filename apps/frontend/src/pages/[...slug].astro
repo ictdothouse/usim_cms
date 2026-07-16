@@ -23,8 +23,12 @@ const tenantHost =
     ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
     : rawHost;
 const slug = Astro.params.slug || "home";
+// Set by the admin's page "View" link (see apps/admin's previewUrl) to
+// preview a draft page before it's published — forwarded as a Bearer token,
+// never persisted or logged past this request.
+const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 
-const page = await getPageBySlug(tenantHost, slug);
+const page = await getPageBySlug(tenantHost, slug, previewToken);
 if (!page) {
   return new Response("Not found", { status: 404 });
 }

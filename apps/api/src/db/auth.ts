@@ -23,11 +23,24 @@ export interface SessionPayload {
   email: string;
   role: "superadmin" | "webmaster";
   tenantHost: string | null;
+  // All sites this webmaster can switch into (superadmin ignores this,
+  // already unrestricted). Optional for backward compat with tokens signed
+  // before this field existed — callers must fall back to [tenantHost].
+  tenantHosts?: string[];
   permissions: string[];
   // Set only on a superadmin's "view as" token (see /api/portal/impersonate)
   // — the superadmin's own email, for audit trails on actions taken while
   // impersonating.
   impersonatedBy?: string;
+  // Set only on a page-preview token (see /api/pages/:id/preview-token) — a
+  // short-lived, read-only credential so a "preview this draft" link never
+  // carries the admin's real, non-expiring session bearer. requireTenantAuth
+  // (plugins/auth.ts) refuses this on every write/protected route; only the
+  // public scope's elevateIfAuthenticated (generic-crud.ts) accepts it.
+  previewOnly?: true;
+  // Unix ms expiry — optional because normal login sessions never expire
+  // today; only preview tokens set this.
+  exp?: number;
 }
 
 // Simple HMAC-signed session token — no JWT library needed for a same-app
@@ -47,7 +60,9 @@ export function verifySession(token: string): SessionPayload | null {
     return null;
   }
   try {
-    return JSON.parse(Buffer.from(body, "base64url").toString());
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionPayload;
+    if (payload.exp !== undefined && Date.now() > payload.exp) return null;
+    return payload;
   } catch {
     return null;
   }

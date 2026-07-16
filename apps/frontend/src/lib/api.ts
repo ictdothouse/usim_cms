@@ -19,11 +19,19 @@ export interface Page {
   bannerImageUrl: string | null;
 }
 
-async function apiGet<T>(path: string, tenantHost: string): Promise<T> {
-  const key = `${tenantHost}${path}`;
+// token, when present, is forwarded as a Bearer header so apps/api's
+// elevateIfAuthenticated (generic-crud.ts) includes draft rows for a valid
+// admin session — this is what lets the admin preview a page before
+// publishing it. The cache key gets a distinct suffix for token-bearing
+// requests so a draft-inclusive response never becomes the stale-fallback
+// served to an anonymous visitor if a later unauthenticated fetch fails.
+async function apiGet<T>(path: string, tenantHost: string, token?: string): Promise<T> {
+  const key = `${tenantHost}${path}${token ? ":preview" : ""}`;
   try {
+    const headers: Record<string, string> = { "x-tenant-host": tenantHost };
+    if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`${API_URL}${path}`, {
-      headers: { "x-tenant-host": tenantHost },
+      headers,
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`${path} -> ${res.status}`);
@@ -40,8 +48,8 @@ async function apiGet<T>(path: string, tenantHost: string): Promise<T> {
   }
 }
 
-export async function getPageBySlug(tenantHost: string, slug: string): Promise<Page | null> {
-  const { items } = await apiGet<{ items: Page[] }>("/api/pages", tenantHost);
+export async function getPageBySlug(tenantHost: string, slug: string, token?: string): Promise<Page | null> {
+  const { items } = await apiGet<{ items: Page[] }>("/api/pages", tenantHost, token);
   return items.find((p) => p.slug === slug) ?? null;
 }
 
