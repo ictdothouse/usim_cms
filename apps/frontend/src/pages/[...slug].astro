@@ -4,6 +4,7 @@ import HeroBlock from "../components/HeroBlock.astro";
 import TextBlock from "../components/TextBlock.astro";
 import ImageBlock from "../components/ImageBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
+import SectionBlock from "../components/SectionBlock.astro";
 import { getPageBySlug, getTheme } from "../lib/api";
 
 // Single instance, ~50 real department domains: tenant identity is always
@@ -37,6 +38,8 @@ const theme = await getTheme(tenantHost);
 <BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme}>
   {page.layout.map((block) => {
     switch (block.type) {
+      case "section":
+        return <SectionBlock {...(block.props ?? {})} />;
       case "hero":
         return <HeroBlock {...(block.props ?? {})} />;
       case "text":

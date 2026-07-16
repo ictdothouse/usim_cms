@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
+  Copy,
   FileText,
   Folder,
   Globe,
@@ -45,6 +46,7 @@ import "@blocknote/mantine/style.css";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
+import Designer from "@/Designer";
 
 const SESSION_KEY = "usim_cms_session";
 
@@ -384,6 +386,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const { t } = useT();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [designPage, setDesignPage] = useState<Record<string, unknown> | null>(null);
   const [slug, setSlug] = useState("");
   // Once the admin edits the slug field directly, stop overwriting it from
   // the title so a deliberate edit never gets clobbered by later typing.
@@ -489,14 +492,16 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
 
   // "home" is the frontend's reserved slug for a tenant's root page (see
   // apps/frontend's [...slug].astro) — only one page may hold it at a time,
-  // so making a new page home demotes whichever page currently has it.
+  // so making a new page home demotes whichever page currently has it. Also
+  // force-publishes the new home page: RLS hides drafts from anonymous
+  // visitors, so a draft home page would 404 the whole site.
   async function setHome(id: string) {
     try {
       const prevHome = pages.find((x) => x.slug === "home" && x.id !== id);
       if (prevHome) {
         await api.updatePage(tenantHost, token, prevHome.id as string, { slug: `home-${(prevHome.id as string).slice(0, 8)}` });
       }
-      await api.updatePage(tenantHost, token, id, { slug: "home" });
+      await api.updatePage(tenantHost, token, id, { slug: "home", status: "published", publishedAt: new Date().toISOString() });
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -575,6 +580,12 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   </button>
                 )}
                 <button
+                  onClick={() => setDesignPage(p)}
+                  className="flex items-center gap-1 font-semibold text-accent hover:underline"
+                >
+                  <Palette className="h-3.5 w-3.5" /> {t("pages-design")}
+                </button>
+                <button
                   onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
                   className="font-semibold text-accent hover:underline"
                 >
@@ -619,6 +630,18 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         })}
         {pages.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("pages-empty")}</li>}
       </ul>
+      {designPage && (
+        <Designer
+          page={designPage}
+          tenantHost={tenantHost}
+          token={token}
+          t={t}
+          onClose={(saved) => {
+            setDesignPage(null);
+            if (saved) void refresh();
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -1478,12 +1501,18 @@ function ThemeForm({
 }
 
 // ---------- Tenants (Multisite) ----------
+// Staging tenants are createTenant'd with this exact department-name suffix
+// (see CloneBox's stage action) — no separate DB column, so this is the one
+// place that decides "is this a staging preview, not a real site".
+const isStagingTenant = (tn: Record<string, unknown>) => (tn.departmentName as string).endsWith("(Staging)");
+
 function TenantsPanel({ token }: { token: string }) {
   const { t } = useT();
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [host, setHost] = useState("");
   const [departmentName, setDepartmentName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const [manageHost, setManageHost] = useState<string | null>(null);
 
   async function refresh() {
@@ -1507,6 +1536,7 @@ function TenantsPanel({ token }: { token: string }) {
 
   const managed = tenants.find((tn) => tn.host === manageHost);
   if (managed) {
+    const staging = isStagingTenant(managed);
     return (
       <section className="space-y-4">
         <button onClick={() => setManageHost(null)} className="flex items-center gap-1 text-xs font-semibold text-sub hover:text-ink">
@@ -1516,10 +1546,13 @@ function TenantsPanel({ token }: { token: string }) {
           <Globe className="h-4 w-4 text-accent" /> {t("tenants-manage-title")}: {managed.departmentName as string}
         </h2>
         {error && <p className="text-xs text-red-600">{error}</p>}
+        {msg && <p className="text-xs text-green-700">{msg}</p>}
         <div className={`${card} space-y-2 p-5`}>
           <p className="font-mono text-xs text-sub">{managed.host as string}</p>
           <p className="text-xs text-sub">
-            {managed.active ? (
+            {staging ? (
+              <span className="font-semibold text-amber-700">{t("tenants-clone-staging-tag")} · {t("tenants-preview-only")}</span>
+            ) : managed.active ? (
               <span className="text-ok">Aktif</span>
             ) : (
               <span className="text-sub">{t("tenants-suspended")}</span>
@@ -1534,9 +1567,21 @@ function TenantsPanel({ token }: { token: string }) {
             <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
           </a>
         </div>
+        {!staging && <CloneBox token={token} sourceHost={managed.host as string} onNewSite={refresh} />}
+        <DangerZone
+          token={token}
+          host={managed.host as string}
+          onDeleted={() => {
+            setManageHost(null);
+            void refresh();
+          }}
+        />
       </section>
     );
   }
+
+  const stagingTenants = tenants.filter(isStagingTenant);
+  const liveTenants = tenants.filter((tn) => !isStagingTenant(tn));
 
   return (
     <section className="space-y-4">
@@ -1544,6 +1589,7 @@ function TenantsPanel({ token }: { token: string }) {
         <Globe className="h-4 w-4 text-accent" /> {t("tenants-title")}
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {msg && <p className="text-xs text-green-700">{msg}</p>}
       <form onSubmit={create} className="flex flex-col gap-2 sm:flex-row">
         <input className={inputCls} placeholder={t("tenants-host")} value={host} onChange={(e) => setHost(e.target.value)} required />
         <input
@@ -1558,42 +1604,289 @@ function TenantsPanel({ token }: { token: string }) {
         </button>
       </form>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {tenants.map((tn) => (
-          <div key={tn.id as string} className={`${card} p-5`}>
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <div className="rounded-lg bg-accent/5 p-2 text-accent">
-                <Globe className="h-5 w-5" />
-              </div>
-              {tn.active ? (
-                <span className="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[10px] font-bold text-ok">
-                  <span className="h-1.5 w-1.5 rounded-full bg-ok" /> Aktif
+        {liveTenants.map((tn) => (
+          <TenantCard key={tn.id as string} tn={tn} staging={false} onManage={() => setManageHost(tn.host as string)} />
+        ))}
+      </div>
+      {stagingTenants.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-amber-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> {t("tenants-staging-section")}
+          </h3>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {stagingTenants.map((tn) => (
+              <TenantCard key={tn.id as string} tn={tn} staging onManage={() => setManageHost(tn.host as string)} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TenantCard({
+  tn,
+  staging,
+  onManage,
+}: {
+  tn: Record<string, unknown>;
+  staging: boolean;
+  onManage: () => void;
+}) {
+  const { t } = useT();
+  return (
+    <div className={`${card} p-5 ${staging ? "border-amber-300 bg-amber-50/60" : ""}`}>
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className={`rounded-lg p-2 ${staging ? "bg-amber-500/10 text-amber-600" : "bg-accent/5 text-accent"}`}>
+          <Globe className="h-5 w-5" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          {staging ? (
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+              {t("tenants-clone-staging-tag")} · {t("tenants-preview-only")}
+            </span>
+          ) : tn.active ? (
+            <span className="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[10px] font-bold text-ok">
+              <span className="h-1.5 w-1.5 rounded-full bg-ok" /> Aktif
+            </span>
+          ) : (
+            <span className="rounded-full bg-sub/10 px-2 py-0.5 text-[10px] font-bold text-sub">{t("tenants-suspended")}</span>
+          )}
+        </div>
+      </div>
+      <h3 className="text-sm font-semibold leading-snug text-ink">{tn.departmentName as string}</h3>
+      <p className="mt-1 truncate font-mono text-xs text-sub">{tn.host as string}</p>
+      <div className="mt-4 flex items-center gap-2">
+        <a
+          href={api.previewUrl(tn.host as string, "home")}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${btnGhost} flex-1 justify-center inline-flex items-center gap-1.5 py-1.5`}
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
+        </a>
+        <button
+          onClick={onManage}
+          className={`${btnPrimary} flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-1.5`}
+        >
+          <SettingsIcon className="h-3.5 w-3.5" /> {t("tenants-manage")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Danger Zone (delete site, type-to-confirm) ----------
+function DangerZone({ token, host, onDeleted }: { token: string; host: string; onDeleted: () => void }) {
+  const { t } = useT();
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function del() {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.deletePortalTenant(token, host, confirmText);
+      onDeleted();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-red-300 bg-red-50/60 p-5">
+      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-red-700">
+        <Trash2 className="h-3.5 w-3.5" /> {t("tenants-danger-zone")}
+      </h3>
+      <p className="text-xs text-red-700/80">{t("tenants-danger-desc")}</p>
+      <p className="text-xs text-red-700">
+        {t("tenants-danger-confirm-label")} <code className="rounded bg-red-100 px-1 font-mono">{host}</code>
+      </p>
+      <input
+        className={`${inputCls} border-red-300`}
+        placeholder={host}
+        value={confirmText}
+        onChange={(e) => setConfirmText(e.target.value)}
+      />
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <button
+        disabled={confirmText !== host || busy}
+        onClick={() => void del()}
+        className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Trash2 className="h-3.5 w-3.5" /> {busy ? t("settings-busy") : t("tenants-danger-delete-btn")}
+      </button>
+    </div>
+  );
+}
+
+// ---------- Clone box (full / design-only clone, staging, promote) ----------
+function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost: string; onNewSite: () => void }) {
+  const { t } = useT();
+  const [clones, setClones] = useState<api.CloneMeta[]>([]);
+  const [type, setType] = useState<"full" | "design">("full");
+  const [label, setLabel] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function refresh() {
+    setClones(await api.listClones(token, sourceHost));
+  }
+  useEffect(() => {
+    void refresh();
+  }, [sourceHost]);
+
+  async function run(busyKey: string | null, fn: () => Promise<void>) {
+    setError(null);
+    setMsg(null);
+    setBusyId(busyKey);
+    try {
+      await fn();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function stage(id: string) {
+    await run(id, async () => {
+      const { stagingHost } = await api.stageClone(token, id);
+      setMsg(`${t("tenants-clone-staging-label")} ${stagingHost}`);
+      await refresh();
+    });
+  }
+
+  async function replace(stagingHost: string) {
+    if (!window.confirm(t("tenants-clone-replace-confirm"))) return;
+    await run(stagingHost, async () => {
+      await api.replaceFromStaging(token, sourceHost, stagingHost);
+      setMsg(t("tenants-clone-replace-done"));
+    });
+  }
+
+  async function promote(id: string, suggestedHost?: string) {
+    const newHost = window.prompt(t("tenants-clone-host-prompt"), suggestedHost ?? "");
+    if (!newHost) return;
+    const departmentName = window.prompt(t("tenants-clone-dept-prompt"));
+    if (!departmentName) return;
+    await run(id, async () => {
+      const created = await api.promoteClone(token, id, newHost, departmentName);
+      setMsg(`${t("tenants-clone-done")} ${created.host}`);
+      onNewSite();
+    });
+  }
+
+  return (
+    <div className={`${card} space-y-3 p-5`}>
+      <h3 className="text-xs font-bold text-ink">{t("tenants-clone-box-title")}</h3>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      {msg && <p className="text-xs text-green-700">{msg}</p>}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select
+          className={`${inputCls} sm:w-64 sm:shrink-0`}
+          value={type}
+          onChange={(e) => setType(e.target.value as "full" | "design")}
+        >
+          <option value="full">{t("tenants-clone-type-full")}</option>
+          <option value="design">{t("tenants-clone-type-design")}</option>
+        </select>
+        <input
+          className={inputCls}
+          placeholder={t("tenants-clone-label-placeholder")}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+        <button
+          disabled={busyId === "prepare"}
+          onClick={() =>
+            void run("prepare", async () => {
+              await api.prepareClone(token, sourceHost, type, label || undefined);
+              setLabel("");
+              await refresh();
+            })
+          }
+          className={`${btnPrimary} shrink-0 inline-flex items-center justify-center gap-1.5`}
+        >
+          <Copy className="h-3.5 w-3.5" /> {busyId === "prepare" ? t("settings-busy") : t("tenants-clone")}
+        </button>
+      </div>
+      {clones.length === 0 && <p className="text-xs text-sub">{t("tenants-clone-empty")}</p>}
+      <div className="space-y-2">
+        {clones.map((c) => (
+          <div
+            key={c.id}
+            className={`rounded-lg border p-3 text-xs ${
+              c.stagingHost ? "border-amber-300 bg-amber-50" : "border-line/30"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-ink">{c.label || (c.type === "full" ? t("tenants-clone-type-full") : t("tenants-clone-type-design"))}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    c.type === "full" ? "bg-accent/10 text-accent" : "bg-sub/10 text-sub"
+                  }`}
+                >
+                  {c.type === "full" ? t("tenants-clone-type-full") : t("tenants-clone-type-design")}
                 </span>
-              ) : (
-                <span className="rounded-full bg-sub/10 px-2 py-0.5 text-[10px] font-bold text-sub">{t("tenants-suspended")}</span>
-              )}
+                {c.stagingHost && (
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                    {t("tenants-clone-staging-tag")}
+                  </span>
+                )}
+              </div>
+              <span className="text-sub">{new Date(c.createdAt).toLocaleString()}</span>
             </div>
-            <h3 className="text-sm font-semibold leading-snug text-ink">{tn.departmentName as string}</h3>
-            <p className="mt-1 truncate font-mono text-xs text-sub">{tn.host as string}</p>
-            <div className="mt-4 flex items-center gap-2">
-              <a
-                href={api.previewUrl(tn.host as string, "home")}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`${btnGhost} flex-1 justify-center inline-flex items-center gap-1.5 py-1.5`}
-              >
-                <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
-              </a>
+            {c.stagingHost && <p className="mt-1 font-mono text-[11px] text-amber-700">{c.stagingHost}</p>}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
-                onClick={() => setManageHost(tn.host as string)}
-                className={`${btnPrimary} flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-1.5`}
+                disabled={busyId === c.id}
+                onClick={() => void run(c.id, () => api.downloadClone(token, c.id))}
+                className={`${btnGhost} px-2.5 py-1`}
               >
-                <SettingsIcon className="h-3.5 w-3.5" /> {t("tenants-manage")}
+                {t("tenants-clone-download")}
+              </button>
+              {c.stagingHost ? (
+                <>
+                  <a
+                    href={api.previewUrl(c.stagingHost, "home")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`${btnGhost} px-2.5 py-1`}
+                  >
+                    {t("tenants-view")}
+                  </a>
+                  <button
+                    disabled={busyId === c.stagingHost}
+                    onClick={() => void replace(c.stagingHost!)}
+                    className={`${btnPrimary} px-2.5 py-1`}
+                  >
+                    {t("tenants-clone-replace")}
+                  </button>
+                </>
+              ) : (
+                <button disabled={busyId === c.id} onClick={() => void stage(c.id)} className={`${btnGhost} px-2.5 py-1`}>
+                  {t("tenants-clone-stage")}
+                </button>
+              )}
+              <button
+                disabled={busyId === c.id}
+                onClick={() => void promote(c.id, c.label)}
+                className={`${btnGhost} px-2.5 py-1`}
+              >
+                {t("tenants-clone-newsite")}
               </button>
             </div>
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -1638,6 +1931,10 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingPerms, setEditingPerms] = useState<string[]>([]);
+  const [editUserId, setEditUserId] = useState<string | null>(null);
+  const [editPassword, setEditPassword] = useState("");
+  const [editTenantHosts, setEditTenantHosts] = useState<string[]>([]);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const selectedRole = roles.find((r) => r.id === roleId);
   const canMultiSite = ((selectedRole?.permissions as string[] | undefined) ?? []).includes("sites.multi");
@@ -1697,6 +1994,47 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
       await refresh();
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  function openEditUser(u: Record<string, unknown>) {
+    setEditUserId(u.id as string);
+    setEditPassword("");
+    setEditTenantHosts(((u.tenantHosts as string[] | null) ?? []).length ? (u.tenantHosts as string[]) : u.tenantHost ? [u.tenantHost as string] : []);
+    setEditError(null);
+  }
+
+  async function saveEditPassword(u: Record<string, unknown>) {
+    if (!editPassword.trim()) return;
+    try {
+      await api.updatePortalUserPassword(token, u.id as string, editPassword.trim());
+      setEditPassword("");
+    } catch (err) {
+      setEditError((err as Error).message);
+    }
+  }
+
+  async function saveEditTenantHosts(u: Record<string, unknown>) {
+    if (editTenantHosts.length === 0) {
+      setEditError(t("users-edit-sites-required"));
+      return;
+    }
+    try {
+      await api.updatePortalUserTenantHosts(token, u.id as string, editTenantHosts);
+      await refresh();
+    } catch (err) {
+      setEditError((err as Error).message);
+    }
+  }
+
+  async function removeUser(u: Record<string, unknown>) {
+    if (!window.confirm(t("users-delete-confirm"))) return;
+    try {
+      await api.deletePortalUser(token, u.id as string);
+      setEditUserId(null);
+      await refresh();
+    } catch (err) {
+      setEditError((err as Error).message);
     }
   }
 
@@ -1804,7 +2142,8 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
           </thead>
           <tbody className="divide-y divide-line/20 text-xs text-ink">
             {users.map((u) => (
-              <tr key={u.id as string} className="transition-colors hover:bg-canvas/30">
+              <Fragment key={u.id as string}>
+              <tr className="transition-colors hover:bg-canvas/30">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[11px] font-bold uppercase text-accent">
@@ -1898,13 +2237,87 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                     ))}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {u.role === "webmaster" && (
-                    <button onClick={() => impersonate(u)} className="text-[10px] font-semibold text-accent hover:underline">
-                      {t("users-impersonate")}
+                  <div className="flex items-center justify-end gap-3">
+                    {u.role === "webmaster" && (
+                      <button onClick={() => impersonate(u)} className="text-[10px] font-semibold text-accent hover:underline">
+                        {t("users-impersonate")}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => (editUserId === (u.id as string) ? setEditUserId(null) : openEditUser(u))}
+                      className="text-sub hover:text-ink"
+                      title={t("users-edit")}
+                    >
+                      <Pencil className="h-3 w-3" />
                     </button>
-                  )}
+                  </div>
                 </td>
               </tr>
+              {editUserId === (u.id as string) && (
+                <tr key={`${u.id as string}-edit`} className="bg-canvas/40">
+                  <td colSpan={6} className="space-y-3 px-4 py-4">
+                    {editError && <p className="text-xs text-red-600">{editError}</p>}
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                          {t("users-edit-password-label")}
+                        </label>
+                        <input
+                          type="password"
+                          className={`${inputCls} w-auto`}
+                          placeholder={t("users-edit-password-placeholder")}
+                          value={editPassword}
+                          onChange={(e) => setEditPassword(e.target.value)}
+                        />
+                      </div>
+                      <button
+                        disabled={!editPassword.trim()}
+                        onClick={() => void saveEditPassword(u)}
+                        className={`${btnGhost} px-3 py-1.5 text-xs`}
+                      >
+                        {t("users-edit-save-password")}
+                      </button>
+                    </div>
+                    {u.role === "webmaster" && (
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                            {t("users-edit-sites-label")}
+                          </label>
+                          <div className="flex max-w-md flex-wrap gap-x-3 gap-y-1 rounded-lg border border-line/30 bg-white px-3 py-2 text-[11px] text-body">
+                            {tenants.map((tn) => (
+                              <label key={tn.id as string} className="flex items-center gap-1">
+                                <input
+                                  type="checkbox"
+                                  checked={editTenantHosts.includes(tn.host as string)}
+                                  onChange={(e) =>
+                                    setEditTenantHosts((prev) =>
+                                      e.target.checked
+                                        ? [...prev, tn.host as string]
+                                        : prev.filter((h) => h !== (tn.host as string)),
+                                    )
+                                  }
+                                />
+                                {tn.departmentName as string}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <button onClick={() => void saveEditTenantHosts(u)} className={`${btnGhost} px-3 py-1.5 text-xs`}>
+                          {t("users-edit-save-sites")}
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => void removeUser(u)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-700"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> {t("users-delete")}
+                    </button>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>

@@ -217,6 +217,46 @@ export async function createTenant(host: string, departmentName: string, dbUrl: 
   await ensureTenantDatabase(host, dbUrl);
 }
 
+// Danger Zone: removes the registry row and, for a same-server derived
+// database (dbUrl null), actually drops it — an explicit dbUrl points at
+// another server this process shouldn't assume it can DROP DATABASE on, so
+// that case only unregisters the tenant. Also evicts this host's pool/
+// provisioned-flag so a future createTenant with the same host provisions
+// a clean database instead of reusing stale cache state.
+export async function deleteTenant(host: string): Promise<void> {
+  const client = await pool.connect();
+  let tenant;
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    [tenant] = await db.select().from(schema.tenants).where(eq(schema.tenants.host, host));
+    if (!tenant) return;
+    await db.delete(schema.tenants).where(eq(schema.tenants.host, host));
+  } finally {
+    client.release();
+  }
+
+  const dbUrl = tenant.dbUrl as string | null;
+  const connectionString = dbUrl ?? deriveTenantDbUrl(host);
+  const tp = tenantPools.get(connectionString);
+  if (tp) {
+    await tp.end();
+    tenantPools.delete(connectionString);
+  }
+  provisionedDbs.delete(connectionString);
+
+  if (!dbUrl) {
+    const dbName = tenantDbName(host);
+    const admin = await pool.connect();
+    try {
+      await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1", [dbName]);
+      await admin.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+    } finally {
+      admin.release();
+    }
+  }
+}
+
 export async function listUsers() {
   const client = await pool.connect();
   try {
@@ -273,6 +313,44 @@ export async function updateUserRole(id: string, roleId: string | null, extraPer
       .update(schema.users)
       .set(extraPermissions === undefined ? { roleId } : { roleId, extraPermissions })
       .where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateUserPassword(id: string, passwordHash: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.update(schema.users).set({ passwordHash }).where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+// tenantHost (singular) stays in sync as hosts[0] — same convention createUser
+// uses, since it's the webmaster's default/first site.
+export async function updateUserTenantHosts(id: string, tenantHosts: string[]) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .update(schema.users)
+      .set({ tenantHosts, tenantHost: tenantHosts[0] ?? null })
+      .where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteUser(id: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.delete(schema.users).where(eq(schema.users.id, id));
   } finally {
     client.release();
   }

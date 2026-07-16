@@ -169,6 +169,14 @@ export const createPortalTenant = (token: string, host: string, departmentName: 
     body: JSON.stringify({ host, departmentName }),
   });
 
+// Danger Zone: irreversible. confirm must equal host exactly (server
+// re-checks the same thing — see index.ts's DELETE route).
+export const deletePortalTenant = (token: string, host: string, confirm: string) =>
+  request(`/api/portal/tenants/${host}`, null, token, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm }),
+  }) as Promise<{ deleted: boolean }>;
+
 export const listPortalUsers = (token: string) =>
   request("/api/portal/users", null, token).then((b) => b.users as Array<Record<string, unknown>>);
 
@@ -195,6 +203,15 @@ export const updatePortalUserRole = (
     body: JSON.stringify({ roleId, extraPermissions }),
   });
 
+export const updatePortalUserPassword = (token: string, id: string, password: string) =>
+  request(`/api/portal/users/${id}`, null, token, { method: "PATCH", body: JSON.stringify({ password }) });
+
+export const updatePortalUserTenantHosts = (token: string, id: string, tenantHosts: string[]) =>
+  request(`/api/portal/users/${id}`, null, token, { method: "PATCH", body: JSON.stringify({ tenantHosts }) });
+
+export const deletePortalUser = (token: string, id: string) =>
+  request(`/api/portal/users/${id}`, null, token, { method: "DELETE" });
+
 // Binary downloads (backup / static export) — plain <a href> can't carry the
 // Authorization header, so fetch to a blob and click a synthetic link.
 async function downloadZip(path: string, token: string, fallbackName: string) {
@@ -217,6 +234,45 @@ export const downloadTenantBackup = (token: string, host: string) =>
 
 export const downloadStaticExport = (token: string, host: string) =>
   downloadZip(`/api/portal/tenants/${host}/static-export`, token, `static-${host}.zip`);
+
+export interface CloneMeta {
+  id: string;
+  sourceHost: string;
+  type: "full" | "design";
+  createdAt: string;
+  label?: string;
+  stagingHost?: string;
+}
+
+export const prepareClone = (token: string, host: string, type: "full" | "design", label?: string) =>
+  request(`/api/portal/tenants/${host}/clone-prepare`, null, token, {
+    method: "POST",
+    body: JSON.stringify({ type, label }),
+  }) as Promise<CloneMeta>;
+
+export const listClones = (token: string, host: string) =>
+  request(`/api/portal/tenants/${host}/clones`, null, token).then((res) => (res as { clones: CloneMeta[] }).clones);
+
+export const downloadClone = (token: string, id: string) =>
+  downloadZip(`/api/portal/clones/${id}/download`, token, `clone-${id}.zip`);
+
+export const stageClone = (token: string, id: string) =>
+  request(`/api/portal/clones/${id}/stage`, null, token, { method: "POST" }) as Promise<{
+    staged: boolean;
+    stagingHost: string;
+  }>;
+
+export const promoteClone = (token: string, id: string, newHost: string, departmentName: string) =>
+  request(`/api/portal/clones/${id}/promote`, null, token, {
+    method: "POST",
+    body: JSON.stringify({ newHost, departmentName }),
+  }) as Promise<{ promoted: boolean; host: string }>;
+
+export const replaceFromStaging = (token: string, host: string, stagingHost: string) =>
+  request(`/api/portal/tenants/${host}/replace-from-staging`, null, token, {
+    method: "POST",
+    body: JSON.stringify({ stagingHost }),
+  }) as Promise<{ replaced: boolean }>;
 
 export async function restoreTenantBackup(token: string, host: string, file: File): Promise<number> {
   const form = new FormData();

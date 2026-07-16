@@ -1,0 +1,212 @@
+---
+// Renders a Web Designer `section` block (see apps/admin/src/Designer.tsx for
+// the model + the matching canvas preview). Pure HTML + scoped CSS, zero JS.
+interface El {
+  id?: string;
+  type: string;
+  props?: Record<string, string>;
+}
+interface Col {
+  span?: number;
+  elements?: El[];
+}
+interface Row {
+  columns?: Col[];
+}
+interface Props {
+  bg?: string;
+  bgImage?: string;
+  textColor?: string;
+  paddingY?: string;
+  width?: string;
+  rows?: Row[];
+}
+const { bg, bgImage, textColor, paddingY = "md", width = "contained", rows = [] } = Astro.props;
+
+const PAD: Record<string, string> = { sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
+const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
+const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
+const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
+const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
+
+// Element props are author-controlled but URLs still get a scheme check so a
+// stored value can never become a javascript:/data: link or iframe source.
+// http(s)/root-relative/anchor/bare-relative (e.g. "#contact", "about") are
+// all fine — only a URI scheme other than http(s) (javascript:, data:, ...)
+// gets stripped.
+const safeUrl = (u?: string) => {
+  const v = u?.trim();
+  if (!v) return undefined;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : undefined;
+  return v;
+};
+
+const sectionStyle = [
+  bgImage && safeUrl(bgImage) ? `background:url('${safeUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
+  textColor ? `color:${textColor}` : null,
+  `padding:${PAD[paddingY] ?? PAD.md} 1.5rem`,
+]
+  .filter(Boolean)
+  .join(";");
+
+const gridStyle = (cols: Col[]) => `grid-template-columns:${cols.map((c) => `${c.span ?? 1}fr`).join(" ")}`;
+const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
+---
+
+<section class="ds-section" style={sectionStyle}>
+  <div class={width === "full" ? "ds-inner ds-full" : "ds-inner"}>
+    {rows.map((row) => (
+      <div class="ds-row" style={gridStyle(row.columns ?? [])}>
+        {(row.columns ?? []).map((col) => (
+          <div class="ds-col">
+            {(col.elements ?? []).map((el) => {
+              const p = el.props ?? {};
+              switch (el.type) {
+                case "heading": {
+                  const Tag = headingTag(p.level) as "h1";
+                  return (
+                    <Tag class={`ds-h ds-h${p.level ?? "2"}`} style={p.align ? `text-align:${p.align}` : undefined}>
+                      {p.text}
+                    </Tag>
+                  );
+                }
+                case "text":
+                  return (
+                    <p
+                      class="ds-text"
+                      style={[
+                        `font-size:${TEXT_SIZE[p.size ?? "md"] ?? TEXT_SIZE.md}`,
+                        p.align ? `text-align:${p.align}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(";")}
+                    >
+                      {p.text}
+                    </p>
+                  );
+                case "image":
+                  return safeUrl(p.src) ? (
+                    <img
+                      class="ds-img"
+                      src={safeUrl(p.src)}
+                      alt={p.alt ?? ""}
+                      loading="lazy"
+                      style={`border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`}
+                    />
+                  ) : null;
+                case "button":
+                  return p.label ? (
+                    <div style={p.align ? `text-align:${p.align}` : undefined}>
+                      <a
+                        class={p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary"}
+                        href={safeUrl(p.href) ?? "#"}
+                      >
+                        {p.label}
+                      </a>
+                    </div>
+                  ) : null;
+                case "spacer":
+                  return <div style={`height:${SPACE[p.height ?? "md"] ?? SPACE.md}`} aria-hidden="true" />;
+                case "divider":
+                  return <hr class="ds-divider" />;
+                case "embed":
+                  return safeUrl(p.url) ? (
+                    <iframe
+                      class="ds-embed"
+                      src={safeUrl(p.url)}
+                      style={`aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`}
+                      loading="lazy"
+                      allowfullscreen
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      referrerpolicy="strict-origin-when-cross-origin"
+                    />
+                  ) : null;
+                default:
+                  return null;
+              }
+            })}
+          </div>
+        ))}
+      </div>
+    ))}
+  </div>
+</section>
+
+<style>
+  .ds-inner {
+    max-width: 68rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+  .ds-full {
+    max-width: none;
+  }
+  .ds-row {
+    display: grid;
+    gap: 2rem;
+    align-items: start;
+  }
+  .ds-col {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    min-width: 0;
+  }
+  .ds-h {
+    margin: 0;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+  .ds-h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  .ds-h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); }
+  .ds-h3 { font-size: 1.5rem; }
+  .ds-h4 { font-size: 1.2rem; }
+  .ds-text {
+    margin: 0;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .ds-img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .ds-btn {
+    display: inline-block;
+    padding: 0.65rem 1.6rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    transition: opacity 0.15s ease;
+  }
+  .ds-btn:hover {
+    opacity: 0.85;
+  }
+  .ds-btn-primary {
+    background: var(--color-primary, #0f62fe);
+    color: #fff;
+  }
+  .ds-btn-outline {
+    border: 2px solid currentColor;
+    color: inherit;
+  }
+  .ds-divider {
+    border: none;
+    border-top: 1px solid currentColor;
+    opacity: 0.2;
+    margin: 0;
+  }
+  .ds-embed {
+    width: 100%;
+    border: 0;
+    border-radius: 0.75rem;
+  }
+  @media (max-width: 768px) {
+    .ds-row {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>

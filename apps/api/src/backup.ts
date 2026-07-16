@@ -1,7 +1,9 @@
 import { readdirSync, readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
+import { sql } from "drizzle-orm";
 import { getTenantConnection, getTenantTheme, setTenantTheme } from "./db/tenant-pool.js";
 import { localUploadsDir } from "./storage.js";
 import * as schema from "./db/schema.js";
@@ -32,6 +34,10 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
   let pages, posts, media, mediaFolders;
   try {
+    // This root-scope call never goes through tenantPlugin/requireTenantAuth
+    // (see plugins/auth.ts), so nothing else sets the RLS flag draft rows
+    // and writes need — set it directly on this connection.
+    await db.execute(sql`SET SESSION app.authenticated = 'true'`);
     [pages, posts, media, mediaFolders] = await Promise.all([
       db.select().from(schema.pages),
       db.select().from(schema.posts),
@@ -61,6 +67,79 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   return zipSync(files);
 }
 
+// Design/skeleton clone: same page rows as a full backup, but block props
+// (the actual text/images) are stripped to just the block type/order, and
+// posts/media are dropped entirely — only site structure + theme survive.
+// Produces the same backup.json shape as exportTenantBackup, so it imports
+// through the existing importTenantBackup unchanged.
+export async function exportTenantDesignClone(host: string): Promise<Uint8Array> {
+  const { db, release } = await getTenantConnection(host);
+  let pages;
+  try {
+    await db.execute(sql`SET SESSION app.authenticated = 'true'`);
+    pages = await db.select().from(schema.pages);
+  } finally {
+    release();
+  }
+  const skeletonPages = pages.map((p) => ({
+    ...p,
+    layout: (p.layout as Array<{ type: string }>).map((block) => ({ type: block.type })),
+    bannerImageUrl: null,
+    status: "draft",
+    publishedAt: null,
+  }));
+  return zipSync({
+    "backup.json": strToU8(
+      JSON.stringify({
+        version: BACKUP_VERSION,
+        sourceHost: host,
+        exportedAt: new Date().toISOString(),
+        tables: { pages: skeletonPages, posts: [], media: [], mediaFolders: [] },
+        theme: await getTenantTheme(host),
+      }),
+    ),
+  });
+}
+
+export interface CloneMeta {
+  id: string;
+  sourceHost: string;
+  type: "full" | "design";
+  createdAt: string;
+  // Optional free-text name OR a real domain, given at prepare time. Shown
+  // as the clone's label in the box; if it looks like a domain it's also
+  // used as the staging host (skips the auto-generated staging-<id> one)
+  // and prefills the "make new site" host prompt.
+  label?: string;
+  stagingHost?: string;
+}
+
+// A label counts as a usable domain, not just a display name, when it looks
+// like one: dotted, no spaces.
+export const looksLikeDomain = (s: string): boolean => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s.trim());
+
+// ponytail: in-memory "box" of prepared clones the admin hasn't acted on
+// yet — single instance (CLAUDE.md), so a process-local Map is enough; lost
+// on API restart, same tradeoff as apps/frontend's stale-while-revalidate
+// cache. Add a DB table only if clones need to survive a restart.
+const cloneStore = new Map<string, { meta: CloneMeta; zip: Uint8Array }>();
+
+export function prepareClone(sourceHost: string, type: "full" | "design", zip: Uint8Array, label?: string): CloneMeta {
+  const meta: CloneMeta = { id: randomUUID(), sourceHost, type, createdAt: new Date().toISOString(), label: label?.trim() || undefined };
+  cloneStore.set(meta.id, { meta, zip });
+  return meta;
+}
+
+export const listClones = (sourceHost: string): CloneMeta[] =>
+  [...cloneStore.values()].filter((c) => c.meta.sourceHost === sourceHost).map((c) => c.meta);
+
+export const getClone = (id: string) => cloneStore.get(id);
+
+export function markCloneStaged(id: string, stagingHost: string) {
+  const entry = cloneStore.get(id);
+  if (entry) entry.meta.stagingHost = stagingHost;
+}
+
 export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[] }> {
   const entries = unzipSync(zip);
   const manifest = entries["backup.json"];
@@ -88,6 +167,7 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
 
   const { db, release } = await getTenantConnection(host);
   try {
+    await db.execute(sql`SET SESSION app.authenticated = 'true'`);
     // Full replace, not merge — a restore means "make the tenant look like
     // the backup". Wipe in FK-safe order: media references media_folders.
     await db.delete(schema.media);
