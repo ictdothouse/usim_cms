@@ -21,7 +21,29 @@ Package manager is pnpm (via corepack — run `corepack enable` once if `pnpm` i
 routes that touch the database will work — `/health` does not need one. On a fresh DB, connect as a
 superuser once and run `pnpm --filter @usim-cms/api db:setup-role`, then switch `DATABASE_URL` to the
 `usim_cms_app` role it creates — the `pages` RLS policies (`src/db/migrations/0002_pages_rls.sql`) are
-a silent no-op under a superuser connection.
+a silent no-op under a superuser connection. That role also needs `CREATEDB` (see the grant in
+`scripts/setup-db-role.sql`): each tenant gets its own database, auto-provisioned on first request.
+
+## Multi-tenancy: database-per-tenant
+
+- `DATABASE_URL` holds only the **control plane** — the `tenants`/`users`/`roles`/`site_theme`/
+  `shared_content` registry tables (`apps/api/src/db/tenant-pool.ts`'s fixed `pool`). Tenant content
+  (`pages`, etc.) never lives there.
+- Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
+  the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
+  `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is
+  requested. An explicit `db_url` means the tenant's data lives on a different server that must already
+  exist — topology is registry data, never code.
+- `getTenantConnection(tenantHost)` is the only way a request gets a tenant's `db`: registry lookup on
+  the control plane confirms the host is known and `active`, then resolves/derives its connection
+  string, provisions+migrates it if this process hasn't seen it yet, and hands back a pooled client
+  (`tenantPools` cached per connection string, not per host, so two hosts sharing a `db_url` share a
+  pool). `plugins/tenant.ts` calls this on every request and attaches the result as `req.db`.
+- This makes tenant DB isolation real (a compromised or buggy query against one tenant's `req.db`
+  cannot see another tenant's rows — separate database, not just a `WHERE tenant_host = ...` filter),
+  on top of the RLS `app.authenticated` session-variable gate already enforced per connection.
+- The one sanctioned cross-tenant path is `publishSharedContent`/`listSharedContent` — an explicit
+  author opt-in into the control-plane `shared_content` table, not a general query capability.
 
 ## Architecture
 
@@ -32,9 +54,8 @@ pnpm workspace monorepo with two apps:
   - `src/plugins/tenant.ts` reads the `x-tenant-host` request header on every request and attaches
     `req.tenantHost` / `req.db` — this is how multi-tenancy is implemented (single instance, per-tenant
     DB pool, no per-tenant deployment).
-  - `src/db/tenant-pool.ts` lazily creates and caches one Drizzle/pg pool per tenant host. It currently
-    points every tenant at the same `DATABASE_URL`; resolving a tenant host to its own connection
-    string is a TODO.
+  - `src/db/tenant-pool.ts` resolves each tenant host to its own database (see "Multi-tenancy:
+    database-per-tenant" below) and lazily creates/caches one Drizzle/pg pool per connection string.
   - `src/db/schema.ts` defines the `pages` table. Page content is a dynamic block layout stored in the
     `layout` JSONB column, not as separate relational tables per block type.
   - `src/collections/config-types.ts` + `src/plugins/generic-crud.ts` are the code-first collection
