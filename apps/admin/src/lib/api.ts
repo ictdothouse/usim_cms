@@ -109,6 +109,22 @@ export const deletePost = (tenantHost: string, token: string, id: string) =>
 export const sharePost = (tenantHost: string, token: string, id: string) =>
   request(`/api/posts/${id}/publish`, tenantHost, token, { method: "POST" });
 
+export interface DesignTemplate {
+  id: string;
+  name: string;
+  data: Record<string, unknown>;
+  createdAt: string;
+}
+
+export const listTemplates = (tenantHost: string, token: string) =>
+  request("/api/templates", tenantHost, token).then((b) => b.items as DesignTemplate[]);
+
+export const createTemplate = (tenantHost: string, token: string, name: string, data: Record<string, unknown>) =>
+  request("/api/templates", tenantHost, token, { method: "POST", body: JSON.stringify({ name, data }) });
+
+export const deleteTemplate = (tenantHost: string, token: string, id: string) =>
+  request(`/api/templates/${id}`, tenantHost, token, { method: "DELETE" });
+
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);
 

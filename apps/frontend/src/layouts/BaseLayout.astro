@@ -3,8 +3,12 @@ interface Props {
   title: string;
   ogImage?: string | null;
   theme: Record<string, unknown>;
+  // Extra per-element Google Fonts used on this page (see
+  // apps/frontend/src/lib/collectFonts.ts) — merged with the theme's own
+  // font into one combined request below.
+  fonts?: string[];
 }
-const { title, ogImage, theme } = Astro.props;
+const { title, ogImage, theme, fonts = [] } = Astro.props;
 // site_theme.settings is an open JSONB bag (superadmin/webmaster-defined);
 // apps/api validates these 6 keys on write (index.ts validateThemeSettings),
 // so this layout only has to wire them, not re-validate them.
@@ -19,6 +23,10 @@ const themeVars = [
   .join(";");
 const fontFamily = typeof theme.fontFamily === "string" ? theme.fontFamily : "";
 const logoUrl = typeof theme.logoUrl === "string" ? theme.logoUrl : "";
+const allFonts = [...new Set([fontFamily, ...fonts].filter(Boolean))];
+const fontsHref = allFonts.length
+  ? `https://fonts.googleapis.com/css2?${allFonts.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`
+  : null;
 ---
 <!doctype html>
 <html lang="en">
@@ -28,12 +36,7 @@ const logoUrl = typeof theme.logoUrl === "string" ? theme.logoUrl : "";
     <title>{title}</title>
     <meta property="og:title" content={title} />
     {ogImage && <meta property="og:image" content={ogImage} />}
-    {fontFamily && (
-      <link
-        rel="stylesheet"
-        href={`https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontFamily)}&display=swap`}
-      />
-    )}
+    {fontsHref && <link rel="stylesheet" href={fontsHref} />}
     <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
   </head>
   <body

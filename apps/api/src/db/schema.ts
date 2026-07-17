@@ -65,6 +65,18 @@ export const media = pgTable("media", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Reusable Designer section blocks, saved by staff and inserted into any
+// page on this tenant — like pages/posts/media, per-tenant (own database),
+// never publicly exposed (protected-scope routes only, see index.ts).
+export const designTemplates = pgTable("design_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  // A whole `section` Block ({ type: "section", props: {...} }) — see
+  // apps/admin/src/Designer.tsx's Block/SectionProps.
+  data: jsonb("data").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Control-plane registry of known tenant hosts, always in the "public"
 // schema. Resolved via search_path (tenant schema first, "public" fallback
 // after) rather than an explicit qualifier, since Drizzle disallows

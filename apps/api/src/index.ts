@@ -693,6 +693,32 @@ const postsCollection: CollectionConfig = {
   },
 };
 
+// Reusable Designer section blocks. Protected-scope only (see registration
+// below) — no `access.update` since there's no PATCH route (replacing a
+// template is delete-and-recreate), and no `shareable` since these aren't
+// site content. Gated on the existing pages.* permissions rather than a new
+// templates.* category — a webmaster who can edit pages can manage these.
+const templatesCollection: CollectionConfig = {
+  slug: "templates",
+  table: schema.designTemplates,
+  createSchema: {
+    type: "object",
+    required: ["name", "data"],
+    additionalProperties: false,
+    properties: {
+      name: { type: "string", minLength: 1 },
+      data: { type: "object" },
+    },
+  },
+  // No `read` here — registerProtectedCollectionRoutes has no GET of its own
+  // (see the hand-rolled /api/templates GET below, since this collection
+  // deliberately has no public route to pair with, unlike pages/posts).
+  access: {
+    create: (a) => hasPermission(a, "pages.create"),
+    delete: (a) => hasPermission(a, "pages.delete"),
+  },
+};
+
 // Public scope: tenant resolution only, no login required — this is what
 // anonymous website visitors (and the apps/frontend renderer) hit. Only GET
 // routes live here; never put a write route in this scope.
@@ -730,6 +756,20 @@ await app.register(async (protectedScope) => {
     return { token };
   });
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
+
+  // Hand-rolled GET, not registerPublicCollectionRoutes — templates have no
+  // public route at all (protectedScope already requires a valid session,
+  // so this is a genuine "auth required even to list" route, matching
+  // design_templates' RLS which has no policy for an unauthenticated read).
+  protectedScope.get("/api/templates", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    const items = await req.db.select().from(schema.designTemplates);
+    return { collection: "templates", items };
+  });
+  registerProtectedCollectionRoutes(protectedScope, templatesCollection);
 
   // Stores uploaded images (banners, etc.) on local disk under a per-tenant
   // folder. Served back publicly at the returned URL — that's expected for

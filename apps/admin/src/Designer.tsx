@@ -5,6 +5,8 @@ import {
   Calendar,
   Check,
   ChevronRight,
+  Clipboard,
+  ClipboardPaste,
   Clock,
   Code2,
   Copy,
@@ -14,12 +16,14 @@ import {
   Heading1,
   Image as ImageIcon,
   Images,
+  LayoutTemplate,
   List,
   Mail,
   MapPin,
   Minus,
   MousePointerClick,
   MoveVertical,
+  Paintbrush,
   Phone,
   Plus,
   Redo2,
@@ -73,6 +77,8 @@ interface SectionProps {
   bgImage?: string;
   textColor?: string;
   paddingY?: string;
+  paddingX?: string;
+  marginY?: string;
   width?: string;
   border?: string;
   shadow?: string;
@@ -115,6 +121,17 @@ const ICONS: Record<string, typeof Check> = {
   download: Download,
 };
 
+// Shared across heading/text/list — full typography control. fontFamily is
+// any Google Font name; see the useEffect near the component body that
+// keeps a matching <link> synced into document.head for canvas preview.
+const TYPOGRAPHY_FIELDS: Field[] = [
+  { key: "fontFamily", labelKey: "designer-f-fontfamily", kind: "text" },
+  { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
+  { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "text" },
+  { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "text" },
+  { key: "fontWeight", labelKey: "designer-f-fontweight", kind: "select", options: ["400", "500", "600", "700", "800"] },
+];
+
 const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<string, string>; fields: Field[] }> = {
   heading: {
     labelKey: "designer-el-heading",
@@ -124,6 +141,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "text", labelKey: "designer-f-text", kind: "textarea" },
       { key: "level", labelKey: "designer-f-level", kind: "select", options: ["1", "2", "3", "4"] },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      ...TYPOGRAPHY_FIELDS,
     ],
   },
   text: {
@@ -134,6 +152,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "text", labelKey: "designer-f-text", kind: "textarea" },
       { key: "size", labelKey: "designer-f-size", kind: "select", options: ["sm", "md", "lg"] },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      ...TYPOGRAPHY_FIELDS,
     ],
   },
   image: {
@@ -162,7 +181,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
     labelKey: "designer-el-spacer",
     icon: MoveVertical,
     defaults: { height: "md" },
-    fields: [{ key: "height", labelKey: "designer-f-height", kind: "select", options: ["sm", "md", "lg", "xl"] }],
+    fields: [{ key: "height", labelKey: "designer-f-height", kind: "text" }],
   },
   divider: { labelKey: "designer-el-divider", icon: Minus, defaults: {}, fields: [] },
   embed: {
@@ -192,6 +211,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
     fields: [
       { key: "items", labelKey: "designer-f-list-items", kind: "textarea" },
       { key: "style", labelKey: "designer-f-list-style", kind: "select", options: ["bullet", "numbered", "none"] },
+      ...TYPOGRAPHY_FIELDS,
     ],
   },
   html: {
@@ -215,11 +235,42 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
   },
 };
 
+// "Paste style" strips these before merging onto a target, so copying a
+// heading's style and pasting it onto a button can't leak the heading's
+// actual text — only the type's own content field(s) need stripping;
+// section/column props are already style-only.
+const CONTENT_KEYS: Record<ElType, string[]> = {
+  heading: ["text"],
+  text: ["text"],
+  image: ["src", "alt"],
+  button: ["label", "href"],
+  icon: ["name"],
+  list: ["items"],
+  html: ["html"],
+  gallery: ["images"],
+  embed: ["url"],
+  spacer: [],
+  divider: [],
+};
+type ClipLevel = "section" | "column" | "element";
+const CLIP_KEYS: Record<ClipLevel, string> = {
+  section: "designer:clip:section",
+  column: "designer:clip:column",
+  element: "designer:clip:element",
+};
+const CLIPSTYLE_KEYS: Record<ClipLevel, string> = {
+  section: "designer:clipstyle:section",
+  column: "designer:clipstyle:column",
+  element: "designer:clipstyle:element",
+};
+
 const SECTION_FIELDS: Field[] = [
   { key: "bg", labelKey: "designer-s-bg", kind: "color" },
   { key: "bgImage", labelKey: "designer-s-bgimage", kind: "image" },
   { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
-  { key: "paddingY", labelKey: "designer-s-padding", kind: "select", options: ["sm", "md", "lg", "xl"] },
+  { key: "paddingY", labelKey: "designer-s-padding", kind: "text" },
+  { key: "paddingX", labelKey: "designer-f-paddingx", kind: "text" },
+  { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
   { key: "width", labelKey: "designer-s-width", kind: "select", options: ["contained", "full"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
@@ -233,7 +284,8 @@ const SECTION_FIELDS: Field[] = [
 // what would otherwise need a dedicated Card/Testimonial element.
 const COLUMN_FIELDS: Field[] = [
   { key: "bg", labelKey: "designer-s-bg", kind: "color" },
-  { key: "padding", labelKey: "designer-f-padding", kind: "select", options: ["none", "sm", "md", "lg", "xl"] },
+  { key: "padding", labelKey: "designer-f-padding", kind: "text" },
+  { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
   { key: "valign", labelKey: "designer-f-valign", kind: "select", options: ["top", "center", "bottom"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
@@ -254,6 +306,14 @@ const SHADOW: Record<string, string> = {
   lg: "0 12px 32px rgba(0,0,0,.16)",
 };
 const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
+// Resolves a spacing value that may be either a legacy preset keyword
+// ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
+// ("42px", "2.5rem") — existing pages keep their preset look, new edits get
+// free-form units. Duplicated in SectionBlock.astro like every other table.
+function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
+  if (!v) return fallback;
+  return table[v] ?? v;
+}
 
 // Row presets offered by "add row": each entry is the column span list.
 const ROW_PRESETS: number[][] = [[1], [1, 1], [1, 1, 1], [1, 1, 1, 1], [1, 2], [2, 1]];
@@ -294,11 +354,25 @@ function renderInline(text: string): string {
 // Approximates a column's COLUMN_FIELDS in the canvas, mirroring the "card"
 // styling SectionBlock.astro applies to .ds-col — same only-if-set guard as
 // the section wrapper above so unstyled columns keep their plain layout.
+// Only sets a style key when the field actually has a value, so an unset
+// typography field falls back to the base style (e.g. heading's default
+// bold weight) instead of being wiped to the browser default by `undefined`.
+function typoStyle(p: Record<string, string>): React.CSSProperties {
+  const s: React.CSSProperties = {};
+  if (p.fontFamily) s.fontFamily = p.fontFamily;
+  if (p.color) s.color = p.color;
+  if (p.lineHeight) s.lineHeight = p.lineHeight;
+  if (p.letterSpacing) s.letterSpacing = p.letterSpacing;
+  if (p.fontWeight) s.fontWeight = p.fontWeight;
+  return s;
+}
+
 function colStyle(cp?: Record<string, string>): React.CSSProperties {
   if (!cp) return {};
   return {
     background: cp.bg || undefined,
-    padding: cp.padding && cp.padding !== "none" ? PAD[cp.padding] : undefined,
+    padding: cp.padding ? lengthValue(cp.padding, PAD, PAD.md) : undefined,
+    margin: cp.marginY ? `${lengthValue(cp.marginY, PAD, "0")} 0` : undefined,
     alignSelf: cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : cp.valign === "center" ? "center" : undefined,
     border: cp.border ? BORDER[cp.border] : undefined,
     boxShadow: cp.shadow ? SHADOW[cp.shadow] : undefined,
@@ -328,6 +402,10 @@ export default function Designer({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
+  const [clipTick, setClipTick] = useState(0); // bumped on every clipboard write, to re-render Paste button enabled-state
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
+  const [templatesBusy, setTemplatesBusy] = useState(false);
   const history = useRef<Block[][]>([]);
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
@@ -360,6 +438,83 @@ export default function Designer({
     setDirty(true);
   }
 
+  // localStorage-backed clipboard (survives reload/switching pages), namespaced
+  // per level so copying a section doesn't clobber a copied element.
+  function clipCopy(level: ClipLevel, data: unknown) {
+    localStorage.setItem(CLIP_KEYS[level], JSON.stringify(data));
+    setClipTick((x) => x + 1);
+  }
+  function clipRead<T = unknown>(level: ClipLevel): T | null {
+    const raw = localStorage.getItem(CLIP_KEYS[level]);
+    return raw ? (JSON.parse(raw) as T) : null;
+  }
+  function clipHas(level: ClipLevel) {
+    void clipTick;
+    return localStorage.getItem(CLIP_KEYS[level]) !== null;
+  }
+  function styleCopy(level: ClipLevel, props: Record<string, string>, elType?: ElType) {
+    const clean = { ...props };
+    (elType ? CONTENT_KEYS[elType] : []).forEach((k) => delete clean[k]);
+    localStorage.setItem(CLIPSTYLE_KEYS[level], JSON.stringify(clean));
+    setClipTick((x) => x + 1);
+  }
+  function styleRead(level: ClipLevel): Record<string, string> | null {
+    const raw = localStorage.getItem(CLIPSTYLE_KEYS[level]);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : null;
+  }
+  function styleHas(level: ClipLevel) {
+    void clipTick;
+    return localStorage.getItem(CLIPSTYLE_KEYS[level]) !== null;
+  }
+
+  useEffect(() => {
+    const onStorage = () => setClipTick((x) => x + 1);
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  async function openTemplates() {
+    setShowTemplates(true);
+    setTemplatesBusy(true);
+    try {
+      setTemplates(await api.listTemplates(tenantHost, token));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTemplatesBusy(false);
+    }
+  }
+
+  async function saveAsTemplate() {
+    if (!sel || sel.length !== 1 || blocks[sel[0]].type !== "section") return;
+    const name = prompt(t("designer-templates-save-prompt"));
+    if (!name) return;
+    setTemplatesBusy(true);
+    try {
+      await api.createTemplate(tenantHost, token, name, blocks[sel[0]] as unknown as Record<string, unknown>);
+      setTemplates(await api.listTemplates(tenantHost, token));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTemplatesBusy(false);
+    }
+  }
+
+  function insertTemplate(tpl: api.DesignTemplate) {
+    mutate((bs) => bs.push(clone(tpl.data) as unknown as Block));
+    setShowTemplates(false);
+  }
+
+  async function deleteTemplateHandler(id: string) {
+    if (!confirm(t("designer-templates-delete-confirm"))) return;
+    try {
+      await api.deleteTemplate(tenantHost, token, id);
+      setTemplates((ts) => ts.filter((x) => x.id !== id));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -378,6 +533,34 @@ export default function Designer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // Keeps a Google Font <link> in document.head for every distinct
+  // fontFamily in use, so the canvas preview approximates the real render
+  // (SectionBlock.astro/[...slug].astro do the equivalent server-side).
+  useEffect(() => {
+    const fonts = new Set<string>();
+    for (const block of blocks) {
+      if (block.type !== "section") continue;
+      for (const row of (block.props as unknown as SectionProps).rows ?? []) {
+        for (const col of row.columns ?? []) {
+          for (const el of col.elements ?? []) {
+            if ((el.type === "heading" || el.type === "text" || el.type === "list") && el.props.fontFamily) {
+              fonts.add(el.props.fontFamily);
+            }
+          }
+        }
+      }
+    }
+    fonts.forEach((f) => {
+      const selector = `link[data-designer-font="${typeof CSS !== "undefined" && CSS.escape ? CSS.escape(f) : f}"]`;
+      if (document.querySelector(selector)) return;
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.dataset.designerFont = f;
+      link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(f)}&display=swap`;
+      document.head.appendChild(link);
+    });
+  }, [blocks]);
 
   const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionProps;
 
@@ -628,6 +811,44 @@ export default function Designer({
               </div>
             </label>
           ))}
+          <div className="flex gap-3">
+            <button
+              onClick={() => clipCopy("column", col)}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+            >
+              <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
+            </button>
+            <button
+              onClick={() => {
+                const data = clipRead<Col>("column");
+                if (data) mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
+              }}
+              disabled={!clipHas("column")}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
+            </button>
+            <button
+              onClick={() => styleCopy("column", col.props ?? {})}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+            >
+              <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
+            </button>
+            <button
+              onClick={() => {
+                const style = styleRead("column");
+                if (style)
+                  mutate((bs) => {
+                    const target = section(bs, b).rows[r].columns[c];
+                    target.props = { ...(target.props ?? {}), ...style };
+                  });
+              }}
+              disabled={!styleHas("column")}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            >
+              <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
+            </button>
+          </div>
           <button
             onClick={() => {
               mutate((bs) => {
@@ -673,6 +894,54 @@ export default function Designer({
               />
             </div>
           </label>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-f-marginy")}
+            <div className="mt-1">
+              <FieldInput
+                field={{ key: "marginY", labelKey: "designer-f-marginy", kind: "text" }}
+                value={el.props.marginY ?? ""}
+                onChange={(v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.marginY = v))}
+              />
+            </div>
+          </label>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => clipCopy("element", el)}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+            >
+              <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
+            </button>
+            <button
+              onClick={() => {
+                const data = clipRead<El>("element");
+                if (data) mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+              }}
+              disabled={!clipHas("element")}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
+            </button>
+            <button
+              onClick={() => styleCopy("element", el.props, el.type)}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+            >
+              <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
+            </button>
+            <button
+              onClick={() => {
+                const style = styleRead("element");
+                if (style)
+                  mutate((bs) => {
+                    const target = section(bs, b).rows[r].columns[c].elements[e];
+                    target.props = { ...target.props, ...style };
+                  });
+              }}
+              disabled={!styleHas("element")}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            >
+              <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
+            </button>
+          </div>
           <div className="flex gap-3">
             <button
               onClick={() =>
@@ -711,7 +980,7 @@ export default function Designer({
       case "heading":
         return (
           <div
-            style={{ ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2 }}
+            style={{ ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2, ...typoStyle(p) }}
             className="font-display"
             dangerouslySetInnerHTML={{ __html: p.text ? renderInline(p.text) : "Heading" }}
           />
@@ -719,7 +988,7 @@ export default function Designer({
       case "text":
         return p.text ? (
           <div
-            style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"], whiteSpace: "pre-wrap", lineHeight: 1.65 }}
+            style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"], whiteSpace: "pre-wrap", lineHeight: 1.65, ...typoStyle(p) }}
             dangerouslySetInnerHTML={{ __html: renderInline(p.text) }}
           />
         ) : (
@@ -755,7 +1024,9 @@ export default function Designer({
           </div>
         );
       case "spacer":
-        return <div style={{ height: SPACE[p.height ?? "md"] }} className="rounded border border-dashed border-line/30" />;
+        return (
+          <div style={{ height: lengthValue(p.height, SPACE, SPACE.md) }} className="rounded border border-dashed border-line/30" />
+        );
       case "divider":
         return <hr className="border-current opacity-20" />;
       case "embed":
@@ -781,7 +1052,7 @@ export default function Designer({
           p.style === "none" ? "list-none" : p.style === "numbered" ? "list-decimal pl-5" : "list-disc pl-5";
         const Tag = p.style === "numbered" ? "ol" : "ul";
         return (
-          <Tag className={`${cls} space-y-1 text-sm`}>
+          <Tag className={`${cls} space-y-1 text-sm`} style={typoStyle(p)}>
             {items.map((it, i) => (
               <li key={i}>{it}</li>
             ))}
@@ -849,6 +1120,43 @@ export default function Designer({
         >
           <Copy className="h-3 w-3" />
         </button>
+        <button onClick={() => clipCopy("section", blocks[b])} className="px-0.5 text-accent" title={t("designer-copy")}>
+          <Clipboard className="h-3 w-3" />
+        </button>
+        <button
+          onClick={() => {
+            const data = clipRead<Block>("section");
+            if (data) mutate((bs) => bs.splice(b + 1, 0, clone(data)));
+          }}
+          disabled={!clipHas("section")}
+          className="px-0.5 text-accent disabled:opacity-30"
+          title={t("designer-paste")}
+        >
+          <ClipboardPaste className="h-3 w-3" />
+        </button>
+        <button
+          onClick={() => {
+            // rows is the section's content (children), never its "style" —
+            // stripped so pasting style elsewhere can't overwrite content.
+            const { rows: _rows, ...styleProps } = blocks[b].props as unknown as SectionProps;
+            styleCopy("section", styleProps as unknown as Record<string, string>);
+          }}
+          className="px-0.5 text-accent"
+          title={t("designer-copy-style")}
+        >
+          <Paintbrush className="h-3 w-3" />
+        </button>
+        <button
+          onClick={() => {
+            const style = styleRead("section");
+            if (style) mutate((bs) => Object.assign(bs[b].props, style));
+          }}
+          disabled={!styleHas("section")}
+          className="px-0.5 text-accent disabled:opacity-30"
+          title={t("designer-paste-style")}
+        >
+          <Paintbrush className="h-3 w-3 opacity-50" />
+        </button>
         <button
           onClick={() => {
             mutate((bs) => {
@@ -896,6 +1204,12 @@ export default function Designer({
           title="Ctrl+Shift+Z"
         >
           <Redo2 className="h-3.5 w-3.5" /> {t("designer-redo")}
+        </button>
+        <button
+          onClick={() => void openTemplates()}
+          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates")}
         </button>
         <button
           onClick={() => void preview()}
@@ -979,7 +1293,8 @@ export default function Designer({
                     style={{
                       background: sp.bgImage ? `url(${sp.bgImage}) center/cover` : sp.bg || "#ffffff",
                       color: sp.textColor || "inherit",
-                      padding: `${PAD[sp.paddingY ?? "md"]} 1.5rem`,
+                      padding: `${lengthValue(sp.paddingY, PAD, PAD.md)} ${lengthValue(sp.paddingX, PAD, "1.5rem")}`,
+                      margin: `${lengthValue(sp.marginY, PAD, "0")} 0`,
                       // Only override when the author actually picked a value —
                       // otherwise every existing section would flatten to
                       // square/shadowless corners (RADIUS.none/SHADOW.none)
@@ -1038,6 +1353,7 @@ export default function Designer({
                                   onDragOver={(ev) => ev.preventDefault()}
                                   onClick={(ev) => pick(ev, [b, r, c, e])}
                                   className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
+                                  style={el.props.marginY ? { margin: `${lengthValue(el.props.marginY, SPACE, "0")} 0` } : undefined}
                                 >
                                   {selEq([b, r, c, e]) && (
                                     <GripVertical className="absolute -left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
@@ -1092,6 +1408,54 @@ export default function Designer({
           <Inspector />
         </aside>
       </div>
+
+      {showTemplates && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
+          onClick={() => setShowTemplates(false)}
+        >
+          <div
+            className="max-h-[70vh] w-96 overflow-y-auto rounded-xl bg-white p-4 shadow-xl"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-bold text-ink">{t("designer-templates")}</p>
+              <button onClick={() => setShowTemplates(false)} className="text-body hover:text-ink">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <button
+              onClick={() => void saveAsTemplate()}
+              disabled={!sel || sel.length !== 1 || blocks[sel[0]]?.type !== "section" || templatesBusy}
+              className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
+            >
+              <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
+            </button>
+            {templates.length === 0 ? (
+              <p className="text-xs text-sub">{t("designer-templates-empty")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {templates.map((tpl) => (
+                  <li key={tpl.id} className="flex items-center justify-between rounded-lg border border-line/30 px-3 py-2">
+                    <span className="truncate text-xs font-medium text-ink">{tpl.name}</span>
+                    <span className="flex items-center gap-2">
+                      <button onClick={() => insertTemplate(tpl)} className="text-[11px] font-semibold text-accent">
+                        {t("designer-templates-insert")}
+                      </button>
+                      <button
+                        onClick={() => void deleteTemplateHandler(tpl.id)}
+                        className="text-[11px] font-semibold text-red-500"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

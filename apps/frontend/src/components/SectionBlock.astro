@@ -19,6 +19,8 @@ interface Props {
   bgImage?: string;
   textColor?: string;
   paddingY?: string;
+  paddingX?: string;
+  marginY?: string;
   width?: string;
   border?: string;
   shadow?: string;
@@ -32,6 +34,8 @@ const {
   bgImage,
   textColor,
   paddingY = "md",
+  paddingX,
+  marginY,
   width = "contained",
   border,
   shadow,
@@ -103,6 +107,31 @@ function renderInline(text: string): string {
     .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 }
 
+// Resolves a spacing value that may be either a legacy preset keyword
+// ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
+// ("42px", "2.5rem") — existing pages keep their preset look, new edits get
+// free-form units. Duplicated in Designer.tsx like every other shared table.
+function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
+  if (!v) return fallback;
+  return table[v] ?? v;
+}
+// Every element accepts a generic marginY (see Designer.tsx's Inspector).
+function marginStyle(p: Record<string, string>) {
+  return p.marginY ? `margin:${lengthValue(p.marginY, SPACE, "0")} 0` : null;
+}
+// Full typography escape hatch for heading/text/list.
+function typoStyle(p: Record<string, string>) {
+  return [
+    p.fontFamily ? `font-family:'${p.fontFamily}'` : null,
+    p.color ? `color:${p.color}` : null,
+    p.lineHeight ? `line-height:${p.lineHeight}` : null,
+    p.letterSpacing ? `letter-spacing:${p.letterSpacing}` : null,
+    p.fontWeight ? `font-weight:${p.fontWeight}` : null,
+  ]
+    .filter(Boolean)
+    .join(";");
+}
+
 // Column-level style escape hatch (Col.props) — mirrors Designer.tsx's
 // colStyle(), turning a column into a themeable "card" wrapping whatever
 // elements are dropped into it.
@@ -110,7 +139,8 @@ function colStyle(cp?: Record<string, string>) {
   if (!cp) return undefined;
   return [
     cp.bg ? `background:${cp.bg}` : null,
-    cp.padding && cp.padding !== "none" ? `padding:${PAD[cp.padding] ?? PAD.md}` : null,
+    cp.padding ? `padding:${lengthValue(cp.padding, PAD, PAD.md)}` : null,
+    cp.marginY ? `margin:${lengthValue(cp.marginY, PAD, "0")} 0` : null,
     cp.valign ? `align-self:${cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : "center"}` : null,
     cp.border ? `border:${BORDER[cp.border]}` : null,
     cp.shadow ? `box-shadow:${SHADOW[cp.shadow]}` : null,
@@ -124,7 +154,8 @@ const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" "
 const sectionStyle = [
   bgImage && safeUrl(bgImage) ? `background:url('${safeUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
   textColor ? `color:${textColor}` : null,
-  `padding:${PAD[paddingY] ?? PAD.md} 1.5rem`,
+  `padding:${lengthValue(paddingY, PAD, PAD.md)} ${lengthValue(paddingX, PAD, "1.5rem")}`,
+  `margin:${lengthValue(marginY, PAD, "0")} 0`,
   // Only override when the author actually picked a value — otherwise
   // every existing section would flatten to square/shadowless corners
   // (RADIUS.none/SHADOW.none) instead of its current default look.
@@ -153,7 +184,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return (
                     <Tag
                       class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass)}
-                      style={p.align ? `text-align:${p.align}` : undefined}
+                      style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), typoStyle(p)].filter(Boolean).join(";")}
                       set:html={p.text ? renderInline(p.text) : ""}
                     />
                   );
@@ -165,6 +196,8 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       style={[
                         `font-size:${TEXT_SIZE[p.size ?? "md"] ?? TEXT_SIZE.md}`,
                         p.align ? `text-align:${p.align}` : null,
+                        marginStyle(p),
+                        typoStyle(p),
                       ]
                         .filter(Boolean)
                         .join(";")}
@@ -181,6 +214,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       style={[
                         `border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`,
                         p.shadow ? `box-shadow:${SHADOW[p.shadow]}` : null,
+                        marginStyle(p),
                       ]
                         .filter(Boolean)
                         .join(";")}
@@ -188,7 +222,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   ) : null;
                 case "button":
                   return p.label ? (
-                    <div style={p.align ? `text-align:${p.align}` : undefined}>
+                    <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p)].filter(Boolean).join(";")}>
                       <a
                         class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass)}
                         href={safeUrl(p.href) ?? "#"}
@@ -198,15 +232,15 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                     </div>
                   ) : null;
                 case "spacer":
-                  return <div style={`height:${SPACE[p.height ?? "md"] ?? SPACE.md}`} aria-hidden="true" />;
+                  return <div style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} aria-hidden="true" />;
                 case "divider":
-                  return <hr class={cls("ds-divider", p.cssClass)} />;
+                  return <hr class={cls("ds-divider", p.cssClass)} style={marginStyle(p) ?? undefined} />;
                 case "embed":
                   return safeUrl(p.url) ? (
                     <iframe
                       class={cls("ds-embed", p.cssClass)}
                       src={safeUrl(p.url)}
-                      style={`aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`}
+                      style={[`aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`, marginStyle(p)].filter(Boolean).join(";")}
                       loading="lazy"
                       allowfullscreen
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -217,7 +251,10 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   const path = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
                   const size = ICON_SIZE[p.size ?? "md"] ?? ICON_SIZE.md;
                   return (
-                    <div class={p.cssClass} style={p.align ? `text-align:${p.align}` : undefined}>
+                    <div
+                      class={p.cssClass}
+                      style={[p.align ? `text-align:${p.align}` : null, marginStyle(p)].filter(Boolean).join(";")}
+                    >
                       <svg
                         width={size}
                         height={size}
@@ -239,7 +276,10 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   if (items.length === 0) return null;
                   const Tag = p.style === "numbered" ? "ol" : "ul";
                   return (
-                    <Tag class={cls("ds-list", p.style === "none" ? "ds-list-none" : undefined, p.cssClass)}>
+                    <Tag
+                      class={cls("ds-list", p.style === "none" ? "ds-list-none" : undefined, p.cssClass)}
+                      style={[marginStyle(p), typoStyle(p)].filter(Boolean).join(";")}
+                    >
                       {items.map((it) => (
                         <li set:html={renderInline(it)} />
                       ))}
@@ -250,7 +290,9 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   // Same trust tier as bgImage/embed src above: only an
                   // authenticated webmaster/superadmin can write page
                   // layout, so this isn't a public-input XSS surface.
-                  return p.html ? <div class={cls("ds-html", p.cssClass)} set:html={p.html} /> : null;
+                  return p.html ? (
+                    <div class={cls("ds-html", p.cssClass)} style={marginStyle(p) ?? undefined} set:html={p.html} />
+                  ) : null;
                 case "gallery": {
                   const images = (p.images ?? "")
                     .split("\n")
@@ -262,7 +304,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return (
                     <div
                       class={cls("ds-gallery", p.cssClass)}
-                      style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`}
+                      style={[`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`, marginStyle(p)].filter(Boolean).join(";")}
                     >
                       {images.map((src) => (
                         <img src={src} alt="" loading="lazy" style={`border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`} />

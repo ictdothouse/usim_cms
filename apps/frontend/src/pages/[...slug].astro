@@ -6,6 +6,7 @@ import ImageBlock from "../components/ImageBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
 import { getPageBySlug, getTheme } from "../lib/api";
+import { collectFonts } from "../lib/collectFonts";
 
 // Single instance, ~50 real department domains: tenant identity is always
 // the request's Host header, never subdomain parsing or build-time config
@@ -34,8 +35,9 @@ if (!page) {
   return new Response("Not found", { status: 404 });
 }
 const theme = await getTheme(tenantHost);
+const fonts = collectFonts(page.layout);
 ---
-<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme}>
+<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts}>
   {page.layout.map((block) => {
     switch (block.type) {
       case "section":
