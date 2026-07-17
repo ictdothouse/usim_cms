@@ -1,0 +1,35 @@
+# Reverse proxy for the whole stack. Default behaviour: Caddy auto-issues
+# and auto-renews a Let's Encrypt certificate for every domain listed below
+# the first time it's requested — no manual cert steps needed for USIM's own
+# subdomains.
+#
+# Only for local trial without a real domain (ADMIN_DOMAIN=localhost etc.):
+# Caddy falls back to an internal self-signed cert, browser will warn once.
+
+{$ADMIN_DOMAIN:admin.localhost} {
+	reverse_proxy admin:80
+}
+
+{$API_DOMAIN:api.localhost} {
+	reverse_proxy api:3000
+}
+
+# Tenant sites (the actual department/faculty websites). Add every live
+# tenant host to TENANT_DOMAINS in .env, space-separated — Caddy treats each
+# token on this line as its own site, all sharing this block. Host header is
+# preserved by reverse_proxy, which is how apps/frontend resolves the tenant
+# (see CLAUDE.md's Multi-tenancy section) — do not rewrite it here.
+{$TENANT_DOMAINS:tenant.localhost} {
+	reverse_proxy frontend:4321
+}
+
+# --- Bringing your own SSL certificate instead of Caddy's automatic one -----
+# If USIM's ICT centre issues its own certificate for a department domain
+# (the cPanel-style flow), replace the matching block above with one like
+# this, and mount the cert files into the proxy service (see the commented
+# volume line in docker-compose.yml):
+#
+# cs.usim.edu.my {
+# 	tls /etc/caddy/certs/cs.usim.edu.my.crt /etc/caddy/certs/cs.usim.edu.my.key
+# 	reverse_proxy frontend:4321
+# }

@@ -81,10 +81,38 @@ pnpm workspace monorepo with two apps:
   `type` (`hero` → `HeroBlock`, anything else → `GenericBlock` fallback — add a new `<TypeBlock>.astro`
   and a case in the page's switch as the admin block builder grows real block types).
 
+## Deployment
+
+- `docker-compose.yml` runs the whole stack: `db` (Postgres, runs
+  `scripts/setup-db-role.sql` once via `docker-entrypoint-initdb.d` to create the
+  `usim_cms_app` role), `api`, `frontend`, `admin` (static SPA served by nginx inside its
+  own image, see `apps/admin/Dockerfile`), and `proxy`. Each service has a healthcheck;
+  `depends_on: condition: service_healthy` sequences the startup order.
+- `proxy` (`caddy:2-alpine`, config in `./Caddyfile`) is the public-facing reverse proxy
+  and TLS terminator. Default behavior: automatic Let's Encrypt issuance/renewal for
+  every domain in `ADMIN_DOMAIN`/`API_DOMAIN`/`TENANT_DOMAINS` (`.env.example`) — no
+  manual cert steps. To use a certificate USIM's ICT centre issues instead (the
+  cPanel-style flow), swap the matching `Caddyfile` site block to a `tls <cert> <key>`
+  directive and mount the cert files in via the commented `./certs` volume on `proxy`.
+  `TENANT_DOMAINS` needs a live tenant's host added to it before that department's site
+  is reachable through the proxy.
+- Tenant backup/restore/migration is `apps/api/src/backup.ts`, not `pg_dump`: JSON dump
+  of a tenant's rows + its local uploads, zipped — restores across Postgres versions and
+  onto a different server/host (rewrites `/uploads/<host>/` references on cross-host
+  restore, which is how the admin's site-clone feature works). `exportStaticSite` renders
+  every page/post through the real running frontend and bundles the HTML + assets for a
+  static-host handover.
+- `apps/api/scripts/backup.sh` is the instance-level counterpart: `pg_dump` (whole
+  control-plane + tenant DBs, or a specific tenant's schema by host), meant to run on a
+  cron job (`RETENTION_DAYS` prunes old dumps, defaults 14).
+- Monitoring/alerting is not implemented — known gap. `restart: unless-stopped` +
+  compose healthchecks only cover crash-restart, not metrics or alerting; revisit if/when
+  the instance carries enough tenants that a silent outage would go unnoticed.
+
 ## Key constraints (from architecture.md)
 
 - Single instance, not one deployment per tenant — tenant identity always comes from the
   `x-tenant-host` header, never from subdomain parsing or config at boot.
 - Avoid heavy dependencies; prefer Tailwind + lightweight Fastify plugins over pulling in a framework.
 - New collections should be added as `CollectionConfig` objects registered through
-  `registerCollectionRoutes`, not as one-off Fastify route files.
+  `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes`, not as one-off Fastify route files.

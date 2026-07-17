@@ -70,6 +70,32 @@ services:
     ports:
       - "5173:80"
 
+  # Public-facing reverse proxy + TLS. Auto-issues/renews Let's Encrypt certs
+  # for ADMIN_DOMAIN/API_DOMAIN/TENANT_DOMAINS (see .env.example) by default —
+  # swap a site block in ./Caddyfile to `tls <cert> <key>` and uncomment the
+  # ./certs mount below if USIM ICT provides its own certificate instead.
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - admin
+      - api
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-admin.localhost}
+      API_DOMAIN: ${API_DOMAIN:-api.localhost}
+      TENANT_DOMAINS: ${TENANT_DOMAINS:-tenant.localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      # - ./certs:/etc/caddy/certs:ro
+
 volumes:
   db-data:
   api-uploads:
+  caddy-data:
+  caddy-config:
