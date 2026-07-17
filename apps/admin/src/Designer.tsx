@@ -1,32 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AlignLeft,
+  AlignVerticalJustifyCenter,
+  Anchor,
   ArrowLeft,
   ArrowRight,
+  Baseline,
+  Blend,
+  Bold,
   Calendar,
+  CaseSensitive,
   Check,
   ChevronRight,
   Clipboard,
   ClipboardPaste,
   Clock,
   Code2,
+  Columns,
   Copy,
   Download,
   ExternalLink,
+  Frame,
   GripVertical,
+  Hash,
   Heading1,
   Image as ImageIcon,
   Images,
   LayoutTemplate,
+  Link,
   List,
   Mail,
   MapPin,
+  Maximize2,
   Minus,
   MousePointerClick,
+  MoveHorizontal,
   MoveVertical,
   Paintbrush,
+  Palette,
+  Pencil,
   Phone,
   Plus,
+  RectangleHorizontal,
   Redo2,
+  Ruler,
+  SlidersHorizontal,
+  Square,
+  SquareDashedBottom,
   Star,
   Trash2,
   Type,
@@ -95,12 +115,67 @@ interface Block {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery";
+type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery" | "length" | "icon";
 interface Field {
   key: string;
   labelKey: Key;
   kind: FieldKind;
   options?: string[];
+}
+
+// One glyph per field label, so the inspector reads at a glance instead of
+// requiring every label to be sounded out — same "icon + short label" idea
+// Puck uses throughout its own field list. Not exhaustive on purpose: a field
+// with no obvious universal glyph (e.g. free-text href/url) just shows text.
+const FIELD_ICONS: Partial<Record<Key, typeof Check>> = {
+  "designer-s-bg": PaintBucket,
+  "designer-s-bgimage": ImageIcon,
+  "designer-s-textcolor": Palette,
+  "designer-s-padding": Frame,
+  "designer-f-padding": Frame,
+  "designer-f-paddingx": Frame,
+  "designer-f-marginy": MoveVertical,
+  "designer-s-width": RectangleHorizontal,
+  "designer-s-border": Square,
+  "designer-s-shadow": Blend,
+  "designer-f-radius": SquareDashedBottom,
+  "designer-f-anchorid": Anchor,
+  "designer-f-cssclass": Hash,
+  "designer-f-valign": AlignVerticalJustifyCenter,
+  "designer-col-span": Columns,
+  "designer-f-text": Type,
+  "designer-f-level": Heading1,
+  "designer-f-align": AlignLeft,
+  "designer-f-size": Ruler,
+  "designer-f-src": ImageIcon,
+  "designer-f-alt": CaseSensitive,
+  "designer-f-label": Type,
+  "designer-f-href": Link,
+  "designer-f-variant": SlidersHorizontal,
+  "designer-f-height": MoveVertical,
+  "designer-f-url": Link,
+  "designer-f-ratio": RectangleHorizontal,
+  "designer-f-icon-name": Star,
+  "designer-f-icon-size": Maximize2,
+  "designer-f-icon-color": Palette,
+  "designer-f-list-items": List,
+  "designer-f-list-style": List,
+  "designer-f-html": Code2,
+  "designer-f-gallery-images": Images,
+  "designer-f-gallery-columns": Columns,
+  "designer-f-fontfamily": Baseline,
+  "designer-f-lineheight": MoveVertical,
+  "designer-f-letterspacing": MoveHorizontal,
+  "designer-f-fontweight": Bold,
+};
+function FieldLabel(labelKey: Key, t: (k: Key) => string) {
+  const Icon = FIELD_ICONS[labelKey];
+  return (
+    <>
+      {Icon && <Icon className="mr-1 inline-block h-3 w-3 shrink-0 -translate-y-px align-middle text-sub" />}
+      {t(labelKey)}
+    </>
+  );
 }
 
 // Curated icon set — SectionBlock.astro hardcodes the matching raw SVG path
@@ -147,10 +222,10 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
   text: {
     labelKey: "designer-el-text",
     icon: Type,
-    defaults: { text: "", size: "md", align: "left" },
+    defaults: { text: "", size: "1rem", align: "left" },
     fields: [
       { key: "text", labelKey: "designer-f-text", kind: "textarea" },
-      { key: "size", labelKey: "designer-f-size", kind: "select", options: ["sm", "md", "lg"] },
+      { key: "size", labelKey: "designer-f-size", kind: "length" },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
       ...TYPOGRAPHY_FIELDS,
     ],
@@ -198,7 +273,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
     icon: Star,
     defaults: { name: "check", size: "md", color: "", align: "left" },
     fields: [
-      { key: "name", labelKey: "designer-f-icon-name", kind: "select", options: Object.keys(ICONS) },
+      { key: "name", labelKey: "designer-f-icon-name", kind: "icon", options: Object.keys(ICONS) },
       { key: "size", labelKey: "designer-f-icon-size", kind: "select", options: ["sm", "md", "lg", "xl"] },
       { key: "color", labelKey: "designer-f-icon-color", kind: "color" },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
@@ -406,6 +481,7 @@ export default function Designer({
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const history = useRef<Block[][]>([]);
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
@@ -472,6 +548,20 @@ export default function Designer({
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
 
   async function openTemplates() {
     setShowTemplates(true);
@@ -619,13 +709,20 @@ export default function Designer({
   // direct response to the click or popup blockers eat it.
   async function preview() {
     const win = window.open("", "_blank", "noreferrer");
+    if (!win) {
+      // window.open silently returns null when the browser's popup blocker
+      // eats it — without this check, clicking Preview looks like nothing
+      // happened at all, with no error and no new tab.
+      setError(t("designer-preview-blocked"));
+      return;
+    }
     try {
       if (dirty) await save();
       const previewToken =
         page.status === "published" ? undefined : await api.getPagePreviewToken(tenantHost, token, page.id as string);
-      if (win) win.location.href = api.previewUrl(tenantHost, page.slug as string, previewToken);
+      win.location.href = api.previewUrl(tenantHost, page.slug as string, previewToken);
     } catch (err) {
-      win?.close();
+      win.close();
       setError((err as Error).message);
     }
   }
@@ -708,6 +805,55 @@ export default function Designer({
           {value && <img src={value} alt="" className="h-16 rounded-lg object-cover" />}
         </div>
       );
+    if (field.kind === "length") {
+      const m = value.match(/^(-?\d*\.?\d+)(px|%|em|rem)$/);
+      const num = m ? m[1] : "";
+      const unit = m ? m[2] : "px";
+      return (
+        <div className="flex gap-2">
+          <input
+            type="number"
+            step={unit === "em" || unit === "rem" ? 0.05 : 1}
+            className={base}
+            value={num}
+            onChange={(e) => onChange(e.target.value === "" ? "" : `${e.target.value}${unit}`)}
+          />
+          <select
+            className={`${base} w-20 shrink-0`}
+            value={unit}
+            onChange={(e) => onChange(`${num || "0"}${e.target.value}`)}
+          >
+            {["px", "%", "em", "rem"].map((u) => (
+              <option key={u} value={u}>
+                {u}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    if (field.kind === "icon")
+      return (
+        <div className="grid grid-cols-4 gap-1.5 rounded-lg border border-line/30 bg-canvas p-1.5">
+          {(field.options ?? []).map((name) => {
+            const Icon = ICONS[name] ?? Check;
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => onChange(name)}
+                title={name}
+                className={`flex flex-col items-center gap-1 rounded-md p-1.5 text-[9px] ${
+                  value === name ? "bg-accent/15 font-semibold text-accent" : "text-body hover:bg-white"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="w-full truncate text-center">{name}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
     if (field.kind === "gallery") {
       const urls = value ? value.split("\n").filter(Boolean) : [];
       const setUrls = (next: string[]) => onChange(next.join("\n"));
@@ -764,13 +910,13 @@ export default function Designer({
           <p className="text-xs font-bold text-ink">{t("designer-section")}</p>
           {SECTION_FIELDS.map((f) => (
             <label key={f.key} className="block text-[11px] font-medium text-body">
-              {t(f.labelKey)}
+              {FieldLabel(f.labelKey, t)}
               <div className="mt-1">
-                <FieldInput
-                  field={f}
-                  value={((sp as unknown as Record<string, string>)[f.key] as string) ?? ""}
-                  onChange={(v) => mutate((bs) => ((bs[b].props as Record<string, unknown>)[f.key] = v))}
-                />
+                {FieldInput({
+                  field: f,
+                  value: ((sp as unknown as Record<string, string>)[f.key] as string) ?? "",
+                  onChange: (v) => mutate((bs) => ((bs[b].props as Record<string, unknown>)[f.key] = v)),
+                })}
               </div>
             </label>
           ))}
@@ -784,7 +930,7 @@ export default function Designer({
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t("designer-column")}</p>
           <label className="block text-[11px] font-medium text-body">
-            {t("designer-col-span")}: {col.span}
+            {FieldLabel("designer-col-span", t)}: {col.span}
             <input
               type="range"
               min={1}
@@ -796,18 +942,17 @@ export default function Designer({
           </label>
           {COLUMN_FIELDS.map((f) => (
             <label key={f.key} className="block text-[11px] font-medium text-body">
-              {t(f.labelKey)}
+              {FieldLabel(f.labelKey, t)}
               <div className="mt-1">
-                <FieldInput
-                  field={f}
-                  value={col.props?.[f.key] ?? ""}
-                  onChange={(v) =>
+                {FieldInput({
+                  field: f,
+                  value: col.props?.[f.key] ?? "",
+                  onChange: (v) =>
                     mutate((bs) => {
                       const target = section(bs, b).rows[r].columns[c];
                       target.props = { ...(target.props ?? {}), [f.key]: v };
-                    })
-                  }
-                />
+                    }),
+                })}
               </div>
             </label>
           ))}
@@ -874,34 +1019,34 @@ export default function Designer({
           <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
           {def.fields.map((f) => (
             <label key={f.key} className="block text-[11px] font-medium text-body">
-              {t(f.labelKey)}
+              {FieldLabel(f.labelKey, t)}
               <div className="mt-1">
-                <FieldInput
-                  field={f}
-                  value={el.props[f.key] ?? ""}
-                  onChange={(v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props[f.key] = v))}
-                />
+                {FieldInput({
+                  field: f,
+                  value: el.props[f.key] ?? "",
+                  onChange: (v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props[f.key] = v)),
+                })}
               </div>
             </label>
           ))}
           <label className="block text-[11px] font-medium text-body">
-            {t("designer-f-cssclass")}
+            {FieldLabel("designer-f-cssclass", t)}
             <div className="mt-1">
-              <FieldInput
-                field={{ key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" }}
-                value={el.props.cssClass ?? ""}
-                onChange={(v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.cssClass = v))}
-              />
+              {FieldInput({
+                field: { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+                value: el.props.cssClass ?? "",
+                onChange: (v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.cssClass = v)),
+              })}
             </div>
           </label>
           <label className="block text-[11px] font-medium text-body">
-            {t("designer-f-marginy")}
+            {FieldLabel("designer-f-marginy", t)}
             <div className="mt-1">
-              <FieldInput
-                field={{ key: "marginY", labelKey: "designer-f-marginy", kind: "text" }}
-                value={el.props.marginY ?? ""}
-                onChange={(v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.marginY = v))}
-              />
+              {FieldInput({
+                field: { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
+                value: el.props.marginY ?? "",
+                onChange: (v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.marginY = v)),
+              })}
             </div>
           </label>
           <div className="flex flex-wrap gap-3">
@@ -988,11 +1133,11 @@ export default function Designer({
       case "text":
         return p.text ? (
           <div
-            style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"], whiteSpace: "pre-wrap", lineHeight: 1.65, ...typoStyle(p) }}
+            style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap", lineHeight: 1.65, ...typoStyle(p) }}
             dangerouslySetInnerHTML={{ __html: renderInline(p.text) }}
           />
         ) : (
-          <div style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"] }} className="opacity-40">
+          <div style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md) }} className="opacity-40">
             {t("designer-f-text")}…
           </div>
         );
@@ -1277,7 +1422,7 @@ export default function Designer({
                     <span className="font-semibold text-sub">
                       {t("designer-legacy")}: {block.type}
                     </span>
-                    <BlockControls b={b} />
+                    {BlockControls({ b })}
                   </div>
                 );
               }
@@ -1286,7 +1431,7 @@ export default function Designer({
               return (
                 <div key={b} className={`group relative rounded-xl ${selCls([b])}`} onClick={(ev) => pick(ev, [b])}>
                   <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
-                    {t("designer-section")} <BlockControls b={b} />
+                    {t("designer-section")} {BlockControls({ b })}
                   </div>
                   <div
                     className="overflow-hidden rounded-xl border border-line/20"
@@ -1352,13 +1497,19 @@ export default function Designer({
                                   }}
                                   onDragOver={(ev) => ev.preventDefault()}
                                   onClick={(ev) => pick(ev, [b, r, c, e])}
+                                  onContextMenu={(ev) => {
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    setSel([b, r, c, e]);
+                                    setCtxMenu({ path: [b, r, c, e], x: ev.clientX, y: ev.clientY });
+                                  }}
                                   className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
                                   style={el.props.marginY ? { margin: `${lengthValue(el.props.marginY, SPACE, "0")} 0` } : undefined}
                                 >
                                   {selEq([b, r, c, e]) && (
                                     <GripVertical className="absolute -left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
                                   )}
-                                  <ElPreview el={el} />
+                                  {ElPreview({ el })}
                                 </div>
                               ))}
                             </div>
@@ -1405,7 +1556,7 @@ export default function Designer({
         {/* inspector */}
         <aside className="w-64 shrink-0 overflow-y-auto border-l border-line/30 bg-white p-4">
           <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
-          <Inspector />
+          {Inspector()}
         </aside>
       </div>
 
@@ -1456,6 +1607,64 @@ export default function Designer({
           </div>
         </div>
       )}
+
+      {ctxMenu &&
+        (() => {
+          const [b, r, c, e] = ctxMenu.path;
+          const el = section(blocks, b).rows[r]?.columns[c]?.elements[e];
+          if (!el) return null;
+          const item = (icon: React.ReactNode, label: string, onClick: () => void, disabled?: boolean) => (
+            <button
+              onClick={() => {
+                onClick();
+                setCtxMenu(null);
+              }}
+              disabled={disabled}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-ink hover:bg-canvas disabled:opacity-30"
+            >
+              {icon}
+              {label}
+            </button>
+          );
+          return (
+            <div
+              className="fixed z-[70] w-44 overflow-hidden rounded-lg border border-line/30 bg-white py-1 shadow-xl"
+              style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b, r, c, e]))}
+              {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () =>
+                mutate((bs) => insertEl(bs, [b, r, c], { ...clone(el), id: uid() }, e + 1)),
+              )}
+              {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => clipCopy("element", el))}
+              {item(
+                <ClipboardPaste className="h-3.5 w-3.5" />,
+                t("designer-paste"),
+                () => {
+                  const data = clipRead<El>("element");
+                  if (data) mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+                },
+                !clipHas("element"),
+              )}
+              {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () =>
+                styleCopy("element", el.props, el.type),
+              )}
+              {item(
+                <Paintbrush className="h-3.5 w-3.5 opacity-50" />,
+                t("designer-paste-style"),
+                () => {
+                  const style = styleRead("element");
+                  if (style)
+                    mutate((bs) => {
+                      const target = section(bs, b).rows[r].columns[c].elements[e];
+                      target.props = { ...target.props, ...style };
+                    });
+                },
+                !styleHas("element"),
+              )}
+            </div>
+          );
+        })()}
     </div>
   );
 }

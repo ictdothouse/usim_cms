@@ -194,7 +194,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                     <p
                       class={cls("ds-text", p.cssClass)}
                       style={[
-                        `font-size:${TEXT_SIZE[p.size ?? "md"] ?? TEXT_SIZE.md}`,
+                        `font-size:${lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md)}`,
                         p.align ? `text-align:${p.align}` : null,
                         marginStyle(p),
                         typoStyle(p),
