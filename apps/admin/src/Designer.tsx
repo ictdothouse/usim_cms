@@ -1,14 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
+  Calendar,
+  Check,
+  ChevronRight,
+  Clock,
+  Code2,
   Copy,
+  Download,
   ExternalLink,
   GripVertical,
   Heading1,
   Image as ImageIcon,
+  Images,
+  List,
+  Mail,
+  MapPin,
   Minus,
   MousePointerClick,
   MoveVertical,
+  Phone,
   Plus,
+  Redo2,
+  Star,
   Trash2,
   Type,
   Undo2,
@@ -24,7 +39,18 @@ import type { Key } from "@/i18n";
 // Legacy blocks (hero/text/image from the old BlockBuilder) are kept as-is and
 // shown as locked cards — the frontend still renders them.
 
-type ElType = "heading" | "text" | "image" | "button" | "spacer" | "divider" | "embed";
+type ElType =
+  | "heading"
+  | "text"
+  | "image"
+  | "button"
+  | "spacer"
+  | "divider"
+  | "embed"
+  | "icon"
+  | "list"
+  | "html"
+  | "gallery";
 
 interface El {
   id: string;
@@ -34,6 +60,10 @@ interface El {
 interface Col {
   span: number;
   elements: El[];
+  // Column-level style escape hatch — see COLUMN_FIELDS. Kept as a loose
+  // string bag (not a typed interface) to match El.props/SectionProps'
+  // convention of storing style values as plain strings.
+  props?: Record<string, string>;
 }
 interface Row {
   columns: Col[];
@@ -44,6 +74,11 @@ interface SectionProps {
   textColor?: string;
   paddingY?: string;
   width?: string;
+  border?: string;
+  shadow?: string;
+  radius?: string;
+  anchorId?: string;
+  cssClass?: string;
   rows: Row[];
 }
 interface Block {
@@ -54,13 +89,31 @@ interface Block {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-type FieldKind = "text" | "textarea" | "select" | "color" | "image";
+type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery";
 interface Field {
   key: string;
   labelKey: Key;
   kind: FieldKind;
   options?: string[];
 }
+
+// Curated icon set — SectionBlock.astro hardcodes the matching raw SVG path
+// for each of these names (no lucide-react dependency on the frontend); add
+// to both places together.
+const ICONS: Record<string, typeof Check> = {
+  check: Check,
+  "arrow-right": ArrowRight,
+  "arrow-left": ArrowLeft,
+  star: Star,
+  phone: Phone,
+  mail: Mail,
+  "map-pin": MapPin,
+  calendar: Calendar,
+  clock: Clock,
+  "external-link": ExternalLink,
+  "chevron-right": ChevronRight,
+  download: Download,
+};
 
 const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<string, string>; fields: Field[] }> = {
   heading: {
@@ -91,6 +144,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "src", labelKey: "designer-f-src", kind: "image" },
       { key: "alt", labelKey: "designer-f-alt", kind: "text" },
       { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
     ],
   },
   button: {
@@ -120,6 +174,45 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "ratio", labelKey: "designer-f-ratio", kind: "select", options: ["16:9", "4:3", "1:1"] },
     ],
   },
+  icon: {
+    labelKey: "designer-el-icon",
+    icon: Star,
+    defaults: { name: "check", size: "md", color: "", align: "left" },
+    fields: [
+      { key: "name", labelKey: "designer-f-icon-name", kind: "select", options: Object.keys(ICONS) },
+      { key: "size", labelKey: "designer-f-icon-size", kind: "select", options: ["sm", "md", "lg", "xl"] },
+      { key: "color", labelKey: "designer-f-icon-color", kind: "color" },
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+    ],
+  },
+  list: {
+    labelKey: "designer-el-list",
+    icon: List,
+    defaults: { items: "", style: "bullet" },
+    fields: [
+      { key: "items", labelKey: "designer-f-list-items", kind: "textarea" },
+      { key: "style", labelKey: "designer-f-list-style", kind: "select", options: ["bullet", "numbered", "none"] },
+    ],
+  },
+  html: {
+    labelKey: "designer-el-html",
+    icon: Code2,
+    // Pairs with cssClass on section/column/element (see COLUMN_FIELDS):
+    // there's no separate site-wide custom-CSS field, so a <style> tag
+    // dropped in here is how a cssClass actually gets styled.
+    defaults: { html: "" },
+    fields: [{ key: "html", labelKey: "designer-f-html", kind: "textarea" }],
+  },
+  gallery: {
+    labelKey: "designer-el-gallery",
+    icon: Images,
+    defaults: { images: "", columns: "3", radius: "md" },
+    fields: [
+      { key: "images", labelKey: "designer-f-gallery-images", kind: "gallery" },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+      { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
+    ],
+  },
 };
 
 const SECTION_FIELDS: Field[] = [
@@ -128,13 +221,39 @@ const SECTION_FIELDS: Field[] = [
   { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
   { key: "paddingY", labelKey: "designer-s-padding", kind: "select", options: ["sm", "md", "lg", "xl"] },
   { key: "width", labelKey: "designer-s-width", kind: "select", options: ["contained", "full"] },
+  { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
+  { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
+  { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
+  { key: "anchorId", labelKey: "designer-f-anchorid", kind: "text" },
+  { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
 ];
 
-const PAD: Record<string, string> = { sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
+// Column-level style escape hatch (see Col.props) — a column becomes a
+// themeable "card" once bg/padding/border/shadow/radius are set, covering
+// what would otherwise need a dedicated Card/Testimonial element.
+const COLUMN_FIELDS: Field[] = [
+  { key: "bg", labelKey: "designer-s-bg", kind: "color" },
+  { key: "padding", labelKey: "designer-f-padding", kind: "select", options: ["none", "sm", "md", "lg", "xl"] },
+  { key: "valign", labelKey: "designer-f-valign", kind: "select", options: ["top", "center", "bottom"] },
+  { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
+  { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
+  { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
+  { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+];
+
+const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
 const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
 const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
+const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
+const SHADOW: Record<string, string> = {
+  none: "none",
+  sm: "0 1px 3px rgba(0,0,0,.1)",
+  md: "0 4px 12px rgba(0,0,0,.12)",
+  lg: "0 12px 32px rgba(0,0,0,.16)",
+};
+const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
 
 // Row presets offered by "add row": each entry is the column span list.
 const ROW_PRESETS: number[][] = [[1], [1, 1], [1, 1, 1], [1, 1, 1, 1], [1, 2], [2, 1]];
@@ -150,6 +269,42 @@ type Sel = number[] | null;
 
 // drag payload: a new palette element, or a move of an existing one
 type Drag = { kind: "new"; type: ElType } | { kind: "move"; path: number[] };
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }) as Record<string, string>)[c]);
+}
+function safeHref(u: string) {
+  const v = u.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : "#";
+  return v;
+}
+// Small inline-markdown subset for heading/text: **bold**, *italic*, [label](url).
+// Duplicated (not shared) in SectionBlock.astro's own renderInline — same
+// convention as this file's PAD/RADIUS tables mirroring the frontend's.
+// ponytail: link regex stops at the first ")" in the URL, so a raw
+// unescaped "(" / ")" inside the URL itself truncates it — fine for normal
+// links/anchors, encode the parens if it ever matters.
+function renderInline(text: string): string {
+  return escapeHtml(text)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, url) => `<a href="${safeHref(url)}">${label}</a>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+// Approximates a column's COLUMN_FIELDS in the canvas, mirroring the "card"
+// styling SectionBlock.astro applies to .ds-col — same only-if-set guard as
+// the section wrapper above so unstyled columns keep their plain layout.
+function colStyle(cp?: Record<string, string>): React.CSSProperties {
+  if (!cp) return {};
+  return {
+    background: cp.bg || undefined,
+    padding: cp.padding && cp.padding !== "none" ? PAD[cp.padding] : undefined,
+    alignSelf: cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : cp.valign === "center" ? "center" : undefined,
+    border: cp.border ? BORDER[cp.border] : undefined,
+    boxShadow: cp.shadow ? SHADOW[cp.shadow] : undefined,
+    borderRadius: cp.radius ? RADIUS[cp.radius] : undefined,
+  };
+}
 
 export default function Designer({
   page,
@@ -174,11 +329,13 @@ export default function Designer({
   const [uploading, setUploading] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
   const history = useRef<Block[][]>([]);
+  const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
 
   function mutate(fn: (next: Block[]) => void) {
     history.current.push(clone(blocks));
     if (history.current.length > 50) history.current.shift();
+    future.current = [];
     const next = clone(blocks);
     fn(next);
     setBlocks(next);
@@ -188,16 +345,34 @@ export default function Designer({
   function undo() {
     const prev = history.current.pop();
     if (!prev) return;
+    future.current.push(clone(blocks));
     setBlocks(prev);
+    setSel(null);
+    setDirty(true);
+  }
+
+  function redo() {
+    const next = future.current.pop();
+    if (!next) return;
+    history.current.push(clone(blocks));
+    setBlocks(next);
     setSel(null);
     setDirty(true);
   }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && e.shiftKey) {
+        e.preventDefault();
+        redo();
+      } else if (key === "z") {
         e.preventDefault();
         undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        redo();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -350,6 +525,46 @@ export default function Designer({
           {value && <img src={value} alt="" className="h-16 rounded-lg object-cover" />}
         </div>
       );
+    if (field.kind === "gallery") {
+      const urls = value ? value.split("\n").filter(Boolean) : [];
+      const setUrls = (next: string[]) => onChange(next.join("\n"));
+      return (
+        <div className="space-y-2">
+          {urls.map((u, i) => (
+            <div key={i} className="flex items-center gap-2">
+              {u && <img src={u} alt="" className="h-9 w-9 rounded object-cover" />}
+              <input
+                className={base}
+                value={u}
+                placeholder="https://"
+                onChange={(e) => setUrls(urls.map((x, j) => (j === i ? e.target.value : x)))}
+              />
+              <label className="cursor-pointer text-[10px] font-semibold text-accent">
+                {uploading ? t("designer-uploading") : t("designer-upload")}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadImage(f, (v) => setUrls(urls.map((x, j) => (j === i ? v : x))));
+                  }}
+                />
+              </label>
+              <button
+                onClick={() => setUrls(urls.filter((_, j) => j !== i))}
+                className="text-[10px] font-semibold text-red-500"
+              >
+                {t("designer-gallery-remove")}
+              </button>
+            </div>
+          ))}
+          <button onClick={() => setUrls([...urls, ""])} className="text-[11px] font-semibold text-accent">
+            {t("designer-gallery-add-image")}
+          </button>
+        </div>
+      );
+    }
     return <input className={base} value={value} onChange={(e) => onChange(e.target.value)} />;
   }
 
@@ -396,6 +611,23 @@ export default function Designer({
               onChange={(ev) => mutate((bs) => (section(bs, b).rows[r].columns[c].span = Number(ev.target.value)))}
             />
           </label>
+          {COLUMN_FIELDS.map((f) => (
+            <label key={f.key} className="block text-[11px] font-medium text-body">
+              {t(f.labelKey)}
+              <div className="mt-1">
+                <FieldInput
+                  field={f}
+                  value={col.props?.[f.key] ?? ""}
+                  onChange={(v) =>
+                    mutate((bs) => {
+                      const target = section(bs, b).rows[r].columns[c];
+                      target.props = { ...(target.props ?? {}), [f.key]: v };
+                    })
+                  }
+                />
+              </div>
+            </label>
+          ))}
           <button
             onClick={() => {
               mutate((bs) => {
@@ -431,6 +663,16 @@ export default function Designer({
               </div>
             </label>
           ))}
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-f-cssclass")}
+            <div className="mt-1">
+              <FieldInput
+                field={{ key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" }}
+                value={el.props.cssClass ?? ""}
+                onChange={(v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.cssClass = v))}
+              />
+            </div>
+          </label>
           <div className="flex gap-3">
             <button
               onClick={() =>
@@ -468,19 +710,30 @@ export default function Designer({
     switch (el.type) {
       case "heading":
         return (
-          <div style={{ ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2 }} className="font-display">
-            {p.text || "Heading"}
-          </div>
+          <div
+            style={{ ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2 }}
+            className="font-display"
+            dangerouslySetInnerHTML={{ __html: p.text ? renderInline(p.text) : "Heading" }}
+          />
         );
       case "text":
-        return (
-          <div style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"], whiteSpace: "pre-wrap", lineHeight: 1.65 }}>
-            {p.text || <span className="opacity-40">{t("designer-f-text")}…</span>}
+        return p.text ? (
+          <div
+            style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"], whiteSpace: "pre-wrap", lineHeight: 1.65 }}
+            dangerouslySetInnerHTML={{ __html: renderInline(p.text) }}
+          />
+        ) : (
+          <div style={{ ...align, fontSize: TEXT_SIZE[p.size ?? "md"] }} className="opacity-40">
+            {t("designer-f-text")}…
           </div>
         );
       case "image":
         return p.src ? (
-          <img src={p.src} alt={p.alt ?? ""} style={{ borderRadius: RADIUS[p.radius ?? "md"], maxWidth: "100%" }} />
+          <img
+            src={p.src}
+            alt={p.alt ?? ""}
+            style={{ borderRadius: RADIUS[p.radius ?? "md"], boxShadow: SHADOW[p.shadow ?? "none"], maxWidth: "100%" }}
+          />
         ) : (
           <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
             <ImageIcon className="h-6 w-6" />
@@ -512,6 +765,62 @@ export default function Designer({
             <span className="max-w-[80%] truncate text-xs">{p.url || t("designer-f-url")}</span>
           </div>
         );
+      case "icon": {
+        const Icon = ICONS[p.name ?? "check"] ?? Check;
+        const size = ICON_SIZE[p.size ?? "md"];
+        return (
+          <div style={align}>
+            <Icon style={{ width: size, height: size, color: p.color || undefined }} />
+          </div>
+        );
+      }
+      case "list": {
+        const items = (p.items ?? "").split("\n").filter(Boolean);
+        if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-list-items")}…</span>;
+        const cls =
+          p.style === "none" ? "list-none" : p.style === "numbered" ? "list-decimal pl-5" : "list-disc pl-5";
+        const Tag = p.style === "numbered" ? "ol" : "ul";
+        return (
+          <Tag className={`${cls} space-y-1 text-sm`}>
+            {items.map((it, i) => (
+              <li key={i}>{it}</li>
+            ))}
+          </Tag>
+        );
+      }
+      case "html":
+        // Not rendered live here (admin's own session token lives in this
+        // page — unlike the public frontend render, executing arbitrary
+        // author HTML in this tab is a needless risk). Real render happens
+        // in SectionBlock.astro.
+        return (
+          <div className="flex h-16 items-center gap-2 rounded-lg border border-dashed border-line/40 bg-canvas/50 px-3 text-[11px] text-sub">
+            <Code2 className="h-4 w-4 shrink-0" />
+            {p.html ? t("designer-el-html") : `${t("designer-el-html")}…`}
+          </div>
+        );
+      case "gallery": {
+        const images = (p.images ?? "").split("\n").filter(Boolean);
+        if (images.length === 0)
+          return (
+            <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
+              <Images className="h-6 w-6" />
+            </div>
+          );
+        return (
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${p.columns ?? "3"}, 1fr)` }}>
+            {images.map((src, i) => (
+              <img
+                key={i}
+                src={src}
+                alt=""
+                className="aspect-square w-full object-cover"
+                style={{ borderRadius: RADIUS[p.radius ?? "md"] }}
+              />
+            ))}
+          </div>
+        );
+      }
     }
   }
 
@@ -580,6 +889,13 @@ export default function Designer({
           title="Ctrl+Z"
         >
           <Undo2 className="h-3.5 w-3.5" /> {t("designer-undo")}
+        </button>
+        <button
+          onClick={redo}
+          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+          title="Ctrl+Shift+Z"
+        >
+          <Redo2 className="h-3.5 w-3.5" /> {t("designer-redo")}
         </button>
         <button
           onClick={() => void preview()}
@@ -664,6 +980,13 @@ export default function Designer({
                       background: sp.bgImage ? `url(${sp.bgImage}) center/cover` : sp.bg || "#ffffff",
                       color: sp.textColor || "inherit",
                       padding: `${PAD[sp.paddingY ?? "md"]} 1.5rem`,
+                      // Only override when the author actually picked a value —
+                      // otherwise every existing section would flatten to
+                      // square/shadowless corners (RADIUS.none/SHADOW.none)
+                      // instead of keeping this wrapper's own default look.
+                      ...(sp.border ? { border: BORDER[sp.border] } : {}),
+                      ...(sp.shadow ? { boxShadow: SHADOW[sp.shadow] } : {}),
+                      ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
                     }}
                   >
                     <div className={contained ? "mx-auto max-w-3xl space-y-5" : "space-y-5"}>
@@ -679,6 +1002,7 @@ export default function Designer({
                               className={`min-h-[3rem] space-y-3 rounded-lg p-1.5 transition-colors ${selCls([b, r, c])} ${
                                 dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""
                               }`}
+                              style={colStyle(col.props)}
                               onClick={(ev) => pick(ev, [b, r, c])}
                               onDragOver={(ev) => {
                                 ev.preventDefault();

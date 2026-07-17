@@ -9,6 +9,7 @@ interface El {
 interface Col {
   span?: number;
   elements?: El[];
+  props?: Record<string, string>;
 }
 interface Row {
   columns?: Col[];
@@ -19,15 +20,58 @@ interface Props {
   textColor?: string;
   paddingY?: string;
   width?: string;
+  border?: string;
+  shadow?: string;
+  radius?: string;
+  anchorId?: string;
+  cssClass?: string;
   rows?: Row[];
 }
-const { bg, bgImage, textColor, paddingY = "md", width = "contained", rows = [] } = Astro.props;
+const {
+  bg,
+  bgImage,
+  textColor,
+  paddingY = "md",
+  width = "contained",
+  border,
+  shadow,
+  radius,
+  anchorId,
+  cssClass,
+  rows = [],
+} = Astro.props;
 
-const PAD: Record<string, string> = { sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
+const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
 const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
 const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
+const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
+const SHADOW: Record<string, string> = {
+  none: "none",
+  sm: "0 1px 3px rgba(0,0,0,.1)",
+  md: "0 4px 12px rgba(0,0,0,.12)",
+  lg: "0 12px 32px rgba(0,0,0,.16)",
+};
+const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
+// Matches apps/admin/src/Designer.tsx's ICONS map by name — hand-simplified
+// stroke path data (24x24, lucide-style) so this zero-JS renderer doesn't
+// need lucide-react as a dependency. Add a name to both places together.
+const ICON_PATHS: Record<string, string> = {
+  check: "M20 6 9 17l-5-5",
+  "arrow-right": "M5 12h14M12 5l7 7-7 7",
+  "arrow-left": "M19 12H5M12 19l-7-7 7-7",
+  star: "M12 2 15 8.5 22 9.3 17 14.1 18.2 21 12 17.6 5.8 21 7 14.1 2 9.3 9 8.5 12 2Z",
+  phone:
+    "M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .3 2 .6 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.5 2.9.6a2 2 0 0 1 1.7 2Z",
+  mail: "M4 4h16v16H4V4Zm0 0 8 9 8-9",
+  "map-pin": "M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+  calendar: "M8 2v4M16 2v4M3 10h18M4 4h16v16H4V4Z",
+  clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-16v6l4 2",
+  "external-link": "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3",
+  "chevron-right": "M9 18l6-6-6-6",
+  download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+};
 
 // Element props are author-controlled but URLs still get a scheme check so a
 // stored value can never become a javascript:/data: link or iframe source.
@@ -41,10 +85,52 @@ const safeUrl = (u?: string) => {
   return v;
 };
 
+function escapeHtml(s: string) {
+  const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return s.replace(/[&<>"']/g, (c) => map[c]);
+}
+// Small inline-markdown subset for heading/text: **bold**, *italic*,
+// [label](url). Duplicated (not shared) from Designer.tsx's own
+// renderInline — same convention as this file's PAD/RADIUS tables mirroring
+// the admin canvas's copies; no shared package exists between the two apps.
+// ponytail: link regex stops at the first ")" in the URL, so a raw
+// unescaped "(" / ")" inside the URL itself truncates it — fine for normal
+// links/anchors, encode the parens if it ever matters.
+function renderInline(text: string): string {
+  return escapeHtml(text)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, url) => `<a href="${safeUrl(url) ?? "#"}">${label}</a>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+// Column-level style escape hatch (Col.props) — mirrors Designer.tsx's
+// colStyle(), turning a column into a themeable "card" wrapping whatever
+// elements are dropped into it.
+function colStyle(cp?: Record<string, string>) {
+  if (!cp) return undefined;
+  return [
+    cp.bg ? `background:${cp.bg}` : null,
+    cp.padding && cp.padding !== "none" ? `padding:${PAD[cp.padding] ?? PAD.md}` : null,
+    cp.valign ? `align-self:${cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : "center"}` : null,
+    cp.border ? `border:${BORDER[cp.border]}` : null,
+    cp.shadow ? `box-shadow:${SHADOW[cp.shadow]}` : null,
+    cp.radius ? `border-radius:${RADIUS[cp.radius]}` : null,
+  ]
+    .filter(Boolean)
+    .join(";");
+}
+const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
+
 const sectionStyle = [
   bgImage && safeUrl(bgImage) ? `background:url('${safeUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
   textColor ? `color:${textColor}` : null,
   `padding:${PAD[paddingY] ?? PAD.md} 1.5rem`,
+  // Only override when the author actually picked a value — otherwise
+  // every existing section would flatten to square/shadowless corners
+  // (RADIUS.none/SHADOW.none) instead of its current default look.
+  border ? `border:${BORDER[border]}` : null,
+  shadow ? `box-shadow:${SHADOW[shadow]}` : null,
+  radius ? `border-radius:${RADIUS[radius]}` : null,
 ]
   .filter(Boolean)
   .join(";");
@@ -53,52 +139,58 @@ const gridStyle = (cols: Col[]) => `grid-template-columns:${cols.map((c) => `${c
 const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
 ---
 
-<section class="ds-section" style={sectionStyle}>
+<section class={cls("ds-section", cssClass)} id={anchorId || undefined} style={sectionStyle}>
   <div class={width === "full" ? "ds-inner ds-full" : "ds-inner"}>
     {rows.map((row) => (
       <div class="ds-row" style={gridStyle(row.columns ?? [])}>
         {(row.columns ?? []).map((col) => (
-          <div class="ds-col">
+          <div class={cls("ds-col", col.props?.cssClass)} style={colStyle(col.props)}>
             {(col.elements ?? []).map((el) => {
               const p = el.props ?? {};
               switch (el.type) {
                 case "heading": {
                   const Tag = headingTag(p.level) as "h1";
                   return (
-                    <Tag class={`ds-h ds-h${p.level ?? "2"}`} style={p.align ? `text-align:${p.align}` : undefined}>
-                      {p.text}
-                    </Tag>
+                    <Tag
+                      class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass)}
+                      style={p.align ? `text-align:${p.align}` : undefined}
+                      set:html={p.text ? renderInline(p.text) : ""}
+                    />
                   );
                 }
                 case "text":
                   return (
                     <p
-                      class="ds-text"
+                      class={cls("ds-text", p.cssClass)}
                       style={[
                         `font-size:${TEXT_SIZE[p.size ?? "md"] ?? TEXT_SIZE.md}`,
                         p.align ? `text-align:${p.align}` : null,
                       ]
                         .filter(Boolean)
                         .join(";")}
-                    >
-                      {p.text}
-                    </p>
+                      set:html={renderInline(p.text ?? "")}
+                    />
                   );
                 case "image":
                   return safeUrl(p.src) ? (
                     <img
-                      class="ds-img"
+                      class={cls("ds-img", p.cssClass)}
                       src={safeUrl(p.src)}
                       alt={p.alt ?? ""}
                       loading="lazy"
-                      style={`border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`}
+                      style={[
+                        `border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`,
+                        p.shadow ? `box-shadow:${SHADOW[p.shadow]}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(";")}
                     />
                   ) : null;
                 case "button":
                   return p.label ? (
                     <div style={p.align ? `text-align:${p.align}` : undefined}>
                       <a
-                        class={p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary"}
+                        class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass)}
                         href={safeUrl(p.href) ?? "#"}
                       >
                         {p.label}
@@ -108,11 +200,11 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                 case "spacer":
                   return <div style={`height:${SPACE[p.height ?? "md"] ?? SPACE.md}`} aria-hidden="true" />;
                 case "divider":
-                  return <hr class="ds-divider" />;
+                  return <hr class={cls("ds-divider", p.cssClass)} />;
                 case "embed":
                   return safeUrl(p.url) ? (
                     <iframe
-                      class="ds-embed"
+                      class={cls("ds-embed", p.cssClass)}
                       src={safeUrl(p.url)}
                       style={`aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`}
                       loading="lazy"
@@ -121,6 +213,63 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       referrerpolicy="strict-origin-when-cross-origin"
                     />
                   ) : null;
+                case "icon": {
+                  const path = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
+                  const size = ICON_SIZE[p.size ?? "md"] ?? ICON_SIZE.md;
+                  return (
+                    <div class={p.cssClass} style={p.align ? `text-align:${p.align}` : undefined}>
+                      <svg
+                        width={size}
+                        height={size}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke={p.color || "currentColor"}
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="display:inline-block;vertical-align:middle"
+                      >
+                        <path d={path} />
+                      </svg>
+                    </div>
+                  );
+                }
+                case "list": {
+                  const items = (p.items ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+                  if (items.length === 0) return null;
+                  const Tag = p.style === "numbered" ? "ol" : "ul";
+                  return (
+                    <Tag class={cls("ds-list", p.style === "none" ? "ds-list-none" : undefined, p.cssClass)}>
+                      {items.map((it) => (
+                        <li set:html={renderInline(it)} />
+                      ))}
+                    </Tag>
+                  );
+                }
+                case "html":
+                  // Same trust tier as bgImage/embed src above: only an
+                  // authenticated webmaster/superadmin can write page
+                  // layout, so this isn't a public-input XSS surface.
+                  return p.html ? <div class={cls("ds-html", p.cssClass)} set:html={p.html} /> : null;
+                case "gallery": {
+                  const images = (p.images ?? "")
+                    .split("\n")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                    .map(safeUrl)
+                    .filter((u): u is string => Boolean(u));
+                  if (images.length === 0) return null;
+                  return (
+                    <div
+                      class={cls("ds-gallery", p.cssClass)}
+                      style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`}
+                    >
+                      {images.map((src) => (
+                        <img src={src} alt="" loading="lazy" style={`border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`} />
+                      ))}
+                    </div>
+                  );
+                }
                 default:
                   return null;
               }
@@ -204,9 +353,31 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     border: 0;
     border-radius: 0.75rem;
   }
+  .ds-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    line-height: 1.7;
+  }
+  .ds-list-none {
+    list-style: none;
+    padding-left: 0;
+  }
+  .ds-gallery {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .ds-gallery img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    display: block;
+  }
   @media (max-width: 768px) {
     .ds-row {
       grid-template-columns: 1fr !important;
+    }
+    .ds-gallery {
+      grid-template-columns: repeat(2, 1fr) !important;
     }
   }
 </style>
