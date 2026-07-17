@@ -3,6 +3,8 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: false
+minimumReleaseAgeExclude:
+  - astro@7.1.1
 overrides:
   "@mantine/core": "^8.3.18"
   "@mantine/hooks": "^8.3.18"
