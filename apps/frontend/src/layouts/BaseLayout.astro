@@ -7,8 +7,13 @@ interface Props {
   // apps/frontend/src/lib/collectFonts.ts) — merged with the theme's own
   // font into one combined request below.
   fonts?: string[];
+  // Designer.tsx "live view" bridge — see SectionBlock.astro's designerEdit
+  // prop for the data-designer-path attributes this script reacts to. Only
+  // ever true alongside a valid preview token (gated in [...slug].astro),
+  // so this script never ships to a real visitor.
+  designerEdit?: boolean;
 }
-const { title, ogImage, theme, fonts = [] } = Astro.props;
+const { title, ogImage, theme, fonts = [], designerEdit = false } = Astro.props;
 // site_theme.settings is an open JSONB bag (superadmin/webmaster-defined);
 // apps/api validates these 6 keys on write (index.ts validateThemeSettings),
 // so this layout only has to wire them, not re-validate them.
@@ -44,5 +49,105 @@ const fontsHref = allFonts.length
   >
     {logoUrl && <img src={logoUrl} alt="" height="40" />}
     <slot />
+    {designerEdit && (
+      <script is:inline>
+        (() => {
+          const targetOrigin = document.referrer ? new URL(document.referrer).origin : null;
+          if (!targetOrigin) return;
+
+          document.addEventListener("click", (e) => {
+            if (justDragged) {
+              e.preventDefault();
+              return;
+            }
+            const node = e.target.closest("[data-designer-path]");
+            if (!node) return;
+            e.preventDefault();
+            parent.postMessage({ type: "designer:select", path: node.dataset.designerPath }, targetOrigin);
+          });
+
+          // Drag-reorder: custom pointer tracking rather than native HTML5
+          // drag/drop, which doesn't hand off cleanly across an iframe
+          // origin boundary. Only element-level nodes (4-part path, e.g.
+          // "0.0.0.0") are draggable — section/column wrappers aren't.
+          let dragState = null;
+          let justDragged = false;
+
+          document.addEventListener("pointerdown", (e) => {
+            const node = e.target.closest("[data-designer-path]");
+            if (!node || node.isContentEditable) return;
+            if (node.dataset.designerPath.split(".").length !== 4) return;
+            dragState = { path: node.dataset.designerPath, node, startX: e.clientX, startY: e.clientY, moved: false };
+          });
+
+          document.addEventListener("pointermove", (e) => {
+            if (!dragState) return;
+            if (!dragState.moved) {
+              if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) < 6) return;
+              dragState.moved = true;
+              dragState.node.style.opacity = "0.4";
+            }
+            const under = document.elementFromPoint(e.clientX, e.clientY);
+            const targetNode = under && under.closest("[data-designer-path]");
+            if (dragState.hoverNode && dragState.hoverNode !== targetNode) {
+              dragState.hoverNode.style.outline = "";
+            }
+            if (
+              targetNode &&
+              targetNode !== dragState.node &&
+              targetNode.dataset.designerPath.split(".").length === 4
+            ) {
+              const rect = targetNode.getBoundingClientRect();
+              dragState.hoverPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+              targetNode.style.outline = "2px solid #0f62fe";
+              dragState.hoverNode = targetNode;
+              dragState.hoverPath = targetNode.dataset.designerPath;
+            } else {
+              dragState.hoverNode = null;
+              dragState.hoverPath = null;
+            }
+          });
+
+          document.addEventListener("pointerup", () => {
+            if (!dragState) return;
+            dragState.node.style.opacity = "";
+            if (dragState.hoverNode) dragState.hoverNode.style.outline = "";
+            if (dragState.moved && dragState.hoverPath) {
+              justDragged = true;
+              parent.postMessage(
+                { type: "designer:reorder", from: dragState.path, to: dragState.hoverPath, position: dragState.hoverPosition },
+                targetOrigin,
+              );
+              setTimeout(() => (justDragged = false), 50);
+            }
+            dragState = null;
+          });
+
+          function findByPath(path) {
+            return document.querySelector(`[data-designer-path="${path}"]`);
+          }
+
+          window.addEventListener("message", (e) => {
+            if (e.origin !== targetOrigin || !e.data) return;
+            const node = findByPath(e.data.path);
+            if (!node) return;
+            if (e.data.type === "designer:style") {
+              Object.assign(node.style, e.data.style);
+            } else if (e.data.type === "designer:text") {
+              node.contentEditable = String(Boolean(e.data.editable));
+              if (e.data.editable && !node.dataset.designerBound) {
+                node.dataset.designerBound = "1";
+                node.addEventListener("input", () => {
+                  parent.postMessage(
+                    { type: "designer:textInput", path: node.dataset.designerPath, value: node.textContent },
+                    targetOrigin,
+                  );
+                });
+              }
+            }
+          });
+        })();
+      </script>
+    )}
   </body>
 </html>

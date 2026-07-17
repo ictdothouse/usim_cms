@@ -1,58 +1,152 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
   AlignLeft,
   AlignVerticalJustifyCenter,
   Anchor,
+  Archive,
   ArrowLeft,
   ArrowRight,
+  ArrowUpRight,
+  AtSign,
+  Award,
+  BarChart3,
   Baseline,
+  Battery,
+  Bell,
   Blend,
   Bold,
+  Bookmark,
+  BookOpen,
+  Briefcase,
+  Building2,
   Calendar,
+  Camera,
+  Car,
   CaseSensitive,
   Check,
+  CheckCircle,
+  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Clipboard,
   ClipboardPaste,
   Clock,
+  Cloud,
   Code2,
+  Coffee,
   Columns,
+  Compass,
   Copy,
+  CreditCard,
+  DollarSign,
   Download,
+  Dumbbell,
   ExternalLink,
+  Eye,
+  EyeOff,
+  FileText,
+  Film,
+  Flag,
+  Folder,
   Frame,
+  Gift,
+  Globe,
+  GraduationCap,
   GripVertical,
+  Handshake,
   Hash,
   Heading1,
+  Headphones,
+  Heart,
+  HelpCircle,
+  Home,
   Image as ImageIcon,
   Images,
+  Inbox,
+  Info,
+  Laptop,
   LayoutTemplate,
+  Leaf,
   Link,
+  Link2,
   List,
+  Lock,
   Mail,
+  Map,
   MapPin,
   Maximize2,
+  Menu,
+  MessageCircle,
+  MessageSquare,
+  Mic,
   Minus,
+  Monitor,
+  Moon,
   MousePointerClick,
   MoveHorizontal,
   MoveVertical,
+  Music,
+  Package,
   Paintbrush,
+  PaintBucket,
   Palette,
   Pencil,
+  Percent,
   Phone,
+  PhoneCall,
+  PieChart,
+  Plane,
   Plus,
+  Printer,
+  QrCode,
+  Receipt,
   RectangleHorizontal,
+  Recycle,
   Redo2,
+  Rocket,
   Ruler,
+  Search,
+  Send,
+  Settings,
+  Share2,
+  Shield,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingCart,
   SlidersHorizontal,
+  Smartphone,
+  Sparkles,
   Square,
   SquareDashedBottom,
   Star,
+  Stethoscope,
+  Store,
+  Sun,
+  Tablet,
+  Tag,
+  Target,
+  ThumbsDown,
+  ThumbsUp,
+  Train,
   Trash2,
+  TrendingUp,
+  Truck,
   Type,
+  Umbrella,
   Undo2,
+  Unlock,
+  User,
+  Users,
+  Utensils,
   Video,
+  Wallet,
+  Wifi,
   X,
+  XCircle,
+  Zap,
 } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Key } from "@/i18n";
@@ -194,6 +288,101 @@ const ICONS: Record<string, typeof Check> = {
   "external-link": ExternalLink,
   "chevron-right": ChevronRight,
   download: Download,
+  menu: Menu,
+  home: Home,
+  search: Search,
+  user: User,
+  users: Users,
+  settings: Settings,
+  bell: Bell,
+  heart: Heart,
+  share: Share2,
+  bookmark: Bookmark,
+  eye: Eye,
+  "eye-off": EyeOff,
+  lock: Lock,
+  unlock: Unlock,
+  shield: Shield,
+  "shield-check": ShieldCheck,
+  globe: Globe,
+  link: Link2,
+  "check-circle": CheckCircle,
+  "x-circle": XCircle,
+  "alert-triangle": AlertTriangle,
+  "alert-circle": AlertCircle,
+  info: Info,
+  "help-circle": HelpCircle,
+  "thumbs-up": ThumbsUp,
+  "thumbs-down": ThumbsDown,
+  gift: Gift,
+  tag: Tag,
+  flag: Flag,
+  award: Award,
+  "shopping-cart": ShoppingCart,
+  "shopping-bag": ShoppingBag,
+  "credit-card": CreditCard,
+  "dollar-sign": DollarSign,
+  percent: Percent,
+  wallet: Wallet,
+  receipt: Receipt,
+  store: Store,
+  package: Package,
+  truck: Truck,
+  briefcase: Briefcase,
+  building: Building2,
+  "message-circle": MessageCircle,
+  "message-square": MessageSquare,
+  send: Send,
+  inbox: Inbox,
+  archive: Archive,
+  "at-sign": AtSign,
+  "phone-call": PhoneCall,
+  camera: Camera,
+  video: Video,
+  music: Music,
+  mic: Mic,
+  image: ImageIcon,
+  "file-text": FileText,
+  folder: Folder,
+  printer: Printer,
+  film: Film,
+  smartphone: Smartphone,
+  monitor: Monitor,
+  laptop: Laptop,
+  tablet: Tablet,
+  headphones: Headphones,
+  wifi: Wifi,
+  battery: Battery,
+  cloud: Cloud,
+  "qr-code": QrCode,
+  sun: Sun,
+  moon: Moon,
+  umbrella: Umbrella,
+  compass: Compass,
+  map: Map,
+  car: Car,
+  plane: Plane,
+  train: Train,
+  rocket: Rocket,
+  coffee: Coffee,
+  utensils: Utensils,
+  dumbbell: Dumbbell,
+  stethoscope: Stethoscope,
+  "graduation-cap": GraduationCap,
+  "book-open": BookOpen,
+  "trending-up": TrendingUp,
+  "bar-chart": BarChart3,
+  "pie-chart": PieChart,
+  activity: Activity,
+  zap: Zap,
+  handshake: Handshake,
+  target: Target,
+  recycle: Recycle,
+  leaf: Leaf,
+  sparkles: Sparkles,
+  "chevron-left": ChevronLeft,
+  "chevron-down": ChevronDown,
+  "arrow-up-right": ArrowUpRight,
 };
 
 // Shared across heading/text/list — full typography control. fontFamily is
@@ -271,10 +460,10 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
   icon: {
     labelKey: "designer-el-icon",
     icon: Star,
-    defaults: { name: "check", size: "md", color: "", align: "left" },
+    defaults: { name: "check", size: "1.5rem", color: "", align: "left" },
     fields: [
       { key: "name", labelKey: "designer-f-icon-name", kind: "icon", options: Object.keys(ICONS) },
-      { key: "size", labelKey: "designer-f-icon-size", kind: "select", options: ["sm", "md", "lg", "xl"] },
+      { key: "size", labelKey: "designer-f-icon-size", kind: "length" },
       { key: "color", labelKey: "designer-f-icon-color", kind: "color" },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
     ],
@@ -482,9 +671,14 @@ export default function Designer({
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
+  const [iconSearch, setIconSearch] = useState("");
+  const [mode, setMode] = useState<"blocks" | "live">("blocks");
+  const [liveSrc, setLiveSrc] = useState<string | null>(null);
   const history = useRef<Block[][]>([]);
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
+  const editingText = useRef<Record<string, string>>({});
+  const liveFrame = useRef<HTMLIFrameElement>(null);
 
   function mutate(fn: (next: Block[]) => void) {
     history.current.push(clone(blocks));
@@ -562,6 +756,85 @@ export default function Designer({
       window.removeEventListener("keydown", onKey);
     };
   }, [ctxMenu]);
+
+  // Live-view bridge: the iframe's window posts these (see BaseLayout.astro's
+  // inline script) — a click there selects exactly like a click in the block
+  // canvas (same `sel`, same Inspector), and typing in an editable text node
+  // there commits through the same mutate() path the Inspector textarea uses.
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (!liveFrame.current || e.source !== liveFrame.current.contentWindow) return;
+      const path = String(e.data?.path ?? "")
+        .split(".")
+        .map(Number);
+      if (e.data?.type === "designer:select" && path.length >= 1) {
+        setSel(path);
+      } else if (e.data?.type === "designer:textInput" && path.length === 4) {
+        const [b, r, c, el] = path;
+        mutate((bs) => {
+          section(bs, b).rows[r].columns[c].elements[el].props.text = e.data.value ?? "";
+        });
+      } else if (e.data?.type === "designer:reorder") {
+        const from = String(e.data.from).split(".").map(Number);
+        const to = String(e.data.to).split(".").map(Number);
+        if (from.length !== 4 || to.length !== 4) return;
+        mutate((bs) => {
+          const [tb, tr, tc, te] = to;
+          let idx = te + (e.data.position === "after" ? 1 : 0);
+          // same-column move: removing the source first shifts later indexes
+          // down — same adjustment dropIntoColumn already makes for the
+          // block-canvas drag.
+          if (from[0] === tb && from[1] === tr && from[2] === tc && from[3] < idx) idx--;
+          const el = removeAt(bs, from);
+          insertEl(bs, [tb, tr, tc], el, idx);
+        });
+        setSel(null);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  });
+
+  // Keeps the live iframe's selection highlight/editability/inline style in
+  // sync with the Inspector — reuses the exact same style helpers the block
+  // canvas preview uses (typoStyle/colStyle/lengthValue), so style logic
+  // isn't computed a third time.
+  useEffect(() => {
+    if (mode !== "live" || !sel || !liveSrc || !liveFrame.current?.contentWindow) return;
+    const win = liveFrame.current.contentWindow;
+    const targetOrigin = new URL(liveSrc, window.location.href).origin;
+    const path = sel.join(".");
+    if (sel.length === 4) {
+      const [b, r, c, e] = sel;
+      const el = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c]?.elements?.[e];
+      if (!el) return;
+      const textLike = el.type === "heading" || el.type === "text" || el.type === "list";
+      const style: React.CSSProperties = textLike ? typoStyle(el.props) : {};
+      win.postMessage({ type: "designer:style", path, style }, targetOrigin);
+      win.postMessage(
+        { type: "designer:text", path, editable: el.type === "heading" || el.type === "text" },
+        targetOrigin,
+      );
+    } else if (sel.length === 3) {
+      const [b, r, c] = sel;
+      const col = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c];
+      if (!col) return;
+      win.postMessage({ type: "designer:style", path, style: colStyle(col.props) }, targetOrigin);
+    } else if (sel.length === 1) {
+      const sp = blocks[sel[0]]?.props as unknown as SectionProps;
+      if (!sp) return;
+      const style: React.CSSProperties = {
+        background: sp.bgImage ? undefined : sp.bg || undefined,
+        color: sp.textColor || undefined,
+        padding: `${lengthValue(sp.paddingY, PAD, PAD.md)} ${lengthValue(sp.paddingX, PAD, "1.5rem")}`,
+        margin: `${lengthValue(sp.marginY, PAD, "0")} 0`,
+        ...(sp.border ? { border: BORDER[sp.border] } : {}),
+        ...(sp.shadow ? { boxShadow: SHADOW[sp.shadow] } : {}),
+        ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
+      };
+      win.postMessage({ type: "designer:style", path, style }, targetOrigin);
+    }
+  }, [mode, sel, blocks, liveSrc]);
 
   async function openTemplates() {
     setShowTemplates(true);
@@ -727,6 +1000,29 @@ export default function Designer({
     }
   }
 
+  // "Live view": same real-render iframe the Preview button opens in a new
+  // tab, but embedded and augmented with a designerEdit=1 flag so
+  // BaseLayout.astro's bridge script + SectionBlock.astro's
+  // data-designer-path attributes activate (see apps/frontend) — clicking an
+  // element there sets `sel` exactly like clicking in the block canvas, so
+  // the existing Inspector sidebar keeps working unmodified.
+  async function toggleLive() {
+    if (mode === "live") {
+      setMode("blocks");
+      return;
+    }
+    try {
+      if (dirty) await save();
+      const previewToken =
+        page.status === "published" ? undefined : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+      const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
+      setLiveSrc(`${base}${base.includes("?") ? "&" : "?"}designerEdit=1`);
+      setMode("live");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   function close() {
     if (dirty && !confirm(t("designer-unsaved"))) return;
     onClose(savedAny);
@@ -832,28 +1128,42 @@ export default function Designer({
         </div>
       );
     }
-    if (field.kind === "icon")
+    if (field.kind === "icon") {
+      const q = iconSearch.trim().toLowerCase();
+      const options = (field.options ?? []).filter((name) => !q || name.includes(q));
       return (
-        <div className="grid grid-cols-4 gap-1.5 rounded-lg border border-line/30 bg-canvas p-1.5">
-          {(field.options ?? []).map((name) => {
-            const Icon = ICONS[name] ?? Check;
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => onChange(name)}
-                title={name}
-                className={`flex flex-col items-center gap-1 rounded-md p-1.5 text-[9px] ${
-                  value === name ? "bg-accent/15 font-semibold text-accent" : "text-body hover:bg-white"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                <span className="w-full truncate text-center">{name}</span>
-              </button>
-            );
-          })}
+        <div className="space-y-1.5">
+          <input
+            className={base}
+            value={iconSearch}
+            onChange={(e) => setIconSearch(e.target.value)}
+            placeholder={t("designer-icon-search")}
+          />
+          <div className="grid max-h-52 grid-cols-4 gap-1.5 overflow-y-auto rounded-lg border border-line/30 bg-canvas p-1.5">
+            {options.length === 0 && (
+              <p className="col-span-4 py-2 text-center text-[10px] text-sub">{t("designer-icon-none")}</p>
+            )}
+            {options.map((name) => {
+              const Icon = ICONS[name] ?? Check;
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => onChange(name)}
+                  title={name}
+                  className={`flex flex-col items-center gap-1 rounded-md p-1.5 text-[9px] ${
+                    value === name ? "bg-accent/15 font-semibold text-accent" : "text-body hover:bg-white"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="w-full truncate text-center">{name}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       );
+    }
     if (field.kind === "gallery") {
       const urls = value ? value.split("\n").filter(Boolean) : [];
       const setUrls = (next: string[]) => onChange(next.join("\n"));
@@ -1118,9 +1428,43 @@ export default function Designer({
   }
 
   // ---------- canvas element preview (visual approximation of SectionBlock.astro) ----------
-  function ElPreview({ el }: { el: El }) {
+  function ElPreview({ el, path }: { el: El; path?: number[] }) {
     const p = el.props;
     const align = { textAlign: (p.align as "left" | "center" | "right") ?? "left" };
+    // Canvas-direct text editing (in addition to the Inspector sidebar): while
+    // this exact element is selected, heading/text swap their formatted
+    // preview for a plain contentEditable showing the raw text (same value
+    // the Inspector textarea edits). editingText holds the value captured at
+    // focus time so re-renders from typing don't feed new children back into
+    // the DOM node (which would reset the caret) — only onBlur clears it.
+    const editable = path && selEq(path);
+    if (editable && (el.type === "heading" || el.type === "text")) {
+      if (editingText.current[el.id] === undefined) editingText.current[el.id] = p.text ?? "";
+      const commit = (v: string) =>
+        mutate((bs) => {
+          const [b, r, c, e] = path;
+          section(bs, b).rows[r].columns[c].elements[e].props.text = v;
+        });
+      const sharedStyle =
+        el.type === "heading"
+          ? { ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2, ...typoStyle(p) }
+          : { ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap" as const, lineHeight: 1.65, ...typoStyle(p) };
+      return (
+        <div
+          contentEditable
+          suppressContentEditableWarning
+          ref={(node) => {
+            if (node && document.activeElement !== node) node.focus();
+          }}
+          style={sharedStyle}
+          className={el.type === "heading" ? "font-display outline-none" : "outline-none"}
+          onInput={(e) => commit(e.currentTarget.textContent ?? "")}
+          onBlur={() => delete editingText.current[el.id]}
+        >
+          {editingText.current[el.id]}
+        </div>
+      );
+    }
     switch (el.type) {
       case "heading":
         return (
@@ -1183,7 +1527,7 @@ export default function Designer({
         );
       case "icon": {
         const Icon = ICONS[p.name ?? "check"] ?? Check;
-        const size = ICON_SIZE[p.size ?? "md"];
+        const size = lengthValue(p.size, ICON_SIZE, ICON_SIZE.md);
         return (
           <div style={align}>
             <Icon style={{ width: size, height: size, color: p.color || undefined }} />
@@ -1357,6 +1701,14 @@ export default function Designer({
           <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates")}
         </button>
         <button
+          onClick={() => void toggleLive()}
+          className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
+            mode === "live" ? "bg-accent/15 text-accent" : "text-body"
+          }`}
+        >
+          <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
+        </button>
+        <button
           onClick={() => void preview()}
           className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
         >
@@ -1406,6 +1758,14 @@ export default function Designer({
         </aside>
 
         {/* canvas */}
+        {mode === "live" ? (
+          <iframe
+            ref={liveFrame}
+            src={liveSrc ?? undefined}
+            className="min-w-0 flex-1 border-0 bg-white"
+            title="live-view"
+          />
+        ) : (
         <main className="min-w-0 flex-1 overflow-y-auto p-6" onClick={() => setSel(null)}>
           <div className="mx-auto max-w-4xl space-y-4">
             {blocks.length === 0 && <p className="py-10 text-center text-xs text-sub">{t("designer-empty")}</p>}
@@ -1509,7 +1869,7 @@ export default function Designer({
                                   {selEq([b, r, c, e]) && (
                                     <GripVertical className="absolute -left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
                                   )}
-                                  {ElPreview({ el })}
+                                  {ElPreview({ el, path: [b, r, c, e] })}
                                 </div>
                               ))}
                             </div>
@@ -1552,6 +1912,7 @@ export default function Designer({
             </button>
           </div>
         </main>
+        )}
 
         {/* inspector */}
         <aside className="w-64 shrink-0 overflow-y-auto border-l border-line/30 bg-white p-4">

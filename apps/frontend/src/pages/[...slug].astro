@@ -36,12 +36,18 @@ if (!page) {
 }
 const theme = await getTheme(tenantHost);
 const fonts = collectFonts(page.layout);
+// Designer.tsx's "live view" mode: an admin iframe requesting this same
+// preview URL with an extra flag, so the bridge script + data-designer-path
+// attributes only ever activate alongside a valid preview token — never for
+// a real visitor, regardless of URL tampering (a public request has no
+// previewToken at all).
+const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boolean(previewToken);
 ---
-<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts}>
-  {page.layout.map((block) => {
+<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts} designerEdit={designerEdit}>
+  {page.layout.map((block, b) => {
     switch (block.type) {
       case "section":
-        return <SectionBlock {...(block.props ?? {})} />;
+        return <SectionBlock {...(block.props ?? {})} designerEdit={designerEdit} blockIndex={b} />;
       case "hero":
         return <HeroBlock {...(block.props ?? {})} />;
       case "text":
