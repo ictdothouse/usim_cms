@@ -60,15 +60,19 @@ pnpm workspace monorepo with two apps:
     `layout` JSONB column, not as separate relational tables per block type.
   - `src/collections/config-types.ts` + `src/plugins/generic-crud.ts` are the code-first collection
     system: a `CollectionConfig` (slug, `access` functions keyed by role/department, `beforeChange`/
-    `afterChange` hooks) is handed to `registerCollectionRoutes`, which mounts generic CRUD routes at
-    `/api/:collectionSlug` — collections are not meant to get hand-written route handlers. Only the
-    `pages` collection is wired up so far, and the CRUD handlers are stubs (GET returns empty/null,
-    write methods return 501) — access checks and hooks are not yet enforced in the handlers.
+    `afterChange` hooks) is handed to `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes`,
+    which mount generic CRUD routes at `/api/:collectionSlug` — collections are not meant to get
+    hand-written route handlers. `pages`, `posts`, and `templates` (`src/index.ts`) are wired up this
+    way, each with real `access.create/update/delete` checks (`hasPermission`) and a `beforeChange`
+    hook enforced in the handlers — `501` only fires for a config with no `table` at all, not as a
+    general stub state.
   - Local API/SDK for same-process frontend access (bypassing HTTP) is not implemented yet.
 
 - **`apps/admin`** — Vite + React + TypeScript, Tailwind CSS, Shadcn UI conventions (`components.json`,
   `src/lib/utils.ts`'s `cn` helper). No components have been added via the shadcn CLI yet — `pnpm dlx
-  shadcn@latest add <component>` from `apps/admin` will place them under `src/components`.
+  shadcn@latest add <component>` from `apps/admin` will place them under `src/components`. The page
+  builder itself lives in `src/Designer.tsx`: drag-drop block canvas, a live-preview edit mode that
+  renders the actual frontend page for click-to-select/inline editing, and a design template library.
 
 - **`apps/frontend`** — Astro, `output: "server"` with the Node standalone adapter (not static:
   tenant identity comes from the request's `Host` header at runtime, so pages can't be pre-built
