@@ -123,6 +123,21 @@ export const siteTheme = pgTable("site_theme", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// A user's personal saved theme presets ("my collection" in the admin's
+// Theme panel) — same settings shape as site_theme.settings, but owned by a
+// user, not a tenant, and never merged/read by the frontend. Purely a
+// favourites list the admin picks from to fill the color/font pickers or to
+// "Activate" (write into site_theme) again later.
+export const themePresets = pgTable("theme_presets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerUserId: uuid("owner_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  settings: jsonb("settings").notNull().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Named permission sets a superadmin defines and assigns to webmaster users
 // (public schema, like tenants/users). `permissions` is a fixed set of
 // "resource.action" strings (see PERMISSIONS in index.ts) — superadmin role

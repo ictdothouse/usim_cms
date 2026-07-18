@@ -149,6 +149,7 @@ import {
   Zap,
 } from "lucide-react";
 import * as api from "@/lib/api";
+import { slugify } from "@/lib/utils";
 import type { Key } from "@/i18n";
 
 // ---------- data model (stored in pages.layout JSONB) ----------
@@ -672,8 +673,11 @@ export default function Designer({
   const [templatesBusy, setTemplatesBusy] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
-  const [mode, setMode] = useState<"blocks" | "live">("blocks");
+  const [mode, setMode] = useState<"blocks" | "live">("live");
   const [liveSrc, setLiveSrc] = useState<string | null>(null);
+  const [editingSlug, setEditingSlug] = useState(false);
+  const [slugDraft, setSlugDraft] = useState(page.slug as string);
+  const [slugError, setSlugError] = useState<string | null>(null);
   const history = useRef<Block[][]>([]);
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
@@ -800,9 +804,11 @@ export default function Designer({
   // canvas preview uses (typoStyle/colStyle/lengthValue), so style logic
   // isn't computed a third time.
   useEffect(() => {
-    if (mode !== "live" || !sel || !liveSrc || !liveFrame.current?.contentWindow) return;
+    if (mode !== "live" || !liveSrc || !liveFrame.current?.contentWindow) return;
     const win = liveFrame.current.contentWindow;
     const targetOrigin = new URL(liveSrc, window.location.href).origin;
+    win.postMessage({ type: "designer:selected", path: sel?.join(".") ?? null }, targetOrigin);
+    if (!sel) return;
     const path = sel.join(".");
     if (sel.length === 4) {
       const [b, r, c, e] = sel;
@@ -958,6 +964,30 @@ export default function Designer({
     setSel(null);
   }
 
+  // Quick-create (App.tsx's PagesPanel) only auto-derives the slug up
+  // front — this is the "then boleh edit" half, exposed as a click-to-edit
+  // field in the header instead of a whole page-settings screen.
+  async function renameSlug() {
+    const next = slugify(slugDraft);
+    if (!next) {
+      setSlugError(t("designer-slug-empty"));
+      return;
+    }
+    if (next === page.slug) {
+      setEditingSlug(false);
+      return;
+    }
+    try {
+      await api.updatePage(tenantHost, token, page.id as string, { slug: next });
+      page.slug = next;
+      setSlugDraft(next);
+      setEditingSlug(false);
+      setSlugError(null);
+    } catch (err) {
+      setSlugError((err as Error).message);
+    }
+  }
+
   async function save(status?: "published") {
     setBusy(true);
     setError(null);
@@ -978,8 +1008,14 @@ export default function Designer({
     }
   }
 
-  // Same sync-open pattern as PagesPanel.preview: window.open must happen in
-  // direct response to the click or popup blockers eat it.
+  // Only reached when there's unsaved content or the page is a draft — a
+  // saved+published page renders a plain <a href target="_blank"> instead
+  // (see the Preview button below), since a real anchor click is a genuine
+  // browser navigation and can't hit the "window.open then redirect"
+  // pattern's failure mode: some browsers let the blank tab open but then
+  // silently block the follow-up script navigation, leaving a permanently
+  // blank tab. This path unavoidably needs that pattern anyway — the save
+  // and/or the preview-token mint have to finish before the URL is known.
   async function preview() {
     const win = window.open("", "_blank", "noreferrer");
     if (!win) {
@@ -991,8 +1027,7 @@ export default function Designer({
     }
     try {
       if (dirty) await save();
-      const previewToken =
-        page.status === "published" ? undefined : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+      const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
       win.location.href = api.previewUrl(tenantHost, page.slug as string, previewToken);
     } catch (err) {
       win.close();
@@ -1000,28 +1035,46 @@ export default function Designer({
     }
   }
 
-  // "Live view": same real-render iframe the Preview button opens in a new
+  // "Live Edit": same real-render iframe the Preview button opens in a new
   // tab, but embedded and augmented with a designerEdit=1 flag so
   // BaseLayout.astro's bridge script + SectionBlock.astro's
   // data-designer-path attributes activate (see apps/frontend) — clicking an
   // element there sets `sel` exactly like clicking in the block canvas, so
   // the existing Inspector sidebar keeps working unmodified.
+  //
+  // Always mints a preview token, even for an already-published page: a
+  // published page's public GET already includes the content, but
+  // [...slug].astro only turns designerEdit on when a token is present (see
+  // its comment) — skipping the mint for "published" used to leave the
+  // bridge script/data-designer-path attributes never activated, so clicks
+  // in Live Edit silently did nothing.
+  async function enterLive() {
+    if (dirty) await save();
+    const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
+    const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
+    setLiveSrc(`${base}${base.includes("?") ? "&" : "?"}designerEdit=1`);
+    setMode("live");
+  }
+
   async function toggleLive() {
     if (mode === "live") {
       setMode("blocks");
       return;
     }
     try {
-      if (dirty) await save();
-      const previewToken =
-        page.status === "published" ? undefined : await api.getPagePreviewToken(tenantHost, token, page.id as string);
-      const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
-      setLiveSrc(`${base}${base.includes("?") ? "&" : "?"}designerEdit=1`);
-      setMode("live");
+      await enterLive();
     } catch (err) {
       setError((err as Error).message);
     }
   }
+
+  // Opens straight into Live Edit (Puck-style single edit surface) rather
+  // than the block canvas — see toggleLive's comment for why this needs an
+  // async token fetch and can't just be the mode's initial state.
+  useEffect(() => {
+    void enterLive().catch((err) => setError((err as Error).message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function close() {
     if (dirty && !confirm(t("designer-unsaved"))) return;
@@ -1667,9 +1720,39 @@ export default function Designer({
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas font-sans text-ink antialiased">
       {/* top bar */}
       <header className="flex items-center gap-3 border-b border-line/30 bg-white px-4 py-2.5">
-        <span className="text-xs font-bold text-ink">
-          {page.title as string} <span className="font-mono font-normal text-sub">/{page.slug as string}</span>
-        </span>
+        <span className="text-xs font-bold text-ink">{page.title as string}</span>
+        {editingSlug ? (
+          <span className="flex items-center gap-1">
+            <span className="font-mono text-[11px] text-sub">/</span>
+            <input
+              autoFocus
+              value={slugDraft}
+              onChange={(e) => setSlugDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void renameSlug();
+                if (e.key === "Escape") {
+                  setSlugDraft(page.slug as string);
+                  setEditingSlug(false);
+                  setSlugError(null);
+                }
+              }}
+              onBlur={() => void renameSlug()}
+              className="rounded border border-line/40 px-1.5 py-0.5 font-mono text-[11px] text-ink"
+            />
+          </span>
+        ) : (
+          <button
+            onClick={() => {
+              setSlugDraft(page.slug as string);
+              setEditingSlug(true);
+            }}
+            className="font-mono text-[11px] text-sub hover:text-accent hover:underline"
+            title={t("designer-slug-edit")}
+          >
+            /{page.slug as string}
+          </button>
+        )}
+        {slugError && <span className="text-[11px] font-semibold text-red-600">{slugError}</span>}
         <span
           className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
             page.status === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
@@ -1708,12 +1791,23 @@ export default function Designer({
         >
           <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
         </button>
-        <button
-          onClick={() => void preview()}
-          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
-        >
-          <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
-        </button>
+        {page.status === "published" && !dirty ? (
+          <a
+            href={api.previewUrl(tenantHost, page.slug as string)}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
+          </a>
+        ) : (
+          <button
+            onClick={() => void preview()}
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
+          </button>
+        )}
         <button
           onClick={() => void save()}
           disabled={busy}

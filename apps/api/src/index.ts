@@ -7,7 +7,7 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { and, desc, eq } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
-import { requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
+import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
 import * as schema from "./db/schema.js";
@@ -16,6 +16,9 @@ import {
   listSharedContent,
   getGlobalTheme,
   setGlobalTheme,
+  listThemePresets,
+  createThemePreset,
+  deleteThemePreset,
   findUserByEmail,
   listTenants,
   createTenant,
@@ -246,6 +249,45 @@ app.put("/api/portal/theme", async (req, reply) => {
   }
   await setGlobalTheme(settings);
   return { saved: true };
+});
+
+// Personal "my collection" of saved theme presets (admin's Theme panel) —
+// any logged-in user (superadmin or webmaster), scoped to their own userId,
+// not tenant-gated at all (see verifyAnyUser's comment).
+app.get("/api/theme-presets", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  return { items: await listThemePresets(session.userId) };
+});
+
+app.post("/api/theme-presets", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  const { name, settings } = req.body as { name?: string; settings?: Record<string, unknown> };
+  if (!name?.trim()) {
+    reply.code(400);
+    return { error: "name is required" };
+  }
+  const error = validateThemeSettings(settings ?? {});
+  if (error) {
+    reply.code(400);
+    return { error };
+  }
+  const item = await createThemePreset(session.userId, name.trim(), settings ?? {});
+  reply.code(201);
+  return { item };
+});
+
+app.delete("/api/theme-presets/:id", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  const { id } = req.params as { id: string };
+  const deleted = await deleteThemePreset(session.userId, id);
+  if (!deleted) {
+    reply.code(404);
+    return { error: "not found" };
+  }
+  return { deleted: true, id };
 });
 
 app.get("/api/portal/tenants", async (req, reply) => {

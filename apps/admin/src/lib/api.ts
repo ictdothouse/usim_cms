@@ -79,7 +79,9 @@ export const getPages = (tenantHost: string, token: string) =>
   request("/api/pages", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
 
 export const createPage = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
-  request("/api/pages", tenantHost, token, { method: "POST", body: JSON.stringify(data) });
+  request("/api/pages", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then(
+    (b) => b.item as Record<string, unknown>,
+  );
 
 // Mints a short-lived, read-only token for previewUrl() — see its comment.
 export const getPagePreviewToken = (tenantHost: string, token: string, id: string) =>
@@ -323,6 +325,27 @@ export const getGlobalTheme = (token: string) =>
 
 export const putGlobalTheme = (token: string, settings: Record<string, string>) =>
   request("/api/portal/theme", null, token, { method: "PUT", body: JSON.stringify(settings) });
+
+// Personal "my collection" of saved theme presets — root-level, not
+// tenant-scoped (see apps/api's verifyAnyUser), same shape either way
+// regardless of whether the caller is on the Global or per-site Theme form.
+export interface ThemePreset {
+  id: string;
+  name: string;
+  settings: Record<string, string>;
+  createdAt: string;
+}
+
+export const listThemePresets = (token: string) =>
+  request("/api/theme-presets", null, token).then((b) => b.items as ThemePreset[]);
+
+export const createThemePreset = (token: string, name: string, settings: Record<string, string>) =>
+  request("/api/theme-presets", null, token, { method: "POST", body: JSON.stringify({ name, settings }) }).then(
+    (b) => b.item as ThemePreset,
+  );
+
+export const deleteThemePreset = (token: string, id: string) =>
+  request(`/api/theme-presets/${id}`, null, token, { method: "DELETE" });
 
 export const listPortalSharedContent = (token: string) =>
   request("/api/portal/shared-content", null, token).then((b) => b.items as Array<Record<string, unknown>>);

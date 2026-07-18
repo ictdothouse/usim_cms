@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Pool, type PoolClient } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema.js";
@@ -442,6 +442,52 @@ export async function setGlobalTheme(settings: Record<string, unknown>): Promise
         target: schema.siteTheme.tenantHost,
         set: { settings, updatedAt: new Date() },
       });
+  } finally {
+    client.release();
+  }
+}
+
+// "My collection" in the admin's Theme panel — personal, per-user, never
+// read by getMergedTheme/apps/frontend. Ownership is enforced in the WHERE
+// clause itself (not just an app-level check before the query), so a
+// guessed id can never touch another user's row.
+export async function listThemePresets(ownerUserId: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    return db
+      .select()
+      .from(schema.themePresets)
+      .where(eq(schema.themePresets.ownerUserId, ownerUserId))
+      .orderBy(desc(schema.themePresets.createdAt));
+  } finally {
+    client.release();
+  }
+}
+
+export async function createThemePreset(ownerUserId: string, name: string, settings: Record<string, unknown>) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.insert(schema.themePresets).values({ ownerUserId, name, settings }).returning();
+    return row;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteThemePreset(ownerUserId: string, id: string): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db
+      .delete(schema.themePresets)
+      .where(and(eq(schema.themePresets.id, id), eq(schema.themePresets.ownerUserId, ownerUserId)))
+      .returning();
+    return Boolean(row);
   } finally {
     client.release();
   }

@@ -34,6 +34,7 @@ import {
   Rss,
   Settings as SettingsIcon,
   ShieldCheck,
+  Sparkles,
   Strikethrough,
   Trash2,
   Underline,
@@ -44,6 +45,7 @@ import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import * as api from "@/lib/api";
+import { slugify, oklchToHex } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
 import Designer from "@/Designer";
@@ -370,30 +372,13 @@ function BlockBuilder({
 }
 
 // ---------- Pages ----------
-// Derives a URL-safe slug from a title (lowercase, non-alphanumerics -> "-",
-// no leading/trailing "-"). Used to auto-fill the slug field as the admin
-// types a title — the field stays a normal input, so it can still be edited
-// by hand afterwards.
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [designPage, setDesignPage] = useState<Record<string, unknown> | null>(null);
-  const [slug, setSlug] = useState("");
-  // Once the admin edits the slug field directly, stop overwriting it from
-  // the title so a deliberate edit never gets clobbered by later typing.
-  const [slugTouched, setSlugTouched] = useState(false);
   const [title, setTitle] = useState("");
-  const [bannerImageUrl, setBannerImageUrl] = useState("");
-  const [uploading, setUploading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -409,30 +394,27 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
     void refresh();
   }, [tenantHost]);
 
-  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
+  // Quick-create: title only, straight into Designer — slug is auto-derived
+  // (de-duplicated against existing slugs) and stays editable there
+  // afterwards (see Designer.tsx's slug-rename field), not up front here.
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const base = slugify(trimmed) || "page";
+    const existing = new Set(pages.map((p) => p.slug as string));
+    let candidate = base;
+    for (let n = 2; existing.has(candidate); n++) candidate = `${base}-${n}`;
+    setCreating(true);
     try {
-      setBannerImageUrl(await api.uploadMedia(tenantHost, token, file));
+      const item = await api.createPage(tenantHost, token, { slug: candidate, title: trimmed });
+      setTitle("");
+      await refresh();
+      setDesignPage(item);
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setUploading(false);
-    }
-  }
-
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      await api.createPage(tenantHost, token, { slug, title, ...(bannerImageUrl ? { bannerImageUrl } : {}) });
-      setSlug("");
-      setSlugTouched(false);
-      setTitle("");
-      setBannerImageUrl("");
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
+      setCreating(false);
     }
   }
 
@@ -460,22 +442,24 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
     }
   }
 
-  // Published pages are already publicly visible, no token needed. A draft
-  // only opens for the admin because a short-lived, read-only preview token
-  // is minted just for this click — never the admin's own session bearer,
-  // which never expires (see apps/api's auth.ts).
+  // Draft only: a published page renders a plain <a href target="_blank">
+  // instead (see the "View" link below) — a real anchor click is a genuine
+  // browser navigation, so it can't hit the "window.open then redirect"
+  // pattern's failure mode (some browsers let the blank tab open but then
+  // silently block the follow-up script navigation, leaving a permanently
+  // blank tab). A draft still needs an async-minted preview token before the
+  // URL is known, so it has no choice but to open first, navigate after.
   async function preview(p: Record<string, unknown>) {
-    // Open the tab synchronously, in direct response to the click, then
-    // navigate it once the token resolves — opening it only after the
-    // `await` below would get silently blocked as a non-gesture popup by
-    // some browsers.
     const win = window.open("", "_blank", "noreferrer");
+    if (!win) {
+      setError(t("designer-preview-blocked"));
+      return;
+    }
     try {
-      const previewToken =
-        p.status === "published" ? undefined : await api.getPagePreviewToken(tenantHost, token, p.id as string);
-      if (win) win.location.href = api.previewUrl(tenantHost, p.slug as string, previewToken);
+      const previewToken = await api.getPagePreviewToken(tenantHost, token, p.id as string);
+      win.location.href = api.previewUrl(tenantHost, p.slug as string, previewToken);
     } catch (err) {
-      win?.close();
+      win.close();
       setError((err as Error).message);
     }
   }
@@ -514,37 +498,16 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         <FileText className="h-4 w-4 text-accent" /> {t("pages-title")}
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <form onSubmit={create} className={`${card} space-y-3 p-4`}>
-        <div className="flex gap-2">
-          <input
-            className={inputCls}
-            placeholder={t("pages-slug")}
-            value={slug}
-            onChange={(e) => {
-              setSlug(e.target.value);
-              setSlugTouched(true);
-            }}
-            required
-          />
-          <input
-            className={inputCls}
-            placeholder={t("pages-name")}
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              if (!slugTouched) setSlug(slugify(e.target.value));
-            }}
-            required
-          />
-        </div>
-        <label className="block text-xs font-medium text-body">
-          {t("pages-banner")}
-          <input type="file" accept="image/*" onChange={onFileChosen} className="mt-1 block text-xs" />
-        </label>
-        {uploading && <p className="text-[11px] text-sub">{t("uploading")}</p>}
-        {bannerImageUrl && <img src={api.API_URL + bannerImageUrl} alt="banner preview" className="h-20 rounded-lg" />}
-        <button type="submit" className={btnPrimary}>
-          {t("pages-create")}
+      <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
+        <input
+          className={inputCls}
+          placeholder={t("pages-name")}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          required
+        />
+        <button type="submit" disabled={creating} className={`${btnPrimary} shrink-0`}>
+          {creating ? t("pages-creating") : t("pages-create")}
         </button>
       </form>
       <ul className={`${card} divide-y divide-line/20`}>
@@ -568,12 +531,23 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                 )}
               </span>
               <span className="flex items-center gap-3">
-                <button
-                  onClick={() => preview(p)}
-                  className="flex items-center gap-1 font-semibold text-body hover:underline"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" /> {t("pages-view")}
-                </button>
+                {published ? (
+                  <a
+                    href={api.previewUrl(tenantHost, p.slug as string)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 font-semibold text-body hover:underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> {t("pages-view")}
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => preview(p)}
+                    className="flex items-center gap-1 font-semibold text-body hover:underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> {t("pages-view")}
+                  </button>
+                )}
                 {p.slug !== "home" && (
                   <button onClick={() => setHome(p.id as string)} className="font-semibold text-body hover:underline">
                     {t("pages-set-home")}
@@ -1403,16 +1377,79 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
 }
 
 // ---------- Theme (shared form for per-site and global) ----------
+// A curated slice of daisyUI's own built-in themes (real oklch() triples
+// copied from node_modules/daisyui/themes.css's [data-theme=X] rules, not
+// guessed) — picking one fills the 4 pickers below, which stay fully
+// editable afterwards, same as typing a color by hand.
+const THEME_PRESETS: Array<{ name: string; primary: [number, number, number]; secondary: [number, number, number]; base: [number, number, number]; text: [number, number, number] }> = [
+  { name: "light", primary: [0.45, 0.24, 277.023], secondary: [0.65, 0.241, 354.308], base: [1, 0, 0], text: [0.21, 0.006, 285.885] },
+  { name: "dark", primary: [0.58, 0.233, 277.117], secondary: [0.65, 0.241, 354.308], base: [0.2533, 0.016, 252.42], text: [0.97807, 0.029, 256.847] },
+  { name: "cupcake", primary: [0.85, 0.138, 181.071], secondary: [0.89, 0.061, 343.231], base: [0.97788, 0.004, 56.375], text: [0.23574, 0.066, 313.189] },
+  { name: "corporate", primary: [0.58, 0.158, 241.966], secondary: [0.55, 0.046, 257.417], base: [1, 0, 0], text: [0.22389, 0.031, 278.072] },
+  { name: "synthwave", primary: [0.71, 0.202, 349.761], secondary: [0.82, 0.111, 230.318], base: [0.15, 0.09, 281.288], text: [0.78, 0.115, 274.713] },
+  { name: "forest", primary: [0.68628, 0.185, 148.958], secondary: [0.69776, 0.135, 168.327], base: [0.2084, 0.008, 17.911], text: [0.83768, 0.001, 17.911] },
+  { name: "luxury", primary: [1, 0, 0], secondary: [0.27581, 0.064, 261.069], base: [0.14076, 0.004, 285.822], text: [0.75687, 0.123, 76.89] },
+  { name: "dracula", primary: [0.75461, 0.183, 346.812], secondary: [0.74202, 0.148, 301.883], base: [0.28822, 0.022, 277.508], text: [0.97747, 0.007, 106.545] },
+  { name: "winter", primary: [0.5686, 0.255, 257.57], secondary: [0.42551, 0.161, 282.339], base: [1, 0, 0], text: [0.41886, 0.053, 255.824] },
+  { name: "business", primary: [0.41703, 0.099, 251.473], secondary: [0.64092, 0.027, 229.389], base: [0.24353, 0, 0], text: [0.8487, 0, 0] },
+  { name: "coffee", primary: [0.71996, 0.123, 62.756], secondary: [0.34465, 0.029, 199.194], base: [0.24, 0.023, 329.708], text: [0.72354, 0.092, 79.129] },
+  { name: "night", primary: [0.75351, 0.138, 232.661], secondary: [0.68011, 0.158, 276.934], base: [0.20768, 0.039, 265.754], text: [0.84153, 0.007, 265.754] },
+];
+
+function presetToColors(p: (typeof THEME_PRESETS)[number]) {
+  return {
+    primaryColor: oklchToHex(...p.primary),
+    secondaryColor: oklchToHex(...p.secondary),
+    backgroundColor: oklchToHex(...p.base),
+    textColor: oklchToHex(...p.text),
+  };
+}
+
+// Random palette on the same oklch model as the presets above, not a
+// separate ad-hoc random-hex generator — a random hue for primary, an
+// analogous hue for secondary, and light/dark base+text picked together so
+// text stays readable against the background.
+function randomTheme() {
+  const hue = Math.random() * 360;
+  const dark = Math.random() < 0.5;
+  return {
+    primaryColor: oklchToHex(0.6, 0.19, hue),
+    secondaryColor: oklchToHex(0.62, 0.16, (hue + 130) % 360),
+    backgroundColor: dark ? oklchToHex(0.22, 0.02, hue) : oklchToHex(0.98, 0.01, hue),
+    textColor: dark ? oklchToHex(0.92, 0.02, hue) : oklchToHex(0.2, 0.02, hue),
+  };
+}
+
+// Curated, not exhaustive — a scrollable/typeable starting list (the field
+// still accepts any Google Font name typed by hand, curated or not).
+const GOOGLE_FONTS = [
+  "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Nunito", "Raleway",
+  "Playfair Display", "Merriweather", "Oswald", "Source Sans Pro", "PT Sans", "Ubuntu", "Rubik",
+  "Work Sans", "Fira Sans", "Noto Sans", "Quicksand", "Josefin Sans", "Karla", "Mulish",
+  "DM Sans", "Barlow", "Manrope", "Space Grotesk", "Outfit", "Plus Jakarta Sans",
+  "Libre Baskerville", "Crimson Text", "Cormorant Garamond", "Bitter", "Domine", "Lora",
+  "EB Garamond", "Vollkorn", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", "Archivo",
+  "Heebo", "Hind", "Titillium Web", "Cabin", "Dosis", "Comfortaa", "Pacifico", "Caveat",
+  "Dancing Script", "Lobster", "Bebas Neue", "Anton", "Abril Fatface", "Righteous",
+  "Permanent Marker", "Shadows Into Light", "Amatic SC", "Indie Flower",
+];
+
 function ThemeForm({
   title,
   desc,
   load,
   save,
+  token,
+  allowDeactivate,
 }: {
   title: string;
   desc?: string;
   load: () => Promise<Record<string, string>>;
   save: (settings: Record<string, string>) => Promise<unknown>;
+  token: string;
+  // Only the per-site override has a "default" above it to fall back to —
+  // the global theme itself has nothing to deactivate into.
+  allowDeactivate?: boolean;
 }) {
   const { t } = useT();
   const [primaryColor, setPrimaryColor] = useState("");
@@ -1420,9 +1457,23 @@ function ThemeForm({
   const [backgroundColor, setBackgroundColor] = useState("");
   const [textColor, setTextColor] = useState("");
   const [fontFamily, setFontFamily] = useState("");
+  const [fontOpen, setFontOpen] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [presets, setPresets] = useState<api.ThemePreset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const currentColors = () => ({ primaryColor, secondaryColor, backgroundColor, textColor, fontFamily, logoUrl });
+
+  async function refreshPresets() {
+    try {
+      setPresets(await api.listThemePresets(token));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   useEffect(() => {
     void load().then((th) => {
@@ -1433,6 +1484,134 @@ function ThemeForm({
       setFontFamily(th.fontFamily ?? "");
       setLogoUrl(th.logoUrl ?? "");
     });
+    void refreshPresets();
+  }, []);
+
+  // "Add to my favourites" — saves whatever's currently in the form
+  // (unsaved edits included) as a new named preset, not what's on disk.
+  async function saveToCollection() {
+    const name = presetName.trim();
+    if (!name) return;
+    try {
+      await api.createThemePreset(token, name, currentColors());
+      setPresetName("");
+      await refreshPresets();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function deletePreset(id: string) {
+    try {
+      await api.deleteThemePreset(token, id);
+      await refreshPresets();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function loadPreset(p: api.ThemePreset) {
+    setPrimaryColor(p.settings.primaryColor ?? "");
+    setSecondaryColor(p.settings.secondaryColor ?? "");
+    setBackgroundColor(p.settings.backgroundColor ?? "");
+    setTextColor(p.settings.textColor ?? "");
+    setFontFamily(p.settings.fontFamily ?? "");
+    setLogoUrl(p.settings.logoUrl ?? "");
+  }
+
+  // "Test only" — same as clicking a preset, an explicit label for it so
+  // it's clear nothing is saved until Save is pressed.
+  const testPreset = loadPreset;
+
+  // Activate: load then immediately persist — same effect as loading a
+  // preset by hand and clicking Save, bundled into one click.
+  async function activatePreset(p: api.ThemePreset) {
+    loadPreset(p);
+    try {
+      await save(p.settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // Revert this site to inheriting the global theme untouched — clearing
+  // every key (not deleting the row) is exactly what the existing PUT
+  // /api/theme already treats as "no override" (validateThemeSettings
+  // allows "" for every field; getMergedTheme spreads an empty object).
+  async function deactivate() {
+    const empty = { primaryColor: "", secondaryColor: "", backgroundColor: "", textColor: "", fontFamily: "", logoUrl: "" };
+    try {
+      await save(empty);
+      loadPreset({ id: "", name: "", createdAt: "", settings: empty });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // design.md export/import — a small YAML-frontmatter-flavored text file,
+  // just the 6 known theme keys, human-readable and diffable, no library
+  // needed to read or write it.
+  function downloadDesignMd() {
+    const colors = currentColors();
+    const lines = [
+      "---",
+      `name: ${presetName.trim() || title}`,
+      ...Object.entries(colors).map(([k, v]) => `${k}: ${v}`),
+      "---",
+      "",
+      "# Design",
+      "",
+      "Generated by USIM CMS's Theme panel. Upload this file back into any site's",
+      "Theme panel to preview or apply these settings.",
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slugify(presetName.trim() || title)}.design.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importDesignMd(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const frontmatter = text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+      const parsed: Record<string, string> = {};
+      for (const line of frontmatter.split("\n")) {
+        const m = line.match(/^([a-zA-Z]+):\s*(.*)$/);
+        if (m) parsed[m[1]] = m[2].trim();
+      }
+      setPrimaryColor(parsed.primaryColor ?? primaryColor);
+      setSecondaryColor(parsed.secondaryColor ?? secondaryColor);
+      setBackgroundColor(parsed.backgroundColor ?? backgroundColor);
+      setTextColor(parsed.textColor ?? textColor);
+      setFontFamily(parsed.fontFamily ?? fontFamily);
+      setLogoUrl(parsed.logoUrl ?? logoUrl);
+      if (parsed.name) setPresetName(parsed.name);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // One combined stylesheet request for every curated font so the dropdown
+  // rows and the live preview panel below can render each one for real,
+  // instead of just naming it — shared across both ThemeForm instances
+  // (Global Theme + per-site Theme), so guard against injecting it twice.
+  useEffect(() => {
+    if (document.getElementById("admin-font-picker-preview")) return;
+    const link = document.createElement("link");
+    link.id = "admin-font-picker-preview";
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`;
+    document.head.appendChild(link);
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -1447,6 +1626,13 @@ function ThemeForm({
     }
   }
 
+  function applyPalette(colors: Record<string, string>) {
+    setPrimaryColor(colors.primaryColor);
+    setSecondaryColor(colors.secondaryColor);
+    setBackgroundColor(colors.backgroundColor);
+    setTextColor(colors.textColor);
+  }
+
   const colorField = (label: string, value: string, onChange: (v: string) => void) => (
     <label className="block text-xs font-medium text-body">
       {label}
@@ -1459,43 +1645,204 @@ function ThemeForm({
     </label>
   );
 
+  const fontMatches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(fontFamily.toLowerCase()));
+
   return (
     <section className="space-y-3">
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <Palette className="h-4 w-4 text-accent" /> {title}
       </h2>
       {desc && <p className="text-xs text-sub">{desc}</p>}
-      <form onSubmit={submit} className={`${card} max-w-sm space-y-3 p-4`}>
-        <div className="flex flex-wrap gap-3">
-          {colorField(t("theme-primary"), primaryColor, setPrimaryColor)}
-          {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor)}
-          {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
-          {colorField(t("theme-text"), textColor, setTextColor)}
+      <div className="flex flex-wrap items-start gap-4">
+        <form onSubmit={submit} className={`${card} max-w-sm space-y-3 p-4`}>
+          <div>
+            <p className="mb-1 text-xs font-medium text-body">{t("theme-presets")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {THEME_PRESETS.map((p) => {
+                const colors = presetToColors(p);
+                return (
+                  <button
+                    key={p.name}
+                    type="button"
+                    title={p.name}
+                    onClick={() => applyPalette(colors)}
+                    className="h-7 w-7 overflow-hidden rounded-full border border-line/30"
+                    style={{ background: `linear-gradient(135deg, ${colors.primaryColor} 50%, ${colors.secondaryColor} 50%)` }}
+                  />
+                );
+              })}
+              <button
+                type="button"
+                title={t("theme-generate")}
+                onClick={() => applyPalette(randomTheme())}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {colorField(t("theme-primary"), primaryColor, setPrimaryColor)}
+            {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor)}
+            {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
+            {colorField(t("theme-text"), textColor, setTextColor)}
+          </div>
+          <div className="relative">
+            <label className="block text-xs font-medium text-body">
+              {t("theme-font")}
+              <input
+                className={`${inputCls} mt-1`}
+                value={fontFamily}
+                onChange={(e) => {
+                  setFontFamily(e.target.value);
+                  setFontOpen(true);
+                }}
+                onFocus={() => setFontOpen(true)}
+                onBlur={() => setTimeout(() => setFontOpen(false), 150)}
+                placeholder="Noto Sans"
+              />
+            </label>
+            {fontOpen && fontMatches.length > 0 && (
+              <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
+                {fontMatches.map((f) => (
+                  <li key={f}>
+                    <button
+                      type="button"
+                      onMouseDown={() => {
+                        setFontFamily(f);
+                        setFontOpen(false);
+                      }}
+                      className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
+                      style={{ fontFamily: f }}
+                    >
+                      {f}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <label className="block text-xs font-medium text-body">
+            {t("theme-logo")}
+            <input className={`${inputCls} mt-1`} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} />
+          </label>
+          <button type="submit" className={btnPrimary}>
+            {t("theme-save")}
+          </button>
+          {saved && <span className="ml-2 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </form>
+
+        {/* Live preview — reflects the form's current (unsaved) state, not
+            what's actually saved, so tweaking a color/font shows its effect
+            immediately without a round trip to Save. */}
+        <div
+          className="w-72 shrink-0 space-y-3 rounded-xl border border-line/30 p-5"
+          style={{
+            background: backgroundColor || "#ffffff",
+            color: textColor || "#111111",
+            fontFamily: fontFamily || undefined,
+          }}
+        >
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{t("theme-preview-label")}</p>
+          <p className="text-lg font-bold">{t("theme-preview-heading")}</p>
+          <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
+          <div className="flex gap-2">
+            <span className="rounded-full px-3 py-1.5 text-xs font-semibold text-white" style={{ background: primaryColor || "#0f62fe" }}>
+              {t("theme-preview-primary")}
+            </span>
+            <span
+              className="rounded-full border px-3 py-1.5 text-xs font-semibold"
+              style={{ borderColor: secondaryColor || "#666", color: secondaryColor || "#666" }}
+            >
+              {t("theme-preview-secondary")}
+            </span>
+          </div>
+          <div className="flex gap-1.5 border-t border-current/10 pt-3">
+            <input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder={t("theme-preset-name")}
+              className="min-w-0 flex-1 rounded-lg border border-current/20 bg-white/40 px-2 py-1 text-xs text-ink placeholder:text-current/50"
+            />
+            <button
+              type="button"
+              onClick={() => void saveToCollection()}
+              disabled={!presetName.trim()}
+              className="shrink-0 rounded-lg bg-black/10 px-2 py-1 text-xs font-semibold disabled:opacity-40"
+            >
+              {t("theme-add-favourite")}
+            </button>
+          </div>
         </div>
-        <label className="block text-xs font-medium text-body">
-          {t("theme-font")}
-          <input
-            className={`${inputCls} mt-1`}
-            value={fontFamily}
-            onChange={(e) => setFontFamily(e.target.value)}
-            placeholder="Noto Sans"
-          />
-        </label>
-        {fontFamily && (
-          <p className="text-sm" style={{ fontFamily }}>
-            {t("theme-font-preview")}
-          </p>
-        )}
-        <label className="block text-xs font-medium text-body">
-          {t("theme-logo")}
-          <input className={`${inputCls} mt-1`} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} />
-        </label>
-        <button type="submit" className={btnPrimary}>
-          {t("theme-save")}
+
+        {/* Export/import a whole theme as a small human-readable file —
+            works across sites: download here, upload on any other site's
+            Theme panel to load the same settings into its form/preview. */}
+        <div className={`${card} w-64 shrink-0 space-y-2 p-4`}>
+          <p className="text-xs font-semibold text-ink">{t("theme-file-title")}</p>
+          <p className="text-[11px] text-sub">{t("theme-file-desc")}</p>
+          <button type="button" onClick={downloadDesignMd} className="w-full rounded-lg bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]">
+            {t("theme-file-download")}
+          </button>
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            className="w-full rounded-lg border border-line/30 px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+          >
+            {t("theme-file-upload")}
+          </button>
+          <input ref={importInputRef} type="file" accept=".md,text/markdown" onChange={importDesignMd} className="hidden" />
+        </div>
+      </div>
+
+      {/* "My collection" — personal favourites, not tied to any one site;
+          Test loads a preset into the form/preview without saving, Activate
+          loads it and saves immediately. */}
+      <div className={`${card} max-w-3xl space-y-2 p-4`}>
+        <p className="text-xs font-semibold text-ink">{t("theme-collection-title")}</p>
+        {presets.length === 0 && <p className="text-[11px] text-sub">{t("theme-collection-empty")}</p>}
+        <ul className="divide-y divide-line/20">
+          {presets.map((p) => (
+            <li key={p.id} className="flex items-center gap-3 py-2 text-xs">
+              <span
+                className="h-5 w-5 shrink-0 rounded-full border border-line/30"
+                style={{ background: `linear-gradient(135deg, ${p.settings.primaryColor || "#ccc"} 50%, ${p.settings.secondaryColor || "#999"} 50%)` }}
+              />
+              <span className="min-w-0 flex-1 truncate font-semibold text-ink">{p.name}</span>
+              <button onClick={() => testPreset(p)} className="font-semibold text-body hover:underline">
+                {t("theme-preset-test")}
+              </button>
+              <button onClick={() => void activatePreset(p)} className="font-semibold text-accent hover:underline">
+                {t("theme-preset-activate")}
+              </button>
+              <button
+                onClick={() => {
+                  setPresetName(p.name);
+                  loadPreset(p);
+                  downloadDesignMd();
+                }}
+                className="font-semibold text-body hover:underline"
+              >
+                {t("theme-file-download")}
+              </button>
+              <button onClick={() => void deletePreset(p.id)} className="text-red-500 hover:text-red-700" title={t("theme-preset-delete")}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {allowDeactivate && (
+        <button
+          type="button"
+          onClick={() => void deactivate()}
+          className="text-xs font-semibold text-sub hover:text-red-600 hover:underline"
+        >
+          {t("theme-deactivate")}
         </button>
-        {saved && <span className="ml-2 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
-        {error && <p className="text-xs text-red-600">{error}</p>}
-      </form>
+      )}
     </section>
   );
 }
@@ -2646,6 +2993,8 @@ function ContentManager({
               desc={t("theme-desc")}
               load={() => api.getTheme(siteHost, token)}
               save={(s) => api.putTheme(siteHost, token, s)}
+              token={token}
+              allowDeactivate
             />
           )}
         </>
@@ -2911,10 +3260,17 @@ function Shell({
                   desc={t("theme-desc")}
                   load={() => api.getTheme(session.tenantHost!, session.token)}
                   save={(s) => api.putTheme(session.tenantHost!, session.token, s)}
+                  token={session.token}
+                  allowDeactivate
                 />
               )}
               {tab === "global-theme" && isSuper && (
-                <ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} />
+                <ThemeForm
+                  title={t("gtheme-title")}
+                  load={() => api.getGlobalTheme(session.token)}
+                  save={(s) => api.putGlobalTheme(session.token, s)}
+                  token={session.token}
+                />
               )}
               {tab === "feed" && isSuper && <PortalFeedPanel token={session.token} />}
               {tab === "settings" && isSuper && <SettingsPanel token={session.token} tenants={tenants} />}

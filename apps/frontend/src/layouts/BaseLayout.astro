@@ -129,21 +129,63 @@ const fontsHref = allFonts.length
             return document.querySelector(`[data-designer-path="${path}"]`);
           }
 
+          // Every element-level wrapper (SectionBlock.astro's
+          // `<div data-designer-path=... style="display:contents">`) has no
+          // box of its own — display:contents renders only its children, so
+          // non-inherited properties like outline/border set on the wrapper
+          // itself are invisible, and contentEditable's focus/caret handling
+          // doesn't reliably attach to it either. typoStyle's own properties
+          // (color, font-family, ...) still reach the child fine since those
+          // are inherited CSS, but outline and contentEditable need the
+          // actual rendered child instead.
+          function visualTarget(node) {
+            if (!node) return null;
+            return getComputedStyle(node).display === "contents" ? node.firstElementChild || node : node;
+          }
+
+          // Puck-style hover/selected feedback: a light dashed outline under
+          // the pointer, a solid one on whatever `sel` currently is in
+          // Designer.tsx (see its designer:selected postMessage below) —
+          // kept separate from the drag-reorder highlight above (also
+          // style.outline) since a plain hover never coincides with an
+          // active drag.
+          let selectedNode = null;
+          let hoveredNode = null;
+          document.addEventListener("pointerover", (e) => {
+            const node = e.target.closest("[data-designer-path]");
+            if (node === hoveredNode) return;
+            if (hoveredNode && hoveredNode !== selectedNode) visualTarget(hoveredNode).style.outline = "";
+            hoveredNode = node;
+            if (node && node !== selectedNode && !dragState) {
+              visualTarget(node).style.outline = "1px dashed rgba(15,98,254,0.55)";
+            }
+          });
+          document.addEventListener("pointerout", (e) => {
+            if (e.target.closest("[data-designer-path]") !== hoveredNode) return;
+            if (hoveredNode && hoveredNode !== selectedNode) visualTarget(hoveredNode).style.outline = "";
+            hoveredNode = null;
+          });
+
           window.addEventListener("message", (e) => {
             if (e.origin !== targetOrigin || !e.data) return;
+            if (e.data.type === "designer:selected") {
+              if (selectedNode) visualTarget(selectedNode).style.outline = "";
+              selectedNode = e.data.path ? findByPath(e.data.path) : null;
+              if (selectedNode) visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
+              return;
+            }
             const node = findByPath(e.data.path);
             if (!node) return;
             if (e.data.type === "designer:style") {
               Object.assign(node.style, e.data.style);
             } else if (e.data.type === "designer:text") {
-              node.contentEditable = String(Boolean(e.data.editable));
-              if (e.data.editable && !node.dataset.designerBound) {
-                node.dataset.designerBound = "1";
-                node.addEventListener("input", () => {
-                  parent.postMessage(
-                    { type: "designer:textInput", path: node.dataset.designerPath, value: node.textContent },
-                    targetOrigin,
-                  );
+              const target = visualTarget(node);
+              target.contentEditable = String(Boolean(e.data.editable));
+              if (e.data.editable && !target.dataset.designerBound) {
+                target.dataset.designerBound = "1";
+                const path = node.dataset.designerPath;
+                target.addEventListener("input", () => {
+                  parent.postMessage({ type: "designer:textInput", path, value: target.textContent }, targetOrigin);
                 });
               }
             }

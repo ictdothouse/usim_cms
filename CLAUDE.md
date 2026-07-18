@@ -27,8 +27,11 @@ a silent no-op under a superuser connection. That role also needs `CREATEDB` (se
 ## Multi-tenancy: database-per-tenant
 
 - `DATABASE_URL` holds only the **control plane** — the `tenants`/`users`/`roles`/`site_theme`/
-  `shared_content` registry tables (`apps/api/src/db/tenant-pool.ts`'s fixed `pool`). Tenant content
-  (`pages`, etc.) never lives there.
+  `shared_content`/`theme_presets` registry tables (`apps/api/src/db/tenant-pool.ts`'s fixed `pool`).
+  Tenant content (`pages`, etc.) never lives there. `theme_presets` is a personal, per-user favourites
+  list in the admin's Theme panel (save/test/activate/delete a named color+font combo, or export/import
+  it as a small `.md` file) — owned by `owner_user_id`, never tenant-scoped, never read by
+  `getMergedTheme`/apps/frontend.
 - Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
   the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
   `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is
@@ -69,10 +72,18 @@ pnpm workspace monorepo with two apps:
   - Local API/SDK for same-process frontend access (bypassing HTTP) is not implemented yet.
 
 - **`apps/admin`** — Vite + React + TypeScript, Tailwind CSS, Shadcn UI conventions (`components.json`,
-  `src/lib/utils.ts`'s `cn` helper). No components have been added via the shadcn CLI yet — `pnpm dlx
+  `src/lib/utils.ts`'s `cn` helper, which also holds the shared `slugify`/`oklchToHex` used by both
+  `App.tsx` and `Designer.tsx`). No components have been added via the shadcn CLI yet — `pnpm dlx
   shadcn@latest add <component>` from `apps/admin` will place them under `src/components`. The page
-  builder itself lives in `src/Designer.tsx`: drag-drop block canvas, a live-preview edit mode that
-  renders the actual frontend page for click-to-select/inline editing, and a design template library.
+  builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit** (opens by default —
+  the real frontend page rendered in an iframe with click-to-select/inline editing via a postMessage
+  bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
+  actually activates), and a design template library. A page's slug is auto-derived from its title on
+  create (`PagesPanel`'s quick-create form) and stays editable afterward via a click-to-edit field in
+  Designer's header. `ThemeForm` (Site Theme / Global Theme) offers daisyUI preset swatches + a random
+  generator (both built on the same `oklchToHex` conversion), a typeable/scrollable Google Font picker
+  with live per-row preview, a live preview panel, and a personal saved-style collection
+  (save/test/activate/delete, export/import as `.md`) backed by `theme_presets`.
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on

@@ -62,3 +62,24 @@ export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): Sess
   }
   return session;
 }
+
+// For root-level routes any logged-in user (superadmin or webmaster) may
+// call, keyed by their own userId — theme-preset favourites, not
+// tenant-scoped content, so no x-tenant-host/tenantPlugin involved.
+export function verifyAnyUser(req: FastifyRequest, reply: FastifyReply): SessionPayload | null {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    reply.code(401).send({ error: "Missing bearer token" });
+    return null;
+  }
+  const session = verifySession(header.slice("Bearer ".length));
+  if (!session) {
+    reply.code(401).send({ error: "Invalid or expired token" });
+    return null;
+  }
+  if (session.previewOnly) {
+    reply.code(403).send({ error: "Preview token cannot be used here" });
+    return null;
+  }
+  return session;
+}

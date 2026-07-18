@@ -58,3 +58,13 @@ ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "role_id" uuid REFERENCES 
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "tenant_hosts" text[] DEFAULT '{}' NOT NULL;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "extra_permissions" text[] DEFAULT '{}' NOT NULL;
 UPDATE "public"."users" SET "tenant_hosts" = ARRAY["tenant_host"] WHERE "tenant_host" IS NOT NULL AND cardinality("tenant_hosts") = 0;
+
+-- A user's personal saved theme presets ("my collection" in the Theme
+-- panel) — must come after "users" exists (owner_user_id references it).
+CREATE TABLE IF NOT EXISTS "public"."theme_presets" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"owner_user_id" uuid NOT NULL REFERENCES "public"."users"("id") ON DELETE CASCADE,
+	"name" text NOT NULL,
+	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
