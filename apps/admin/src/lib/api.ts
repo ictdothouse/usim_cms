@@ -92,6 +92,9 @@ export const createPage = (tenantHost: string, token: string, data: { slug: stri
 export const getPagePreviewToken = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
 
+export const getPostPreviewToken = (tenantHost: string, token: string, id: string) =>
+  request(`/api/posts/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
+
 export const sharePage = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}/publish`, tenantHost, token, { method: "POST" });
 

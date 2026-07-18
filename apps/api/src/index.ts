@@ -910,6 +910,21 @@ await app.register(async (protectedScope) => {
     });
     return { token };
   });
+
+  // Same shape as the pages preview-token route above — posts had none,
+  // which made a Preview button dead for Draft/Private posts.
+  protectedScope.post("/api/posts/:id/preview-token", async (req) => {
+    const token = signSession({
+      userId: req.user.userId,
+      email: req.user.email,
+      role: req.user.role,
+      tenantHost: req.tenantHost,
+      permissions: [],
+      previewOnly: true,
+      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+    });
+    return { token };
+  });
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
 
