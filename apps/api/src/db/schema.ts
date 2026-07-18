@@ -13,10 +13,24 @@ export const pages = pgTable("pages", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-// News/article content per tenant. body is sanitized HTML from the admin
+// Real taxonomy table (unlike posts.tags, which stays freeform) — a post's
+// category is a managed, renameable, FK'd reference, not a repeated string.
+// ON DELETE RESTRICT on posts.categoryId (below) is the "can't delete a
+// category that's in use" rule — enforced by Postgres, no app-level check.
+export const categories = pgTable("categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  slug: text("slug").notNull().unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Post/Article content per tenant. body is sanitized HTML from the admin
 // rich-text editor (see the posts collection's beforeChange hook). Public
 // visibility is enforced by RLS: anonymous SELECT only sees status='published'
-// (migrations/0003_create_posts.sql).
+// (migrations/0003_create_posts.sql) — "private" is deliberately the same
+// non-published branch as "draft" (see 0009's comment), just with its own
+// publishedAt and a real history snapshot, unlike a draft.
 export const posts = pgTable("posts", {
   id: uuid("id").primaryKey().defaultRandom(),
   slug: text("slug").notNull(),
@@ -24,10 +38,44 @@ export const posts = pgTable("posts", {
   body: text("body").notNull().default(""),
   excerpt: text("excerpt"),
   bannerImageUrl: text("banner_image_url"),
-  status: text("status").notNull().default("draft"), // "draft" | "published"
+  status: text("status").notNull().default("draft"), // "draft" | "published" | "private"
   publishedAt: timestamp("published_at"),
+  // Category is a real FK into `categories` (a managed taxonomy) — tags stay
+  // freeform text, no separate tags table; good enough for a per-tenant blog
+  // without inventing a managed-list UI for tags nobody asked for.
+  categoryId: uuid("category_id").references(() => categories.id, { onDelete: "restrict" }),
+  tags: text("tags").array().notNull().default([]),
+  // Author, within the tenant. No FK: users live in the control-plane
+  // database, posts live in the tenant's own database (DB-per-tenant), and
+  // Postgres can't FK across databases — same limitation as media.uploadedBy
+  // (0006_media_ownership.sql). Stamped once on create (postsCollection's
+  // beforeChange hook), never overwritten on update.
+  authorId: text("author_id"),
+  authorEmail: text("author_email"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Full content snapshot taken every time a post is explicitly published or
+// made private (postsCollection's afterChange hook in index.ts) — not on
+// every edit. The admin's "History" panel lists these per post; "Restore"
+// copies a snapshot's fields back onto the live post as a new draft (never
+// auto-republishes it). Same tenant DB as posts, so a real FK here (unlike
+// the cross-database author columns above).
+export const postRevisions = pgTable("post_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  postId: uuid("post_id")
+    .notNull()
+    .references(() => posts.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  excerpt: text("excerpt"),
+  bannerImageUrl: text("banner_image_url"),
+  category: text("category"),
+  tags: text("tags").array().notNull().default([]),
+  status: text("status").notNull(), // "published" | "private" — whichever this snapshot was taken for
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Flat, non-nested folders for organizing the media library — a name only,
