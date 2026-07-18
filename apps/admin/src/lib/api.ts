@@ -142,6 +142,26 @@ export const restorePostRevision = (tenantHost: string, token: string, postId: s
     (b) => b.item as Record<string, unknown>,
   );
 
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listCategories = (tenantHost: string, token: string) =>
+  request("/api/categories", tenantHost, token).then((b) => b.items as Category[]);
+
+export const createCategory = (tenantHost: string, token: string, name: string, slug: string) =>
+  request("/api/categories", tenantHost, token, { method: "POST", body: JSON.stringify({ name, slug }) }).then((b) => b.item as Category);
+
+export const updateCategory = (tenantHost: string, token: string, id: string, name: string) =>
+  request(`/api/categories/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify({ name }) });
+
+export const deleteCategory = (tenantHost: string, token: string, id: string) =>
+  request(`/api/categories/${id}`, tenantHost, token, { method: "DELETE" });
+
 export interface DesignTemplate {
   id: string;
   name: string;
