@@ -1,5 +1,5 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ChevronRight,
   Copy,
@@ -379,10 +379,10 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const { t } = useT();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [designPage, setDesignPage] = useState<Record<string, unknown> | null>(null);
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   async function refresh() {
     try {
@@ -413,7 +413,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
       const item = await api.createPage(tenantHost, token, { slug: candidate, title: trimmed });
       setTitle("");
       await refresh();
-      setDesignPage(item);
+      navigate(item.id as string);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -557,7 +557,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   </button>
                 )}
                 <button
-                  onClick={() => setDesignPage(p)}
+                  onClick={() => navigate(p.id as string)}
                   className="flex items-center gap-1 font-semibold text-accent hover:underline"
                 >
                   <Palette className="h-3.5 w-3.5" /> {t("pages-design")}
@@ -607,20 +607,21 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         })}
         {pages.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("pages-empty")}</li>}
       </ul>
-      {designPage && (
-        <Designer
-          page={designPage}
-          tenantHost={tenantHost}
-          token={token}
-          t={t}
-          onClose={(saved) => {
-            setDesignPage(null);
-            if (saved) void refresh();
-          }}
-        />
-      )}
     </section>
   );
+}
+
+function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: string }) {
+  const { t } = useT();
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [page, setPage] = useState<Record<string, unknown> | null | undefined>(undefined);
+  useEffect(() => {
+    void api.getPages(tenantHost, token).then((pages) => setPage(pages.find((p) => p.id === id) ?? null));
+  }, [tenantHost, id]);
+  if (page === undefined) return null;
+  if (page === null) return <p className="text-xs text-sub">{t("pages-empty")}</p>;
+  return <Designer page={page} tenantHost={tenantHost} token={token} t={t} onClose={() => navigate("/content/pages")} />;
 }
 
 // ---------- Rich-text toolbar (fixed bar, not just Notion-style slash/hover) ----------
@@ -897,10 +898,10 @@ function PostEditor({
 function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
   const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   async function refresh() {
     try {
@@ -933,7 +934,7 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
       const item = await api.createPost(tenantHost, token, { slug: candidate, title: trimmed });
       setTitle("");
       await refresh();
-      setEditingId(item.id as string);
+      navigate(item.id as string);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -971,11 +972,6 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
       setError((err as Error).message);
     }
   }
-
-  const categoryOptions = useMemo(
-    () => [...new Set(posts.map((p) => p.category as string | null).filter((c): c is string => Boolean(c)))],
-    [posts],
-  );
 
   const statusBadge: Record<PostStatus, string> = {
     draft: "bg-warn/10 text-warn",
@@ -1028,11 +1024,8 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   )}
                 </span>
                 <span className="flex items-center gap-3">
-                  <button
-                    onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
-                    className="font-semibold text-accent hover:underline"
-                  >
-                    {editingId === p.id ? t("posts-close") : t("posts-edit")}
+                  <button onClick={() => navigate(p.id as string)} className="font-semibold text-accent hover:underline">
+                    {t("posts-edit")}
                   </button>
                   {otherStatuses(status).map((s) => (
                     <button
@@ -1053,22 +1046,6 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   </button>
                 </span>
               </div>
-              {editingId === p.id && (
-                <div className="mt-3">
-                  <PostEditor
-                    key={p.id as string}
-                    post={p}
-                    tenantHost={tenantHost}
-                    token={token}
-                    categoryOptions={categoryOptions}
-                    onClose={() => setEditingId(null)}
-                    onSaved={async () => {
-                      setEditingId(null);
-                      await refresh();
-                    }}
-                  />
-                </div>
-              )}
             </li>
           );
         })}
@@ -1076,6 +1053,19 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
       </ul>
     </section>
   );
+}
+
+function PostEditorRoute({ tenantHost, token }: { tenantHost: string; token: string }) {
+  const { t } = useT();
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
+  useEffect(() => { void api.getPosts(tenantHost, token).then(setPosts); }, [tenantHost, id]);
+  if (posts === null) return null;
+  const post = posts.find((p) => p.id === id);
+  if (!post) return <p className="text-xs text-sub">{t("posts-empty")}</p>;
+  const categoryOptions = [...new Set(posts.map((p) => p.category as string | null).filter((c): c is string => Boolean(c)))];
+  return <PostEditor key={post.id as string} post={post} tenantHost={tenantHost} token={token} categoryOptions={categoryOptions} onClose={() => navigate("/content/posts")} onSaved={() => navigate("/content/posts")} />;
 }
 
 // ---------- Media library ----------
@@ -3418,7 +3408,9 @@ function ContentManager({
           <Routes>
             <Route index element={<Navigate to="pages" replace />} />
             <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
+            <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} />} />
             <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
+            <Route path="posts/:id" element={<PostEditorRoute tenantHost={siteHost} token={token} />} />
             <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
             {isSuper && (
               <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
