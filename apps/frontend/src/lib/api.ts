@@ -61,16 +61,35 @@ export interface Post {
   excerpt: string | null;
   bannerImageUrl: string | null;
   publishedAt: string | null;
+  category: string | null;
+  tags: string[];
+  authorEmail: string | null;
 }
 
 // Public scope only returns status='published' rows (RLS policy in
-// apps/api migrations/0003_create_posts.sql).
+// apps/api migrations/0003_create_posts.sql — "private" posts fall in the
+// same non-published branch as a draft, so they never reach here either).
+// query, when given, narrows via apps/api's generic list filters (category/
+// tag/authorId/authorEmail exact-match, from/to range on publishedAt) — see
+// generic-crud.ts's buildListFilters.
 export async function getPostBySlug(tenantHost: string, slug: string): Promise<Post | null> {
   const { items } = await apiGet<{ items: Post[] }>("/api/posts", tenantHost);
   return items.find((p) => p.slug === slug) ?? null;
 }
 
-export async function getTheme(tenantHost: string): Promise<Record<string, unknown>> {
-  const { theme } = await apiGet<{ theme: Record<string, unknown> }>("/api/theme", tenantHost);
+export async function listPosts(
+  tenantHost: string,
+  query?: Record<string, string>,
+): Promise<Post[]> {
+  const qs = query && Object.keys(query).length ? `?${new URLSearchParams(query)}` : "";
+  const { items } = await apiGet<{ items: Post[] }>(`/api/posts${qs}`, tenantHost);
+  return items;
+}
+
+// token here is a theme-preview token (see apps/admin's getThemePreviewToken)
+// — a separate credential from getPageBySlug's draft-visibility token, even
+// though both ride the same Bearer-forwarding apiGet helper.
+export async function getTheme(tenantHost: string, token?: string): Promise<Record<string, unknown>> {
+  const { theme } = await apiGet<{ theme: Record<string, unknown> }>("/api/theme", tenantHost, token);
   return theme;
 }

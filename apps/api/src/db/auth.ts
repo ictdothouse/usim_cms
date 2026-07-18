@@ -38,6 +38,11 @@ export interface SessionPayload {
   // (plugins/auth.ts) refuses this on every write/protected route; only the
   // public scope's elevateIfAuthenticated (generic-crud.ts) accepts it.
   previewOnly?: true;
+  // Set only on a theme-preview token (see POST /api/theme-preview-token) —
+  // carries not-yet-saved site_theme.settings so GET /api/theme can render
+  // them for this request only, without writing to site_theme. Same
+  // previewOnly/exp gating as a page-preview token.
+  themePreview?: Record<string, string>;
   // Unix ms expiry — optional because normal login sessions never expire
   // today; only preview tokens set this.
   exp?: number;

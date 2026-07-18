@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { rm } from "node:fs/promises";
 import Fastify from "fastify";
+import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -38,7 +39,7 @@ import {
   setTenantTheme,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
-import { verifyPassword, hashPassword, signSession } from "./db/auth.js";
+import { verifyPassword, hashPassword, signSession, verifySession } from "./db/auth.js";
 import {
   exportTenantBackup,
   importTenantBackup,
@@ -97,11 +98,16 @@ const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 // built by apps/frontend, so it must not carry `/`, `?`, `<`, etc.
 const FONT_FAMILY_RE = /^[A-Za-z0-9 ]*$/;
 
+// fontFamily = body font; headingFont/postTitleFont are the other two roles
+// in the type system (Header/Title, Blog/Post Title) — all three end up in
+// the same Google Fonts URL, so all three validate the same way.
+const FONT_KEYS = ["fontFamily", "headingFont", "subHeadingFont", "postTitleFont"] as const;
+
 // Shared by both theme write routes (per-tenant + global). site_theme.settings
-// is an open JSONB bag but only these 6 keys are ever read by apps/frontend
+// is an open JSONB bag but only these keys are ever read by apps/frontend
 // (BaseLayout.astro) — reject anything else instead of silently storing it.
 function validateThemeSettings(settings: Record<string, unknown>): string | null {
-  const allowed = new Set([...THEME_COLOR_KEYS, "fontFamily", "logoUrl"]);
+  const allowed = new Set([...THEME_COLOR_KEYS, ...FONT_KEYS, "logoUrl"]);
   for (const key of Object.keys(settings)) {
     if (!allowed.has(key)) return `unknown theme key: ${key}`;
   }
@@ -111,8 +117,11 @@ function validateThemeSettings(settings: Record<string, unknown>): string | null
       return `${key} must be a hex color like #003399`;
     }
   }
-  if (settings.fontFamily !== undefined && !FONT_FAMILY_RE.test(settings.fontFamily as string)) {
-    return "fontFamily must contain only letters, digits, and spaces";
+  for (const key of FONT_KEYS) {
+    const value = settings[key];
+    if (value !== undefined && !FONT_FAMILY_RE.test(value as string)) {
+      return `${key} must contain only letters, digits, and spaces`;
+    }
   }
   if (settings.logoUrl !== undefined && typeof settings.logoUrl !== "string") {
     return "logoUrl must be a string";
@@ -288,6 +297,28 @@ app.delete("/api/theme-presets/:id", async (req, reply) => {
     return { error: "not found" };
   }
   return { deleted: true, id };
+});
+
+// Mints a short-lived, read-only token that lets GET /api/theme render
+// not-yet-saved settings (ThemeForm's "Test" button, either a saved preset
+// or whatever's currently in the form) for one request, without writing to
+// site_theme — same previewOnly/exp pattern as a page's preview-token.
+app.post("/api/theme-preview-token", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  const settings = (req.body as { settings?: Record<string, unknown> })?.settings ?? {};
+  const error = validateThemeSettings(settings);
+  if (error) {
+    reply.code(400);
+    return { error };
+  }
+  const token = signSession({
+    ...session,
+    previewOnly: true,
+    exp: Date.now() + 5 * 60 * 1000,
+    themePreview: settings as Record<string, string>,
+  });
+  return { token };
 });
 
 app.get("/api/portal/tenants", async (req, reply) => {
@@ -688,8 +719,10 @@ const pagesCollection: CollectionConfig = {
 };
 
 // body is author-written HTML rendered raw on the public site — sanitize at
-// this trust boundary on every write, whatever the client sent.
-const sanitizePostBody = (data: unknown) => {
+// this trust boundary on every write, whatever the client sent. Author is
+// stamped once, on create only (req.method — PATCH never overwrites it), so
+// editing someone else's post never reassigns authorship.
+const postsBeforeChange = (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
   // JSON gives an ISO string; Drizzle timestamp columns need a Date.
   if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
@@ -700,7 +733,34 @@ const sanitizePostBody = (data: unknown) => {
       allowedAttributes: { ...sanitizeHtml.defaults.allowedAttributes, img: ["src", "alt"] },
     });
   }
+  if (req.method === "POST" && req.user) {
+    record.authorId = req.user.userId;
+    record.authorEmail = req.user.email;
+  }
   return record;
+};
+
+// Snapshots the post into post_revisions whenever a request explicitly
+// publishes or makes it private (req.body.status, the raw incoming payload —
+// not just "happens to already be published", so a plain content edit via
+// PostEditor's Save never re-snapshots). "private" gets a real history entry
+// too, same as "published" — both are "this went live" events, just with
+// different public visibility (see 0009's migration comment).
+const postsAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRequest) => {
+  const requested = (req.body as Record<string, unknown>)?.status;
+  if (requested !== "published" && requested !== "private") return;
+  const row = item as Record<string, unknown>;
+  await req.db.insert(schema.postRevisions).values({
+    postId: row.id as string,
+    title: row.title as string,
+    body: row.body as string,
+    excerpt: row.excerpt as string | null,
+    bannerImageUrl: row.bannerImageUrl as string | null,
+    category: row.category as string | null,
+    tags: (row.tags as string[]) ?? [],
+    status: row.status as string,
+    publishedAt: row.publishedAt as Date | null,
+  });
 };
 
 const postsCollection: CollectionConfig = {
@@ -716,7 +776,9 @@ const postsCollection: CollectionConfig = {
       body: { type: "string" },
       excerpt: { type: "string" },
       bannerImageUrl: { type: "string" },
-      status: { type: "string", enum: ["draft", "published"] },
+      status: { type: "string", enum: ["draft", "published", "private"] },
+      category: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
     },
   },
   shareable: {
@@ -731,7 +793,8 @@ const postsCollection: CollectionConfig = {
     delete: (a) => hasPermission(a, "posts.delete"),
   },
   hooks: {
-    beforeChange: sanitizePostBody,
+    beforeChange: postsBeforeChange,
+    afterChange: postsAfterChange,
   },
 };
 
@@ -769,8 +832,23 @@ await app.register(async (publicScope) => {
   registerPublicCollectionRoutes(publicScope, pagesCollection);
   registerPublicCollectionRoutes(publicScope, postsCollection);
   // Theme lives in the control-plane DB, not the tenant DB — req.db's own
-  // site_theme copy is always empty under DB-per-tenant.
-  publicScope.get("/api/theme", async (req) => ({ theme: await getMergedTheme(req.tenantHost) }));
+  // site_theme copy is always empty under DB-per-tenant. A theme-preview
+  // Bearer token (ThemeForm's "Test" button) overlays its not-yet-saved
+  // settings on top of the real merged theme for this response only —
+  // empty-string fields are skipped so a partially-filled test still falls
+  // back to whatever's actually persisted, instead of blanking it.
+  publicScope.get("/api/theme", async (req) => {
+    const merged = await getMergedTheme(req.tenantHost);
+    const auth = req.headers.authorization;
+    if (auth?.startsWith("Bearer ")) {
+      const session = verifySession(auth.slice("Bearer ".length));
+      if (session?.previewOnly && session.themePreview) {
+        const overrides = Object.fromEntries(Object.entries(session.themePreview).filter(([, v]) => v !== ""));
+        return { theme: { ...merged, ...overrides } };
+      }
+    }
+    return { theme: merged };
+  });
 });
 
 // Protected scope: tenant resolution + login required — this is what the
@@ -798,6 +876,58 @@ await app.register(async (protectedScope) => {
     return { token };
   });
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
+
+  // History/restore — a post-specific feature the generic CRUD mechanism
+  // doesn't cover (same reasoning as the preview-token route above), so
+  // hand-rolled rather than forced into registerProtectedCollectionRoutes.
+  protectedScope.get("/api/posts/:id/revisions", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "posts.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    const { id } = req.params as { id: string };
+    const items = await req.db
+      .select()
+      .from(schema.postRevisions)
+      .where(eq(schema.postRevisions.postId, id))
+      .orderBy(desc(schema.postRevisions.createdAt));
+    return { items };
+  });
+
+  // Copies a snapshot's content fields back onto the live post as a new
+  // draft — never auto-republishes it, so restoring an old version always
+  // goes through a deliberate re-publish click, same as any other edit.
+  protectedScope.post("/api/posts/:id/revisions/:revisionId/restore", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "posts.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    const { id, revisionId } = req.params as { id: string; revisionId: string };
+    const [revision] = await req.db
+      .select()
+      .from(schema.postRevisions)
+      .where(and(eq(schema.postRevisions.id, revisionId), eq(schema.postRevisions.postId, id)));
+    if (!revision) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const [item] = await req.db
+      .update(schema.posts)
+      .set({
+        title: revision.title,
+        body: revision.body,
+        excerpt: revision.excerpt,
+        bannerImageUrl: revision.bannerImageUrl,
+        category: revision.category,
+        tags: revision.tags,
+        status: "draft",
+        publishedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.posts.id, id))
+      .returning();
+    return { item };
+  });
 
   // Hand-rolled GET, not registerPublicCollectionRoutes — templates have no
   // public route at all (protectedScope already requires a valid session,

@@ -29,12 +29,15 @@ const slug = Astro.params.slug || "home";
 // preview a draft page before it's published — forwarded as a Bearer token,
 // never persisted or logged past this request.
 const previewToken = Astro.url.searchParams.get("token") ?? undefined;
+// Set by ThemeForm's "Test" button (see apps/admin's getThemePreviewToken) to
+// render not-yet-saved theme settings — independent of previewToken above.
+const themeToken = Astro.url.searchParams.get("themeToken") ?? undefined;
 
 const page = await getPageBySlug(tenantHost, slug, previewToken);
 if (!page) {
   return new Response("Not found", { status: 404 });
 }
-const theme = await getTheme(tenantHost);
+const theme = await getTheme(tenantHost, themeToken);
 const fonts = collectFonts(page.layout);
 // Designer.tsx's "live view" mode: an admin iframe requesting this same
 // preview URL with an extra flag, so the bridge script + data-designer-path

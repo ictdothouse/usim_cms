@@ -13,11 +13,16 @@ const FRONTEND_DEV_URL = import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:
 // whose public GET elevates to authenticated visibility for it (see
 // generic-crud.ts's elevateIfAuthenticated); requireTenantAuth refuses it on
 // every write route.
-export const previewUrl = (tenantHost: string, slug: string, previewToken?: string) => {
+// themeToken is a separate, independent preview credential from
+// previewToken (page-draft visibility vs not-yet-saved theme settings —
+// see getThemePreviewToken) — both can be present at once, each forwarded
+// by apps/frontend to the api route it actually applies to.
+export const previewUrl = (tenantHost: string, slug: string, previewToken?: string, themeToken?: string) => {
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
   const query = new URLSearchParams({
     ...(isLocal ? { __tenant: tenantHost } : {}),
     ...(previewToken ? { token: previewToken } : {}),
+    ...(themeToken ? { themeToken } : {}),
   }).toString();
   const base = isLocal ? `${FRONTEND_DEV_URL}/${slug}` : `https://${tenantHost}/${slug}`;
   return query ? `${base}?${query}` : base;
@@ -99,8 +104,12 @@ export const deletePage = (tenantHost: string, token: string, id: string) =>
 export const getPosts = (tenantHost: string, token: string) =>
   request("/api/posts", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
 
+// Returns the created row (unlike before) so the quick-create flow can jump
+// straight into the writing view for it, same pattern as createPage.
 export const createPost = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
-  request("/api/posts", tenantHost, token, { method: "POST", body: JSON.stringify(data) });
+  request("/api/posts", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then(
+    (b) => b.item as Record<string, unknown>,
+  );
 
 export const updatePost = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
   request(`/api/posts/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
@@ -110,6 +119,28 @@ export const deletePost = (tenantHost: string, token: string, id: string) =>
 
 export const sharePost = (tenantHost: string, token: string, id: string) =>
   request(`/api/posts/${id}/publish`, tenantHost, token, { method: "POST" });
+
+export interface PostRevision {
+  id: string;
+  postId: string;
+  title: string;
+  body: string;
+  excerpt: string | null;
+  bannerImageUrl: string | null;
+  category: string | null;
+  tags: string[];
+  status: string;
+  publishedAt: string | null;
+  createdAt: string;
+}
+
+export const listPostRevisions = (tenantHost: string, token: string, postId: string) =>
+  request(`/api/posts/${postId}/revisions`, tenantHost, token).then((b) => b.items as PostRevision[]);
+
+export const restorePostRevision = (tenantHost: string, token: string, postId: string, revisionId: string) =>
+  request(`/api/posts/${postId}/revisions/${revisionId}/restore`, tenantHost, token, { method: "POST" }).then(
+    (b) => b.item as Record<string, unknown>,
+  );
 
 export interface DesignTemplate {
   id: string;
@@ -346,6 +377,14 @@ export const createThemePreset = (token: string, name: string, settings: Record<
 
 export const deleteThemePreset = (token: string, id: string) =>
   request(`/api/theme-presets/${id}`, null, token, { method: "DELETE" });
+
+// Mints a short-lived, read-only token so ThemeForm's "Test" button can open
+// the real frontend with not-yet-saved settings applied — see previewUrl's
+// comment for the same pattern used by page drafts.
+export const getThemePreviewToken = (token: string, settings: Record<string, string>) =>
+  request("/api/theme-preview-token", null, token, { method: "POST", body: JSON.stringify({ settings }) }).then(
+    (b) => b.token as string,
+  );
 
 export const listPortalSharedContent = (token: string) =>
   request("/api/portal/shared-content", null, token).then((b) => b.items as Array<Record<string, unknown>>);

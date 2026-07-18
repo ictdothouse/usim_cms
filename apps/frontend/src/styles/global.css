@@ -1,2 +1,9 @@
 @import "tailwindcss";
 @plugin "daisyui";
+
+h1 {
+  font-family: var(--font-heading, var(--font-family, inherit));
+}
+h2, h3, h4, h5, h6 {
+  font-family: var(--font-subheading, var(--font-heading, var(--font-family, inherit)));
+}

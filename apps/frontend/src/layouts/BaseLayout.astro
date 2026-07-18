@@ -16,21 +16,50 @@ interface Props {
   designerEdit?: boolean;
 }
 const { title, ogImage, theme, fonts = [], designerEdit = false } = Astro.props;
+
+// Same WCAG relative-luminance math as apps/admin's lib/utils.ts
+// (contrastRatio/bestTextColor) — duplicated, not imported, since this is a
+// separate app with its own build; picks black or white for
+// --color-primary-content instead of SectionBlock.astro assuming white
+// always, so a light primary color (several curated presets included)
+// renders a readable button label instead of invisible white-on-white.
+function bestTextColor(hex: string): string {
+  const luminance = (c: string) => {
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
+    const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  };
+  const clean = hex.replace("#", "");
+  const l = luminance(clean);
+  const contrast = (other: number) => (Math.max(l, other) + 0.05) / (Math.min(l, other) + 0.05);
+  return contrast(1) >= contrast(0) ? "#ffffff" : "#000000";
+}
+
 // site_theme.settings is an open JSONB bag (superadmin/webmaster-defined);
-// apps/api validates these 6 keys on write (index.ts validateThemeSettings),
-// so this layout only has to wire them, not re-validate them.
+// apps/api validates these keys on write (index.ts validateThemeSettings),
+// so this layout only has to wire them, not re-validate them. fontFamily is
+// the body font; headingFont/postTitleFont fall back to it (global.css and
+// posts/[slug].astro read --font-heading/--font-post-title) so a site with
+// only a body font set still looks consistent everywhere.
 const themeVars = [
   theme.primaryColor ? `--color-primary:${theme.primaryColor}` : null,
+  typeof theme.primaryColor === "string" ? `--color-primary-content:${bestTextColor(theme.primaryColor)}` : null,
   theme.secondaryColor ? `--color-secondary:${theme.secondaryColor}` : null,
   theme.backgroundColor ? `--color-bg:${theme.backgroundColor}` : null,
   theme.textColor ? `--color-text:${theme.textColor}` : null,
   theme.fontFamily ? `--font-family:${theme.fontFamily}` : null,
+  theme.headingFont ? `--font-heading:${theme.headingFont}` : null,
+  theme.subHeadingFont ? `--font-subheading:${theme.subHeadingFont}` : null,
+  theme.postTitleFont ? `--font-post-title:${theme.postTitleFont}` : null,
 ]
   .filter(Boolean)
   .join(";");
 const fontFamily = typeof theme.fontFamily === "string" ? theme.fontFamily : "";
+const headingFont = typeof theme.headingFont === "string" ? theme.headingFont : "";
+const subHeadingFont = typeof theme.subHeadingFont === "string" ? theme.subHeadingFont : "";
+const postTitleFont = typeof theme.postTitleFont === "string" ? theme.postTitleFont : "";
 const logoUrl = typeof theme.logoUrl === "string" ? theme.logoUrl : "";
-const allFonts = [...new Set([fontFamily, ...fonts].filter(Boolean))];
+const allFonts = [...new Set([fontFamily, headingFont, subHeadingFont, postTitleFont, ...fonts].filter(Boolean))];
 const fontsHref = allFonts.length
   ? `https://fonts.googleapis.com/css2?${allFonts.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`
   : null;

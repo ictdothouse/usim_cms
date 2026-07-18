@@ -21,10 +21,20 @@ const theme = await getTheme(tenantHost);
     {post.bannerImageUrl && (
       <img src={post.bannerImageUrl} alt="" style="width:100%;border-radius:0.75rem;margin-bottom:1.5rem;" />
     )}
-    <h1 style="color:var(--color-primary,#1d1d1f);">{post.title}</h1>
-    {post.publishedAt && (
-      <p style="color:#86868b;font-size:0.85rem;">
-        {new Date(post.publishedAt).toLocaleDateString("ms-MY", { day: "numeric", month: "long", year: "numeric" })}
+    <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));">{post.title}</h1>
+    <p style="color:#86868b;font-size:0.85rem;">
+      {post.publishedAt &&
+        new Date(post.publishedAt).toLocaleDateString("ms-MY", { day: "numeric", month: "long", year: "numeric" })}
+      {post.category && <span> · {post.category}</span>}
+      {post.authorEmail && <span> · {post.authorEmail}</span>}
+    </p>
+    {post.tags.length > 0 && (
+      <p style="margin:0.5rem 0 1rem;">
+        {post.tags.map((tag) => (
+          <span style="display:inline-block;margin:0 0.4rem 0.4rem 0;padding:0.15rem 0.6rem;border-radius:999px;background:#f2f2f2;font-size:0.75rem;color:#555;">
+            {tag}
+          </span>
+        ))}
       </p>
     )}
     {/* body is sanitized server-side on every write (apps/api posts beforeChange) */}

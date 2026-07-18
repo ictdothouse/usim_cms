@@ -63,12 +63,34 @@ pnpm workspace monorepo with two apps:
     `layout` JSONB column, not as separate relational tables per block type.
   - `src/collections/config-types.ts` + `src/plugins/generic-crud.ts` are the code-first collection
     system: a `CollectionConfig` (slug, `access` functions keyed by role/department, `beforeChange`/
-    `afterChange` hooks) is handed to `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes`,
-    which mount generic CRUD routes at `/api/:collectionSlug` — collections are not meant to get
-    hand-written route handlers. `pages`, `posts`, and `templates` (`src/index.ts`) are wired up this
-    way, each with real `access.create/update/delete` checks (`hasPermission`) and a `beforeChange`
-    hook enforced in the handlers — `501` only fires for a config with no `table` at all, not as a
-    general stub state.
+    `afterChange` hooks — both receive `(data, args, req)`, so a hook can tell `POST` from `PATCH` via
+    `req.method` and reach `req.db`/`req.user`) is handed to
+    `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes`, which mount generic CRUD routes
+    at `/api/:collectionSlug` — collections are not meant to get hand-written route handlers. `pages`,
+    `posts`, and `templates` (`src/index.ts`) are wired up this way, each with real
+    `access.create/update/delete` checks (`hasPermission`) and a `beforeChange` hook enforced in the
+    handlers — `501` only fires for a config with no `table` at all, not as a general stub state. The
+    public list `GET` also applies generic query-string filters (`generic-crud.ts`'s
+    `buildListFilters`) keyed off whichever columns a collection's table actually has: exact-match on any
+    matching column name, `?tag=` as an array-contains against a `tags` column, `?from=`/`?to=` as a
+    range against `publishedAt` — a collection without those columns just ignores the params. RLS (the
+    per-table `_select` policy) is still the real visibility gate; these filters only narrow within what
+    RLS already allows the request to see. `POST /:id/publish` (the "Share to portal" route) refuses to
+    share any row whose `status` isn't `"published"` — draft and `posts`' `"private"` are both blocked,
+    generically, for any collection with a `status` column.
+  - `posts` (`src/db/schema.ts`) has a single `category` + freeform `tags` (text array, no separate
+    taxonomy table), `authorId`/`authorEmail` (no DB-level FK — cross-database, see the multi-tenancy
+    note below — stamped once on create by `postsCollection`'s `beforeChange`, never overwritten on
+    update), and a 3-way `status`: `"draft" | "published" | "private"`. "private" reuses the exact same
+    RLS branch as "draft" (`status = 'published' OR authenticated`) — it's a real publish event with its
+    own `publishedAt` and history snapshot, just never visible to an anonymous visitor. Every time a
+    request explicitly sets `status` to `"published"` or `"private"`, `postsCollection`'s `afterChange`
+    hook inserts a full-content snapshot into `post_revisions` (own table, real FK to `posts.id`, admin-
+    only RLS, migration `0009_posts_taxonomy_author_revisions.sql`) — a plain content edit via Save never
+    snapshots. `GET /api/posts/:id/revisions` + `POST /api/posts/:id/revisions/:id/restore` (hand-written
+    in `index.ts`, the same kind of exception as the pages preview-token route below) list/restore a
+    snapshot; restoring always sets the post back to `"draft"` (never auto-republishes) so a restored old
+    version goes live only via a deliberate re-publish click.
   - Local API/SDK for same-process frontend access (bypassing HTTP) is not implemented yet.
 
 - **`apps/admin`** — Vite + React + TypeScript, Tailwind CSS, Shadcn UI conventions (`components.json`,
@@ -80,10 +102,51 @@ pnpm workspace monorepo with two apps:
   bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
   actually activates), and a design template library. A page's slug is auto-derived from its title on
   create (`PagesPanel`'s quick-create form) and stays editable afterward via a click-to-edit field in
-  Designer's header. `ThemeForm` (Site Theme / Global Theme) offers daisyUI preset swatches + a random
-  generator (both built on the same `oklchToHex` conversion), a typeable/scrollable Google Font picker
-  with live per-row preview, a live preview panel, and a personal saved-style collection
-  (save/test/activate/delete, export/import as `.md`) backed by `theme_presets`.
+  Designer's header. `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
+  (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
+  brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
+  built on the same `oklchToHex` conversion), a 4-role Google Font system (Heading/Header-Title,
+  Sub-heading, Blog/Post Title, Body — each a typeable/scrollable `FontField` with live per-row preview,
+  and a "same as Heading font" note when two roles happen to match, since a pairing intentionally sets
+  Heading/Sub-heading/Post-Title to the same face) with a "Generate font pairing" button that fills
+  Heading+Sub-heading+Post-Title+Body from a curated ~30-entry `FONT_PAIRINGS` list (documented
+  typography pairings, not a random freeform combination), a live preview panel, and — in its own box
+  below the preview, not mixed into it, so it stays legible even when the theme it's judging isn't — an
+  automatic WCAG contrast-ratio readability check (`lib/utils.ts`'s `contrastRatio`, worst-case across
+  body text vs background and the primary button's label vs its background, shown as a percent +
+  Good/OK/Poor label). The button check (and the real frontend) use `bestTextColor` — black or white,
+  whichever actually contrasts — instead of assuming white text always; `BaseLayout.astro` computes the
+  matching `--color-primary-content` and `SectionBlock.astro`'s `.ds-btn-primary` reads it, so a light
+  primary color (several curated presets included) renders a readable button instead of invisible
+  white-on-white. The live preview's secondary/accent button is filled the same way (background:
+  secondaryColor, label: `bestTextColor(secondaryColor)`) — not outlined with secondaryColor used
+  directly as text on the page background, which isn't how any real color system pairs an accent hue
+  and made several legitimately-fine UI Themes presets score "poor" for a combination nothing actually
+  renders. All 12 presets score "Good" under this model; a genuinely low-contrast accent (e.g. mid-gray)
+  still moves the score down, by design. The same box also flags font legibility independently of color contrast — script/handwriting faces
+  (`SCRIPT_FONTS`) are illegible in any role, display-only faces like Abril Fatface (`DISPLAY_ONLY_FONTS`)
+  are only flagged when used as the body font, not heading — either caps the score/tone to "poor" even
+  if the color contrast alone would pass. Also a personal saved-style collection
+  (save/test/activate/delete, export/import as `.md`) backed by `theme_presets`. "Test" on a saved preset
+  opens the real site's homepage with those not-yet-saved settings applied: `POST
+  /api/theme-preview-token` (`verifyAnyUser`-gated) validates the settings the same way the real save
+  route does and mints a short-lived (`previewOnly`, 5-min TTL) session-signed token carrying them;
+  `GET /api/theme` overlays a valid token's settings on top of the real merged theme for that response
+  only (empty-string fields skipped, so a partial test still falls back to what's actually persisted) —
+  nothing is written to `site_theme`. `previewUrl`'s new `themeToken` param is independent of its
+  page-draft `previewToken` (different purpose, both can be present at once); only the two tenant-scoped
+  `ThemeForm` instances pass a `previewTenantHost` to enable this — Global Theme has no single site to
+  open, so its Test still only updates the form's own local preview panel.
+  `PostsPanel`/`PostEditor` ("Post / Article" in the UI — the underlying `posts` slug/table/i18n-key
+  names are unchanged) follow the same quick-create pattern as `PagesPanel`: title only, auto-derived +
+  de-duplicated slug, then straight into `PostEditor` (no separate route/page the way `Designer.tsx` is
+  for pages — still the same inline-expand-under-the-list-row editor as before, just auto-opened on
+  create). `PostEditor` adds a category field (`<datalist>` of this tenant's existing categories) and a
+  comma-separated tags input, a collapsible `PostHistory` panel (fetched only when opened, not on every
+  edit) listing `post_revisions` snapshots with one-click Restore, and a 3-way status control in the list
+  row (Publish/Make private/Back to draft — whichever two aren't the post's current status) instead of
+  the old draft↔published toggle. "Share to portal" only ever shows for `"published"` (never `"private"`,
+  enforced server-side too, not just hidden client-side).
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on
