@@ -1,5 +1,5 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import {
   ChevronRight,
   Copy,
@@ -52,6 +52,7 @@ import { slugify, oklchToHex, contrastRatio, bestTextColor } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
 import Designer from "@/Designer";
+import CategoriesPanel from "./CategoriesPanel";
 
 const SESSION_KEY = "usim_cms_session";
 
@@ -65,20 +66,20 @@ function loadSession(): Session | null {
 }
 
 // ---------- i18n ----------
-const I18nCtx = createContext<{ lang: Lang; t: (k: Key) => string }>({
+export const I18nCtx = createContext<{ lang: Lang; t: (k: Key) => string }>({
   lang: "en",
   t: (k) => dict.en[k],
 });
-const useT = () => useContext(I18nCtx);
+export const useT = () => useContext(I18nCtx);
 
 // ---------- shared styles (prototype look) ----------
-const inputCls =
+export const inputCls =
   "w-full rounded-lg border border-line/30 bg-canvas px-3 py-2 text-xs text-ink outline-none transition-all focus:border-line focus:bg-white";
-const btnPrimary =
+export const btnPrimary =
   "rounded-full bg-accent px-5 py-2.5 text-xs font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50";
-const btnGhost =
+export const btnGhost =
   "rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink transition-colors hover:bg-[#e8e8ed]";
-const card = "rounded-xl border border-line/40 bg-white";
+export const card = "rounded-xl border border-line/40 bg-white";
 
 // ---------- Setup wizard (first-run only, see /api/setup) ----------
 function SetupWizard({ onDone }: { onDone: (s: Session) => void }) {
@@ -995,9 +996,12 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
 
   return (
     <section className="space-y-4">
-      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
-        <Newspaper className="h-4 w-4 text-accent" /> {t("posts-title")}
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+          <Newspaper className="h-4 w-4 text-accent" /> {t("posts-title")}
+        </h2>
+        <Link to="categories" className="text-xs font-semibold text-accent hover:underline">{t("categories-title")}</Link>
+      </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
       <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
         <input className={inputCls} placeholder={t("pages-name")} value={title} onChange={(e) => setTitle(e.target.value)} required />
@@ -3410,6 +3414,7 @@ function ContentManager({
             <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
             <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} />} />
             <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
+            <Route path="posts/categories" element={<CategoriesPanel tenantHost={siteHost} token={token} />} />
             <Route path="posts/:id" element={<PostEditorRoute tenantHost={siteHost} token={token} />} />
             <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
             {isSuper && (
