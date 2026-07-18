@@ -750,13 +750,18 @@ const postsAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRe
   const requested = (req.body as Record<string, unknown>)?.status;
   if (requested !== "published" && requested !== "private") return;
   const row = item as Record<string, unknown>;
+  let categoryName: string | null = null;
+  if (row.categoryId) {
+    const [cat] = await req.db.select().from(schema.categories).where(eq(schema.categories.id, row.categoryId as string));
+    categoryName = cat?.name ?? null;
+  }
   await req.db.insert(schema.postRevisions).values({
     postId: row.id as string,
     title: row.title as string,
     body: row.body as string,
     excerpt: row.excerpt as string | null,
     bannerImageUrl: row.bannerImageUrl as string | null,
-    category: row.category as string | null,
+    category: categoryName,
     tags: (row.tags as string[]) ?? [],
     status: row.status as string,
     publishedAt: row.publishedAt as Date | null,
@@ -777,7 +782,7 @@ const postsCollection: CollectionConfig = {
       excerpt: { type: "string" },
       bannerImageUrl: { type: "string" },
       status: { type: "string", enum: ["draft", "published", "private"] },
-      category: { type: "string" },
+      categoryId: { type: ["string", "null"] },
       tags: { type: "array", items: { type: "string" } },
     },
   },
@@ -796,6 +801,35 @@ const postsCollection: CollectionConfig = {
     beforeChange: postsBeforeChange,
     afterChange: postsAfterChange,
   },
+};
+
+const categoriesBeforeChange = (data: unknown) => {
+  const record = data as Record<string, unknown>;
+  record.updatedAt = new Date();
+  return record;
+};
+
+// Gated on posts.* permissions (not a new categories.* resource) — managing
+// categories is a sub-concern of managing posts.
+const categoriesCollection: CollectionConfig = {
+  slug: "categories",
+  table: schema.categories,
+  createSchema: {
+    type: "object",
+    required: ["name", "slug"],
+    additionalProperties: false,
+    properties: {
+      name: { type: "string", minLength: 1 },
+      slug: { type: "string", minLength: 1 },
+    },
+  },
+  access: {
+    read: () => true,
+    create: (a) => hasPermission(a, "posts.update"),
+    update: (a) => hasPermission(a, "posts.update"),
+    delete: (a) => hasPermission(a, "posts.update"),
+  },
+  hooks: { beforeChange: categoriesBeforeChange },
 };
 
 // Reusable Designer section blocks. Protected-scope only (see registration
@@ -831,6 +865,7 @@ await app.register(async (publicScope) => {
   await tenantPlugin(publicScope);
   registerPublicCollectionRoutes(publicScope, pagesCollection);
   registerPublicCollectionRoutes(publicScope, postsCollection);
+  registerPublicCollectionRoutes(publicScope, categoriesCollection);
   // Theme lives in the control-plane DB, not the tenant DB — req.db's own
   // site_theme copy is always empty under DB-per-tenant. A theme-preview
   // Bearer token (ThemeForm's "Test" button) overlays its not-yet-saved
@@ -876,6 +911,7 @@ await app.register(async (protectedScope) => {
     return { token };
   });
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
+  registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
 
   // History/restore — a post-specific feature the generic CRUD mechanism
   // doesn't cover (same reasoning as the preview-token route above), so
@@ -911,6 +947,15 @@ await app.register(async (protectedScope) => {
       reply.code(404);
       return { error: "not found" };
     }
+    // Revision's category is a name snapshot — if a category with that exact
+    // name still exists, restore points at it; if renamed/deleted since,
+    // this goes to uncategorized rather than guessing (same known-ceiling
+    // tradeoff as the bookmark card snapshot in Phase 4).
+    let categoryId: string | null = null;
+    if (revision.category) {
+      const [cat] = await req.db.select().from(schema.categories).where(eq(schema.categories.name, revision.category));
+      categoryId = cat?.id ?? null;
+    }
     const [item] = await req.db
       .update(schema.posts)
       .set({
@@ -918,7 +963,7 @@ await app.register(async (protectedScope) => {
         body: revision.body,
         excerpt: revision.excerpt,
         bannerImageUrl: revision.bannerImageUrl,
-        category: revision.category,
+        categoryId,
         tags: revision.tags,
         status: "draft",
         publishedAt: null,
