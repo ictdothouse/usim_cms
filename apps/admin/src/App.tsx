@@ -786,21 +786,21 @@ function PostEditor({
   post,
   tenantHost,
   token,
-  categoryOptions,
+  categories,
   onSaved,
   onClose,
 }: {
   post: Record<string, unknown>;
   tenantHost: string;
   token: string;
-  categoryOptions: string[];
+  categories: api.Category[];
   onSaved: () => void;
   onClose: () => void;
 }) {
   const { t } = useT();
   const [title, setTitle] = useState(post.title as string);
   const [excerpt, setExcerpt] = useState((post.excerpt as string | null) ?? "");
-  const [category, setCategory] = useState((post.category as string | null) ?? "");
+  const [categoryId, setCategoryId] = useState((post.categoryId as string | null) ?? "");
   const [tagsInput, setTagsInput] = useState(((post.tags as string[] | null) ?? []).join(", "));
   const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -826,7 +826,7 @@ function PostEditor({
       await api.updatePost(tenantHost, token, post.id as string, {
         title,
         excerpt,
-        category: category.trim() || null,
+        categoryId: categoryId || null,
         tags,
         body: await editor.blocksToHTMLLossy(editor.document),
       });
@@ -849,18 +849,10 @@ function PostEditor({
       <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
       <input className={inputCls} placeholder={t("posts-excerpt")} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} />
       <div className="flex gap-2">
-        <input
-          className={inputCls}
-          list="post-category-options"
-          placeholder={t("posts-category")}
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        />
-        <datalist id="post-category-options">
-          {categoryOptions.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
+        <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          <option value="">{t("posts-category")}</option>
+          {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+        </select>
         <input
           className={inputCls}
           placeholder={t("posts-tags")}
@@ -903,6 +895,9 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const [categories, setCategories] = useState<api.Category[]>([]);
+  useEffect(() => { void api.listCategories(tenantHost, token).then(setCategories); }, [tenantHost]);
+  const categoryName = (id: string | null) => categories.find((c) => c.id === id)?.name;
 
   async function refresh() {
     try {
@@ -1021,9 +1016,9 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[status]}`}>
                     {t(statusLabelKey[status])}
                   </span>
-                  {(p.category as string | null) && (
+                  {categoryName(p.categoryId as string | null) && (
                     <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
-                      {p.category as string}
+                      {categoryName(p.categoryId as string | null)}
                     </span>
                   )}
                 </span>
@@ -1064,12 +1059,15 @@ function PostEditorRoute({ tenantHost, token }: { tenantHost: string; token: str
   const { id } = useParams();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
-  useEffect(() => { void api.getPosts(tenantHost, token).then(setPosts); }, [tenantHost, id]);
+  const [categories, setCategories] = useState<api.Category[]>([]);
+  useEffect(() => {
+    void api.getPosts(tenantHost, token).then(setPosts);
+    void api.listCategories(tenantHost, token).then(setCategories);
+  }, [tenantHost, id]);
   if (posts === null) return null;
   const post = posts.find((p) => p.id === id);
   if (!post) return <p className="text-xs text-sub">{t("posts-empty")}</p>;
-  const categoryOptions = [...new Set(posts.map((p) => p.category as string | null).filter((c): c is string => Boolean(c)))];
-  return <PostEditor key={post.id as string} post={post} tenantHost={tenantHost} token={token} categoryOptions={categoryOptions} onClose={() => navigate("/content/posts")} onSaved={() => navigate("/content/posts")} />;
+  return <PostEditor key={post.id as string} post={post} tenantHost={tenantHost} token={token} categories={categories} onClose={() => navigate("/content/posts")} onSaved={() => navigate("/content/posts")} />;
 }
 
 // ---------- Media library ----------
