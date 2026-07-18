@@ -1,5 +1,5 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronRight,
   Copy,
@@ -3371,7 +3371,9 @@ function ContentManager({
   token: string;
 }) {
   const { t } = useT();
-  const [subTab, setSubTab] = useState<ContentSubTab>("pages");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeSubTab = (location.pathname.split("/")[2] || "pages") as ContentSubTab;
   const subTabs: Array<{ id: ContentSubTab; labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = [
     { id: "pages", labelKey: "pages-title", icon: FileText },
     { id: "posts", labelKey: "posts-title", icon: Newspaper },
@@ -3404,30 +3406,24 @@ function ContentManager({
             {subTabs.map(({ id, labelKey, icon: Icon }) => (
               <button
                 key={id}
-                onClick={() => setSubTab(id)}
+                onClick={() => navigate(id)}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                  subTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
+                  activeSubTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
               </button>
             ))}
           </div>
-          {subTab === "pages" && <PagesPanel tenantHost={siteHost} token={token} />}
-          {subTab === "posts" && <PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />}
-          {subTab === "media" && <MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />}
-          {subTab === "theme" && isSuper && (
-            <ThemeForm
-              key={siteHost}
-              title={t("theme-title")}
-              desc={t("theme-desc")}
-              load={() => api.getTheme(siteHost, token)}
-              save={(s) => api.putTheme(siteHost, token, s)}
-              token={token}
-              allowDeactivate
-              previewTenantHost={siteHost}
-            />
-          )}
+          <Routes>
+            <Route index element={<Navigate to="pages" replace />} />
+            <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
+            <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
+            <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
+            {isSuper && (
+              <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
+            )}
+          </Routes>
         </>
       )}
     </div>
@@ -3673,7 +3669,18 @@ function Shell({
 
           <main className="flex-1 overflow-y-auto bg-white p-8">
             <div className="mx-auto max-w-7xl space-y-6 pb-10">
-              <Dashboard session={session} />
+              <Routes>
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<Dashboard session={session} />} />
+                <Route path="multisite" element={isSuper ? <TenantsPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
+                <Route path="users" element={isSuper ? <UsersPanel token={session.token} onImpersonate={onImpersonate} /> : <Navigate to="/dashboard" replace />} />
+                <Route path="roles" element={isSuper ? <RolesPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
+                <Route path="content/*" element={<ContentManager isSuper={isSuper} showSitePicker={showSitePicker} siteHost={siteHost} setSiteHost={setSiteHost} tenants={siteOptions} token={session.token} />} />
+                <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
+                <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />
+              </Routes>
             </div>
           </main>
         </div>
