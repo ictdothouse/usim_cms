@@ -1,4 +1,5 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronRight,
   Copy,
@@ -23,6 +24,7 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  History,
   Italic,
   Link2,
   List,
@@ -31,6 +33,7 @@ import {
   Palette,
   Pencil,
   Quote,
+  RotateCcw,
   Rss,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -45,7 +48,7 @@ import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import * as api from "@/lib/api";
-import { slugify, oklchToHex } from "@/lib/utils";
+import { slugify, oklchToHex, contrastRatio, bestTextColor } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
 import Designer from "@/Designer";
@@ -705,22 +708,99 @@ function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNot
 }
 
 // ---------- Posts (rich-text articles) ----------
+type PostStatus = "draft" | "published" | "private";
+
+// Revision history + restore — a small, self-contained panel so PostEditor
+// itself doesn't have to hold the revisions list in state unless the admin
+// actually opens it (avoids an extra request on every edit-open).
+function PostHistory({
+  tenantHost,
+  token,
+  postId,
+  onRestored,
+}: {
+  tenantHost: string;
+  token: string;
+  postId: string;
+  onRestored: () => void;
+}) {
+  const { t } = useT();
+  const [revisions, setRevisions] = useState<api.PostRevision[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api
+      .listPostRevisions(tenantHost, token, postId)
+      .then(setRevisions)
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoaded(true));
+  }, [postId]);
+
+  async function restore(revisionId: string) {
+    if (!confirm(t("posts-restore-confirm"))) return;
+    try {
+      await api.restorePostRevision(tenantHost, token, postId, revisionId);
+      onRestored();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-line/30 bg-canvas/40 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+        <History className="h-3.5 w-3.5" /> {t("posts-history")}
+      </p>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      {loaded && revisions.length === 0 && <p className="text-[11px] text-sub">{t("posts-history-empty")}</p>}
+      <ul className="divide-y divide-line/20">
+        {revisions.map((r) => (
+          <li key={r.id} className="flex items-center gap-3 py-1.5 text-xs">
+            <span className="min-w-0 flex-1 truncate text-sub">
+              {new Date(r.createdAt).toLocaleString()} · {r.title}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                r.status === "private" ? "bg-violet-500/10 text-violet-700" : "bg-ok/10 text-ok"
+              }`}
+            >
+              {r.status === "private" ? t("posts-private") : t("posts-published")}
+            </span>
+            <button
+              onClick={() => void restore(r.id)}
+              className="flex items-center gap-1 font-semibold text-accent hover:underline"
+            >
+              <RotateCcw className="h-3 w-3" /> {t("posts-restore")}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function PostEditor({
   post,
   tenantHost,
   token,
+  categoryOptions,
   onSaved,
   onClose,
 }: {
   post: Record<string, unknown>;
   tenantHost: string;
   token: string;
+  categoryOptions: string[];
   onSaved: () => void;
   onClose: () => void;
 }) {
   const { t } = useT();
   const [title, setTitle] = useState(post.title as string);
   const [excerpt, setExcerpt] = useState((post.excerpt as string | null) ?? "");
+  const [category, setCategory] = useState((post.category as string | null) ?? "");
+  const [tagsInput, setTagsInput] = useState(((post.tags as string[] | null) ?? []).join(", "));
+  const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editor = useCreateBlockNote({
@@ -740,9 +820,12 @@ function PostEditor({
   async function save() {
     setSaving(true);
     try {
+      const tags = [...new Set(tagsInput.split(",").map((s) => s.trim()).filter(Boolean))];
       await api.updatePost(tenantHost, token, post.id as string, {
         title,
         excerpt,
+        category: category.trim() || null,
+        tags,
         body: await editor.blocksToHTMLLossy(editor.document),
       });
       onSaved();
@@ -756,22 +839,57 @@ function PostEditor({
   return (
     <div className="space-y-3 rounded-lg border border-line/30 bg-canvas/40 p-4">
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {(post.authorEmail as string | null) && (
+        <p className="text-[11px] text-sub">
+          {t("posts-author")}: {post.authorEmail as string}
+        </p>
+      )}
       <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
       <input className={inputCls} placeholder={t("posts-excerpt")} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} />
+      <div className="flex gap-2">
+        <input
+          className={inputCls}
+          list="post-category-options"
+          placeholder={t("posts-category")}
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        />
+        <datalist id="post-category-options">
+          {categoryOptions.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+        <input
+          className={inputCls}
+          placeholder={t("posts-tags")}
+          value={tagsInput}
+          onChange={(e) => setTagsInput(e.target.value)}
+        />
+      </div>
       <div>
         <EditorToolbar editor={editor} />
         <div className="rounded-b-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[240px]">
           <BlockNoteView editor={editor} theme="light" />
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button onClick={save} disabled={saving} className={btnPrimary}>
           {saving ? t("blocks-saving") : t("posts-save")}
         </button>
         <button onClick={onClose} className={btnGhost}>
           {t("posts-close")}
         </button>
+        <button
+          type="button"
+          onClick={() => setShowHistory((v) => !v)}
+          className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-sub hover:bg-canvas"
+        >
+          <History className="h-3.5 w-3.5" /> {t("posts-history")}
+        </button>
       </div>
+      {showHistory && (
+        <PostHistory tenantHost={tenantHost} token={token} postId={post.id as string} onRestored={onSaved} />
+      )}
     </div>
   );
 }
@@ -780,8 +898,8 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const { t } = useT();
   const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -797,23 +915,37 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
     void refresh();
   }, [tenantHost]);
 
+  // Quick-create: title only, straight into the writing view — slug is
+  // auto-derived (de-duplicated against existing slugs), same pattern as
+  // PagesPanel's quick-create (slug stays editable later via the same
+  // pattern, if ever needed — not exposed yet since posts have no
+  // Designer-equivalent slug-rename field today).
   async function create(e: React.FormEvent) {
     e.preventDefault();
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const base = slugify(trimmed) || "post";
+    const existing = new Set(posts.map((p) => p.slug as string));
+    let candidate = base;
+    for (let n = 2; existing.has(candidate); n++) candidate = `${base}-${n}`;
+    setCreating(true);
     try {
-      await api.createPost(tenantHost, token, { slug, title });
-      setSlug("");
+      const item = await api.createPost(tenantHost, token, { slug: candidate, title: trimmed });
       setTitle("");
       await refresh();
+      setEditingId(item.id as string);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setCreating(false);
     }
   }
 
-  async function setStatus(p: Record<string, unknown>, status: "draft" | "published") {
+  async function setStatus(p: Record<string, unknown>, status: PostStatus) {
     try {
       await api.updatePost(tenantHost, token, p.id as string, {
         status,
-        publishedAt: status === "published" ? new Date().toISOString() : null,
+        publishedAt: status === "draft" ? null : new Date().toISOString(),
       });
       await refresh();
     } catch (err) {
@@ -840,6 +972,31 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
     }
   }
 
+  const categoryOptions = useMemo(
+    () => [...new Set(posts.map((p) => p.category as string | null).filter((c): c is string => Boolean(c)))],
+    [posts],
+  );
+
+  const statusBadge: Record<PostStatus, string> = {
+    draft: "bg-warn/10 text-warn",
+    published: "bg-ok/10 text-ok",
+    private: "bg-violet-500/10 text-violet-700",
+  };
+  const statusLabelKey: Record<PostStatus, Key> = {
+    draft: "posts-draft",
+    published: "posts-published",
+    private: "posts-private",
+  };
+  // Whichever states aren't the post's current one, offered as one-click
+  // transitions — draft/published/private form a triangle, not a toggle.
+  const otherStatuses = (current: PostStatus): PostStatus[] =>
+    (["draft", "published", "private"] as PostStatus[]).filter((s) => s !== current);
+  const statusActionKey: Record<PostStatus, Key> = {
+    draft: "posts-set-draft",
+    published: "posts-publish",
+    private: "posts-make-private",
+  };
+
   return (
     <section className="space-y-4">
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
@@ -847,28 +1004,28 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
       <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
-        <input className={inputCls} placeholder={t("pages-slug")} value={slug} onChange={(e) => setSlug(e.target.value)} required />
         <input className={inputCls} placeholder={t("pages-name")} value={title} onChange={(e) => setTitle(e.target.value)} required />
-        <button type="submit" className={`${btnPrimary} shrink-0`}>
-          {t("posts-create")}
+        <button type="submit" disabled={creating} className={`${btnPrimary} shrink-0`}>
+          {creating ? t("pages-creating") : t("posts-create")}
         </button>
       </form>
       <ul className={`${card} divide-y divide-line/20`}>
         {posts.map((p) => {
-          const published = p.status === "published";
+          const status = (p.status as PostStatus) || "draft";
           return (
             <li key={p.id as string} className="px-4 py-3 text-xs">
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
+                <span className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-ink">{p.title as string}</span>
                   <span className="font-mono text-sub">/posts/{p.slug as string}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      published ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
-                    }`}
-                  >
-                    {published ? t("posts-published") : t("posts-draft")}
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[status]}`}>
+                    {t(statusLabelKey[status])}
                   </span>
+                  {(p.category as string | null) && (
+                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
+                      {p.category as string}
+                    </span>
+                  )}
                 </span>
                 <span className="flex items-center gap-3">
                   <button
@@ -877,13 +1034,16 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   >
                     {editingId === p.id ? t("posts-close") : t("posts-edit")}
                   </button>
-                  <button
-                    onClick={() => setStatus(p, published ? "draft" : "published")}
-                    className="font-semibold text-body hover:underline"
-                  >
-                    {published ? t("posts-unpublish") : t("posts-publish")}
-                  </button>
-                  {published && (
+                  {otherStatuses(status).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => void setStatus(p, s)}
+                      className="font-semibold text-body hover:underline"
+                    >
+                      {t(statusActionKey[s])}
+                    </button>
+                  ))}
+                  {status === "published" && (
                     <button onClick={() => share(p.id as string)} className="font-semibold text-body hover:underline">
                       {t("posts-share")}
                     </button>
@@ -900,6 +1060,7 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                     post={p}
                     tenantHost={tenantHost}
                     token={token}
+                    categoryOptions={categoryOptions}
                     onClose={() => setEditingId(null)}
                     onSaved={async () => {
                       setEditingId(null);
@@ -1434,6 +1595,136 @@ const GOOGLE_FONTS = [
   "Permanent Marker", "Shadows Into Light", "Amatic SC", "Indie Flower",
 ];
 
+// Color contrast can be perfect and a font can still be hard to read —
+// script/handwriting faces are illegible in any role, especially at small
+// size or paragraph length; condensed/display faces (Bebas Neue, Anton,
+// Righteous) are fine for a short heading but unreadable as extended body
+// copy, so those are only flagged when used for the body font.
+const SCRIPT_FONTS = new Set([
+  "Pacifico",
+  "Caveat",
+  "Dancing Script",
+  "Lobster",
+  "Permanent Marker",
+  "Shadows Into Light",
+  "Amatic SC",
+  "Indie Flower",
+]);
+const DISPLAY_ONLY_FONTS = new Set(["Bebas Neue", "Anton", "Righteous", "Abril Fatface"]);
+
+function isLegibleFont(name: string, role: "body" | "heading"): boolean {
+  if (!name) return true;
+  if (SCRIPT_FONTS.has(name)) return false;
+  return !(role === "body" && DISPLAY_ONLY_FONTS.has(name));
+}
+
+// Typeable/scrollable font picker shared by the heading/post-title/body
+// fields below — each field owns its own open/filter state, so 3 of these
+// can sit in one form without stepping on each other.
+function FontField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const matches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(value.toLowerCase()));
+  return (
+    <div className="relative">
+      <label className="block text-xs font-medium text-body">
+        {label}
+        <input
+          className={`${inputCls} mt-1`}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder={placeholder}
+        />
+      </label>
+      {open && matches.length > 0 && (
+        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
+          {matches.map((f) => (
+            <li key={f}>
+              <button
+                type="button"
+                onMouseDown={() => {
+                  onChange(f);
+                  setOpen(false);
+                }}
+                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
+                style={{ fontFamily: f }}
+              >
+                {f}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Curated heading/body pairings (not derived from the freeform GOOGLE_FONTS
+// list above) so "Generate pairing" always lands on a combination that's
+// actually designed to look intentional together, not two random fonts —
+// every pair here is a well-documented typography pairing (the kind of combo
+// fontpair.co-style galleries recommend), every font name is also in
+// GOOGLE_FONTS so the picker/preview can actually render it.
+const FONT_PAIRINGS: Array<{ heading: string; body: string }> = [
+  { heading: "Poppins", body: "Inter" },
+  { heading: "Playfair Display", body: "Source Sans Pro" },
+  { heading: "Playfair Display", body: "Raleway" },
+  { heading: "Space Grotesk", body: "Inter" },
+  { heading: "Merriweather", body: "Open Sans" },
+  { heading: "Merriweather", body: "Montserrat" },
+  { heading: "Montserrat", body: "Nunito" },
+  { heading: "Oswald", body: "Roboto" },
+  { heading: "Oswald", body: "Lato" },
+  { heading: "Libre Baskerville", body: "Lato" },
+  { heading: "Archivo", body: "Work Sans" },
+  { heading: "Bitter", body: "Karla" },
+  { heading: "Bitter", body: "Raleway" },
+  { heading: "Abril Fatface", body: "Mulish" },
+  { heading: "Abril Fatface", body: "Poppins" },
+  { heading: "DM Sans", body: "IBM Plex Sans" },
+  { heading: "Rubik", body: "Noto Sans" },
+  { heading: "Raleway", body: "Roboto" },
+  { heading: "Lora", body: "Montserrat" },
+  { heading: "Crimson Text", body: "Karla" },
+  { heading: "Cormorant Garamond", body: "Montserrat" },
+  { heading: "Josefin Sans", body: "Nunito" },
+  { heading: "Zilla Slab", body: "Work Sans" },
+  { heading: "Domine", body: "Mulish" },
+  { heading: "Barlow", body: "Fira Sans" },
+  { heading: "Manrope", body: "Inter" },
+  { heading: "Outfit", body: "Inter" },
+  { heading: "Plus Jakarta Sans", body: "Inter" },
+  { heading: "Quicksand", body: "Nunito" },
+  { heading: "Titillium Web", body: "Open Sans" },
+];
+function randomFontPairing() {
+  return FONT_PAIRINGS[Math.floor(Math.random() * FONT_PAIRINGS.length)];
+}
+
+// WCAG contrast ratio maxes out its useful range at 7:1 (the AAA threshold
+// for normal text) — scaling the percent to that instead of the ratio's true
+// max (21:1, pure black on white) keeps "100%" meaning "as readable as it
+// needs to be", not "the single most extreme pair possible".
+function readabilityScore(ratio: number): { percent: number; tone: "good" | "ok" | "poor" } {
+  const percent = Math.min(100, Math.round((ratio / 7) * 100));
+  const tone = ratio >= 4.5 ? "good" : ratio >= 3 ? "ok" : "poor";
+  return { percent, tone };
+}
+
 function ThemeForm({
   title,
   desc,
@@ -1441,6 +1732,7 @@ function ThemeForm({
   save,
   token,
   allowDeactivate,
+  previewTenantHost,
 }: {
   title: string;
   desc?: string;
@@ -1450,6 +1742,10 @@ function ThemeForm({
   // Only the per-site override has a "default" above it to fall back to —
   // the global theme itself has nothing to deactivate into.
   allowDeactivate?: boolean;
+  // Which site's real homepage "Test" opens with these not-yet-saved
+  // settings applied. Omitted for the Global Theme form (no single site to
+  // preview against) — Test there still fills the form/local preview panel.
+  previewTenantHost?: string;
 }) {
   const { t } = useT();
   const [primaryColor, setPrimaryColor] = useState("");
@@ -1457,7 +1753,9 @@ function ThemeForm({
   const [backgroundColor, setBackgroundColor] = useState("");
   const [textColor, setTextColor] = useState("");
   const [fontFamily, setFontFamily] = useState("");
-  const [fontOpen, setFontOpen] = useState(false);
+  const [headingFont, setHeadingFont] = useState("");
+  const [subHeadingFont, setSubHeadingFont] = useState("");
+  const [postTitleFont, setPostTitleFont] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1465,7 +1763,17 @@ function ThemeForm({
   const [presetName, setPresetName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  const currentColors = () => ({ primaryColor, secondaryColor, backgroundColor, textColor, fontFamily, logoUrl });
+  const currentColors = () => ({
+    primaryColor,
+    secondaryColor,
+    backgroundColor,
+    textColor,
+    fontFamily,
+    headingFont,
+    subHeadingFont,
+    postTitleFont,
+    logoUrl,
+  });
 
   async function refreshPresets() {
     try {
@@ -1482,6 +1790,9 @@ function ThemeForm({
       setBackgroundColor(th.backgroundColor ?? "");
       setTextColor(th.textColor ?? "");
       setFontFamily(th.fontFamily ?? "");
+      setHeadingFont(th.headingFont ?? "");
+      setSubHeadingFont(th.subHeadingFont ?? "");
+      setPostTitleFont(th.postTitleFont ?? "");
       setLogoUrl(th.logoUrl ?? "");
     });
     void refreshPresets();
@@ -1516,12 +1827,49 @@ function ThemeForm({
     setBackgroundColor(p.settings.backgroundColor ?? "");
     setTextColor(p.settings.textColor ?? "");
     setFontFamily(p.settings.fontFamily ?? "");
+    setHeadingFont(p.settings.headingFont ?? "");
+    setSubHeadingFont(p.settings.subHeadingFont ?? "");
+    setPostTitleFont(p.settings.postTitleFont ?? "");
     setLogoUrl(p.settings.logoUrl ?? "");
   }
 
-  // "Test only" — same as clicking a preset, an explicit label for it so
-  // it's clear nothing is saved until Save is pressed.
-  const testPreset = loadPreset;
+  // Fills all 4 font roles from one curated pairing — heading, sub-heading,
+  // and post-title share the display face (all "big text", same family at
+  // different weights, matching how the source pairings are actually used
+  // in the wild), body gets the paired reading face. Same pattern as
+  // applyPalette below for colors.
+  function applyFontPairing() {
+    const pairing = randomFontPairing();
+    setHeadingFont(pairing.heading);
+    setSubHeadingFont(pairing.heading);
+    setPostTitleFont(pairing.heading);
+    setFontFamily(pairing.body);
+  }
+
+  // "Test only" — loads the preset into the form/local preview (same as
+  // clicking a preset swatch) AND, when there's a real site to preview
+  // against, opens its actual homepage with these not-yet-saved settings
+  // applied (via a short-lived theme-preview token — see
+  // getThemePreviewToken), so "Test" shows the real rendered page, not just
+  // this panel's own preview box. Nothing is saved until Save is pressed.
+  // Opens the tab before the await (not after) so the async token mint
+  // can't trip the "window.open then redirect" popup-blocker failure mode.
+  async function testPreset(p: api.ThemePreset) {
+    loadPreset(p);
+    if (!previewTenantHost) return;
+    const win = window.open("", "_blank", "noreferrer");
+    if (!win) {
+      setError(t("designer-preview-blocked"));
+      return;
+    }
+    try {
+      const themeToken = await api.getThemePreviewToken(token, p.settings);
+      win.location.href = api.previewUrl(previewTenantHost, "home", undefined, themeToken);
+    } catch (err) {
+      win.close();
+      setError((err as Error).message);
+    }
+  }
 
   // Activate: load then immediately persist — same effect as loading a
   // preset by hand and clicking Save, bundled into one click.
@@ -1541,7 +1889,17 @@ function ThemeForm({
   // /api/theme already treats as "no override" (validateThemeSettings
   // allows "" for every field; getMergedTheme spreads an empty object).
   async function deactivate() {
-    const empty = { primaryColor: "", secondaryColor: "", backgroundColor: "", textColor: "", fontFamily: "", logoUrl: "" };
+    const empty = {
+      primaryColor: "",
+      secondaryColor: "",
+      backgroundColor: "",
+      textColor: "",
+      fontFamily: "",
+      headingFont: "",
+      subHeadingFont: "",
+      postTitleFont: "",
+      logoUrl: "",
+    };
     try {
       await save(empty);
       loadPreset({ id: "", name: "", createdAt: "", settings: empty });
@@ -1594,6 +1952,9 @@ function ThemeForm({
       setBackgroundColor(parsed.backgroundColor ?? backgroundColor);
       setTextColor(parsed.textColor ?? textColor);
       setFontFamily(parsed.fontFamily ?? fontFamily);
+      setHeadingFont(parsed.headingFont ?? headingFont);
+      setSubHeadingFont(parsed.subHeadingFont ?? subHeadingFont);
+      setPostTitleFont(parsed.postTitleFont ?? postTitleFont);
       setLogoUrl(parsed.logoUrl ?? logoUrl);
       if (parsed.name) setPresetName(parsed.name);
     } catch (err) {
@@ -1618,7 +1979,17 @@ function ThemeForm({
     e.preventDefault();
     setError(null);
     try {
-      await save({ primaryColor, secondaryColor, backgroundColor, textColor, fontFamily, logoUrl });
+      await save({
+        primaryColor,
+        secondaryColor,
+        backgroundColor,
+        textColor,
+        fontFamily,
+        headingFont,
+        subHeadingFont,
+        postTitleFont,
+        logoUrl,
+      });
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (err) {
@@ -1633,6 +2004,58 @@ function ThemeForm({
     setTextColor(colors.textColor);
   }
 
+  // Heading/sub-heading/post-title are 3 independent fields but commonly
+  // land on the same font (a pairing applies one display face to all of
+  // them) — flag that instead of hiding it, so the user knows the fields
+  // aren't broken/duplicated and can tell at a glance whether to leave them
+  // shared or give this one its own face.
+  const sameFontNote = (value: string, comparedTo: string) =>
+    value && comparedTo && value === comparedTo ? (
+      <p className="-mt-1 text-[11px] text-sub">{t("theme-font-same-note")}</p>
+    ) : null;
+
+  // Auto readability check — worst-case contrast across the things actually
+  // rendered on the real site: body text vs background, and the primary
+  // button's label vs its background (SectionBlock.astro's .ds-btn-primary).
+  // The button check uses bestTextColor, not a hardcoded white, matching
+  // what the real frontend now does too — otherwise a light primary color
+  // (several daisyUI presets included) would falsely score "poor" here while
+  // actually rendering fine with auto-picked black text on the live site.
+  // secondaryColor isn't checked: it has no real rendered consumer yet
+  // (BaseLayout.astro defines --color-secondary but nothing reads it), so
+  // testing it here would just be flagging an admin-preview-only decoration.
+  const colorReadability = readabilityScore(
+    Math.min(
+      contrastRatio(textColor || "#111111", backgroundColor || "#ffffff"),
+      contrastRatio(bestTextColor(primaryColor || "#0f62fe"), primaryColor || "#0f62fe"),
+      // Secondary/accent is checked the same way as primary: as a filled
+      // swatch with an auto-picked (black-or-white) label, matching how
+      // daisyUI actually pairs every color with its own "-content" text —
+      // not as raw secondaryColor used directly as text on the page
+      // background, which isn't how any real color system uses an accent
+      // hue and made several legitimately-fine presets score "poor" for a
+      // combination nothing actually renders. Accent color still moves this
+      // score (a genuinely low-contrast fill, e.g. white text picked for a
+      // near-white accent, is still caught).
+      contrastRatio(bestTextColor(secondaryColor || "#666666"), secondaryColor || "#666666"),
+    ),
+  );
+  // Font legibility is checked separately from color contrast (a script body
+  // font is unreadable even with perfect contrast) — if any field fails,
+  // that caps the overall score/tone, since "readable" has to mean both.
+  const illegibleFontFields = [
+    !isLegibleFont(fontFamily, "body") && t("theme-font-body"),
+    !isLegibleFont(headingFont, "heading") && t("theme-font-heading"),
+    !isLegibleFont(subHeadingFont, "heading") && t("theme-font-subheading"),
+    !isLegibleFont(postTitleFont, "heading") && t("theme-font-posttitle"),
+  ].filter((v): v is string => Boolean(v));
+  const readability =
+    illegibleFontFields.length > 0
+      ? { percent: Math.min(colorReadability.percent, 40), tone: "poor" as const }
+      : colorReadability;
+  const readabilityToneClass =
+    readability.tone === "good" ? "text-ok" : readability.tone === "ok" ? "text-amber-600" : "text-red-600";
+
   const colorField = (label: string, value: string, onChange: (v: string) => void) => (
     <label className="block text-xs font-medium text-body">
       {label}
@@ -1645,8 +2068,6 @@ function ThemeForm({
     </label>
   );
 
-  const fontMatches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(fontFamily.toLowerCase()));
-
   return (
     <section className="space-y-3">
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
@@ -1658,13 +2079,13 @@ function ThemeForm({
           <div>
             <p className="mb-1 text-xs font-medium text-body">{t("theme-presets")}</p>
             <div className="flex flex-wrap gap-1.5">
-              {THEME_PRESETS.map((p) => {
+              {THEME_PRESETS.map((p, i) => {
                 const colors = presetToColors(p);
                 return (
                   <button
                     key={p.name}
                     type="button"
-                    title={p.name}
+                    title={`${t("theme-presets")} ${i + 1}`}
                     onClick={() => applyPalette(colors)}
                     className="h-7 w-7 overflow-hidden rounded-full border border-line/30"
                     style={{ background: `linear-gradient(135deg, ${colors.primaryColor} 50%, ${colors.secondaryColor} 50%)` }}
@@ -1687,40 +2108,23 @@ function ThemeForm({
             {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
             {colorField(t("theme-text"), textColor, setTextColor)}
           </div>
-          <div className="relative">
-            <label className="block text-xs font-medium text-body">
-              {t("theme-font")}
-              <input
-                className={`${inputCls} mt-1`}
-                value={fontFamily}
-                onChange={(e) => {
-                  setFontFamily(e.target.value);
-                  setFontOpen(true);
-                }}
-                onFocus={() => setFontOpen(true)}
-                onBlur={() => setTimeout(() => setFontOpen(false), 150)}
-                placeholder="Noto Sans"
-              />
-            </label>
-            {fontOpen && fontMatches.length > 0 && (
-              <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
-                {fontMatches.map((f) => (
-                  <li key={f}>
-                    <button
-                      type="button"
-                      onMouseDown={() => {
-                        setFontFamily(f);
-                        setFontOpen(false);
-                      }}
-                      className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
-                      style={{ fontFamily: f }}
-                    >
-                      {f}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-body">{t("theme-fonts")}</p>
+              <button
+                type="button"
+                onClick={applyFontPairing}
+                className="flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+              >
+                <Sparkles className="h-3 w-3" /> {t("theme-font-pairing")}
+              </button>
+            </div>
+            <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} placeholder="Poppins" />
+            <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} placeholder="Poppins" />
+            {sameFontNote(subHeadingFont, headingFont)}
+            <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} placeholder="Poppins" />
+            {sameFontNote(postTitleFont, headingFont)}
+            <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
           </div>
           <label className="block text-xs font-medium text-body">
             {t("theme-logo")}
@@ -1735,44 +2139,70 @@ function ThemeForm({
 
         {/* Live preview — reflects the form's current (unsaved) state, not
             what's actually saved, so tweaking a color/font shows its effect
-            immediately without a round trip to Save. */}
-        <div
-          className="w-72 shrink-0 space-y-3 rounded-xl border border-line/30 p-5"
-          style={{
-            background: backgroundColor || "#ffffff",
-            color: textColor || "#111111",
-            fontFamily: fontFamily || undefined,
-          }}
-        >
-          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{t("theme-preview-label")}</p>
-          <p className="text-lg font-bold">{t("theme-preview-heading")}</p>
-          <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
-          <div className="flex gap-2">
-            <span className="rounded-full px-3 py-1.5 text-xs font-semibold text-white" style={{ background: primaryColor || "#0f62fe" }}>
-              {t("theme-preview-primary")}
-            </span>
-            <span
-              className="rounded-full border px-3 py-1.5 text-xs font-semibold"
-              style={{ borderColor: secondaryColor || "#666", color: secondaryColor || "#666" }}
-            >
-              {t("theme-preview-secondary")}
-            </span>
+            immediately without a round trip to Save. The readability check
+            sits in its own box below (not inside the preview) and always
+            uses fixed neutral styling, not the theme's own colors — it has
+            to stay legible even when the theme it's judging isn't. */}
+        <div className="w-72 shrink-0 space-y-2">
+          <div
+            className="space-y-3 rounded-xl border border-line/30 p-5"
+            style={{
+              background: backgroundColor || "#ffffff",
+              color: textColor || "#111111",
+              fontFamily: fontFamily || undefined,
+            }}
+          >
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{t("theme-preview-label")}</p>
+            <p className="text-lg font-bold" style={{ fontFamily: headingFont || undefined }}>
+              {t("theme-preview-heading")}
+            </p>
+            <p className="text-base font-semibold opacity-90" style={{ fontFamily: subHeadingFont || undefined }}>
+              {t("theme-preview-subheading")}
+            </p>
+            <p className="text-sm font-semibold opacity-80" style={{ fontFamily: postTitleFont || undefined }}>
+              {t("theme-preview-posttitle")}
+            </p>
+            <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
+            <div className="flex gap-2">
+              <span
+                className="rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ background: primaryColor || "#0f62fe", color: bestTextColor(primaryColor || "#0f62fe") }}
+              >
+                {t("theme-preview-primary")}
+              </span>
+              <span
+                className="rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ background: secondaryColor || "#666666", color: bestTextColor(secondaryColor || "#666666") }}
+              >
+                {t("theme-preview-secondary")}
+              </span>
+            </div>
+            <div className="flex gap-1.5 border-t border-current/10 pt-3">
+              <input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder={t("theme-preset-name")}
+                className="min-w-0 flex-1 rounded-lg border border-current/20 bg-white/40 px-2 py-1 text-xs text-ink placeholder:text-current/50"
+              />
+              <button
+                type="button"
+                onClick={() => void saveToCollection()}
+                disabled={!presetName.trim()}
+                className="shrink-0 rounded-lg bg-black/10 px-2 py-1 text-xs font-semibold disabled:opacity-40"
+              >
+                {t("theme-add-favourite")}
+              </button>
+            </div>
           </div>
-          <div className="flex gap-1.5 border-t border-current/10 pt-3">
-            <input
-              value={presetName}
-              onChange={(e) => setPresetName(e.target.value)}
-              placeholder={t("theme-preset-name")}
-              className="min-w-0 flex-1 rounded-lg border border-current/20 bg-white/40 px-2 py-1 text-xs text-ink placeholder:text-current/50"
-            />
-            <button
-              type="button"
-              onClick={() => void saveToCollection()}
-              disabled={!presetName.trim()}
-              className="shrink-0 rounded-lg bg-black/10 px-2 py-1 text-xs font-semibold disabled:opacity-40"
-            >
-              {t("theme-add-favourite")}
-            </button>
+          <div className={`${card} space-y-1 p-3`}>
+            <p className={`text-xs font-semibold ${readabilityToneClass}`}>
+              {t("theme-readability")}: {readability.percent}% — {t(`theme-readability-${readability.tone}`)}
+            </p>
+            {illegibleFontFields.length > 0 && (
+              <p className="text-[11px] text-sub">
+                {t("theme-readability-font-note")} {illegibleFontFields.join(", ")}
+              </p>
+            )}
           </div>
         </div>
 
@@ -2995,6 +3425,7 @@ function ContentManager({
               save={(s) => api.putTheme(siteHost, token, s)}
               token={token}
               allowDeactivate
+              previewTenantHost={siteHost}
             />
           )}
         </>
@@ -3136,7 +3567,9 @@ function Shell({
   const [lang, setLang] = useState<Lang>("en");
   const t = (k: Key) => dict[lang][k];
   const isSuper = session.role === "superadmin";
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab = (location.pathname.split("/")[1] || "dashboard") as Tab;
   // superadmin picks which site to manage in the content tab; webmaster is locked to theirs
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [siteHost, setSiteHost] = useState<string>(session.tenantHost ?? "");
@@ -3184,11 +3617,11 @@ function Shell({
           <nav className="flex-1 space-y-1.5 overflow-y-auto p-4">
             <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-main")}</div>
             {mainTabs.map((tb) => (
-              <NavButton key={tb} tab={tb} active={tab === tb} onClick={() => setTab(tb)} />
+              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => navigate(`/${tb}`)} />
             ))}
             <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-content")}</div>
             {contentTabs.map((tb) => (
-              <NavButton key={tb} tab={tb} active={tab === tb} onClick={() => setTab(tb)} />
+              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => navigate(`/${tb}`)} />
             ))}
           </nav>
           <div className="flex items-center gap-3 border-t border-line/30 bg-canvas/30 p-4">
@@ -3217,7 +3650,7 @@ function Shell({
               <ChevronRight className="h-3.5 w-3.5 text-line" />
               <span className="flex items-center gap-1.5 rounded-full border border-line/30 bg-canvas px-2.5 py-0.5 text-xs font-bold text-ink">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                {t(TAB_META[tab].labelKey)}
+                {t(TAB_META[activeTab].labelKey)}
               </span>
               <span className="rounded-full bg-accent/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-accent">
                 {session.role}
@@ -3240,40 +3673,7 @@ function Shell({
 
           <main className="flex-1 overflow-y-auto bg-white p-8">
             <div className="mx-auto max-w-7xl space-y-6 pb-10">
-              {tab === "dashboard" && <Dashboard session={session} />}
-              {tab === "multisite" && isSuper && <TenantsPanel token={session.token} />}
-              {tab === "users" && isSuper && <UsersPanel token={session.token} onImpersonate={onImpersonate} />}
-              {tab === "roles" && isSuper && <RolesPanel token={session.token} />}
-              {tab === "content" && (
-                <ContentManager
-                  isSuper={isSuper}
-                  showSitePicker={showSitePicker}
-                  siteHost={siteHost}
-                  setSiteHost={setSiteHost}
-                  tenants={siteOptions}
-                  token={session.token}
-                />
-              )}
-              {tab === "theme" && !isSuper && session.tenantHost && (
-                <ThemeForm
-                  title={t("theme-title")}
-                  desc={t("theme-desc")}
-                  load={() => api.getTheme(session.tenantHost!, session.token)}
-                  save={(s) => api.putTheme(session.tenantHost!, session.token, s)}
-                  token={session.token}
-                  allowDeactivate
-                />
-              )}
-              {tab === "global-theme" && isSuper && (
-                <ThemeForm
-                  title={t("gtheme-title")}
-                  load={() => api.getGlobalTheme(session.token)}
-                  save={(s) => api.putGlobalTheme(session.token, s)}
-                  token={session.token}
-                />
-              )}
-              {tab === "feed" && isSuper && <PortalFeedPanel token={session.token} />}
-              {tab === "settings" && isSuper && <SettingsPanel token={session.token} tenants={tenants} />}
+              <Dashboard session={session} />
             </div>
           </main>
         </div>
@@ -3332,17 +3732,26 @@ export default function App() {
     return <LoginForm onLogin={setSession} />;
   }
   return (
-    <Shell
-      // Forces a full remount on every session swap (login/impersonate/exit)
-      // — Shell's siteHost/tab state only initializes from session on mount,
-      // and without this a same-instance prop swap leaves both stuck on
-      // whatever the previous session had (wrong x-tenant-host, dead tabs).
-      key={session.token}
-      session={session}
-      onLogout={logout}
-      onImpersonate={impersonate}
-      impersonating={adminSession !== null}
-      onExitImpersonation={exitImpersonation}
-    />
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/*"
+          element={
+            <Shell
+              // Forces a full remount on every session swap (login/impersonate/exit)
+              // — Shell's siteHost/tab state only initializes from session on mount,
+              // and without this a same-instance prop swap leaves both stuck on
+              // whatever the previous session had (wrong x-tenant-host, dead tabs).
+              key={session.token}
+              session={session}
+              onLogout={logout}
+              onImpersonate={impersonate}
+              impersonating={adminSession !== null}
+              onExitImpersonation={exitImpersonation}
+            />
+          }
+        />
+      </Routes>
+    </BrowserRouter>
   );
 }
