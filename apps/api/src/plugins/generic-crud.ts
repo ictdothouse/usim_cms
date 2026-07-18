@@ -1,13 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { sql } from "drizzle-orm";
+import { and, getTableColumns, sql, type SQL } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
 import { verifySession } from "../db/auth.js";
 
 // Registers generic CRUD routes for a collection under /api/:collectionSlug,
 // so individual collections don't need hand-written route handlers.
-// TODO: wire afterChange hooks into each handler (collections without a
-// `table` stay stubbed).
 
 function accessArgs(req: FastifyRequest): AccessArgs {
   return { role: req.user?.role, department: req.tenantHost, permissions: req.user?.permissions };
@@ -29,7 +27,7 @@ async function checkAccess(
 
 async function applyBeforeChange(config: CollectionConfig, req: FastifyRequest): Promise<unknown> {
   if (!config.hooks?.beforeChange) return req.body;
-  return config.hooks.beforeChange(req.body, accessArgs(req));
+  return config.hooks.beforeChange(req.body, accessArgs(req), req);
 }
 //
 // Split public (read, anonymous website visitors) from protected (write,
@@ -50,6 +48,34 @@ async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
   await req.db.execute(sql`SET SESSION app.authenticated = 'true'`);
 }
 
+// Generic query-string filtering for the list GET below — keyed off
+// whichever columns a collection's table actually has, not hand-written per
+// collection (e.g. postsCollection gets ?category=/?authorId=/?authorEmail=
+// /?status= exact-match, ?tag= array-contains against a `tags` column, and
+// ?from=/?to= range against a `publishedAt` column, for free, just by having
+// those columns — a collection without them simply ignores those params).
+// RLS is still the real visibility gate (elevateIfAuthenticated above,
+// posts_select's status='published' branch) — these filters only narrow
+// within whatever rows RLS already allows this request to see.
+function buildListFilters(table: CollectionConfig["table"], query: Record<string, unknown>): SQL | undefined {
+  if (!table) return undefined;
+  const columns = getTableColumns(table);
+  const conditions: SQL[] = [];
+  for (const [key, raw] of Object.entries(query)) {
+    if (typeof raw !== "string" || !raw) continue;
+    if (key === "tag" && "tags" in columns) {
+      conditions.push(sql`${columns.tags} @> ARRAY[${raw}]::text[]`);
+    } else if (key === "from" && "publishedAt" in columns) {
+      conditions.push(sql`${columns.publishedAt} >= ${raw}`);
+    } else if (key === "to" && "publishedAt" in columns) {
+      conditions.push(sql`${columns.publishedAt} <= ${raw}`);
+    } else if (key in columns) {
+      conditions.push(sql`${columns[key as keyof typeof columns]} = ${raw}`);
+    }
+  }
+  return conditions.length ? and(...conditions) : undefined;
+}
+
 export function registerPublicCollectionRoutes(app: FastifyInstance, config: CollectionConfig) {
   const base = `/api/${config.slug}`;
   const { table } = config;
@@ -57,7 +83,8 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
   app.get(base, async (req) => {
     if (!table) return { collection: config.slug, items: [] };
     await elevateIfAuthenticated(req);
-    const items = await req.db.select().from(table);
+    const filters = buildListFilters(table, req.query as Record<string, unknown>);
+    const items = filters ? await req.db.select().from(table).where(filters) : await req.db.select().from(table);
     return { collection: config.slug, items };
   });
 
@@ -85,6 +112,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       if (!(await checkAccess(config.access?.create, req, reply))) return;
       const data = await applyBeforeChange(config, req);
       const [item] = await req.db.insert(table).values(data as never).returning();
+      await config.hooks?.afterChange?.(item, accessArgs(req), req);
       reply.code(201);
       return { collection: config.slug, item };
     },
@@ -101,6 +129,14 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
     if (!row) {
       reply.code(404);
       return { error: "not found" };
+    }
+    // shared_content is read by an unauthenticated public route (GET
+    // /api/portal/shared-content) — a row with any status other than
+    // "published" (draft, or a posts-specific "private") must never reach
+    // it, whichever collection this is.
+    if ("status" in row && row.status !== "published") {
+      reply.code(409);
+      return { error: "only a published item can be shared to the portal" };
     }
     const { title, excerpt, link } = config.shareable;
     await publishSharedContent({
@@ -132,6 +168,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       reply.code(404);
       return { error: "not found" };
     }
+    await config.hooks?.afterChange?.(item, accessArgs(req), req);
     return { collection: config.slug, item };
   });
 
@@ -142,11 +179,21 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
     }
     if (!(await checkAccess(config.access?.delete, req, reply))) return;
     const { id } = req.params as { id: string };
-    const [item] = await req.db.delete(table).where(sql`id = ${id}`).returning();
-    if (!item) {
-      reply.code(404);
-      return { error: "not found" };
+    try {
+      const [item] = await req.db.delete(table).where(sql`id = ${id}`).returning();
+      if (!item) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      return { deleted: true, id };
+    } catch (err) {
+      // Postgres FK-violation (e.g. categories.id RESTRICTed by posts.category_id)
+      // — a clean, generic 409 for any collection this applies to.
+      if ((err as { code?: string }).code === "23503") {
+        reply.code(409);
+        return { error: "still referenced by other records" };
+      }
+      throw err;
     }
-    return { deleted: true, id };
   });
 }
