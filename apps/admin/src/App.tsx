@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, usePa
 import {
   ChevronRight,
   Copy,
+  ExternalLink,
   FileText,
   Folder,
   Globe,
@@ -12,47 +13,25 @@ import {
   LayoutDashboard,
   LogOut,
   Newspaper,
-  Search,
-  UploadCloud,
-  X,
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
-  Bold,
-  Code,
-  ExternalLink,
-  Heading1,
-  Heading2,
-  Heading3,
-  History,
-  Italic,
-  Link2,
-  List,
-  ListChecks,
-  ListOrdered,
   Palette,
   Pencil,
-  Quote,
-  RotateCcw,
   Rss,
+  Search,
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
-  Strikethrough,
   Trash2,
-  Underline,
+  UploadCloud,
   Users as UsersIcon,
+  X,
 } from "lucide-react";
-import { useCreateBlockNote } from "@blocknote/react";
-import { BlockNoteView } from "@blocknote/mantine";
-import "@blocknote/core/fonts/inter.css";
-import "@blocknote/mantine/style.css";
 import * as api from "@/lib/api";
 import { slugify, oklchToHex, contrastRatio, bestTextColor } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
 import Designer from "@/Designer";
 import CategoriesPanel from "./CategoriesPanel";
+import PostEditorPage from "./PostEditorPage";
 
 const SESSION_KEY = "usim_cms_session";
 
@@ -625,268 +604,8 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
   return <Designer page={page} tenantHost={tenantHost} token={token} t={t} onClose={() => navigate("/content/pages")} />;
 }
 
-// ---------- Rich-text toolbar (fixed bar, not just Notion-style slash/hover) ----------
-// BlockNote's own selection popup + slash menu stay as-is (kept per request) —
-// this adds a persistent bar above the editor for people used to a
-// Word/Google Docs-style always-visible toolbar instead of "/"-commands.
-function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNote> }) {
-  const [, forceUpdate] = useState(0);
-  useEffect(() => editor.onSelectionChange(() => forceUpdate((n) => n + 1)), [editor]);
-
-  const active = editor.getActiveStyles();
-  const block = editor.getTextCursorPosition()?.block;
-
-  const styleBtn = (icon: React.ReactNode, key: "bold" | "italic" | "underline" | "strike" | "code", title: string) => (
-    <button
-      type="button"
-      title={title}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => editor.toggleStyles({ [key]: true })}
-      className={`rounded p-1.5 hover:bg-canvas ${active[key] ? "bg-canvas text-accent" : "text-body"}`}
-    >
-      {icon}
-    </button>
-  );
-
-  const blockBtn = (icon: React.ReactNode, type: string, props: Record<string, unknown>, title: string) => (
-    <button
-      type="button"
-      title={title}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => block && editor.updateBlock(block, { type, props } as never)}
-      className={`rounded p-1.5 hover:bg-canvas ${block?.type === type ? "bg-canvas text-accent" : "text-body"}`}
-    >
-      {icon}
-    </button>
-  );
-
-  const alignBtn = (icon: React.ReactNode, alignment: "left" | "center" | "right", title: string) => (
-    <button
-      type="button"
-      title={title}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => block && editor.updateBlock(block, { props: { textAlignment: alignment } } as never)}
-      className={`rounded p-1.5 hover:bg-canvas ${(block?.props as Record<string, unknown>)?.textAlignment === alignment ? "bg-canvas text-accent" : "text-body"}`}
-    >
-      {icon}
-    </button>
-  );
-
-  return (
-    <div className="flex flex-wrap items-center gap-0.5 rounded-t-lg border border-b-0 border-line/30 bg-canvas/40 p-1.5">
-      {styleBtn(<Bold className="h-3.5 w-3.5" />, "bold", "Bold")}
-      {styleBtn(<Italic className="h-3.5 w-3.5" />, "italic", "Italic")}
-      {styleBtn(<Underline className="h-3.5 w-3.5" />, "underline", "Underline")}
-      {styleBtn(<Strikethrough className="h-3.5 w-3.5" />, "strike", "Strikethrough")}
-      {styleBtn(<Code className="h-3.5 w-3.5" />, "code", "Code")}
-      <span className="mx-1 h-4 w-px bg-line/30" />
-      {blockBtn(<Heading1 className="h-3.5 w-3.5" />, "heading", { level: 1 }, "Heading 1")}
-      {blockBtn(<Heading2 className="h-3.5 w-3.5" />, "heading", { level: 2 }, "Heading 2")}
-      {blockBtn(<Heading3 className="h-3.5 w-3.5" />, "heading", { level: 3 }, "Heading 3")}
-      {blockBtn(<Quote className="h-3.5 w-3.5" />, "quote", {}, "Quote")}
-      <span className="mx-1 h-4 w-px bg-line/30" />
-      {blockBtn(<List className="h-3.5 w-3.5" />, "bulletListItem", {}, "Bullet list")}
-      {blockBtn(<ListOrdered className="h-3.5 w-3.5" />, "numberedListItem", {}, "Numbered list")}
-      {blockBtn(<ListChecks className="h-3.5 w-3.5" />, "checkListItem", {}, "Checklist")}
-      <span className="mx-1 h-4 w-px bg-line/30" />
-      {alignBtn(<AlignLeft className="h-3.5 w-3.5" />, "left", "Align left")}
-      {alignBtn(<AlignCenter className="h-3.5 w-3.5" />, "center", "Align center")}
-      {alignBtn(<AlignRight className="h-3.5 w-3.5" />, "right", "Align right")}
-      <span className="mx-1 h-4 w-px bg-line/30" />
-      <button
-        type="button"
-        title="Link"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => {
-          const url = window.prompt("URL:");
-          if (url) editor.createLink(url);
-        }}
-        className="rounded p-1.5 text-body hover:bg-canvas"
-      >
-        <Link2 className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
-
 // ---------- Posts (rich-text articles) ----------
 type PostStatus = "draft" | "published" | "private";
-
-// Revision history + restore — a small, self-contained panel so PostEditor
-// itself doesn't have to hold the revisions list in state unless the admin
-// actually opens it (avoids an extra request on every edit-open).
-function PostHistory({
-  tenantHost,
-  token,
-  postId,
-  onRestored,
-}: {
-  tenantHost: string;
-  token: string;
-  postId: string;
-  onRestored: () => void;
-}) {
-  const { t } = useT();
-  const [revisions, setRevisions] = useState<api.PostRevision[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    void api
-      .listPostRevisions(tenantHost, token, postId)
-      .then(setRevisions)
-      .catch((err) => setError((err as Error).message))
-      .finally(() => setLoaded(true));
-  }, [postId]);
-
-  async function restore(revisionId: string) {
-    if (!confirm(t("posts-restore-confirm"))) return;
-    try {
-      await api.restorePostRevision(tenantHost, token, postId, revisionId);
-      onRestored();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  return (
-    <div className="space-y-2 rounded-lg border border-line/30 bg-canvas/40 p-3">
-      <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
-        <History className="h-3.5 w-3.5" /> {t("posts-history")}
-      </p>
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      {loaded && revisions.length === 0 && <p className="text-[11px] text-sub">{t("posts-history-empty")}</p>}
-      <ul className="divide-y divide-line/20">
-        {revisions.map((r) => (
-          <li key={r.id} className="flex items-center gap-3 py-1.5 text-xs">
-            <span className="min-w-0 flex-1 truncate text-sub">
-              {new Date(r.createdAt).toLocaleString()} · {r.title}
-            </span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                r.status === "private" ? "bg-violet-500/10 text-violet-700" : "bg-ok/10 text-ok"
-              }`}
-            >
-              {r.status === "private" ? t("posts-private") : t("posts-published")}
-            </span>
-            <button
-              onClick={() => void restore(r.id)}
-              className="flex items-center gap-1 font-semibold text-accent hover:underline"
-            >
-              <RotateCcw className="h-3 w-3" /> {t("posts-restore")}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function PostEditor({
-  post,
-  tenantHost,
-  token,
-  categories,
-  onSaved,
-  onClose,
-}: {
-  post: Record<string, unknown>;
-  tenantHost: string;
-  token: string;
-  categories: api.Category[];
-  onSaved: () => void;
-  onClose: () => void;
-}) {
-  const { t } = useT();
-  const [title, setTitle] = useState(post.title as string);
-  const [excerpt, setExcerpt] = useState((post.excerpt as string | null) ?? "");
-  const [categoryId, setCategoryId] = useState((post.categoryId as string | null) ?? "");
-  const [tagsInput, setTagsInput] = useState(((post.tags as string[] | null) ?? []).join(", "));
-  const [showHistory, setShowHistory] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const editor = useCreateBlockNote({
-    uploadFile: async (file: File) => {
-      const url = await api.uploadMedia(tenantHost, token, file);
-      // local driver returns a relative /uploads/... path — make it absolute
-      // so it renders in the editor and on the public site
-      return url.startsWith("http") ? url : api.API_URL + url;
-    },
-  });
-
-  useEffect(() => {
-    const blocks = editor.tryParseHTMLToBlocks((post.body as string) || "");
-    editor.replaceBlocks(editor.document, blocks);
-  }, [editor]);
-
-  async function save() {
-    setSaving(true);
-    try {
-      const tags = [...new Set(tagsInput.split(",").map((s) => s.trim()).filter(Boolean))];
-      await api.updatePost(tenantHost, token, post.id as string, {
-        title,
-        excerpt,
-        categoryId: categoryId || null,
-        tags,
-        body: await editor.blocksToHTMLLossy(editor.document),
-      });
-      onSaved();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="space-y-3 rounded-lg border border-line/30 bg-canvas/40 p-4">
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      {(post.authorEmail as string | null) && (
-        <p className="text-[11px] text-sub">
-          {t("posts-author")}: {post.authorEmail as string}
-        </p>
-      )}
-      <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} />
-      <input className={inputCls} placeholder={t("posts-excerpt")} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} />
-      <div className="flex gap-2">
-        <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-          <option value="">{t("posts-category")}</option>
-          {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-        </select>
-        <input
-          className={inputCls}
-          placeholder={t("posts-tags")}
-          value={tagsInput}
-          onChange={(e) => setTagsInput(e.target.value)}
-        />
-      </div>
-      <div>
-        <EditorToolbar editor={editor} />
-        <div className="rounded-b-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[240px]">
-          <BlockNoteView editor={editor} theme="light" />
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <button onClick={save} disabled={saving} className={btnPrimary}>
-          {saving ? t("blocks-saving") : t("posts-save")}
-        </button>
-        <button onClick={onClose} className={btnGhost}>
-          {t("posts-close")}
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowHistory((v) => !v)}
-          className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-sub hover:bg-canvas"
-        >
-          <History className="h-3.5 w-3.5" /> {t("posts-history")}
-        </button>
-      </div>
-      {showHistory && (
-        <PostHistory tenantHost={tenantHost} token={token} postId={post.id as string} onRestored={onSaved} />
-      )}
-    </div>
-  );
-}
 
 function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
@@ -938,18 +657,6 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
     }
   }
 
-  async function setStatus(p: Record<string, unknown>, status: PostStatus) {
-    try {
-      await api.updatePost(tenantHost, token, p.id as string, {
-        status,
-        publishedAt: status === "draft" ? null : new Date().toISOString(),
-      });
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
   async function share(id: string) {
     try {
       await api.sharePost(tenantHost, token, id);
@@ -979,16 +686,6 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
     published: "posts-published",
     private: "posts-private",
   };
-  // Whichever states aren't the post's current one, offered as one-click
-  // transitions — draft/published/private form a triangle, not a toggle.
-  const otherStatuses = (current: PostStatus): PostStatus[] =>
-    (["draft", "published", "private"] as PostStatus[]).filter((s) => s !== current);
-  const statusActionKey: Record<PostStatus, Key> = {
-    draft: "posts-set-draft",
-    published: "posts-publish",
-    private: "posts-make-private",
-  };
-
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1026,15 +723,6 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   <button onClick={() => navigate(p.id as string)} className="font-semibold text-accent hover:underline">
                     {t("posts-edit")}
                   </button>
-                  {otherStatuses(status).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => void setStatus(p, s)}
-                      className="font-semibold text-body hover:underline"
-                    >
-                      {t(statusActionKey[s])}
-                    </button>
-                  ))}
                   {status === "published" && (
                     <button onClick={() => share(p.id as string)} className="font-semibold text-body hover:underline">
                       {t("posts-share")}
@@ -1052,22 +740,6 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
       </ul>
     </section>
   );
-}
-
-function PostEditorRoute({ tenantHost, token }: { tenantHost: string; token: string }) {
-  const { t } = useT();
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
-  const [categories, setCategories] = useState<api.Category[]>([]);
-  useEffect(() => {
-    void api.getPosts(tenantHost, token).then(setPosts);
-    void api.listCategories(tenantHost, token).then(setCategories);
-  }, [tenantHost, id]);
-  if (posts === null) return null;
-  const post = posts.find((p) => p.id === id);
-  if (!post) return <p className="text-xs text-sub">{t("posts-empty")}</p>;
-  return <PostEditor key={post.id as string} post={post} tenantHost={tenantHost} token={token} categories={categories} onClose={() => navigate("/content/posts")} onSaved={() => navigate("/content/posts")} />;
 }
 
 // ---------- Media library ----------
@@ -3413,7 +3085,7 @@ function ContentManager({
             <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} />} />
             <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
             <Route path="posts/categories" element={<CategoriesPanel tenantHost={siteHost} token={token} />} />
-            <Route path="posts/:id" element={<PostEditorRoute tenantHost={siteHost} token={token} />} />
+            <Route path="posts/:id" element={<PostEditorPage tenantHost={siteHost} token={token} />} />
             <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
             {isSuper && (
               <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
