@@ -6,7 +6,7 @@ import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
@@ -987,6 +987,23 @@ await app.register(async (protectedScope) => {
       .where(eq(schema.posts.id, id))
       .returning();
     return { item };
+  });
+
+  // Cross-collection search for the admin's @-mention bookmark-card feature —
+  // spans posts+pages, which generic-crud's per-table routes can't do. Own
+  // tenant only, no shared_content.
+  protectedScope.get("/api/content-search", async (req) => {
+    const { q } = req.query as { q?: string };
+    const query = (q ?? "").trim();
+    if (!query) return { items: [] };
+    const like = `%${query}%`;
+    const matchedPosts = await req.db.select().from(schema.posts).where(sql`${schema.posts.title} ILIKE ${like}`).limit(10);
+    const matchedPages = await req.db.select().from(schema.pages).where(sql`${schema.pages.title} ILIKE ${like}`).limit(10);
+    const items = [
+      ...matchedPosts.map((p) => ({ type: "post" as const, id: p.id, title: p.title, excerpt: p.excerpt, bannerImageUrl: p.bannerImageUrl, url: `https://${req.tenantHost}/posts/${p.slug}` })),
+      ...matchedPages.map((p) => ({ type: "page" as const, id: p.id, title: p.title, excerpt: null, bannerImageUrl: p.bannerImageUrl, url: `https://${req.tenantHost}/${p.slug}` })),
+    ];
+    return { items };
   });
 
   // Hand-rolled GET, not registerPublicCollectionRoutes — templates have no
