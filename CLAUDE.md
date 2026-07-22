@@ -78,8 +78,15 @@ pnpm workspace monorepo with two apps:
     RLS already allows the request to see. `POST /:id/publish` (the "Share to portal" route) refuses to
     share any row whose `status` isn't `"published"` — draft and `posts`' `"private"` are both blocked,
     generically, for any collection with a `status` column.
-  - `posts` (`src/db/schema.ts`) has a single `category` + freeform `tags` (text array, no separate
-    taxonomy table), `authorId`/`authorEmail` (no DB-level FK — cross-database, see the multi-tenancy
+  - `posts` (`src/db/schema.ts`) has a real `categoryId` FK into a `categories` table (`name`+`slug`,
+    both unique; its own `categoriesCollection` in `index.ts` is gated on `posts.update`, not a new
+    `categories.*` permission, since managing categories is a sub-concern of managing posts) declared
+    `onDelete: "restrict"` — Postgres itself refuses to delete a category any post still references, and
+    `generic-crud.ts`'s generic DELETE handler catches that FK-violation (Postgres error code `23503`)
+    and turns it into a `409 { error: "still referenced by other records" }` instead of a raw 500,
+    generically, for any collection with a restricted FK, not just categories. `tags` stays freeform
+    `text[]` (no separate taxonomy table) — tags never needed a managed, renameable list the way category
+    did. `authorId`/`authorEmail` (no DB-level FK — cross-database, see the multi-tenancy
     note below — stamped once on create by `postsCollection`'s `beforeChange`, never overwritten on
     update), and a 3-way `status`: `"draft" | "published" | "private"`. "private" reuses the exact same
     RLS branch as "draft" (`status = 'published' OR authenticated`) — it's a real publish event with its
@@ -87,18 +94,38 @@ pnpm workspace monorepo with two apps:
     request explicitly sets `status` to `"published"` or `"private"`, `postsCollection`'s `afterChange`
     hook inserts a full-content snapshot into `post_revisions` (own table, real FK to `posts.id`, admin-
     only RLS, migration `0009_posts_taxonomy_author_revisions.sql`) — a plain content edit via Save never
-    snapshots. `GET /api/posts/:id/revisions` + `POST /api/posts/:id/revisions/:id/restore` (hand-written
-    in `index.ts`, the same kind of exception as the pages preview-token route below) list/restore a
-    snapshot; restoring always sets the post back to `"draft"` (never auto-republishes) so a restored old
-    version goes live only via a deliberate re-publish click.
+    snapshots. `post_revisions.category` deliberately stays a plain denormalized text column rather than
+    its own `categoryId` FK back into `categories` — a revision snapshot should keep showing whatever
+    category name the post had at that moment regardless of a later rename, and the `ON DELETE RESTRICT`
+    above only ever blocks deleting a category a *live* post still points to, never one only a past
+    revision mentions by name. `GET /api/posts/:id/revisions` + `POST
+    /api/posts/:id/revisions/:id/restore`, `POST /api/posts/:id/preview-token` (same shape as the pages
+    preview-token route — added because Preview was otherwise dead for a Draft/Private post; see
+    `PostEditorPage`'s `preview()` in the `apps/admin` Posts paragraph below), and `GET
+    /api/content-search` (own-tenant `ILIKE` match against `posts.title`/`pages.title`, capped at 10 rows
+    per table — the admin's `@`-mention bookmark card is its only caller) are all hand-written in
+    `index.ts`, the same kind of exception as the pages preview-token route: a real feature the generic
+    collection-route mechanism doesn't cover, not a general stub state. Restoring a revision always sets
+    the post back to `"draft"` (never auto-republishes) so a restored old version goes live only via a
+    deliberate re-publish click.
   - Local API/SDK for same-process frontend access (bypassing HTTP) is not implemented yet.
 
 - **`apps/admin`** — Vite + React + TypeScript, Tailwind CSS, Shadcn UI conventions (`components.json`,
   `src/lib/utils.ts`'s `cn` helper, which also holds the shared `slugify`/`oklchToHex` used by both
   `App.tsx` and `Designer.tsx`). No components have been added via the shadcn CLI yet — `pnpm dlx
-  shadcn@latest add <component>` from `apps/admin` will place them under `src/components`. The page
-  builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit** (opens by default —
-  the real frontend page rendered in an iframe with click-to-select/inline editing via a postMessage
+  shadcn@latest add <component>` from `apps/admin` will place them under `src/components`. Routing is
+  `react-router-dom`'s `BrowserRouter` (`App.tsx`'s default export): `Shell`'s `<Routes>` maps
+  `/dashboard`, `/multisite`, `/users`, `/roles`, `/content/*`, `/theme`, `/global-theme`, `/feed`,
+  `/settings` (the superadmin-only tabs redirect a webmaster session to `/dashboard` via `<Navigate>`,
+  not a hidden-but-reachable route), and `ContentManager` — itself mounted at `/content/*` — nests its own
+  sub-tree: `pages`, `pages/:id` (`PageDesignerRoute` → `Designer`), `posts`, `posts/categories`
+  (`CategoriesPanel`), `posts/:id` (`PostEditorPage`), `media`, and, superadmin-only, `theme`. Both
+  `Designer` and `PostEditorPage` are real routed pages reached by navigating to a row's id
+  (`navigate(item.id)` right after quick-create, or a list row's Design/Edit button) — going back is a
+  real `navigate("/content/pages")`/`navigate("/content/posts")`, not a `useState`-driven conditional
+  mount the way `PagesPanel`'s `BlockBuilder` (the older inline page-block editor, still expand-under-row)
+  remains. The page builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit**
+  (opens by default — the real frontend page rendered in an iframe with click-to-select/inline editing via a postMessage
   bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
   actually activates), and a design template library. A page's slug is auto-derived from its title on
   create (`PagesPanel`'s quick-create form) and stays editable afterward via a click-to-edit field in
@@ -137,16 +164,41 @@ pnpm workspace monorepo with two apps:
   page-draft `previewToken` (different purpose, both can be present at once); only the two tenant-scoped
   `ThemeForm` instances pass a `previewTenantHost` to enable this — Global Theme has no single site to
   open, so its Test still only updates the form's own local preview panel.
-  `PostsPanel`/`PostEditor` ("Post / Article" in the UI — the underlying `posts` slug/table/i18n-key
-  names are unchanged) follow the same quick-create pattern as `PagesPanel`: title only, auto-derived +
-  de-duplicated slug, then straight into `PostEditor` (no separate route/page the way `Designer.tsx` is
-  for pages — still the same inline-expand-under-the-list-row editor as before, just auto-opened on
-  create). `PostEditor` adds a category field (`<datalist>` of this tenant's existing categories) and a
-  comma-separated tags input, a collapsible `PostHistory` panel (fetched only when opened, not on every
-  edit) listing `post_revisions` snapshots with one-click Restore, and a 3-way status control in the list
-  row (Publish/Make private/Back to draft — whichever two aren't the post's current status) instead of
-  the old draft↔published toggle. "Share to portal" only ever shows for `"published"` (never `"private"`,
-  enforced server-side too, not just hidden client-side).
+  `PostsPanel` ("Post / Article" in the UI — the underlying `posts` slug/table/i18n-key names are
+  unchanged) follows the same quick-create pattern as `PagesPanel`: title only, auto-derived +
+  de-duplicated slug, then `navigate(item.id)` straight into `PostEditorPage` — a real routed page now
+  (`posts/:id`, see the route map above), not the old inline-expand-under-the-list-row `PostEditor`.
+  `PostEditorPage` is a Ghost-style full-screen editor (`fixed inset-0` overlay over the whole shell): a
+  header with a status badge, a Preview button (mints a post preview token via `POST
+  /api/posts/:id/preview-token` so Draft/Private posts stay previewable), the two status actions that
+  aren't the post's current one (Publish/Make private/Back to draft), Save, and a toggle for the settings
+  panel; a feature-image band whose empty state opens `MediaPickerModal` — a small upload-or-pick modal
+  (its own component, shared wherever the editor needs exactly one image) distinct from the full
+  `MediaManager` panel's folders/search/bulk-select; the title/excerpt fields; and the BlockNote editor
+  wrapped in its own fixed `EditorToolbar` (bold/italic/underline/strike/code, heading 1-3, quote, lists,
+  alignment, link) — an always-visible bar for people used to a Word/Docs-style toolbar, layered on top of
+  BlockNote's own slash-menu and selection popup rather than replacing them. The collapsible settings
+  panel (`panelOpen`, open by default) holds a `<select>` of this tenant's `categories` plus an inline
+  new-category name input + button that calls `POST /api/categories` and immediately selects the result,
+  so creating a category never requires leaving the editor for `CategoriesPanel`'s own route
+  (`posts/categories`, linked from `PostsPanel`'s header — a plain rename/delete list, no
+  quick-create-into-editor pattern of its own, since a category has no content to edit); a
+  comma-separated tags input; "Share to portal" (rendered only when `status === "published"`, matching
+  the server-side gate — never for `"private"`); the author's email if set; and a collapsible
+  `PostHistory` panel (fetched only when opened, not on every edit) listing `post_revisions` snapshots
+  with one-click Restore. Typing `@` in the body opens a `SuggestionMenuController` wired to a custom
+  `bookmarkCard` BlockNote block (`src/blocknote/bookmarkCard.tsx`): it calls `GET /api/content-search`
+  and, on pick, inserts a card whose title/excerpt/image/url are a snapshot captured at insert time, not
+  re-fetched on render — an accepted staleness ceiling (a later rename or delete of the linked post/page
+  leaves the card showing the old snapshot; a background re-sync job is the upgrade path if that's ever a
+  real complaint, not built now). Building that block surfaced two real deviations from the naive
+  BlockNote API in the installed `@blocknote/react@0.51.4`: `createReactBlockSpec(config, implementation)`
+  returns a factory function (`(options?) => BlockSpec`), not a `BlockSpec` itself, so it has to be
+  invoked once (`createBookmarkCardBlockSpec()`) before going into `blockSpecs` alongside
+  `defaultBlockSpecs`'s already-plain entries; and a React block spec's `toExternalHTML` is typed as a
+  React FC returning JSX (same props as `render`, plus `context`), not the DOM-node-returning function
+  `BlockImplementation` uses on the non-React `@blocknote/core` side — both are called out inline in
+  `bookmarkCard.tsx` so the next block spec added there doesn't have to rediscover them.
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on
