@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useCreateBlockNote } from "@blocknote/react";
+import { SuggestionMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
+import { bookmarkCardSchema } from "./blocknote/bookmarkCard";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import {
@@ -196,6 +197,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   }, [post]);
 
   const editor = useCreateBlockNote({
+    schema: bookmarkCardSchema,
     uploadFile: async (file: File) => {
       const url = await api.uploadMedia(tenantHost, token, file);
       return url.startsWith("http") ? url : api.API_URL + url;
@@ -301,7 +303,37 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
             <div>
               <EditorToolbar editor={editor} />
               <div className="rounded-b-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[400px]">
-                <BlockNoteView editor={editor} theme="light" />
+                <BlockNoteView editor={editor} theme="light">
+                  <SuggestionMenuController
+                    triggerCharacter="@"
+                    getItems={async (query) => {
+                      const results = await api.searchContent(tenantHost, token, query);
+                      return results.map((r) => ({
+                        title: r.title,
+                        subtext: r.type === "post" ? t("posts-title") : t("pages-title"),
+                        onItemClick: () => {
+                          editor.insertBlocks(
+                            [
+                              {
+                                type: "bookmarkCard",
+                                props: {
+                                  targetType: r.type,
+                                  targetId: r.id,
+                                  title: r.title,
+                                  excerpt: r.excerpt ?? "",
+                                  imageUrl: r.bannerImageUrl ?? "",
+                                  url: r.url,
+                                },
+                              },
+                            ],
+                            editor.getTextCursorPosition().block,
+                            "after",
+                          );
+                        },
+                      }));
+                    }}
+                  />
+                </BlockNoteView>
               </div>
             </div>
           </div>
