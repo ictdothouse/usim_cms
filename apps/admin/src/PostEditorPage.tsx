@@ -307,30 +307,35 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                   <SuggestionMenuController
                     triggerCharacter="@"
                     getItems={async (query) => {
-                      const results = await api.searchContent(tenantHost, token, query);
-                      return results.map((r) => ({
-                        title: r.title,
-                        subtext: r.type === "post" ? t("posts-title") : t("pages-title"),
-                        onItemClick: () => {
-                          editor.insertBlocks(
-                            [
-                              {
-                                type: "bookmarkCard",
-                                props: {
-                                  targetType: r.type,
-                                  targetId: r.id,
-                                  title: r.title,
-                                  excerpt: r.excerpt ?? "",
-                                  imageUrl: r.bannerImageUrl ?? "",
-                                  url: r.url,
+                      try {
+                        const results = await api.searchContent(tenantHost, token, query);
+                        return results.map((r) => ({
+                          title: r.title,
+                          subtext: r.type === "post" ? t("posts-title") : t("pages-title"),
+                          onItemClick: () => {
+                            editor.insertBlocks(
+                              [
+                                {
+                                  type: "bookmarkCard",
+                                  props: {
+                                    targetType: r.type,
+                                    targetId: r.id,
+                                    title: r.title,
+                                    excerpt: r.excerpt ?? "",
+                                    imageUrl: r.bannerImageUrl ?? "",
+                                    url: r.url,
+                                  },
                                 },
-                              },
-                            ],
-                            editor.getTextCursorPosition().block,
-                            "after",
-                          );
-                        },
-                      }));
+                              ],
+                              editor.getTextCursorPosition().block,
+                              "after",
+                            );
+                          },
+                        }));
+                      } catch (err) {
+                        setError((err as Error).message);
+                        return [];
+                      }
                     }}
                   />
                 </BlockNoteView>
