@@ -16,6 +16,73 @@ import { createReactBlockSpec } from "@blocknote/react";
 //   React FC with the same props shape as `render` (plus `context`), i.e. it
 //   returns JSX, not a `{ dom: HTMLElement }` pair — that DOM-returning shape
 //   only exists on the non-React `BlockImplementation` in @blocknote/core.
+
+const BOOKMARK_CARD_STYLE = {
+  display: "flex",
+  gap: "12px",
+  border: "1px solid #e2e2e2",
+  borderRadius: "8px",
+  padding: "12px",
+  textDecoration: "none",
+  color: "inherit",
+  width: "100%",
+} as const;
+
+function BookmarkCardContent({
+  title,
+  excerpt,
+  imageUrl,
+  targetType,
+}: {
+  title: string;
+  excerpt: string;
+  imageUrl: string;
+  targetType: "post" | "page";
+}) {
+  return (
+    <>
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt=""
+          style={{
+            width: "96px",
+            height: "72px",
+            objectFit: "cover",
+            borderRadius: "6px",
+            flexShrink: 0,
+          }}
+        />
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <span
+          style={{
+            display: "inline-block",
+            fontSize: "10px",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            color: "#6b7280",
+            marginBottom: "4px",
+          }}
+        >
+          {targetType === "post" ? "Post" : "Page"}
+        </span>
+        <div style={{ fontWeight: 600, fontSize: "14px" }}>{title}</div>
+        {excerpt && (
+          <div
+            style={{
+              fontSize: "12px",
+              color: "#6b7280",
+              marginTop: "2px",
+            }}
+          >
+            {excerpt}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 const createBookmarkCardBlockSpec = createReactBlockSpec(
   {
     type: "bookmarkCard",
@@ -37,18 +104,14 @@ const createBookmarkCardBlockSpec = createReactBlockSpec(
           href={url}
           target="_blank"
           rel="noreferrer"
-          style={{ display: "flex", gap: "12px", border: "1px solid #e2e2e2", borderRadius: "8px", padding: "12px", textDecoration: "none", color: "inherit", width: "100%" }}
+          style={BOOKMARK_CARD_STYLE}
         >
-          {imageUrl && (
-            <img src={imageUrl} alt="" style={{ width: "96px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0 }} />
-          )}
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <span style={{ display: "inline-block", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", color: "#6b7280", marginBottom: "4px" }}>
-              {targetType === "post" ? "Post" : "Page"}
-            </span>
-            <div style={{ fontWeight: 600, fontSize: "14px" }}>{title}</div>
-            {excerpt && <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>{excerpt}</div>}
-          </div>
+          <BookmarkCardContent
+            title={title}
+            excerpt={excerpt}
+            imageUrl={imageUrl}
+            targetType={targetType}
+          />
         </a>
       );
     },
@@ -66,18 +129,14 @@ const createBookmarkCardBlockSpec = createReactBlockSpec(
           data-bookmark-excerpt={excerpt}
           data-bookmark-image={imageUrl}
           data-bookmark-url={url}
-          style={{ display: "flex", gap: "12px", border: "1px solid #e2e2e2", borderRadius: "8px", padding: "12px", textDecoration: "none", color: "inherit", width: "100%" }}
+          style={BOOKMARK_CARD_STYLE}
         >
-          {imageUrl && (
-            <img src={imageUrl} alt="" style={{ width: "96px", height: "72px", objectFit: "cover", borderRadius: "6px", flexShrink: 0 }} />
-          )}
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <span style={{ display: "inline-block", fontSize: "10px", fontWeight: 700, textTransform: "uppercase", color: "#6b7280", marginBottom: "4px" }}>
-              {targetType === "post" ? "Post" : "Page"}
-            </span>
-            <div style={{ fontWeight: 600, fontSize: "14px" }}>{title}</div>
-            {excerpt && <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>{excerpt}</div>}
-          </div>
+          <BookmarkCardContent
+            title={title}
+            excerpt={excerpt}
+            imageUrl={imageUrl}
+            targetType={targetType}
+          />
         </a>
       );
     },
