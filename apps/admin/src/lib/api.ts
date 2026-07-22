@@ -145,6 +145,18 @@ export const restorePostRevision = (tenantHost: string, token: string, postId: s
     (b) => b.item as Record<string, unknown>,
   );
 
+export interface ContentSearchResult {
+  type: "post" | "page";
+  id: string;
+  title: string;
+  excerpt: string | null;
+  bannerImageUrl: string | null;
+  url: string;
+}
+
+export const searchContent = (tenantHost: string, token: string, q: string) =>
+  request(`/api/content-search?q=${encodeURIComponent(q)}`, tenantHost, token).then((b) => b.items as ContentSearchResult[]);
+
 export interface Category {
   id: string;
   name: string;
