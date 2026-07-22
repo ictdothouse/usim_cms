@@ -84,7 +84,8 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
     if (!table) return { collection: config.slug, items: [] };
     await elevateIfAuthenticated(req);
     const filters = buildListFilters(table, req.query as Record<string, unknown>);
-    const items = filters ? await req.db.select().from(table).where(filters) : await req.db.select().from(table);
+    let items: unknown[] = filters ? await req.db.select().from(table).where(filters) : await req.db.select().from(table);
+    if (config.hooks?.afterRead) items = await config.hooks.afterRead(items, req);
     return { collection: config.slug, items };
   });
 
@@ -92,8 +93,13 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
     const { id } = req.params as { id: string };
     if (!table) return { collection: config.slug, id, item: null };
     await elevateIfAuthenticated(req);
-    const [item] = await req.db.select().from(table).where(sql`id = ${id}`);
-    return { collection: config.slug, id, item: item ?? null };
+    const [row] = await req.db.select().from(table).where(sql`id = ${id}`);
+    let item: unknown = row ?? null;
+    if (item && config.hooks?.afterRead) {
+      const [resolved] = await config.hooks.afterRead([item], req);
+      item = resolved ?? item;
+    }
+    return { collection: config.slug, id, item };
   });
 }
 
