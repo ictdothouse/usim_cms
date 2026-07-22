@@ -3,14 +3,19 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
 import { getPostBySlug, getTheme } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro: Host header, with the
-// DEV_TENANT_HOST fallback for plain-localhost `astro dev` only.
+// DEV_TENANT_HOST fallback (or a `?__tenant=` override, used by the admin's
+// post Preview link) for plain-localhost `astro dev` only.
 const rawHost = Astro.request.headers.get("host") ?? "";
 const tenantHost =
   import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
-    ? (import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
     : rawHost;
+// Set by the admin's post Preview button (PostEditorPage's preview()) to
+// preview a Draft/Private post — same mechanism as [...slug].astro's page
+// preview token.
+const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 
-const post = await getPostBySlug(tenantHost, Astro.params.slug!);
+const post = await getPostBySlug(tenantHost, Astro.params.slug!, previewToken);
 if (!post) {
   return new Response("Not found", { status: 404 });
 }

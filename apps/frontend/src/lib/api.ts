@@ -72,8 +72,8 @@ export interface Post {
 // query, when given, narrows via apps/api's generic list filters (category/
 // tag/authorId/authorEmail exact-match, from/to range on publishedAt) — see
 // generic-crud.ts's buildListFilters.
-export async function getPostBySlug(tenantHost: string, slug: string): Promise<Post | null> {
-  const { items } = await apiGet<{ items: Post[] }>("/api/posts", tenantHost);
+export async function getPostBySlug(tenantHost: string, slug: string, token?: string): Promise<Post | null> {
+  const { items } = await apiGet<{ items: Post[] }>("/api/posts", tenantHost, token);
   return items.find((p) => p.slug === slug) ?? null;
 }
 
