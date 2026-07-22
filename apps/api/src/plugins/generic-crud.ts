@@ -111,10 +111,21 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       }
       if (!(await checkAccess(config.access?.create, req, reply))) return;
       const data = await applyBeforeChange(config, req);
-      const [item] = await req.db.insert(table).values(data as never).returning();
-      await config.hooks?.afterChange?.(item, accessArgs(req), req);
-      reply.code(201);
-      return { collection: config.slug, item };
+      try {
+        const [item] = await req.db.insert(table).values(data as never).returning();
+        await config.hooks?.afterChange?.(item, accessArgs(req), req);
+        reply.code(201);
+        return { collection: config.slug, item };
+      } catch (err) {
+        // Postgres unique-violation (e.g. categories.name/slug UNIQUE) — a
+        // clean, generic 409 for any collection with a unique constraint,
+        // mirroring the DELETE handler's 23503 -> 409 handling below.
+        if ((err as { code?: string }).code === "23505") {
+          reply.code(409);
+          return { error: "already exists" };
+        }
+        throw err;
+      }
     },
   );
 
