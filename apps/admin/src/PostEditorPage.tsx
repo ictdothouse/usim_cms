@@ -120,7 +120,7 @@ function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNot
   );
 }
 
-function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: string; token: string; postId: string; onRestored: () => void }) {
+function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: string; token: string; postId: string; onRestored: (restoredPost: Record<string, unknown>) => void }) {
   const { t } = useT();
   const [revisions, setRevisions] = useState<api.PostRevision[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -131,8 +131,8 @@ function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: st
   async function restore(revisionId: string) {
     if (!confirm(t("posts-restore-confirm"))) return;
     try {
-      await api.restorePostRevision(tenantHost, token, postId, revisionId);
-      onRestored();
+      const restoredPost = await api.restorePostRevision(tenantHost, token, postId, revisionId);
+      onRestored(restoredPost);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -376,8 +376,8 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 tenantHost={tenantHost}
                 token={token}
                 postId={post.id as string}
-                onRestored={() => {
-                  void api.getPosts(tenantHost, token).then(setPosts);
+                onRestored={(restoredPost) => {
+                  setPosts((prev) => prev?.map((p) => (p.id === restoredPost.id ? restoredPost : p)) ?? prev);
                   setBodyVersion((v) => v + 1);
                 }}
               />
