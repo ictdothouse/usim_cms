@@ -176,11 +176,20 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
     if (!(await checkAccess(config.access?.update, req, reply))) return;
     const { id } = req.params as { id: string };
     const data = await applyBeforeChange(config, req);
-    const [item] = await req.db
-      .update(table)
-      .set(data as never)
-      .where(sql`id = ${id}`)
-      .returning();
+    let item: Record<string, unknown> | undefined;
+    try {
+      [item] = await req.db
+        .update(table)
+        .set(data as never)
+        .where(sql`id = ${id}`)
+        .returning();
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") {
+        reply.code(409);
+        return { error: "already exists" };
+      }
+      throw err;
+    }
     if (!item) {
       reply.code(404);
       return { error: "not found" };
