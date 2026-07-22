@@ -728,16 +728,20 @@ const postsBeforeChange = (data: unknown, _args: AccessArgs, req: FastifyRequest
   if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
   record.updatedAt = new Date();
   if (typeof record.body === "string") {
+    // bookmarkCard's toExternalHTML (blocknote/bookmarkCard.tsx) encodes the
+    // block as data-bookmark-* attrs + a fixed, hardcoded inline style on the
+    // a/img/div/span it renders — both are needed for parse() to reconstitute
+    // the block on reopen and for the public frontend to render the card's
+    // layout, so they must survive this trust-boundary sanitize on every
+    // save. `style` isn't allowed unrestricted (that would let arbitrary
+    // saved HTML carry CSS-injection payloads, e.g. url()-based
+    // exfiltration) — allowedStyles below whitelists only the exact
+    // property/value shapes BOOKMARK_CARD_STYLE ever emits.
+    const bookmarkCardStyleValue = [/^inherit$|^none$|^flex$|^inline-block$|^cover$|^uppercase$/, /^-?\d+(\.\d+)?(px|%)$/, /^#[0-9a-fA-F]{3,8}$/, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
     record.body = sanitizeHtml(record.body, {
       allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
       allowedAttributes: {
         ...sanitizeHtml.defaults.allowedAttributes,
-        // bookmarkCard's toExternalHTML (blocknote/bookmarkCard.tsx) encodes
-        // the block as data-bookmark-* attrs + inline style on an <a>, plus
-        // inline style on the img/div/span it wraps — both are needed for
-        // parse() to reconstitute the block on reopen and for the public
-        // frontend to render the card's layout, so they must survive this
-        // trust-boundary sanitize on every save.
         a: [
           ...sanitizeHtml.defaults.allowedAttributes.a,
           "style",
@@ -751,6 +755,28 @@ const postsBeforeChange = (data: unknown, _args: AccessArgs, req: FastifyRequest
         img: ["src", "alt", "style"],
         div: ["style"],
         span: ["style"],
+      },
+      allowedStyles: {
+        "*": {
+          display: bookmarkCardStyleValue,
+          gap: bookmarkCardStyleValue,
+          border: bookmarkCardStyleValue,
+          "border-radius": bookmarkCardStyleValue,
+          padding: bookmarkCardStyleValue,
+          "text-decoration": bookmarkCardStyleValue,
+          color: bookmarkCardStyleValue,
+          width: bookmarkCardStyleValue,
+          height: bookmarkCardStyleValue,
+          "object-fit": bookmarkCardStyleValue,
+          "flex-shrink": bookmarkCardStyleValue,
+          "min-width": bookmarkCardStyleValue,
+          flex: bookmarkCardStyleValue,
+          "font-size": bookmarkCardStyleValue,
+          "font-weight": bookmarkCardStyleValue,
+          "text-transform": bookmarkCardStyleValue,
+          "margin-bottom": bookmarkCardStyleValue,
+          "margin-top": bookmarkCardStyleValue,
+        },
       },
     });
   }
