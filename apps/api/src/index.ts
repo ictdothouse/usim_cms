@@ -737,7 +737,7 @@ const postsBeforeChange = (data: unknown, _args: AccessArgs, req: FastifyRequest
     // saved HTML carry CSS-injection payloads, e.g. url()-based
     // exfiltration) — allowedStyles below whitelists only the exact
     // property/value shapes BOOKMARK_CARD_STYLE ever emits.
-    const bookmarkCardStyleValue = [/^inherit$|^none$|^flex$|^inline-block$|^cover$|^uppercase$/, /^-?\d+(\.\d+)?(px|%)$/, /^#[0-9a-fA-F]{3,8}$/, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
+    const bookmarkCardStyleValue = [/^inherit$|^none$|^flex$|^inline-block$|^cover$|^uppercase$/, /^-?\d+(\.\d+)?(px|%)?$/, /^#[0-9a-fA-F]{3,8}$/, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
     record.body = sanitizeHtml(record.body, {
       allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
       allowedAttributes: {
