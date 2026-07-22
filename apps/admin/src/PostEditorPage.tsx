@@ -180,6 +180,12 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [tagsInput, setTagsInput] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<PostStatus>("draft");
+  // Bumped by PostHistory's onRestored below — post?.id never changes across
+  // a restore (same post, new content), so the body-load effect needs this
+  // extra dependency to know a restore happened and reload the editor's
+  // content instead of leaving the pre-restore body on screen (which Save
+  // would otherwise silently write back over the just-restored revision).
+  const [bodyVersion, setBodyVersion] = useState(0);
 
   useEffect(() => {
     void api.getPosts(tenantHost, token).then(setPosts);
@@ -209,7 +215,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     const blocks = editor.tryParseHTMLToBlocks((post.body as string) || "");
     editor.replaceBlocks(editor.document, blocks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [post?.id]);
+  }, [post?.id, bodyVersion]);
 
   async function save(nextStatus?: PostStatus) {
     if (!post) return;
@@ -365,7 +371,17 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
             <button type="button" onClick={() => setShowHistory((v) => !v)} className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-sub hover:bg-canvas">
               <History className="h-3.5 w-3.5" /> {t("posts-history")}
             </button>
-            {showHistory && (<PostHistory tenantHost={tenantHost} token={token} postId={post.id as string} onRestored={() => void api.getPosts(tenantHost, token).then(setPosts)} />)}
+            {showHistory && (
+              <PostHistory
+                tenantHost={tenantHost}
+                token={token}
+                postId={post.id as string}
+                onRestored={() => {
+                  void api.getPosts(tenantHost, token).then(setPosts);
+                  setBodyVersion((v) => v + 1);
+                }}
+              />
+            )}
           </aside>
         )}
       </div>
