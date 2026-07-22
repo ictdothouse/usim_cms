@@ -6,7 +6,7 @@ import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
@@ -730,7 +730,28 @@ const postsBeforeChange = (data: unknown, _args: AccessArgs, req: FastifyRequest
   if (typeof record.body === "string") {
     record.body = sanitizeHtml(record.body, {
       allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
-      allowedAttributes: { ...sanitizeHtml.defaults.allowedAttributes, img: ["src", "alt"] },
+      allowedAttributes: {
+        ...sanitizeHtml.defaults.allowedAttributes,
+        // bookmarkCard's toExternalHTML (blocknote/bookmarkCard.tsx) encodes
+        // the block as data-bookmark-* attrs + inline style on an <a>, plus
+        // inline style on the img/div/span it wraps — both are needed for
+        // parse() to reconstitute the block on reopen and for the public
+        // frontend to render the card's layout, so they must survive this
+        // trust-boundary sanitize on every save.
+        a: [
+          ...sanitizeHtml.defaults.allowedAttributes.a,
+          "style",
+          "data-bookmark-type",
+          "data-bookmark-id",
+          "data-bookmark-title",
+          "data-bookmark-excerpt",
+          "data-bookmark-image",
+          "data-bookmark-url",
+        ],
+        img: ["src", "alt", "style"],
+        div: ["style"],
+        span: ["style"],
+      },
     });
   }
   if (req.method === "POST" && req.user) {
@@ -768,6 +789,22 @@ const postsAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRe
   });
 };
 
+// The public posts list/get returns the raw row, which only has categoryId
+// (uuid) — categories.name text column was dropped in migration 0010. The
+// frontend's Post.category: string | null contract (apps/frontend/src/lib/
+// api.ts, rendered by posts/[slug].astro) expects a resolved name, so add it
+// here rather than pushing the join onto every frontend consumer.
+const postsAfterRead = async (items: unknown[], req: FastifyRequest) => {
+  const rows = items as Record<string, unknown>[];
+  const categoryIds = [...new Set(rows.map((r) => r.categoryId as string | null).filter((v): v is string => Boolean(v)))];
+  const byId = new Map<string, string>();
+  if (categoryIds.length > 0) {
+    const cats = await req.db.select().from(schema.categories).where(inArray(schema.categories.id, categoryIds));
+    for (const cat of cats) byId.set(cat.id, cat.name);
+  }
+  return rows.map((r) => ({ ...r, category: r.categoryId ? byId.get(r.categoryId as string) ?? null : null }));
+};
+
 const postsCollection: CollectionConfig = {
   slug: "posts",
   table: schema.posts,
@@ -800,6 +837,7 @@ const postsCollection: CollectionConfig = {
   hooks: {
     beforeChange: postsBeforeChange,
     afterChange: postsAfterChange,
+    afterRead: postsAfterRead,
   },
 };
 

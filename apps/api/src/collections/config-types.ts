@@ -16,6 +16,12 @@ export interface CollectionHooks<T = unknown> {
   // published/made it private (req.body.status), not on every edit.
   beforeChange?: (data: T, args: AccessArgs, req: FastifyRequest) => T | Promise<T>;
   afterChange?: (item: T, args: AccessArgs, req: FastifyRequest) => void | Promise<void>;
+  // Runs on the public GET list and GET/:id routes (the latter called with a
+  // one-item array) right before the response is sent — lets a collection
+  // enrich rows with a cross-table value (e.g. postsCollection resolving
+  // categoryId -> category name) without generic-crud needing table-specific
+  // joins.
+  afterRead?: (items: T[], req: FastifyRequest) => T[] | Promise<T[]>;
 }
 
 export interface CollectionConfig<T = unknown> {
