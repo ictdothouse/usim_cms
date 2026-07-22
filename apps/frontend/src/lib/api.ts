@@ -39,7 +39,11 @@ async function apiGet<T>(path: string, tenantHost: string, token?: string): Prom
     cache.set(key, data);
     return data;
   } catch (err) {
-    const cached = cache.get(key);
+    // Stale-cache fallback is for anonymous visitor traffic only (see the
+    // module comment) — a token-bearing (preview) request must never fall
+    // back to a stale cached response, since that could serve draft/private
+    // content cached from an earlier, different, possibly-now-invalid token.
+    const cached = !token ? cache.get(key) : undefined;
     if (cached !== undefined) {
       console.error(`apiGet: ${key} failed, serving stale cache`, err);
       return cached as T;
