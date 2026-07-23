@@ -898,12 +898,19 @@ export default function Designer({
       const el = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c]?.elements?.[e];
       if (!el) return;
       const textLike = el.type === "heading" || el.type === "text" || el.type === "list";
-      const style: React.CSSProperties = textLike ? typoStyle(el.props) : {};
+      if (!textLike) {
+        // Non-text element types (button/image/icon/spacer/...) each render
+        // bespoke CSS in ElPreview/SectionBlock.astro — there's no single
+        // props-to-CSS mapping to reuse here, so a style change (paste
+        // style, or an Inspector field edit) falls back to the same
+        // debounced reload structural edits use instead of silently posting
+        // no visible change.
+        bumpStructural();
+        return;
+      }
+      const style = typoStyle(el.props);
       win.postMessage({ type: "designer:style", path, style }, targetOrigin);
-      win.postMessage(
-        { type: "designer:text", path, editable: el.type === "heading" || el.type === "text" },
-        targetOrigin,
-      );
+      win.postMessage({ type: "designer:text", path, editable: el.type === "heading" || el.type === "text" }, targetOrigin);
     } else if (sel.length === 3) {
       const [b, r, c] = sel;
       const col = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c];
