@@ -793,6 +793,28 @@ export default function Designer({
         setSelectedRect(e.data.rect ?? null);
         return;
       }
+      if (e.data?.type === "designer:iframeClick") {
+        setCtxMenu(null);
+        return;
+      }
+      if (e.data?.type === "designer:undo") {
+        undo();
+        return;
+      }
+      if (e.data?.type === "designer:redo") {
+        redo();
+        return;
+      }
+      if (e.data?.type === "designer:contextmenu") {
+        const p = String(e.data.path ?? "")
+          .split(".")
+          .map(Number);
+        if (p.length !== 4 || !liveFrame.current) return;
+        const rect = liveFrame.current.getBoundingClientRect();
+        setSel(p);
+        setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0), y: rect.top + Number(e.data.y ?? 0) });
+        return;
+      }
       const path = String(e.data?.path ?? "")
         .split(".")
         .map(Number);

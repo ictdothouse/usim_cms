@@ -88,6 +88,11 @@ const fontsHref = allFonts.length
           if (!targetOrigin) return;
 
           document.addEventListener("click", (e) => {
+            // Lets Designer.tsx close its right-click context menu on any
+            // click inside the iframe — a click here never bubbles to the
+            // parent document's own click listener (cross-document), which
+            // is the same reason the keydown bridge below exists.
+            parent.postMessage({ type: "designer:iframeClick" }, targetOrigin);
             if (justDragged) {
               e.preventDefault();
               return;
@@ -96,6 +101,43 @@ const fontsHref = allFonts.length
             if (!node) return;
             e.preventDefault();
             parent.postMessage({ type: "designer:select", path: node.dataset.designerPath }, targetOrigin);
+          });
+
+          // Right-click to edit: mirrors Blocks mode's own context menu,
+          // which is element-level only (4-part path) — see Designer.tsx's
+          // ctxMenu render block.
+          document.addEventListener("contextmenu", (e) => {
+            const node = e.target.closest("[data-designer-path]");
+            if (!node || node.dataset.designerPath.split(".").length !== 4) return;
+            e.preventDefault();
+            parent.postMessage(
+              { type: "designer:contextmenu", path: node.dataset.designerPath, x: e.clientX, y: e.clientY },
+              targetOrigin,
+            );
+          });
+
+          // Undo/redo: Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y typed while focus is inside
+          // this iframe never reaches Designer.tsx's own keydown listener
+          // (attached to the parent document's window, which a keypress
+          // inside a different document never bubbles to) — forward it
+          // instead. Skipped while actively editing text so the browser's
+          // own contentEditable undo (which already works, for free) keeps
+          // handling that case rather than being shadowed by a block-level
+          // undo that wouldn't visually update the typed text anyway.
+          document.addEventListener("keydown", (e) => {
+            if (!(e.ctrlKey || e.metaKey)) return;
+            if (document.activeElement && document.activeElement.isContentEditable) return;
+            const key = e.key.toLowerCase();
+            if (key === "z" && e.shiftKey) {
+              e.preventDefault();
+              parent.postMessage({ type: "designer:redo" }, targetOrigin);
+            } else if (key === "z") {
+              e.preventDefault();
+              parent.postMessage({ type: "designer:undo" }, targetOrigin);
+            } else if (key === "y") {
+              e.preventDefault();
+              parent.postMessage({ type: "designer:redo" }, targetOrigin);
+            }
           });
 
           // Drag-reorder: custom pointer tracking rather than native HTML5
