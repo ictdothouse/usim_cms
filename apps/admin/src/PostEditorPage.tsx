@@ -175,12 +175,48 @@ function fromDisplayOverride(value: DisplayOverride): boolean | null {
   return value === "show" ? true : value === "hide" ? false : null;
 }
 
+// "inherit" has no on/off position of its own — it takes whichever the
+// theme's site-wide default currently is, so the switch below always shows
+// a real state instead of a third disabled-looking one.
+function effectiveDisplay(value: DisplayOverride, themeDefault: boolean): boolean {
+  return value === "inherit" ? themeDefault : value === "show";
+}
+
+// A real on/off switch, not a checkbox — this panel used to have a 3-option
+// <select> ("Ikut Tema"/"Papar"/"Sorok") per field; feedback was that it read
+// as fussy for what's just a visibility toggle. Clicking always commits an
+// explicit show/hide (see effectiveDisplay above) — there's no separate UI
+// to return to "inherit" once touched, by design, matching the request for
+// "toggle button on/off shj".
+function MetaSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center justify-between gap-3 py-0.5">
+      <span className="text-xs text-body">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? "bg-accent" : "bg-line/40"}`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0"}`}
+        />
+      </button>
+    </label>
+  );
+}
+
 export default function PostEditorPage({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
   const [categories, setCategories] = useState<api.Category[]>([]);
+  // Only for computing each MetaSwitch's default on/off position when a
+  // field is still "inherit" — this page never edits the theme itself.
+  const [theme, setTheme] = useState<Record<string, string> | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
@@ -219,6 +255,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   useEffect(() => {
     void api.getPosts(tenantHost, token).then(setPosts);
     void api.listCategories(tenantHost, token).then(setCategories);
+    void api.getTheme(tenantHost, token).then(setTheme);
   }, [tenantHost, id]);
 
   useEffect(() => {
@@ -448,25 +485,28 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-display-inherit")}</label>
-              {(
-                [
-                  ["showTags", t("posts-show-tags"), showTags, setShowTags],
-                  ["showCategory", t("posts-show-category"), showCategory, setShowCategory],
-                  ["showAuthor", t("posts-show-author"), showAuthor, setShowAuthor],
-                  ["showPublishedDate", t("posts-show-date"), showPublishedDate, setShowPublishedDate],
-                ] as Array<[string, string, DisplayOverride, (v: DisplayOverride) => void]>
-              ).map(([key, label, value, setValue]) => (
-                <div key={key} className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-body">{label}</span>
-                  <select className={`${inputCls} w-28`} value={value} onChange={(e) => setValue(e.target.value as DisplayOverride)}>
-                    <option value="inherit">{t("posts-display-inherit")}</option>
-                    <option value="show">{t("posts-display-show")}</option>
-                    <option value="hide">{t("posts-display-hide")}</option>
-                  </select>
-                </div>
-              ))}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-show-meta")}</label>
+              <MetaSwitch
+                label={t("posts-show-tags")}
+                checked={effectiveDisplay(showTags, theme ? theme.showPostTags !== "false" : true)}
+                onChange={(v) => setShowTags(v ? "show" : "hide")}
+              />
+              <MetaSwitch
+                label={t("posts-show-category")}
+                checked={effectiveDisplay(showCategory, theme ? theme.showPostCategory !== "false" : true)}
+                onChange={(v) => setShowCategory(v ? "show" : "hide")}
+              />
+              <MetaSwitch
+                label={t("posts-show-author")}
+                checked={effectiveDisplay(showAuthor, theme ? theme.showPostAuthor !== "false" : true)}
+                onChange={(v) => setShowAuthor(v ? "show" : "hide")}
+              />
+              <MetaSwitch
+                label={t("posts-show-date")}
+                checked={effectiveDisplay(showPublishedDate, theme ? theme.showPostDate !== "false" : true)}
+                onChange={(v) => setShowPublishedDate(v ? "show" : "hide")}
+              />
             </div>
             {status === "published" && (<button onClick={() => void share()} className={`${btnGhost} w-full`}>{t("posts-share")}</button>)}
             {(post.authorEmail as string | null) && (<p className="text-[11px] text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}
