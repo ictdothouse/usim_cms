@@ -66,8 +66,16 @@ export interface Post {
   bannerImageUrl: string | null;
   publishedAt: string | null;
   category: string | null;
+  categorySlug: string | null;
   tags: string[];
   authorEmail: string | null;
+  status: "draft" | "published" | "private";
+  // Per-post override of the theme's site-wide show/hide default; null =
+  // inherit the theme's showPost* setting (see getTheme's returned keys).
+  showTags: boolean | null;
+  showCategory: boolean | null;
+  showAuthor: boolean | null;
+  showPublishedDate: boolean | null;
 }
 
 // Public scope only returns status='published' rows (RLS policy in
@@ -87,6 +95,22 @@ export async function listPosts(
 ): Promise<Post[]> {
   const qs = query && Object.keys(query).length ? `?${new URLSearchParams(query)}` : "";
   const { items } = await apiGet<{ items: Post[] }>(`/api/posts${qs}`, tenantHost);
+  return items;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+// GET /api/categories is public (registerPublicCollectionRoutes in
+// apps/api's index.ts) — used by category/[slug].astro to resolve a
+// category's URL slug to its id before filtering posts, since posts.category
+// is a virtual (afterRead-computed) field and can't be filtered directly —
+// see generic-crud.ts's buildListFilters, which only matches real columns.
+export async function listCategories(tenantHost: string): Promise<Category[]> {
+  const { items } = await apiGet<{ items: Category[] }>("/api/categories", tenantHost);
   return items;
 }
 
