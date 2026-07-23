@@ -196,12 +196,34 @@ const fontsHref = allFonts.length
             hoveredNode = null;
           });
 
+          // Reports the selected node's on-screen box so Designer.tsx can
+          // position a floating action toolbar over it — recomputed on
+          // resize (ResizeObserver, covers a live style edit changing the
+          // box, or the iframe's own container resizing) and on scroll
+          // (position-only change, no size change, so ResizeObserver alone
+          // wouldn't fire).
+          function reportSelectedRect() {
+            if (!selectedNode) return;
+            const r = visualTarget(selectedNode).getBoundingClientRect();
+            parent.postMessage(
+              { type: "designer:selectedRect", rect: { top: r.top, left: r.left, width: r.width, height: r.height } },
+              targetOrigin,
+            );
+          }
+          const selectionResizeObserver = new ResizeObserver(reportSelectedRect);
+          window.addEventListener("scroll", reportSelectedRect, true);
+
           window.addEventListener("message", (e) => {
             if (e.origin !== targetOrigin || !e.data) return;
             if (e.data.type === "designer:selected") {
               if (selectedNode) visualTarget(selectedNode).style.outline = "";
+              selectionResizeObserver.disconnect();
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
-              if (selectedNode) visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
+              if (selectedNode) {
+                visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
+                selectionResizeObserver.observe(visualTarget(selectedNode));
+                reportSelectedRect();
+              }
               return;
             }
             const node = findByPath(e.data.path);
