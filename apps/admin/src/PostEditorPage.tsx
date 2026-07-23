@@ -286,7 +286,11 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
         <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[status]}`}>{t(`posts-${status}` as Key)}</span>
         <span className="flex-1" />
         {error && <p className="text-xs text-red-600">{error}</p>}
-        <button onClick={() => void preview()} className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</button>
+        {status === "published" ? (
+          <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a>
+        ) : (
+          <button onClick={() => void preview()} className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</button>
+        )}
         {otherStatuses(status).map((s) => (<button key={s} onClick={() => void save(s)} disabled={saving} className={btnGhost}>{t(statusActionKey[s])}</button>))}
         <button onClick={() => void save()} disabled={saving} className={btnPrimary}>{saving ? t("blocks-saving") : t("posts-save")}</button>
         <button onClick={() => setPanelOpen((v) => !v)} className="rounded p-1.5 text-body hover:bg-canvas" title={t("posts-settings")}><Settings2 className="h-4 w-4" /></button>
