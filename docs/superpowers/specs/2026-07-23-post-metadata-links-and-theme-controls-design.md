@@ -43,9 +43,24 @@ gate on what keys are accepted. Add:
 | `showPostAuthor` | boolean | — | Site-wide default for author email. Unset → `true`. |
 | `showPostDate` | boolean | — | Site-wide default for published date. Unset → `true`. |
 
-`validateThemeSettings` adds these five keys to its `allowed` set and checks
-`postTitleFontSize` is a finite number in range; the four `showPost*` keys
-just need `typeof value === "boolean"` when present.
+Every existing key in this bag is a string on the wire (colors are hex
+strings, fonts are font-name strings) because `ThemeForm`'s `load`/`save`
+props and every admin `api.ts` theme function are typed
+`Record<string, string>` — widening that to a union type would touch 7+
+call sites for no real benefit. The 5 new keys follow the same convention:
+`postTitleFontSize` is sent as a numeric string (`"32"`), `showPost*` as
+`"true"`/`"false"`. Like every existing key, `""` means "no override" (this
+is what `deactivate()` sends for every field, and what an empty preset
+round-trips as) — `validateThemeSettings` must accept `""` same as the
+existing color/font keys do, only applying its real check when the value is
+non-empty. So: `postTitleFontSize` accepts `""` or a value where
+`Number(value)` is a finite integer in `[12, 96]`; each `showPost*` key
+accepts `""`, `"true"`, or `"false"`. Reading them back:
+`BaseLayout.astro` string-concatenates `postTitleFontSize` directly (no
+`Number()` needed, it's going into a CSS string either way); `posts/
+[slug].astro` treats "unset or anything other than the literal string
+`\"false\"`" as show (`theme.showPostTags !== "false"`), so an absent key
+defaults to visible.
 
 `apps/frontend/src/layouts/BaseLayout.astro`'s `themeVars` array gets one
 more line, following the exact pattern already used for `postTitleFont`:
@@ -58,22 +73,34 @@ theme.postTitleFontSize ? `--font-post-title-size:${theme.postTitleFontSize}px` 
 
 New files under `apps/frontend/src/pages/`:
 - `tag/[tag].astro`
-- `category/[category].astro`
+- `category/[slug].astro`
 - `author/[email].astro`
 
 Each follows the same tenant-resolution block already duplicated in
 `[...slug].astro` and `posts/[slug].astro` (`Host` header, `DEV_TENANT_HOST`
-+ `?__tenant=` fallback for local dev). Each calls
-`apps/frontend/src/lib/api.ts`'s existing `listPosts(tenantHost, query)`:
-- `tag/[tag].astro` → `listPosts(tenantHost, { tag: Astro.params.tag! })`
-- `category/[category].astro` → `listPosts(tenantHost, { category: Astro.params.category! })`
-- `author/[email].astro` → `listPosts(tenantHost, { authorEmail: Astro.params.email! })`
++ `?__tenant=` fallback for local dev).
 
-This needs zero backend work: `generic-crud.ts`'s `buildListFilters` already
-supports exact-match `?category=`/`?authorEmail=` and array-contains `?tag=`
-on the `posts` table, and the public GET already applies RLS (published-only
-for anonymous visitors — an archive page never leaks draft/private posts to
-a visitor, since no preview token is forwarded here).
+`tag` and `author` need zero backend work: `generic-crud.ts`'s
+`buildListFilters` already supports array-contains `?tag=` and exact-match
+`?authorEmail=` directly against real columns on the `posts` table (`tags`,
+`authorEmail`) — `apps/frontend/src/lib/api.ts`'s existing
+`listPosts(tenantHost, { tag })` / `{ authorEmail }` already does this.
+
+`category` needs one extra step: `posts.categoryId` is the only real column
+— `category` (the name) is a **virtual** field `postsAfterRead` (`index.ts`)
+computes after the query runs, so `buildListFilters` (which only matches
+real table columns) silently ignores a `?category=` param. `category/
+[slug].astro` therefore resolves the URL's category **slug** to an id
+first: call a new `listCategories(tenantHost)` (mirrors the admin's own
+`listCategories`, but public/unauthenticated) hitting the already-public
+`GET /api/categories` (`categoriesCollection` is registered on
+`registerPublicCollectionRoutes`, `index.ts:932`), find the row whose `slug`
+matches, then `listPosts(tenantHost, { categoryId: match.id })`. No match →
+same empty-result rendering as a real category with zero posts (see below).
+
+`postsAfterRead` also gains `categorySlug` (alongside the existing
+`category` name lookup) so the *post page's* category link has a slug to
+link to — see section C.
 
 Each page renders, inside `BaseLayout`: an `<h1>` naming the filter
 ("Tag: sukan" / "Category: bola" / the raw email for author — no separate
@@ -102,22 +129,27 @@ execution happens whenever a DB is next available.
 `apps/frontend/src/lib/api.ts`'s `Post` interface gains the same 4 fields
 (`showTags`/`showCategory`/`showAuthor`/`showPublishedDate`, each
 `boolean | null`) — no backend change needed beyond the schema/migration
-above, since the public GET already `select()`s every column.
+above, since the public GET already `select()`s every column. It also gains
+`categorySlug: string | null`, populated by `postsAfterRead`'s existing
+category lookup (same query, one more field read off the row it already
+fetched — see section B).
 
 `posts/[slug].astro` computes, once per field:
 
 ```js
-const showTags = post.showTags ?? theme.showPostTags ?? true;
-const showCategory = post.showCategory ?? theme.showPostCategory ?? true;
-const showAuthor = post.showAuthor ?? theme.showPostAuthor ?? true;
-const showDate = post.showPublishedDate ?? theme.showPostDate ?? true;
+// post.showX is a real nullable boolean column; theme.showPostX is a
+// "true"/"false" string (or absent) — see section A.
+const showTags = post.showTags ?? (theme.showPostTags !== "false");
+const showCategory = post.showCategory ?? (theme.showPostCategory !== "false");
+const showAuthor = post.showAuthor ?? (theme.showPostAuthor !== "false");
+const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
 ```
 
 and gates each existing block on the matching variable. Tag/category/author
 become real anchors:
 
 ```html
-<a href={`/category/${encodeURIComponent(post.category)}`}>{post.category}</a>
+<a href={`/category/${encodeURIComponent(post.categorySlug)}`}>{post.category}</a>
 <a href={`/author/${encodeURIComponent(post.authorEmail)}`}>{post.authorEmail}</a>
 {post.tags.map((tag) => <a href={`/tag/${encodeURIComponent(tag)}`}>{tag}</a>)}
 ```
