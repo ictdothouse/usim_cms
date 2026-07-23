@@ -103,11 +103,20 @@ const FONT_FAMILY_RE = /^[A-Za-z0-9 ]*$/;
 // the same Google Fonts URL, so all three validate the same way.
 const FONT_KEYS = ["fontFamily", "headingFont", "subHeadingFont", "postTitleFont"] as const;
 
+// Site-wide default for whether a post shows its tags/category/author/date —
+// per-post can override this (posts.showTags etc., nullable booleans, null =
+// inherit these). "true"/"false" strings, same wire convention as every
+// other theme key (see postTitleFontSize below) — "" means unset/inherit.
+const POST_DISPLAY_KEYS = ["showPostTags", "showPostCategory", "showPostAuthor", "showPostDate"] as const;
+const POST_TITLE_FONT_SIZE_MIN = 12;
+const POST_TITLE_FONT_SIZE_MAX = 96;
+
 // Shared by both theme write routes (per-tenant + global). site_theme.settings
 // is an open JSONB bag but only these keys are ever read by apps/frontend
-// (BaseLayout.astro) — reject anything else instead of silently storing it.
+// (BaseLayout.astro, posts/[slug].astro) — reject anything else instead of
+// silently storing it.
 function validateThemeSettings(settings: Record<string, unknown>): string | null {
-  const allowed = new Set([...THEME_COLOR_KEYS, ...FONT_KEYS, "logoUrl"]);
+  const allowed = new Set([...THEME_COLOR_KEYS, ...FONT_KEYS, ...POST_DISPLAY_KEYS, "logoUrl", "postTitleFontSize"]);
   for (const key of Object.keys(settings)) {
     if (!allowed.has(key)) return `unknown theme key: ${key}`;
   }
@@ -125,6 +134,19 @@ function validateThemeSettings(settings: Record<string, unknown>): string | null
   }
   if (settings.logoUrl !== undefined && typeof settings.logoUrl !== "string") {
     return "logoUrl must be a string";
+  }
+  const fontSize = settings.postTitleFontSize;
+  if (fontSize !== undefined && fontSize !== "") {
+    const n = Number(fontSize);
+    if (!Number.isFinite(n) || n < POST_TITLE_FONT_SIZE_MIN || n > POST_TITLE_FONT_SIZE_MAX) {
+      return `postTitleFontSize must be a number between ${POST_TITLE_FONT_SIZE_MIN} and ${POST_TITLE_FONT_SIZE_MAX}`;
+    }
+  }
+  for (const key of POST_DISPLAY_KEYS) {
+    const value = settings[key];
+    if (value !== undefined && value !== "" && value !== "true" && value !== "false") {
+      return `${key} must be "true" or "false"`;
+    }
   }
   return null;
 }
