@@ -52,6 +52,13 @@ export const posts = pgTable("posts", {
   // beforeChange hook), never overwritten on update.
   authorId: text("author_id"),
   authorEmail: text("author_email"),
+  // Per-post override of the theme's site-wide show/hide default for each
+  // field (apps/api's validateThemeSettings' showPost* keys). null = inherit
+  // the theme default; true/false = explicit override for this post only.
+  showTags: boolean("show_tags"),
+  showCategory: boolean("show_category"),
+  showAuthor: boolean("show_author"),
+  showPublishedDate: boolean("show_published_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

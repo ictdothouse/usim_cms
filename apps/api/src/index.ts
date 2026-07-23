@@ -845,12 +845,15 @@ const postsAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRe
 const postsAfterRead = async (items: unknown[], req: FastifyRequest) => {
   const rows = items as Record<string, unknown>[];
   const categoryIds = [...new Set(rows.map((r) => r.categoryId as string | null).filter((v): v is string => Boolean(v)))];
-  const byId = new Map<string, string>();
+  const byId = new Map<string, { name: string; slug: string }>();
   if (categoryIds.length > 0) {
     const cats = await req.db.select().from(schema.categories).where(inArray(schema.categories.id, categoryIds));
-    for (const cat of cats) byId.set(cat.id, cat.name);
+    for (const cat of cats) byId.set(cat.id, { name: cat.name, slug: cat.slug });
   }
-  return rows.map((r) => ({ ...r, category: r.categoryId ? byId.get(r.categoryId as string) ?? null : null }));
+  return rows.map((r) => {
+    const cat = r.categoryId ? byId.get(r.categoryId as string) : undefined;
+    return { ...r, category: cat?.name ?? null, categorySlug: cat?.slug ?? null };
+  });
 };
 
 const postsCollection: CollectionConfig = {
