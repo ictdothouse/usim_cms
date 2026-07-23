@@ -253,10 +253,25 @@ const fontsHref = allFonts.length
             );
           }
           const selectionResizeObserver = new ResizeObserver(reportSelectedRect);
-          window.addEventListener("scroll", reportSelectedRect, true);
+          // Also reports plain scroll position (independent of any
+          // selection) so Designer.tsx can restore it after a structural
+          // edit forces this iframe to reload — see designer:restoreScroll
+          // below.
+          window.addEventListener(
+            "scroll",
+            () => {
+              reportSelectedRect();
+              parent.postMessage({ type: "designer:scroll", y: window.scrollY }, targetOrigin);
+            },
+            true,
+          );
 
           window.addEventListener("message", (e) => {
             if (e.origin !== targetOrigin || !e.data) return;
+            if (e.data.type === "designer:restoreScroll") {
+              window.scrollTo(0, e.data.y ?? 0);
+              return;
+            }
             if (e.data.type === "designer:selected") {
               if (selectedNode) visualTarget(selectedNode).style.outline = "";
               selectionResizeObserver.disconnect();

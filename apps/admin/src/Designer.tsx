@@ -666,6 +666,19 @@ export default function Designer({
   // rect never positions the toolbar over the wrong element while the new
   // one's first report is in flight.
   const [selectedRect, setSelectedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  // Bumped by every structural (shape/order-changing) mutate() call reachable
+  // from Live Edit — duplicate/paste/delete at any level, plus the iframe's
+  // own drag-reorder. Live Edit's iframe is a real server-rendered page, not
+  // a local render of `blocks`, so unlike a prop/style edit (already synced
+  // live via the designer:style postMessage effect below) a shape change
+  // needs an actual reload to become visible — debounced further down so a
+  // burst of edits reloads once, not per action.
+  const [structuralTick, setStructuralTick] = useState(0);
+  function bumpStructural() {
+    setStructuralTick((n) => n + 1);
+  }
+  const lastScrollY = useRef(0);
+  const pendingScrollRestore = useRef<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -707,6 +720,7 @@ export default function Designer({
     setBlocks(prev);
     setSel(null);
     setDirty(true);
+    bumpStructural();
   }
 
   function redo() {
@@ -716,6 +730,7 @@ export default function Designer({
     setBlocks(next);
     setSel(null);
     setDirty(true);
+    bumpStructural();
   }
 
   useEffect(() => {
@@ -732,6 +747,22 @@ export default function Designer({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // Debounced reload for structural Live Edit changes (see bumpStructural
+  // above) — waits for a pause in activity so a fast burst (e.g. several
+  // deletes in a row) reloads once. enterLive() already saves when dirty and
+  // mints a fresh preview token, which is what actually forces the iframe to
+  // reload; the scroll position is restored once the reloaded iframe reports
+  // back in (see the iframe's onLoad handler further down).
+  useEffect(() => {
+    if (structuralTick === 0 || mode !== "live") return;
+    const timer = setTimeout(() => {
+      pendingScrollRestore.current = lastScrollY.current;
+      void enterLive().catch((err) => setError((err as Error).message));
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structuralTick]);
 
   // localStorage-backed clipboard (survives reload/switching pages), namespaced
   // per level so copying a section doesn't clobber a copied element.
@@ -797,6 +828,10 @@ export default function Designer({
         setCtxMenu(null);
         return;
       }
+      if (e.data?.type === "designer:scroll") {
+        lastScrollY.current = Number(e.data.y ?? 0);
+        return;
+      }
       if (e.data?.type === "designer:undo") {
         undo();
         return;
@@ -840,6 +875,7 @@ export default function Designer({
           insertEl(bs, [tb, tr, tc], el, idx);
         });
         setSel(null);
+        bumpStructural();
       }
     }
     window.addEventListener("message", onMessage);
@@ -996,13 +1032,17 @@ export default function Designer({
   // action+level instead of re-deriving the same splice/clip logic.
   function duplicateSection(b: number) {
     mutate((bs) => bs.splice(b + 1, 0, clone(bs[b])));
+    bumpStructural();
   }
   function copySection(b: number) {
     clipCopy("section", blocks[b]);
   }
   function pasteSection(b: number) {
     const data = clipRead<Block>("section");
-    if (data) mutate((bs) => bs.splice(b + 1, 0, clone(data)));
+    if (data) {
+      mutate((bs) => bs.splice(b + 1, 0, clone(data)));
+      bumpStructural();
+    }
   }
   function copyStyleSection(b: number) {
     // rows is the section's content (children), never its "style" —
@@ -1019,6 +1059,7 @@ export default function Designer({
       bs.splice(b, 1);
     });
     setSel(null);
+    bumpStructural();
   }
 
   function copyColumn(b: number, r: number, c: number) {
@@ -1026,7 +1067,10 @@ export default function Designer({
   }
   function pasteColumn(b: number, r: number, c: number) {
     const data = clipRead<Col>("column");
-    if (data) mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
+    if (data) {
+      mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
+      bumpStructural();
+    }
   }
   function copyStyleColumn(b: number, r: number, c: number) {
     styleCopy("column", section(blocks, b).rows[r].columns[c].props ?? {});
@@ -1046,6 +1090,7 @@ export default function Designer({
       if (row.columns.length === 0) section(bs, b).rows.splice(r, 1);
     });
     setSel(null);
+    bumpStructural();
   }
 
   function duplicateElement(b: number, r: number, c: number, e: number) {
@@ -1053,13 +1098,17 @@ export default function Designer({
       const src = section(bs, b).rows[r].columns[c].elements[e];
       section(bs, b).rows[r].columns[c].elements.splice(e + 1, 0, { ...clone(src), id: uid() });
     });
+    bumpStructural();
   }
   function copyElement(b: number, r: number, c: number, e: number) {
     clipCopy("element", section(blocks, b).rows[r].columns[c].elements[e]);
   }
   function pasteElement(b: number, r: number, c: number, e: number) {
     const data = clipRead<El>("element");
-    if (data) mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+    if (data) {
+      mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+      bumpStructural();
+    }
   }
   function copyStyleElement(b: number, r: number, c: number, e: number) {
     const el = section(blocks, b).rows[r].columns[c].elements[e];
@@ -1078,6 +1127,7 @@ export default function Designer({
       removeAt(bs, [b, r, c, e]);
     });
     setSel(null);
+    bumpStructural();
   }
 
   function dropIntoColumn(colPath: number[], index?: number) {
@@ -1967,6 +2017,15 @@ export default function Designer({
             <iframe
               ref={liveFrame}
               src={liveSrc ?? undefined}
+              onLoad={() => {
+                if (pendingScrollRestore.current == null || !liveFrame.current?.contentWindow || !liveSrc) return;
+                const targetOrigin = new URL(liveSrc, window.location.href).origin;
+                liveFrame.current.contentWindow.postMessage(
+                  { type: "designer:restoreScroll", y: pendingScrollRestore.current },
+                  targetOrigin,
+                );
+                pendingScrollRestore.current = null;
+              }}
               className="min-w-0 flex-1 border-0 bg-white"
               title="live-view"
             />
@@ -2201,16 +2260,20 @@ export default function Designer({
               onClick={(ev) => ev.stopPropagation()}
             >
               {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b, r, c, e]))}
-              {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () =>
-                mutate((bs) => insertEl(bs, [b, r, c], { ...clone(el), id: uid() }, e + 1)),
-              )}
+              {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => {
+                mutate((bs) => insertEl(bs, [b, r, c], { ...clone(el), id: uid() }, e + 1));
+                bumpStructural();
+              })}
               {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => clipCopy("element", el))}
               {item(
                 <ClipboardPaste className="h-3.5 w-3.5" />,
                 t("designer-paste"),
                 () => {
                   const data = clipRead<El>("element");
-                  if (data) mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+                  if (data) {
+                    mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+                    bumpStructural();
+                  }
                 },
                 !clipHas("element"),
               )}
