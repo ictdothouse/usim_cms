@@ -680,6 +680,11 @@ export default function Designer({
   const lastScrollY = useRef(0);
   const pendingScrollRestore = useRef<number | null>(null);
   const lastNonTextSig = useRef<string | null>(null);
+  // True from the moment any iframe (re)load starts (initial open, mode
+  // toggle back into Live, or a debounced structural/style reload) until
+  // its onLoad fires — covers the skeleton overlay below so a reload never
+  // shows the browser's own blank-frame flash, however brief.
+  const [reloading, setReloading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1249,6 +1254,7 @@ export default function Designer({
   // bridge script/data-designer-path attributes never activated, so clicks
   // in Live Edit silently did nothing.
   async function enterLive() {
+    setReloading(true);
     if (dirty) await save();
     const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
     const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
@@ -2028,21 +2034,36 @@ export default function Designer({
         {/* canvas */}
         {mode === "live" ? (
           <>
-            <iframe
-              ref={liveFrame}
-              src={liveSrc ?? undefined}
-              onLoad={() => {
-                if (pendingScrollRestore.current == null || !liveFrame.current?.contentWindow || !liveSrc) return;
-                const targetOrigin = new URL(liveSrc, window.location.href).origin;
-                liveFrame.current.contentWindow.postMessage(
-                  { type: "designer:restoreScroll", y: pendingScrollRestore.current },
-                  targetOrigin,
-                );
-                pendingScrollRestore.current = null;
-              }}
-              className="min-w-0 flex-1 border-0 bg-white"
-              title="live-view"
-            />
+            <div className="relative min-w-0 flex-1">
+              <iframe
+                ref={liveFrame}
+                src={liveSrc ?? undefined}
+                onLoad={() => {
+                  setReloading(false);
+                  if (pendingScrollRestore.current == null || !liveFrame.current?.contentWindow || !liveSrc) return;
+                  const targetOrigin = new URL(liveSrc, window.location.href).origin;
+                  liveFrame.current.contentWindow.postMessage(
+                    { type: "designer:restoreScroll", y: pendingScrollRestore.current },
+                    targetOrigin,
+                  );
+                  pendingScrollRestore.current = null;
+                }}
+                className="h-full w-full border-0 bg-white"
+                title="live-view"
+              />
+              {reloading && (
+                <div className="absolute inset-0 z-10 animate-pulse overflow-hidden bg-white p-6">
+                  <div className="mx-auto max-w-4xl space-y-4">
+                    <div className="h-8 w-2/3 rounded bg-canvas" />
+                    <div className="h-4 w-full rounded bg-canvas" />
+                    <div className="h-4 w-5/6 rounded bg-canvas" />
+                    <div className="h-40 w-full rounded bg-canvas" />
+                    <div className="h-4 w-3/4 rounded bg-canvas" />
+                    <div className="h-4 w-1/2 rounded bg-canvas" />
+                  </div>
+                </div>
+              )}
+            </div>
             <LiveEditToolbar />
           </>
         ) : (
