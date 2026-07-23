@@ -34,6 +34,13 @@ import type { Key } from "@/i18n";
 import { useT, inputCls, btnPrimary, btnGhost } from "./App";
 import MediaPickerModal from "./MediaPickerModal";
 
+// Used by save() when the excerpt field is left blank — strips tags from the
+// sanitized body HTML and takes the first ~160 chars, so a post never ships
+// with no excerpt just because the author didn't fill it in.
+function autoExcerpt(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
 // ---------- Rich-text toolbar (fixed bar, not just Notion-style slash/hover) ----------
 // BlockNote's own selection popup + slash menu stay as-is (kept per request) —
 // this adds a persistent bar above the editor for people used to a
@@ -177,7 +184,8 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [title, setTitle] = useState("");
   const [excerpt, setExcerpt] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [tagsInput, setTagsInput] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<PostStatus>("draft");
   // Bumped by PostHistory's onRestored below — post?.id never changes across
@@ -197,7 +205,8 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     setTitle(post.title as string);
     setExcerpt((post.excerpt as string | null) ?? "");
     setCategoryId((post.categoryId as string | null) ?? "");
-    setTagsInput(((post.tags as string[] | null) ?? []).join(", "));
+    setTags((post.tags as string[] | null) ?? []);
+    setTagDraft("");
     setBannerImageUrl((post.bannerImageUrl as string | null) ?? null);
     setStatus((post.status as PostStatus) || "draft");
   }, [post]);
@@ -221,10 +230,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     if (!post) return;
     setSaving(true);
     try {
-      const tags = [...new Set(tagsInput.split(",").map((s) => s.trim()).filter(Boolean))];
+      const body = await editor.blocksToHTMLLossy(editor.document);
       await api.updatePost(tenantHost, token, post.id as string, {
-        title, excerpt, categoryId: categoryId || null, tags, bannerImageUrl,
-        body: await editor.blocksToHTMLLossy(editor.document),
+        title, excerpt: excerpt.trim() || autoExcerpt(body), categoryId: categoryId || null, tags, bannerImageUrl,
+        body,
         ...(nextStatus ? { status: nextStatus, publishedAt: nextStatus === "draft" ? null : new Date().toISOString() } : {}),
       });
       if (nextStatus) setStatus(nextStatus);
@@ -309,7 +318,6 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
               </button>
             )}
             <textarea value={title} onChange={(e) => setTitle(e.target.value)} rows={1} placeholder={t("posts-title-placeholder")} className="w-full resize-none border-0 font-display text-3xl font-bold text-ink outline-none" onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }} />
-            <input value={excerpt} onChange={(e) => setExcerpt(e.target.value)} placeholder={t("posts-excerpt")} className="w-full border-0 text-sm text-sub outline-none" />
             <div>
               <EditorToolbar editor={editor} />
               <div className="rounded-b-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[400px]">
@@ -367,8 +375,50 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
               </div>
             </div>
             <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-excerpt")}</label>
+              <textarea rows={3} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} placeholder={t("posts-excerpt-auto")} className={`${inputCls} resize-none`} />
+            </div>
+            <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-tags")}</label>
-              <input className={inputCls} value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} />
+              <div
+                className={`${inputCls} flex flex-wrap items-center gap-1`}
+                onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}
+              >
+                {tags.map((tag) => (
+                  <span key={tag} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] text-body">
+                    {tag}
+                    <button type="button" onClick={() => setTags((prev) => prev.filter((t2) => t2 !== tag))} className="text-sub hover:text-ink"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+                <input
+                  value={tagDraft}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (!value.includes(",")) { setTagDraft(value); return; }
+                    const [committed, rest] = [value.slice(0, value.lastIndexOf(",")), value.slice(value.lastIndexOf(",") + 1)];
+                    const parts = committed.split(",").map((s) => s.trim()).filter(Boolean);
+                    if (parts.length) setTags((prev) => [...new Set([...prev, ...parts])]);
+                    setTagDraft(rest);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const value = tagDraft.trim();
+                      if (value) setTags((prev) => [...new Set([...prev, value])]);
+                      setTagDraft("");
+                    } else if (e.key === "Backspace" && !tagDraft && tags.length) {
+                      setTags((prev) => prev.slice(0, -1));
+                    }
+                  }}
+                  onBlur={() => {
+                    const value = tagDraft.trim();
+                    if (value) setTags((prev) => [...new Set([...prev, value])]);
+                    setTagDraft("");
+                  }}
+                  placeholder={tags.length ? "" : t("posts-tags")}
+                  className="min-w-[60px] flex-1 border-0 bg-transparent text-xs outline-none"
+                />
+              </div>
             </div>
             {status === "published" && (<button onClick={() => void share()} className={`${btnGhost} w-full`}>{t("posts-share")}</button>)}
             {(post.authorEmail as string | null) && (<p className="text-[11px] text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}

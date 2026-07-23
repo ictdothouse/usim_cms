@@ -42,8 +42,8 @@ export default function MediaPickerModal({
         </button>
         <div className="grid flex-1 grid-cols-4 gap-3 overflow-y-auto">
           {items.filter((m) => (m.mimeType as string).startsWith("image/")).map((m) => (
-            <button key={m.id as string} onClick={() => onSelect(m.url as string)} className="group relative aspect-square overflow-hidden rounded-lg border border-line/30 hover:border-accent">
-              <img src={m.url as string} alt={(m.altText as string) ?? ""} className="h-full w-full object-cover" />
+            <button key={m.id as string} onClick={() => onSelect(api.API_URL + (m.url as string))} className="group relative aspect-square overflow-hidden rounded-lg border border-line/30 hover:border-accent">
+              <img src={api.API_URL + (m.url as string)} alt={(m.altText as string) ?? ""} className="h-full w-full object-cover" />
             </button>
           ))}
         </div>
