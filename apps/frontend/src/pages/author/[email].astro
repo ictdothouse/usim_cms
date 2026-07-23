@@ -1,0 +1,35 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { listPosts, getTheme } from "../../lib/api";
+
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost =
+  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+    ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    : rawHost;
+
+const email = Astro.params.email!;
+const posts = await listPosts(tenantHost, { authorEmail: email });
+const theme = await getTheme(tenantHost);
+---
+<BaseLayout title={`Author: ${email}`} theme={theme}>
+  <main style="max-width:44rem;margin:0 auto;padding:2rem 1rem;">
+    <h1 style="color:var(--color-primary,#1d1d1f);">Author: {email}</h1>
+    {posts.length === 0 && <p style="color:#86868b;">No posts by this author yet.</p>}
+    <ul style="list-style:none;padding:0;">
+      {posts.map((post) => (
+        <li style="margin-bottom:1.5rem;">
+          <a href={`/posts/${post.slug}`} style="font-size:1.1rem;font-weight:700;color:var(--color-primary,#1d1d1f);text-decoration:none;">
+            {post.title}
+          </a>
+          {post.publishedAt && (
+            <p style="color:#86868b;font-size:0.8rem;margin:0.2rem 0;">
+              {new Date(post.publishedAt).toLocaleDateString("ms-MY", { day: "numeric", month: "long", year: "numeric" })}
+            </p>
+          )}
+          {post.excerpt && <p style="margin:0.2rem 0;">{post.excerpt}</p>}
+        </li>
+      ))}
+    </ul>
+  </main>
+</BaseLayout>

@@ -1,0 +1,41 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { listPosts, listCategories, getTheme } from "../../lib/api";
+
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost =
+  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+    ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    : rawHost;
+
+const slug = Astro.params.slug!;
+// posts.category (the name) is a virtual, computed field — buildListFilters
+// only matches real columns, so filtering posts requires the real
+// categoryId. Resolve the URL's slug to an id via the public categories
+// list first (see apps/frontend/src/lib/api.ts's listCategories).
+const categories = await listCategories(tenantHost);
+const category = categories.find((c) => c.slug === slug);
+const posts = category ? await listPosts(tenantHost, { categoryId: category.id }) : [];
+const theme = await getTheme(tenantHost);
+---
+<BaseLayout title={`Category: ${category?.name ?? slug}`} theme={theme}>
+  <main style="max-width:44rem;margin:0 auto;padding:2rem 1rem;">
+    <h1 style="color:var(--color-primary,#1d1d1f);">Category: {category?.name ?? slug}</h1>
+    {posts.length === 0 && <p style="color:#86868b;">No posts in this category yet.</p>}
+    <ul style="list-style:none;padding:0;">
+      {posts.map((post) => (
+        <li style="margin-bottom:1.5rem;">
+          <a href={`/posts/${post.slug}`} style="font-size:1.1rem;font-weight:700;color:var(--color-primary,#1d1d1f);text-decoration:none;">
+            {post.title}
+          </a>
+          {post.publishedAt && (
+            <p style="color:#86868b;font-size:0.8rem;margin:0.2rem 0;">
+              {new Date(post.publishedAt).toLocaleDateString("ms-MY", { day: "numeric", month: "long", year: "numeric" })}
+            </p>
+          )}
+          {post.excerpt && <p style="margin:0.2rem 0;">{post.excerpt}</p>}
+        </li>
+      ))}
+    </ul>
+  </main>
+</BaseLayout>
