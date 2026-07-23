@@ -660,6 +660,12 @@ export default function Designer({
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   const [sel, setSel] = useState<Sel>(null);
+  // Reported by BaseLayout.astro's designer:selectedRect message — the
+  // selected node's on-screen box inside the iframe, used to position
+  // LiveEditToolbar. Cleared below whenever `sel` itself changes so a stale
+  // rect never positions the toolbar over the wrong element while the new
+  // one's first report is in flight.
+  const [selectedRect, setSelectedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -711,6 +717,21 @@ export default function Designer({
     setSel(null);
     setDirty(true);
   }
+
+  useEffect(() => {
+    setSelectedRect(null);
+  }, [sel]);
+
+  // Forces a re-render on window resize so LiveEditToolbar's position (which
+  // reads liveFrame.current.getBoundingClientRect() directly at render time,
+  // not from state) picks up the iframe's new page position even when
+  // selectedRect itself hasn't changed.
+  const [, bumpLayoutTick] = useState(0);
+  useEffect(() => {
+    const onResize = () => bumpLayoutTick((n) => n + 1);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // localStorage-backed clipboard (survives reload/switching pages), namespaced
   // per level so copying a section doesn't clobber a copied element.
@@ -768,6 +789,10 @@ export default function Designer({
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       if (!liveFrame.current || e.source !== liveFrame.current.contentWindow) return;
+      if (e.data?.type === "designer:selectedRect") {
+        setSelectedRect(e.data.rect ?? null);
+        return;
+      }
       const path = String(e.data?.path ?? "")
         .split(".")
         .map(Number);
@@ -1718,6 +1743,66 @@ export default function Designer({
     );
   }
 
+  // Floating action toolbar for Live Edit mode — same actions Blocks mode
+  // already has at the matching selection level (see the extracted
+  // duplicate/copy/paste/etc. functions above), positioned over the
+  // selected block using selectedRect (reported by BaseLayout.astro) plus
+  // the iframe's own page position.
+  function LiveEditToolbar() {
+    if (!sel || !selectedRect || !liveFrame.current) return null;
+    const iframeRect = liveFrame.current.getBoundingClientRect();
+    const top = iframeRect.top + selectedRect.top;
+    const left = iframeRect.left + selectedRect.left;
+    const toolbarHeight = 32;
+    const showBelow = top < toolbarHeight + 8;
+    const style: React.CSSProperties = {
+      position: "fixed",
+      left,
+      top: showBelow ? top + selectedRect.height + 4 : top - toolbarHeight - 4,
+      zIndex: 50,
+    };
+    const iconBtn = "flex items-center justify-center rounded p-1 text-accent hover:bg-canvas disabled:opacity-30";
+    if (sel.length === 1) {
+      const [b] = sel;
+      return (
+        <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
+          <button onClick={() => duplicateSection(b)} className={iconBtn} title={t("designer-duplicate")}><Copy className="h-3.5 w-3.5" /></button>
+          <button onClick={() => copySection(b)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
+          <button onClick={() => pasteSection(b)} disabled={!clipHas("section")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
+          <button onClick={() => copyStyleSection(b)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
+          <button onClick={() => pasteStyleSection(b)} disabled={!styleHas("section")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+          <button onClick={() => deleteSection(b)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
+        </div>
+      );
+    }
+    if (sel.length === 3) {
+      const [b, r, c] = sel;
+      return (
+        <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
+          <button onClick={() => copyColumn(b, r, c)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
+          <button onClick={() => pasteColumn(b, r, c)} disabled={!clipHas("column")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
+          <button onClick={() => copyStyleColumn(b, r, c)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
+          <button onClick={() => pasteStyleColumn(b, r, c)} disabled={!styleHas("column")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+          <button onClick={() => deleteColumn(b, r, c)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
+        </div>
+      );
+    }
+    if (sel.length === 4) {
+      const [b, r, c, e] = sel;
+      return (
+        <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
+          <button onClick={() => duplicateElement(b, r, c, e)} className={iconBtn} title={t("designer-duplicate")}><Copy className="h-3.5 w-3.5" /></button>
+          <button onClick={() => copyElement(b, r, c, e)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
+          <button onClick={() => pasteElement(b, r, c, e)} disabled={!clipHas("element")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
+          <button onClick={() => copyStyleElement(b, r, c, e)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
+          <button onClick={() => pasteStyleElement(b, r, c, e)} disabled={!styleHas("element")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+          <button onClick={() => deleteElement(b, r, c, e)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
+        </div>
+      );
+    }
+    return null;
+  }
+
   // ---------- render ----------
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas font-sans text-ink antialiased">
@@ -1856,12 +1941,15 @@ export default function Designer({
 
         {/* canvas */}
         {mode === "live" ? (
-          <iframe
-            ref={liveFrame}
-            src={liveSrc ?? undefined}
-            className="min-w-0 flex-1 border-0 bg-white"
-            title="live-view"
-          />
+          <>
+            <iframe
+              ref={liveFrame}
+              src={liveSrc ?? undefined}
+              className="min-w-0 flex-1 border-0 bg-white"
+              title="live-view"
+            />
+            <LiveEditToolbar />
+          </>
         ) : (
         <main className="min-w-0 flex-1 overflow-y-auto p-6" onClick={() => setSel(null)}>
           <div className="mx-auto max-w-4xl space-y-4">
