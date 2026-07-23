@@ -679,6 +679,7 @@ export default function Designer({
   }
   const lastScrollY = useRef(0);
   const pendingScrollRestore = useRef<number | null>(null);
+  const lastNonTextSig = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -904,8 +905,14 @@ export default function Designer({
         // props-to-CSS mapping to reuse here, so a style change (paste
         // style, or an Inspector field edit) falls back to the same
         // debounced reload structural edits use instead of silently posting
-        // no visible change.
-        bumpStructural();
+        // no visible change. Guarded by a signature so the reload this
+        // itself triggers (liveSrc changing re-runs this effect against the
+        // same still-selected element) doesn't bump again and loop forever.
+        const sig = `${path}:${JSON.stringify(el.props)}`;
+        if (lastNonTextSig.current !== sig) {
+          lastNonTextSig.current = sig;
+          bumpStructural();
+        }
         return;
       }
       const style = typoStyle(el.props);
