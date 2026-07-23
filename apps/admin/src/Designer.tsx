@@ -944,6 +944,95 @@ export default function Designer({
     list.splice(index ?? list.length, 0, el);
   }
 
+  // Extracted from BlockControls/Inspector's inline closures so both those
+  // and LiveEditToolbar (Live Edit mode) call one shared implementation per
+  // action+level instead of re-deriving the same splice/clip logic.
+  function duplicateSection(b: number) {
+    mutate((bs) => bs.splice(b + 1, 0, clone(bs[b])));
+  }
+  function copySection(b: number) {
+    clipCopy("section", blocks[b]);
+  }
+  function pasteSection(b: number) {
+    const data = clipRead<Block>("section");
+    if (data) mutate((bs) => bs.splice(b + 1, 0, clone(data)));
+  }
+  function copyStyleSection(b: number) {
+    // rows is the section's content (children), never its "style" —
+    // stripped so pasting style elsewhere can't overwrite content.
+    const { rows: _rows, ...styleProps } = blocks[b].props as unknown as SectionProps;
+    styleCopy("section", styleProps as unknown as Record<string, string>);
+  }
+  function pasteStyleSection(b: number) {
+    const style = styleRead("section");
+    if (style) mutate((bs) => Object.assign(bs[b].props, style));
+  }
+  function deleteSection(b: number) {
+    mutate((bs) => {
+      bs.splice(b, 1);
+    });
+    setSel(null);
+  }
+
+  function copyColumn(b: number, r: number, c: number) {
+    clipCopy("column", section(blocks, b).rows[r].columns[c]);
+  }
+  function pasteColumn(b: number, r: number, c: number) {
+    const data = clipRead<Col>("column");
+    if (data) mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
+  }
+  function copyStyleColumn(b: number, r: number, c: number) {
+    styleCopy("column", section(blocks, b).rows[r].columns[c].props ?? {});
+  }
+  function pasteStyleColumn(b: number, r: number, c: number) {
+    const style = styleRead("column");
+    if (style)
+      mutate((bs) => {
+        const target = section(bs, b).rows[r].columns[c];
+        target.props = { ...(target.props ?? {}), ...style };
+      });
+  }
+  function deleteColumn(b: number, r: number, c: number) {
+    mutate((bs) => {
+      const row = section(bs, b).rows[r];
+      row.columns.splice(c, 1);
+      if (row.columns.length === 0) section(bs, b).rows.splice(r, 1);
+    });
+    setSel(null);
+  }
+
+  function duplicateElement(b: number, r: number, c: number, e: number) {
+    mutate((bs) => {
+      const src = section(bs, b).rows[r].columns[c].elements[e];
+      section(bs, b).rows[r].columns[c].elements.splice(e + 1, 0, { ...clone(src), id: uid() });
+    });
+  }
+  function copyElement(b: number, r: number, c: number, e: number) {
+    clipCopy("element", section(blocks, b).rows[r].columns[c].elements[e]);
+  }
+  function pasteElement(b: number, r: number, c: number, e: number) {
+    const data = clipRead<El>("element");
+    if (data) mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+  }
+  function copyStyleElement(b: number, r: number, c: number, e: number) {
+    const el = section(blocks, b).rows[r].columns[c].elements[e];
+    styleCopy("element", el.props, el.type);
+  }
+  function pasteStyleElement(b: number, r: number, c: number, e: number) {
+    const style = styleRead("element");
+    if (style)
+      mutate((bs) => {
+        const target = section(bs, b).rows[r].columns[c].elements[e];
+        target.props = { ...target.props, ...style };
+      });
+  }
+  function deleteElement(b: number, r: number, c: number, e: number) {
+    mutate((bs) => {
+      removeAt(bs, [b, r, c, e]);
+    });
+    setSel(null);
+  }
+
   function dropIntoColumn(colPath: number[], index?: number) {
     const d = drag.current;
     drag.current = null;
@@ -1320,54 +1409,28 @@ export default function Designer({
             </label>
           ))}
           <div className="flex gap-3">
-            <button
-              onClick={() => clipCopy("column", col)}
-              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
-            >
+            <button onClick={() => copyColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
             </button>
             <button
-              onClick={() => {
-                const data = clipRead<Col>("column");
-                if (data) mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
-              }}
+              onClick={() => pasteColumn(b, r, c)}
               disabled={!clipHas("column")}
               className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
             >
               <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
             </button>
-            <button
-              onClick={() => styleCopy("column", col.props ?? {})}
-              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
-            >
+            <button onClick={() => copyStyleColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
             </button>
             <button
-              onClick={() => {
-                const style = styleRead("column");
-                if (style)
-                  mutate((bs) => {
-                    const target = section(bs, b).rows[r].columns[c];
-                    target.props = { ...(target.props ?? {}), ...style };
-                  });
-              }}
+              onClick={() => pasteStyleColumn(b, r, c)}
               disabled={!styleHas("column")}
               className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
             >
               <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
             </button>
           </div>
-          <button
-            onClick={() => {
-              mutate((bs) => {
-                const row = section(bs, b).rows[r];
-                row.columns.splice(c, 1);
-                if (row.columns.length === 0) section(bs, b).rows.splice(r, 1);
-              });
-              setSel(null);
-            }}
-            className="flex items-center gap-1 text-[11px] font-semibold text-red-500"
-          >
+          <button onClick={() => deleteColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
             <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
           </button>
         </div>
@@ -1413,37 +1476,21 @@ export default function Designer({
             </div>
           </label>
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => clipCopy("element", el)}
-              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
-            >
+            <button onClick={() => copyElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
             </button>
             <button
-              onClick={() => {
-                const data = clipRead<El>("element");
-                if (data) mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
-              }}
+              onClick={() => pasteElement(b, r, c, e)}
               disabled={!clipHas("element")}
               className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
             >
               <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
             </button>
-            <button
-              onClick={() => styleCopy("element", el.props, el.type)}
-              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
-            >
+            <button onClick={() => copyStyleElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
             </button>
             <button
-              onClick={() => {
-                const style = styleRead("element");
-                if (style)
-                  mutate((bs) => {
-                    const target = section(bs, b).rows[r].columns[c].elements[e];
-                    target.props = { ...target.props, ...style };
-                  });
-              }}
+              onClick={() => pasteStyleElement(b, r, c, e)}
               disabled={!styleHas("element")}
               className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
             >
@@ -1451,26 +1498,10 @@ export default function Designer({
             </button>
           </div>
           <div className="flex gap-3">
-            <button
-              onClick={() =>
-                mutate((bs) => {
-                  const src = section(bs, b).rows[r].columns[c].elements[e];
-                  section(bs, b).rows[r].columns[c].elements.splice(e + 1, 0, { ...clone(src), id: uid() });
-                })
-              }
-              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
-            >
+            <button onClick={() => duplicateElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
             </button>
-            <button
-              onClick={() => {
-                mutate((bs) => {
-                  removeAt(bs, sel);
-                });
-                setSel(null);
-              }}
-              className="flex items-center gap-1 text-[11px] font-semibold text-red-500"
-            >
+            <button onClick={() => deleteElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
               <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
             </button>
           </div>
@@ -1655,60 +1686,32 @@ export default function Designer({
         >
           ↓
         </button>
-        <button
-          onClick={() => mutate((bs) => bs.splice(b + 1, 0, clone(bs[b])))}
-          className="px-0.5 text-accent"
-          title={t("designer-duplicate")}
-        >
+        <button onClick={() => duplicateSection(b)} className="px-0.5 text-accent" title={t("designer-duplicate")}>
           <Copy className="h-3 w-3" />
         </button>
-        <button onClick={() => clipCopy("section", blocks[b])} className="px-0.5 text-accent" title={t("designer-copy")}>
+        <button onClick={() => copySection(b)} className="px-0.5 text-accent" title={t("designer-copy")}>
           <Clipboard className="h-3 w-3" />
         </button>
         <button
-          onClick={() => {
-            const data = clipRead<Block>("section");
-            if (data) mutate((bs) => bs.splice(b + 1, 0, clone(data)));
-          }}
+          onClick={() => pasteSection(b)}
           disabled={!clipHas("section")}
           className="px-0.5 text-accent disabled:opacity-30"
           title={t("designer-paste")}
         >
           <ClipboardPaste className="h-3 w-3" />
         </button>
-        <button
-          onClick={() => {
-            // rows is the section's content (children), never its "style" —
-            // stripped so pasting style elsewhere can't overwrite content.
-            const { rows: _rows, ...styleProps } = blocks[b].props as unknown as SectionProps;
-            styleCopy("section", styleProps as unknown as Record<string, string>);
-          }}
-          className="px-0.5 text-accent"
-          title={t("designer-copy-style")}
-        >
+        <button onClick={() => copyStyleSection(b)} className="px-0.5 text-accent" title={t("designer-copy-style")}>
           <Paintbrush className="h-3 w-3" />
         </button>
         <button
-          onClick={() => {
-            const style = styleRead("section");
-            if (style) mutate((bs) => Object.assign(bs[b].props, style));
-          }}
+          onClick={() => pasteStyleSection(b)}
           disabled={!styleHas("section")}
           className="px-0.5 text-accent disabled:opacity-30"
           title={t("designer-paste-style")}
         >
           <Paintbrush className="h-3 w-3 opacity-50" />
         </button>
-        <button
-          onClick={() => {
-            mutate((bs) => {
-              bs.splice(b, 1);
-            });
-            setSel(null);
-          }}
-          className="px-0.5 text-red-500"
-          title={t("designer-delete")}
-        >
+        <button onClick={() => deleteSection(b)} className="px-0.5 text-red-500" title={t("designer-delete")}>
           <Trash2 className="h-3 w-3" />
         </button>
       </span>
