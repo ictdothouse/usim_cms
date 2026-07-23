@@ -1420,6 +1420,11 @@ function ThemeForm({
   const [headingFont, setHeadingFont] = useState("");
   const [subHeadingFont, setSubHeadingFont] = useState("");
   const [postTitleFont, setPostTitleFont] = useState("");
+  const [postTitleFontSize, setPostTitleFontSize] = useState("");
+  const [showPostTags, setShowPostTags] = useState("");
+  const [showPostCategory, setShowPostCategory] = useState("");
+  const [showPostAuthor, setShowPostAuthor] = useState("");
+  const [showPostDate, setShowPostDate] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1436,6 +1441,11 @@ function ThemeForm({
     headingFont,
     subHeadingFont,
     postTitleFont,
+    postTitleFontSize,
+    showPostTags,
+    showPostCategory,
+    showPostAuthor,
+    showPostDate,
     logoUrl,
   });
 
@@ -1457,6 +1467,11 @@ function ThemeForm({
       setHeadingFont(th.headingFont ?? "");
       setSubHeadingFont(th.subHeadingFont ?? "");
       setPostTitleFont(th.postTitleFont ?? "");
+      setPostTitleFontSize(th.postTitleFontSize ?? "");
+      setShowPostTags(th.showPostTags ?? "");
+      setShowPostCategory(th.showPostCategory ?? "");
+      setShowPostAuthor(th.showPostAuthor ?? "");
+      setShowPostDate(th.showPostDate ?? "");
       setLogoUrl(th.logoUrl ?? "");
     });
     void refreshPresets();
@@ -1494,6 +1509,11 @@ function ThemeForm({
     setHeadingFont(p.settings.headingFont ?? "");
     setSubHeadingFont(p.settings.subHeadingFont ?? "");
     setPostTitleFont(p.settings.postTitleFont ?? "");
+    setPostTitleFontSize(p.settings.postTitleFontSize ?? "");
+    setShowPostTags(p.settings.showPostTags ?? "");
+    setShowPostCategory(p.settings.showPostCategory ?? "");
+    setShowPostAuthor(p.settings.showPostAuthor ?? "");
+    setShowPostDate(p.settings.showPostDate ?? "");
     setLogoUrl(p.settings.logoUrl ?? "");
   }
 
@@ -1562,6 +1582,11 @@ function ThemeForm({
       headingFont: "",
       subHeadingFont: "",
       postTitleFont: "",
+      postTitleFontSize: "",
+      showPostTags: "",
+      showPostCategory: "",
+      showPostAuthor: "",
+      showPostDate: "",
       logoUrl: "",
     };
     try {
@@ -1619,6 +1644,11 @@ function ThemeForm({
       setHeadingFont(parsed.headingFont ?? headingFont);
       setSubHeadingFont(parsed.subHeadingFont ?? subHeadingFont);
       setPostTitleFont(parsed.postTitleFont ?? postTitleFont);
+      setPostTitleFontSize(parsed.postTitleFontSize ?? postTitleFontSize);
+      setShowPostTags(parsed.showPostTags ?? showPostTags);
+      setShowPostCategory(parsed.showPostCategory ?? showPostCategory);
+      setShowPostAuthor(parsed.showPostAuthor ?? showPostAuthor);
+      setShowPostDate(parsed.showPostDate ?? showPostDate);
       setLogoUrl(parsed.logoUrl ?? logoUrl);
       if (parsed.name) setPresetName(parsed.name);
     } catch (err) {
@@ -1652,6 +1682,11 @@ function ThemeForm({
         headingFont,
         subHeadingFont,
         postTitleFont,
+        postTitleFontSize,
+        showPostTags,
+        showPostCategory,
+        showPostAuthor,
+        showPostDate,
         logoUrl,
       });
       setSaved(true);
@@ -1788,7 +1823,37 @@ function ThemeForm({
             {sameFontNote(subHeadingFont, headingFont)}
             <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} placeholder="Poppins" />
             {sameFontNote(postTitleFont, headingFont)}
+            <label className="block text-xs font-medium text-body">
+              {t("theme-post-title-size")}
+              <input
+                type="number"
+                min={12}
+                max={96}
+                className={`${inputCls} mt-1`}
+                value={postTitleFontSize}
+                onChange={(e) => setPostTitleFontSize(e.target.value)}
+                placeholder="32"
+              />
+            </label>
             <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs font-medium text-body">
+              <input type="checkbox" checked={showPostTags !== "false"} onChange={(e) => setShowPostTags(e.target.checked ? "" : "false")} />
+              {t("theme-show-tags")}
+            </label>
+            <label className="flex items-center gap-2 text-xs font-medium text-body">
+              <input type="checkbox" checked={showPostCategory !== "false"} onChange={(e) => setShowPostCategory(e.target.checked ? "" : "false")} />
+              {t("theme-show-category")}
+            </label>
+            <label className="flex items-center gap-2 text-xs font-medium text-body">
+              <input type="checkbox" checked={showPostAuthor !== "false"} onChange={(e) => setShowPostAuthor(e.target.checked ? "" : "false")} />
+              {t("theme-show-author")}
+            </label>
+            <label className="flex items-center gap-2 text-xs font-medium text-body">
+              <input type="checkbox" checked={showPostDate !== "false"} onChange={(e) => setShowPostDate(e.target.checked ? "" : "false")} />
+              {t("theme-show-date")}
+            </label>
           </div>
           <label className="block text-xs font-medium text-body">
             {t("theme-logo")}
@@ -1823,7 +1888,7 @@ function ThemeForm({
             <p className="text-base font-semibold opacity-90" style={{ fontFamily: subHeadingFont || undefined }}>
               {t("theme-preview-subheading")}
             </p>
-            <p className="text-sm font-semibold opacity-80" style={{ fontFamily: postTitleFont || undefined }}>
+            <p className="text-sm font-semibold opacity-80" style={{ fontFamily: postTitleFont || undefined, fontSize: postTitleFontSize ? `${postTitleFontSize}px` : undefined }}>
               {t("theme-preview-posttitle")}
             </p>
             <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
