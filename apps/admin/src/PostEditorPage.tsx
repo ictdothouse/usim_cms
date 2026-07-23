@@ -165,6 +165,15 @@ function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: st
 }
 
 type PostStatus = "draft" | "published" | "private";
+type DisplayOverride = "inherit" | "show" | "hide";
+
+function toDisplayOverride(value: boolean | null | undefined): DisplayOverride {
+  return value === true ? "show" : value === false ? "hide" : "inherit";
+}
+
+function fromDisplayOverride(value: DisplayOverride): boolean | null {
+  return value === "show" ? true : value === "hide" ? false : null;
+}
 
 export default function PostEditorPage({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
@@ -188,6 +197,18 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [tagDraft, setTagDraft] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<PostStatus>("draft");
+  const [showTags, setShowTags] = useState<DisplayOverride>("inherit");
+  const [showCategory, setShowCategory] = useState<DisplayOverride>("inherit");
+  const [showAuthor, setShowAuthor] = useState<DisplayOverride>("inherit");
+  const [showPublishedDate, setShowPublishedDate] = useState<DisplayOverride>("inherit");
+  // Minted eagerly (not on-click) so the Preview link for a draft/private
+  // post can be a real <a href>, same as the published case below — a real
+  // anchor click is a genuine browser navigation and can't hit the
+  // "window.open then redirect after an async fetch" failure mode (some
+  // browsers silently block that delayed navigation, leaving the tab blank
+  // forever — see commit 5363b24, which fixed this for published posts by
+  // removing the token round-trip entirely; draft/private still needs one).
+  const [previewToken, setPreviewToken] = useState<string | null>(null);
   // Bumped by PostHistory's onRestored below — post?.id never changes across
   // a restore (same post, new content), so the body-load effect needs this
   // extra dependency to know a restore happened and reload the editor's
@@ -209,6 +230,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     setTagDraft("");
     setBannerImageUrl((post.bannerImageUrl as string | null) ?? null);
     setStatus((post.status as PostStatus) || "draft");
+    setShowTags(toDisplayOverride(post.showTags as boolean | null | undefined));
+    setShowCategory(toDisplayOverride(post.showCategory as boolean | null | undefined));
+    setShowAuthor(toDisplayOverride(post.showAuthor as boolean | null | undefined));
+    setShowPublishedDate(toDisplayOverride(post.showPublishedDate as boolean | null | undefined));
   }, [post]);
 
   const editor = useCreateBlockNote({
@@ -226,6 +251,18 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post?.id, bodyVersion]);
 
+  useEffect(() => {
+    setPreviewToken(null);
+    if (!post || status === "published") return;
+    let cancelled = false;
+    void api.getPostPreviewToken(tenantHost, token, post.id as string).then((t) => {
+      if (!cancelled) setPreviewToken(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [post?.id, status, tenantHost, token]);
+
   async function save(nextStatus?: PostStatus) {
     if (!post) return;
     setSaving(true);
@@ -234,6 +271,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
       await api.updatePost(tenantHost, token, post.id as string, {
         title, excerpt: excerpt.trim() || autoExcerpt(body), categoryId: categoryId || null, tags, bannerImageUrl,
         body,
+        showTags: fromDisplayOverride(showTags),
+        showCategory: fromDisplayOverride(showCategory),
+        showAuthor: fromDisplayOverride(showAuthor),
+        showPublishedDate: fromDisplayOverride(showPublishedDate),
         ...(nextStatus ? { status: nextStatus, publishedAt: nextStatus === "draft" ? null : new Date().toISOString() } : {}),
       });
       if (nextStatus) setStatus(nextStatus);
@@ -268,19 +309,6 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     }
   }
 
-  async function preview() {
-    if (!post) return;
-    const win = window.open("", "_blank", "noreferrer");
-    if (!win) return;
-    try {
-      const previewToken = await api.getPostPreviewToken(tenantHost, token, post.id as string);
-      win.location.href = api.previewUrl(tenantHost, `posts/${post.slug as string}`, previewToken);
-    } catch (err) {
-      win.close();
-      setError((err as Error).message);
-    }
-  }
-
   if (posts === null) return null;
   if (!post) return <p className="p-8 text-xs text-sub">{t("posts-empty")}</p>;
 
@@ -298,7 +326,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
         {status === "published" ? (
           <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a>
         ) : (
-          <button onClick={() => void preview()} className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</button>
+          <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`, previewToken ?? undefined)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a>
         )}
         {otherStatuses(status).map((s) => (<button key={s} onClick={() => void save(s)} disabled={saving} className={btnGhost}>{t(statusActionKey[s])}</button>))}
         <button onClick={() => void save()} disabled={saving} className={btnPrimary}>{saving ? t("blocks-saving") : t("posts-save")}</button>
@@ -419,6 +447,26 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                   className="min-w-[60px] flex-1 border-0 bg-transparent text-xs outline-none"
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-display-inherit")}</label>
+              {(
+                [
+                  ["showTags", t("posts-show-tags"), showTags, setShowTags],
+                  ["showCategory", t("posts-show-category"), showCategory, setShowCategory],
+                  ["showAuthor", t("posts-show-author"), showAuthor, setShowAuthor],
+                  ["showPublishedDate", t("posts-show-date"), showPublishedDate, setShowPublishedDate],
+                ] as Array<[string, string, DisplayOverride, (v: DisplayOverride) => void]>
+              ).map(([key, label, value, setValue]) => (
+                <div key={key} className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-body">{label}</span>
+                  <select className={`${inputCls} w-28`} value={value} onChange={(e) => setValue(e.target.value as DisplayOverride)}>
+                    <option value="inherit">{t("posts-display-inherit")}</option>
+                    <option value="show">{t("posts-display-show")}</option>
+                    <option value="hide">{t("posts-display-hide")}</option>
+                  </select>
+                </div>
+              ))}
             </div>
             {status === "published" && (<button onClick={() => void share()} className={`${btnGhost} w-full`}>{t("posts-share")}</button>)}
             {(post.authorEmail as string | null) && (<p className="text-[11px] text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}
