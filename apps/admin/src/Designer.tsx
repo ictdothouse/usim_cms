@@ -2205,9 +2205,9 @@ export default function Designer({
             </button>
             <button
               onClick={() => setActiveLeftTab("layers")}
-              className={`flex-1 rounded-md py-1 ${activeLeftTab === "layers" ? "bg-white shadow-sm" : "text-sub"}`}
+              className={`flex-1 rounded-md py-1 inline-flex items-center justify-center gap-1 ${activeLeftTab === "layers" ? "bg-white shadow-sm" : "text-sub"}`}
             >
-              {t("designer-tab-layers")}
+              <Layers className="h-3 w-3" /> {t("designer-tab-layers")}
             </button>
           </div>
           {activeLeftTab === "elements" ? (
