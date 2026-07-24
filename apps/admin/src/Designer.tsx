@@ -1459,8 +1459,13 @@ export default function Designer({
       <div className="space-y-0.5 text-xs">
         {blocks.map((block, b) => {
           if (block.type !== "section") {
+            const key = `${b}`;
             return (
-              <div key={b} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-sub">
+              <div
+                key={b}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sub ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
+                {...rowDragProps("section", [b], key)}
+              >
                 <Lock className="h-3 w-3" /> {t("designer-layers-locked")} ({block.type})
               </div>
             );
