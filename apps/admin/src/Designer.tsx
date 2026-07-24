@@ -968,13 +968,28 @@ export default function Designer({
     }
   }
 
+  // Saveable at any selection depth — sel[0] is always the containing
+  // section's index regardless of depth, so this derives which level
+  // (section/column/element) the current selection actually points at.
+  function templateKind(): "section" | "column" | "element" | null {
+    if (!sel || blocks[sel[0]]?.type !== "section") return null;
+    return sel.length === 1 ? "section" : sel.length === 3 ? "column" : sel.length === 4 ? "element" : null;
+  }
+
   async function saveAsTemplate() {
-    if (!sel || blocks[sel[0]]?.type !== "section") return;
+    const kind = templateKind();
+    if (!kind || !sel) return;
+    const value: unknown =
+      kind === "section"
+        ? blocks[sel[0]]
+        : kind === "column"
+          ? section(blocks, sel[0]).rows[sel[1]].columns[sel[2]]
+          : section(blocks, sel[0]).rows[sel[1]].columns[sel[2]].elements[sel[3]];
     const name = prompt(t("designer-templates-save-prompt"));
     if (!name) return;
     setTemplatesBusy(true);
     try {
-      await api.createTemplate(tenantHost, token, name, blocks[sel[0]] as unknown as Record<string, unknown>);
+      await api.createTemplate(tenantHost, token, name, { kind, value } as unknown as Record<string, unknown>);
       setTemplates(await api.listTemplates(tenantHost, token));
     } catch (err) {
       setError((err as Error).message);
@@ -983,8 +998,27 @@ export default function Designer({
     }
   }
 
+  // Pre-migration rows have no `kind`/`value` wrapper — `data` itself was
+  // the raw section block, so a missing `kind` falls back to that shape.
   function insertTemplate(tpl: api.DesignTemplate) {
-    mutate((bs) => bs.push(clone(tpl.data) as unknown as Block));
+    const kind = tpl.data?.kind as "section" | "column" | "element" | undefined;
+    const value = kind ? tpl.data.value : tpl.data;
+    if (kind === "column" || kind === "element") {
+      if (!sel || sel.length < 3) {
+        alert(t("designer-templates-need-column"));
+        return;
+      }
+      const [b, r, c, e] = sel;
+      if (kind === "column") {
+        mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(value) as Col));
+      } else {
+        const index = sel.length === 4 ? e + 1 : section(blocks, b).rows[r].columns[c].elements.length;
+        mutate((bs) => insertEl(bs, [b, r, c], { ...(clone(value) as El), id: uid() }, index));
+      }
+    } else {
+      mutate((bs) => bs.push(clone(value) as unknown as Block));
+    }
+    bumpStructural();
     setShowTemplates(false);
   }
 
@@ -2290,7 +2324,7 @@ export default function Designer({
             </div>
             <button
               onClick={() => void saveAsTemplate()}
-              disabled={!sel || blocks[sel[0]]?.type !== "section" || templatesBusy}
+              disabled={!templateKind() || templatesBusy}
               className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
             >
               <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
@@ -2299,9 +2333,15 @@ export default function Designer({
               <p className="text-xs text-sub">{t("designer-templates-empty")}</p>
             ) : (
               <ul className="space-y-2">
-                {templates.map((tpl) => (
+                {templates.map((tpl) => {
+                  const kind = (tpl.data?.kind as string | undefined) ?? "section";
+                  const kindLabel =
+                    kind === "column" ? t("designer-column") : kind === "element" ? t("designer-elements") : t("designer-section");
+                  return (
                   <li key={tpl.id} className="flex items-center justify-between rounded-lg border border-line/30 px-3 py-2">
-                    <span className="truncate text-xs font-medium text-ink">{tpl.name}</span>
+                    <span className="min-w-0 truncate text-xs font-medium text-ink">
+                      {tpl.name} <span className="text-[10px] font-normal text-sub">({kindLabel})</span>
+                    </span>
                     <span className="flex items-center gap-2">
                       <button onClick={() => insertTemplate(tpl)} className="text-[11px] font-semibold text-accent">
                         {t("designer-templates-insert")}
@@ -2314,7 +2354,8 @@ export default function Designer({
                       </button>
                     </span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>
