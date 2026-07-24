@@ -68,6 +68,7 @@ import {
   Inbox,
   Info,
   Laptop,
+  Layers,
   LayoutTemplate,
   Leaf,
   Link,
@@ -660,6 +661,8 @@ export default function Designer({
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   const [sel, setSel] = useState<Sel>(null);
+  const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Reported by BaseLayout.astro's designer:selectedRect message — the
   // selected node's on-screen box inside the iframe, used to position
   // LiveEditToolbar. Cleared below whenever `sel` itself changes so a stale
@@ -753,6 +756,18 @@ export default function Designer({
 
   useEffect(() => {
     setSelectedRect(null);
+  }, [sel]);
+
+  // Auto-expand the Layers tree around the current selection so switching to
+  // the tab, or changing selection via the canvas/Live Edit, always reveals
+  // the selected row without requiring a manual expand-click first.
+  useEffect(() => {
+    if (!sel) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (let i = 1; i <= sel.length; i++) next.add(sel.slice(0, i).join("."));
+      return next;
+    });
   }, [sel]);
 
   // Forces a re-render on window resize so LiveEditToolbar's position (which
@@ -1382,6 +1397,90 @@ export default function Designer({
   function pick(e: React.MouseEvent, p: number[]) {
     e.stopPropagation();
     setSel(p);
+  }
+
+  // ---------- layers tree ----------
+  function toggleExpand(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function LayersTree() {
+    return (
+      <div className="space-y-0.5 text-xs">
+        {blocks.map((block, b) => {
+          if (block.type !== "section") {
+            return (
+              <div key={b} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-sub">
+                <Lock className="h-3 w-3" /> {t("designer-layers-locked")} ({block.type})
+              </div>
+            );
+          }
+          const sp = block.props as unknown as SectionProps;
+          const key = `${b}`;
+          const isOpen = expanded.has(key);
+          const label = sp.anchorId || sp.cssClass || `${t("designer-layers-section")} ${b + 1}`;
+          return (
+            <div key={b}>
+              <div
+                className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"}`}
+                onClick={(e) => pick(e, [b])}
+              >
+                <button onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}>
+                  {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </button>
+                <span className="truncate">{label}</span>
+              </div>
+              {isOpen &&
+                sp.rows.map((row, r) => (
+                  <div key={r} className="ml-3">
+                    {sp.rows.length > 1 && (
+                      <p className="px-1.5 py-0.5 text-[10px] font-semibold text-sub">
+                        {t("designer-layers-row")} {r + 1}
+                      </p>
+                    )}
+                    {row.columns.map((col, c) => {
+                      const colKey = `${b}.${r}.${c}`;
+                      const colOpen = expanded.has(colKey);
+                      return (
+                        <div key={c} className="ml-1.5">
+                          <div
+                            className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"}`}
+                            onClick={(e) => pick(e, [b, r, c])}
+                          >
+                            <button onClick={(e) => { e.stopPropagation(); toggleExpand(colKey); }}>
+                              {colOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            </button>
+                            <span className="truncate">
+                              {t("designer-layers-column")} {c + 1} ({col.span})
+                            </span>
+                          </div>
+                          {colOpen &&
+                            col.elements.map((el, e) => {
+                              const Icon = ELS[el.type].icon;
+                              return (
+                                <div
+                                  key={el.id}
+                                  className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"}`}
+                                  onClick={(ev) => pick(ev, [b, r, c, e])}
+                                >
+                                  <Icon className="h-3 w-3" /> {t(ELS[el.type].labelKey)}
+                                </div>
+                              );
+                            })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   // ---------- inspector ----------
@@ -2096,26 +2195,46 @@ export default function Designer({
 
       <div className="flex min-h-0 flex-1">
         {/* palette */}
-        <aside className="w-44 shrink-0 space-y-1.5 overflow-y-auto border-r border-line/30 bg-white p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-elements")}</p>
-          {(Object.keys(ELS) as ElType[]).map((type) => {
-            const Icon = ELS[type].icon;
-            return (
-              <div
-                key={type}
-                draggable
-                onDragStart={(ev) => {
-                  drag.current = { kind: "new", type };
-                  ev.dataTransfer.effectAllowed = "copy";
-                }}
-                onDragEnd={() => (drag.current = null)}
-                className="flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
-              >
-                <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
-              </div>
-            );
-          })}
-          <p className="pt-2 text-[10px] leading-relaxed text-sub">{t("designer-drop-hint")}</p>
+        <aside className="w-44 shrink-0 overflow-y-auto border-r border-line/30 bg-white p-3">
+          <div className="mb-2 flex gap-1 rounded-lg bg-canvas p-0.5 text-[10px] font-semibold">
+            <button
+              onClick={() => setActiveLeftTab("elements")}
+              className={`flex-1 rounded-md py-1 ${activeLeftTab === "elements" ? "bg-white shadow-sm" : "text-sub"}`}
+            >
+              {t("designer-tab-elements")}
+            </button>
+            <button
+              onClick={() => setActiveLeftTab("layers")}
+              className={`flex-1 rounded-md py-1 ${activeLeftTab === "layers" ? "bg-white shadow-sm" : "text-sub"}`}
+            >
+              {t("designer-tab-layers")}
+            </button>
+          </div>
+          {activeLeftTab === "elements" ? (
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-elements")}</p>
+              {(Object.keys(ELS) as ElType[]).map((type) => {
+                const Icon = ELS[type].icon;
+                return (
+                  <div
+                    key={type}
+                    draggable
+                    onDragStart={(ev) => {
+                      drag.current = { kind: "new", type };
+                      ev.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onDragEnd={() => (drag.current = null)}
+                    className="flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+                  >
+                    <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
+                  </div>
+                );
+              })}
+              <p className="pt-2 text-[10px] leading-relaxed text-sub">{t("designer-drop-hint")}</p>
+            </div>
+          ) : (
+            <LayersTree />
+          )}
         </aside>
 
         {/* canvas */}
