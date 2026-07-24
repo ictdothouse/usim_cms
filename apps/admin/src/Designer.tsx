@@ -1219,7 +1219,11 @@ export default function Designer({
     const d = drag.current;
     drag.current = null;
     setDropHint(null);
-    if (!d) return;
+    // Layers-tree section/column reorders are handled entirely by rowDragProps'
+    // own onDrop — a stray drop onto a canvas column must not fall through to
+    // the "move" (element) branch below, which would destructure this payload's
+    // section/column path as if it were an element's [b, r, c, e] path.
+    if (!d || d.kind === "tree-reorder") return;
     mutate((bs) => {
       if (d.kind === "new") {
         insertEl(bs, colPath, newEl(d.type), index);
@@ -1463,7 +1467,7 @@ export default function Designer({
             return (
               <div
                 key={b}
-                className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sub ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sub ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
                 {...rowDragProps("section", [b], key)}
               >
                 <Lock className="h-3 w-3" /> {t("designer-layers-locked")} ({block.type})
@@ -1477,7 +1481,7 @@ export default function Designer({
           return (
             <div key={b}>
               <div
-                className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
+                className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
                 onClick={(e) => pick(e, [b])}
                 {...rowDragProps("section", [b], key)}
               >
@@ -1500,7 +1504,7 @@ export default function Designer({
                       return (
                         <div key={c} className="ml-1.5">
                           <div
-                            className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === colKey && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === colKey && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
+                            className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === colKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === colKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
                             onClick={(e) => pick(e, [b, r, c])}
                             {...rowDragProps("column", [b, r, c], colKey)}
                           >
@@ -1518,7 +1522,7 @@ export default function Designer({
                               return (
                                 <div
                                   key={el.id}
-                                  className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === elKey && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === elKey && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
+                                  className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === elKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === elKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
                                   onClick={(ev) => pick(ev, [b, r, c, e])}
                                   {...rowDragProps("element", [b, r, c, e], elKey)}
                                 >
