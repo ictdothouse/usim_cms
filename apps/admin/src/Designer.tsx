@@ -152,6 +152,7 @@ import {
 import * as api from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import type { Key } from "@/i18n";
+import { moveSection, moveColumn } from "./designerTree";
 
 // ---------- data model (stored in pages.layout JSONB) ----------
 // A designer page is a list of blocks; the designer emits `section` blocks:
@@ -594,7 +595,10 @@ const newEl = (type: ElType): El => ({ id: uid(), type, props: { ...ELS[type].de
 type Sel = number[] | null;
 
 // drag payload: a new palette element, or a move of an existing one
-type Drag = { kind: "new"; type: ElType } | { kind: "move"; path: number[] };
+type Drag =
+  | { kind: "new"; type: ElType }
+  | { kind: "move"; path: number[] }
+  | { kind: "tree-reorder"; treeKind: "section" | "column"; path: number[] };
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }) as Record<string, string>)[c]);
@@ -663,6 +667,7 @@ export default function Designer({
   const [sel, setSel] = useState<Sel>(null);
   const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
   // selected node's on-screen box inside the iframe, used to position
   // LiveEditToolbar. Cleared below whenever `sel` itself changes so a stale
@@ -1408,6 +1413,47 @@ export default function Designer({
     });
   }
 
+  function rowDragProps(kind: "section" | "column" | "element", path: number[], key: string) {
+    return {
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => {
+        e.stopPropagation();
+        if (kind === "element") drag.current = { kind: "move", path };
+        else drag.current = { kind: "tree-reorder", treeKind: kind, path };
+      },
+      onDragEnd: () => (drag.current = null),
+      onDragOver: (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const pos = e.clientY - rect.top < rect.height / 2 ? "before" : "after";
+        setTreeDropHint({ key, pos });
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const d = drag.current;
+        drag.current = null;
+        const hint = treeDropHint;
+        setTreeDropHint(null);
+        if (!d || !hint) return;
+        if (kind === "element" && d.kind === "move") {
+          dropIntoColumn([path[0], path[1], path[2]], hint.pos === "before" ? path[3] : path[3] + 1);
+          return;
+        }
+        if (d.kind !== "tree-reorder" || d.treeKind !== kind) return;
+        // Column reorder is scoped to within the same row — a row's grid-template
+        // and each column's span are only meaningful there. Cross-row drags no-op.
+        if (kind === "column" && (d.path[0] !== path[0] || d.path[1] !== path[1])) return;
+        const to = hint.pos === "before" ? path[path.length - 1] : path[path.length - 1] + 1;
+        const from = d.path[d.path.length - 1];
+        const adjustedTo = from < to ? to - 1 : to;
+        if (kind === "section") mutate((bs) => moveSection(bs, from, adjustedTo));
+        else mutate((bs) => moveColumn(bs, path[0], path[1], from, adjustedTo));
+      },
+    };
+  }
+
   function LayersTree() {
     return (
       <div className="space-y-0.5 text-xs">
@@ -1426,8 +1472,9 @@ export default function Designer({
           return (
             <div key={b}>
               <div
-                className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"}`}
+                className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
                 onClick={(e) => pick(e, [b])}
+                {...rowDragProps("section", [b], key)}
               >
                 <button onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}>
                   {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -1448,8 +1495,9 @@ export default function Designer({
                       return (
                         <div key={c} className="ml-1.5">
                           <div
-                            className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"}`}
+                            className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === colKey && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === colKey && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
                             onClick={(e) => pick(e, [b, r, c])}
+                            {...rowDragProps("column", [b, r, c], colKey)}
                           >
                             <button onClick={(e) => { e.stopPropagation(); toggleExpand(colKey); }}>
                               {colOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -1461,11 +1509,13 @@ export default function Designer({
                           {colOpen &&
                             col.elements.map((el, e) => {
                               const Icon = ELS[el.type].icon;
+                              const elKey = `${b}.${r}.${c}.${e}`;
                               return (
                                 <div
                                   key={el.id}
-                                  className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"}`}
+                                  className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === elKey && treeDropHint.pos === "before" ? "border-t-2 border-accent" : ""} ${treeDropHint?.key === elKey && treeDropHint.pos === "after" ? "border-b-2 border-accent" : ""}`}
                                   onClick={(ev) => pick(ev, [b, r, c, e])}
+                                  {...rowDragProps("element", [b, r, c, e], elKey)}
                                 >
                                   <Icon className="h-3 w-3" /> {t(ELS[el.type].labelKey)}
                                 </div>
