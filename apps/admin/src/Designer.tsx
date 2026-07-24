@@ -969,7 +969,7 @@ export default function Designer({
   }
 
   async function saveAsTemplate() {
-    if (!sel || sel.length !== 1 || blocks[sel[0]].type !== "section") return;
+    if (!sel || blocks[sel[0]]?.type !== "section") return;
     const name = prompt(t("designer-templates-save-prompt"));
     if (!name) return;
     setTemplatesBusy(true);
@@ -2290,7 +2290,7 @@ export default function Designer({
             </div>
             <button
               onClick={() => void saveAsTemplate()}
-              disabled={!sel || sel.length !== 1 || blocks[sel[0]]?.type !== "section" || templatesBusy}
+              disabled={!sel || blocks[sel[0]]?.type !== "section" || templatesBusy}
               className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
             >
               <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
