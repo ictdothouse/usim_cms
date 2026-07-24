@@ -699,7 +699,17 @@ export default function Designer({
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
   const [mode, setMode] = useState<"blocks" | "live">("live");
-  const [liveSrc, setLiveSrc] = useState<string | null>(null);
+  // Double-buffered iframe pair: the inactive slot loads a reload's new
+  // content off-screen (opacity 0, pointer-events none) and only swaps to
+  // visible once its onLoad fires, so the visible iframe is never mid-
+  // navigation — that's the actual source of any reload "blink", not skeleton
+  // speed. swapPending names which slot a hot-swap (not a cold mount) is
+  // waiting on; handleFrameLoad() below is the single place that resolves it.
+  const [liveSrcA, setLiveSrcA] = useState<string | null>(null);
+  const [liveSrcB, setLiveSrcB] = useState<string | null>(null);
+  const [activeSlot, setActiveSlot] = useState<"a" | "b">("a");
+  const swapPending = useRef<"a" | "b" | null>(null);
+  const liveSrc = activeSlot === "a" ? liveSrcA : liveSrcB;
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -707,7 +717,9 @@ export default function Designer({
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
-  const liveFrame = useRef<HTMLIFrameElement>(null);
+  const frameARef = useRef<HTMLIFrameElement>(null);
+  const frameBRef = useRef<HTMLIFrameElement>(null);
+  const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
 
   function mutate(fn: (next: Block[]) => void) {
     history.current.push(clone(blocks));
@@ -1253,13 +1265,54 @@ export default function Designer({
   // its comment) — skipping the mint for "published" used to leave the
   // bridge script/data-designer-path attributes never activated, so clicks
   // in Live Edit silently did nothing.
-  async function enterLive() {
-    setReloading(true);
+  // cold=true means the live iframes were just unmounted (switching in from
+  // Blocks mode) or this is the very first load — nothing is on screen to
+  // keep showing, so skeleton + a fresh mount into slot "a" is correct.
+  // cold=false (the debounced structural/style reload path, mode already
+  // "live") loads into the *inactive* slot and hands off the actual swap to
+  // handleFrameLoad, so the visible iframe never sees its own navigation.
+  async function enterLive(cold = false) {
     if (dirty) await save();
     const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
     const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
-    setLiveSrc(`${base}${base.includes("?") ? "&" : "?"}designerEdit=1`);
+    const src = `${base}${base.includes("?") ? "&" : "?"}designerEdit=1`;
+    if (cold || (liveSrcA === null && liveSrcB === null)) {
+      setReloading(true);
+      swapPending.current = null;
+      setActiveSlot("a");
+      setLiveSrcA(src);
+      setLiveSrcB(null);
+      setMode("live");
+      return;
+    }
+    const targetSlot = activeSlot === "a" ? "b" : "a";
+    swapPending.current = targetSlot;
+    if (targetSlot === "a") setLiveSrcA(src);
+    else setLiveSrcB(src);
     setMode("live");
+  }
+
+  // Resolves both reload paths' onLoad: a pending hot-swap for this exact
+  // slot flips it to active (the actual, blink-free "reveal"); a cold mount
+  // just clears the skeleton once its own slot (already active) has painted.
+  function handleFrameLoad(slot: "a" | "b") {
+    if (swapPending.current === slot) {
+      swapPending.current = null;
+      setActiveSlot(slot);
+      setReloading(false);
+      const frame = (slot === "a" ? frameARef : frameBRef).current;
+      const src = slot === "a" ? liveSrcA : liveSrcB;
+      if (pendingScrollRestore.current != null && frame?.contentWindow && src) {
+        const targetOrigin = new URL(src, window.location.href).origin;
+        frame.contentWindow.postMessage(
+          { type: "designer:restoreScroll", y: pendingScrollRestore.current },
+          targetOrigin,
+        );
+        pendingScrollRestore.current = null;
+      }
+      return;
+    }
+    if (slot === activeSlot) setReloading(false);
   }
 
   async function toggleLive() {
@@ -1268,7 +1321,7 @@ export default function Designer({
       return;
     }
     try {
-      await enterLive();
+      await enterLive(true);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -2036,20 +2089,18 @@ export default function Designer({
           <>
             <div className="relative min-w-0 flex-1">
               <iframe
-                ref={liveFrame}
-                src={liveSrc ?? undefined}
-                onLoad={() => {
-                  setReloading(false);
-                  if (pendingScrollRestore.current == null || !liveFrame.current?.contentWindow || !liveSrc) return;
-                  const targetOrigin = new URL(liveSrc, window.location.href).origin;
-                  liveFrame.current.contentWindow.postMessage(
-                    { type: "designer:restoreScroll", y: pendingScrollRestore.current },
-                    targetOrigin,
-                  );
-                  pendingScrollRestore.current = null;
-                }}
-                className="h-full w-full border-0 bg-white"
+                ref={frameARef}
+                src={liveSrcA ?? undefined}
+                onLoad={() => handleFrameLoad("a")}
+                className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "a" ? "" : "pointer-events-none opacity-0"}`}
                 title="live-view"
+              />
+              <iframe
+                ref={frameBRef}
+                src={liveSrcB ?? undefined}
+                onLoad={() => handleFrameLoad("b")}
+                className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "b" ? "" : "pointer-events-none opacity-0"}`}
+                title="live-view-buffer"
               />
               {reloading && (
                 <div className="absolute inset-0 z-10 animate-pulse overflow-hidden bg-white p-6">
