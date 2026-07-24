@@ -171,12 +171,12 @@ type ElType =
   | "html"
   | "gallery";
 
-interface El {
+export interface El {
   id: string;
   type: ElType;
   props: Record<string, string>;
 }
-interface Col {
+export interface Col {
   span: number;
   elements: El[];
   // Column-level style escape hatch — see COLUMN_FIELDS. Kept as a loose
@@ -184,10 +184,10 @@ interface Col {
   // convention of storing style values as plain strings.
   props?: Record<string, string>;
 }
-interface Row {
+export interface Row {
   columns: Col[];
 }
-interface SectionProps {
+export interface SectionProps {
   bg?: string;
   bgImage?: string;
   textColor?: string;
@@ -202,7 +202,7 @@ interface SectionProps {
   cssClass?: string;
   rows: Row[];
 }
-interface Block {
+export interface Block {
   type: string;
   props: Record<string, unknown>;
 }
