@@ -20,11 +20,19 @@ interface Props {
   textColor?: string;
   paddingY?: string;
   paddingX?: string;
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
   marginY?: string;
   width?: string;
   border?: string;
   shadow?: string;
   radius?: string;
+  radiusTopLeft?: string;
+  radiusTopRight?: string;
+  radiusBottomRight?: string;
+  radiusBottomLeft?: string;
   anchorId?: string;
   cssClass?: string;
   rows?: Row[];
@@ -44,11 +52,19 @@ const {
   textColor,
   paddingY = "md",
   paddingX,
+  paddingTop,
+  paddingRight,
+  paddingBottom,
+  paddingLeft,
   marginY,
   width = "contained",
   border,
   shadow,
   radius,
+  radiusTopLeft,
+  radiusTopRight,
+  radiusBottomRight,
+  radiusBottomLeft,
   anchorId,
   cssClass,
   rows = [],
@@ -233,6 +249,9 @@ function typoStyle(p: Record<string, string>) {
     p.lineHeight ? `line-height:${p.lineHeight}` : null,
     p.letterSpacing ? `letter-spacing:${p.letterSpacing}` : null,
     p.fontWeight ? `font-weight:${p.fontWeight}` : null,
+    p.textTransform ? `text-transform:${p.textTransform}` : null,
+    p.fontStyle ? `font-style:${p.fontStyle}` : null,
+    p.textDecoration ? `text-decoration:${p.textDecoration}` : null,
   ]
     .filter(Boolean)
     .join(";");
@@ -243,31 +262,58 @@ function typoStyle(p: Record<string, string>) {
 // elements are dropped into it.
 function colStyle(cp?: Record<string, string>) {
   if (!cp) return undefined;
+  const anyPadding = cp.padding || cp.paddingTop || cp.paddingRight || cp.paddingBottom || cp.paddingLeft;
+  const padSide = (per: string) => lengthValue(cp[per] || cp.padding, PAD, "0");
+  const anyRadius = cp.radius || cp.radiusTopLeft || cp.radiusTopRight || cp.radiusBottomRight || cp.radiusBottomLeft;
+  const radCorner = (per: string) => lengthValue(cp[per] || cp.radius, RADIUS, RADIUS.none);
   return [
     cp.bg ? `background:${cp.bg}` : null,
-    cp.padding ? `padding:${lengthValue(cp.padding, PAD, PAD.md)}` : null,
+    anyPadding ? `padding:${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}` : null,
     cp.marginY ? `margin:${lengthValue(cp.marginY, PAD, "0")} 0` : null,
     cp.valign ? `align-self:${cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : "center"}` : null,
     cp.border ? `border:${BORDER[cp.border]}` : null,
     cp.shadow ? `box-shadow:${SHADOW[cp.shadow]}` : null,
-    cp.radius ? `border-radius:${RADIUS[cp.radius]}` : null,
+    anyRadius ? `border-radius:${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}` : null,
   ]
     .filter(Boolean)
     .join(";");
 }
+
+// Element radius (image/embed/gallery): per-corner freedom, same fallback-
+// chain convention as colStyle()/sectionStyle above. These elements default
+// to a rounded "md" look (see Designer.tsx's ELS defaults), so the fallback
+// is RADIUS.md, not RADIUS.none.
+function elRadius(p: Record<string, string>): string {
+  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.md);
+  return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
+}
 const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
+
+// Per-side padding / per-corner radius — freedom to set Top/Right/Bottom/
+// Left (or each corner) independently from the admin's FourSideControl;
+// unset falls back to the shared axis (paddingY/paddingX) or single radius
+// preset, same fallback-chain convention Designer.tsx's fourSideValue() uses.
+const padTop = lengthValue(paddingTop || paddingY, PAD, PAD.md);
+const padRight = lengthValue(paddingRight || paddingX, PAD, "1.5rem");
+const padBottom = lengthValue(paddingBottom || paddingY, PAD, PAD.md);
+const padLeft = lengthValue(paddingLeft || paddingX, PAD, "1.5rem");
+const radTopLeft = lengthValue(radiusTopLeft || radius, RADIUS, RADIUS.none);
+const radTopRight = lengthValue(radiusTopRight || radius, RADIUS, RADIUS.none);
+const radBottomRight = lengthValue(radiusBottomRight || radius, RADIUS, RADIUS.none);
+const radBottomLeft = lengthValue(radiusBottomLeft || radius, RADIUS, RADIUS.none);
 
 const sectionStyle = [
   bgImage && safeUrl(bgImage) ? `background:url('${safeUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
   textColor ? `color:${textColor}` : null,
-  `padding:${lengthValue(paddingY, PAD, PAD.md)} ${lengthValue(paddingX, PAD, "1.5rem")}`,
+  `padding:${padTop} ${padRight} ${padBottom} ${padLeft}`,
   `margin:${lengthValue(marginY, PAD, "0")} 0`,
-  // Only override when the author actually picked a value — otherwise
-  // every existing section would flatten to square/shadowless corners
-  // (RADIUS.none/SHADOW.none) instead of its current default look.
+  // Only override border/shadow when the author actually picked a value —
+  // otherwise every existing section would flatten to square/shadowless
+  // corners instead of its current default look. Radius always applies
+  // (falls back to RADIUS.none = 0, same visual result as unset).
   border ? `border:${BORDER[border]}` : null,
   shadow ? `box-shadow:${SHADOW[shadow]}` : null,
-  radius ? `border-radius:${RADIUS[radius]}` : null,
+  `border-radius:${radTopLeft} ${radTopRight} ${radBottomRight} ${radBottomLeft}`,
 ]
   .filter(Boolean)
   .join(";");
@@ -328,7 +374,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       alt={p.alt ?? ""}
                       loading="lazy"
                       style={[
-                        `border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`,
+                        `border-radius:${elRadius(p)}`,
                         p.shadow ? `box-shadow:${SHADOW[p.shadow]}` : null,
                         marginStyle(p),
                       ]
@@ -356,7 +402,14 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                     <iframe
                       class={cls("ds-embed", p.cssClass)}
                       src={safeUrl(p.url)}
-                      style={[`aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`, marginStyle(p)].filter(Boolean).join(";")}
+                      style={[
+                        `aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`,
+                        `border-radius:${elRadius(p)}`,
+                        p.shadow ? `box-shadow:${SHADOW[p.shadow]}` : null,
+                        marginStyle(p),
+                      ]
+                        .filter(Boolean)
+                        .join(";")}
                       loading="lazy"
                       allowfullscreen
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -423,7 +476,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       style={[`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`, marginStyle(p)].filter(Boolean).join(";")}
                     >
                       {images.map((src) => (
-                        <img src={src} alt="" loading="lazy" style={`border-radius:${RADIUS[p.radius ?? "md"] ?? RADIUS.md}`} />
+                        <img src={src} alt="" loading="lazy" style={`border-radius:${elRadius(p)}`} />
                       ))}
                     </div>
                   );
@@ -517,7 +570,6 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   .ds-embed {
     width: 100%;
     border: 0;
-    border-radius: 0.75rem;
   }
   .ds-list {
     margin: 0;

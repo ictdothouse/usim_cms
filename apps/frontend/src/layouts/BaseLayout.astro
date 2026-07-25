@@ -141,16 +141,28 @@ const fontsHref = allFonts.length
           });
 
           // Drag-reorder: custom pointer tracking rather than native HTML5
-          // drag/drop, which doesn't hand off cleanly across an iframe
-          // origin boundary. Only element-level nodes (4-part path, e.g.
-          // "0.0.0.0") are draggable — section/column wrappers aren't.
+          // drag/drop. Native draggable was tried and reverted — with
+          // nested draggable ancestors (element inside column inside
+          // section) browsers don't reliably resolve which one is actually
+          // being dragged, and can render a whole ancestor's content as the
+          // drag ghost instead of just the intended node. Pointer tracking
+          // avoids that entirely (opacity/outline are plain style changes,
+          // no native ghost image). Any tagged node is draggable — section
+          // (1-part path, e.g. "0"), column (3-part, "0.0.0"), or element
+          // (4-part, "0.0.0.0") — closest() from the pointerdown target
+          // already picks the innermost tagged ancestor, so grabbing real
+          // content still starts an element/column drag; only a section's
+          // own empty area (padding, gaps between rows) resolves to a
+          // section-level drag. Designer.tsx's designer:reorder handler
+          // dispatches on path depth, matching the Layers tree's
+          // drag-reorder (same depths, same same-row column restriction
+          // below).
           let dragState = null;
           let justDragged = false;
 
           document.addEventListener("pointerdown", (e) => {
             const node = e.target.closest("[data-designer-path]");
             if (!node || node.isContentEditable) return;
-            if (node.dataset.designerPath.split(".").length !== 4) return;
             dragState = { path: node.dataset.designerPath, node, startX: e.clientX, startY: e.clientY, moved: false };
           });
 
@@ -161,21 +173,26 @@ const fontsHref = allFonts.length
               dragState.moved = true;
               dragState.node.style.opacity = "0.4";
             }
+            const depth = dragState.path.split(".").length;
             const under = document.elementFromPoint(e.clientX, e.clientY);
             const targetNode = under && under.closest("[data-designer-path]");
             if (dragState.hoverNode && dragState.hoverNode !== targetNode) {
               dragState.hoverNode.style.outline = "";
             }
-            if (
-              targetNode &&
-              targetNode !== dragState.node &&
-              targetNode.dataset.designerPath.split(".").length === 4
-            ) {
+            const targetPath = targetNode && targetNode.dataset.designerPath;
+            // Column reorder is scoped to within its own row (depth 3) — a
+            // row's grid-template-columns/each column's span are only
+            // meaningful there, same restriction the Layers tree applies.
+            const sameRow =
+              depth !== 3 ||
+              (targetPath &&
+                targetPath.split(".").slice(0, 2).join(".") === dragState.path.split(".").slice(0, 2).join("."));
+            if (targetNode && targetNode !== dragState.node && targetPath.split(".").length === depth && sameRow) {
               const rect = targetNode.getBoundingClientRect();
               dragState.hoverPosition = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
               targetNode.style.outline = "2px solid #0f62fe";
               dragState.hoverNode = targetNode;
-              dragState.hoverPath = targetNode.dataset.designerPath;
+              dragState.hoverPath = targetPath;
             } else {
               dragState.hoverNode = null;
               dragState.hoverPath = null;

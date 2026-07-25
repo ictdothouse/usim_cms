@@ -3,7 +3,10 @@ import {
   Activity,
   AlertCircle,
   AlertTriangle,
+  AlignCenter,
+  AlignJustify,
   AlignLeft,
+  AlignRight,
   AlignVerticalJustifyCenter,
   Anchor,
   Archive,
@@ -177,6 +180,10 @@ export interface El {
   id: string;
   type: ElType;
   props: Record<string, string>;
+  // Breakpoint style overrides, admin-preview only (see Designer's bp
+  // toggle) — keyed "tablet:<fieldKey>" / "mobile:<fieldKey>", falling back
+  // to props[fieldKey] when absent. Never read by apps/frontend.
+  bp?: Record<string, string>;
 }
 export interface Col {
   span: number;
@@ -185,6 +192,7 @@ export interface Col {
   // string bag (not a typed interface) to match El.props/SectionProps'
   // convention of storing style values as plain strings.
   props?: Record<string, string>;
+  bp?: Record<string, string>;
 }
 export interface Row {
   columns: Col[];
@@ -195,14 +203,30 @@ export interface SectionProps {
   textColor?: string;
   paddingY?: string;
   paddingX?: string;
+  // Per-side overrides — freedom to set Top/Right/Bottom/Left independently
+  // instead of just the Y/X shorthand above. Empty/unset falls back to the
+  // matching axis (paddingTop/Bottom -> paddingY, paddingRight/Left ->
+  // paddingX), which itself falls back to the PAD table default — same
+  // fallback-chain convention as bp overrides.
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
   marginY?: string;
   width?: string;
   border?: string;
   shadow?: string;
   radius?: string;
+  // Per-corner overrides, same fallback convention: unset falls back to the
+  // single `radius` preset above.
+  radiusTopLeft?: string;
+  radiusTopRight?: string;
+  radiusBottomRight?: string;
+  radiusBottomLeft?: string;
   anchorId?: string;
   cssClass?: string;
   rows: Row[];
+  bp?: Record<string, string>;
 }
 export interface Block {
   type: string;
@@ -397,6 +421,19 @@ const TYPOGRAPHY_FIELDS: Field[] = [
   { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "text" },
   { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "text" },
   { key: "fontWeight", labelKey: "designer-f-fontweight", kind: "select", options: ["400", "500", "600", "700", "800"] },
+  {
+    key: "textTransform",
+    labelKey: "designer-f-texttransform",
+    kind: "select",
+    options: ["none", "uppercase", "lowercase", "capitalize"],
+  },
+  { key: "fontStyle", labelKey: "designer-f-fontstyle", kind: "select", options: ["normal", "italic"] },
+  {
+    key: "textDecoration",
+    labelKey: "designer-f-textdecoration",
+    kind: "select",
+    options: ["none", "underline", "line-through"],
+  },
 ];
 
 const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<string, string>; fields: Field[] }> = {
@@ -429,7 +466,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
     fields: [
       { key: "src", labelKey: "designer-f-src", kind: "image" },
       { key: "alt", labelKey: "designer-f-alt", kind: "text" },
-      { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
+      // radius edited via FourSideControl (element Inspector) — see Designer.tsx's ELS-radius branch.
       { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
     ],
   },
@@ -454,10 +491,12 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
   embed: {
     labelKey: "designer-el-embed",
     icon: Video,
-    defaults: { url: "", ratio: "16:9" },
+    defaults: { url: "", ratio: "16:9", radius: "md" },
     fields: [
       { key: "url", labelKey: "designer-f-url", kind: "text" },
       { key: "ratio", labelKey: "designer-f-ratio", kind: "select", options: ["16:9", "4:3", "1:1"] },
+      // radius edited via FourSideControl (element Inspector) — see Designer.tsx's ELS-radius branch.
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
     ],
   },
   icon: {
@@ -497,7 +536,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
     fields: [
       { key: "images", labelKey: "designer-f-gallery-images", kind: "gallery" },
       { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
-      { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
+      // radius edited via FourSideControl (element Inspector) — see Designer.tsx's ELS-radius branch.
     ],
   },
 };
@@ -535,13 +574,12 @@ const SECTION_FIELDS: Field[] = [
   { key: "bg", labelKey: "designer-s-bg", kind: "color" },
   { key: "bgImage", labelKey: "designer-s-bgimage", kind: "image" },
   { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
-  { key: "paddingY", labelKey: "designer-s-padding", kind: "text" },
-  { key: "paddingX", labelKey: "designer-f-paddingx", kind: "text" },
+  // paddingY/paddingX/radius are edited via the FourSideControl composites
+  // (top-level "Padding"/"Border Radius" panels) instead of a plain row here.
   { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
   { key: "width", labelKey: "designer-s-width", kind: "select", options: ["contained", "full"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
-  { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
   { key: "anchorId", labelKey: "designer-f-anchorid", kind: "text" },
   { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
 ];
@@ -551,13 +589,58 @@ const SECTION_FIELDS: Field[] = [
 // what would otherwise need a dedicated Card/Testimonial element.
 const COLUMN_FIELDS: Field[] = [
   { key: "bg", labelKey: "designer-s-bg", kind: "color" },
-  { key: "padding", labelKey: "designer-f-padding", kind: "text" },
+  // padding/radius are edited via the FourSideControl composites (same as
+  // SECTION_FIELDS) instead of a plain row here.
   { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
   { key: "valign", labelKey: "designer-f-valign", kind: "select", options: ["top", "center", "bottom"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
-  { key: "radius", labelKey: "designer-f-radius", kind: "select", options: ["none", "md", "xl", "full"] },
   { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+];
+// Bp-merge list for bpColStyle() — covers the base padding/radius fields plus
+// their per-side/per-corner overrides, none of which are in COLUMN_FIELDS
+// (they're edited via FourSideControl, not the flat Inspector list).
+const COLUMN_SPACING_KEYS = [
+  "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
+];
+
+// Standalone fields appended to every element's own type-specific fields
+// (matches the two <label> blocks the flat Inspector used to hard-code after
+// def.fields — hoisted so the grouped Inspector can bucket them like any
+// other field instead of rendering them as a special tail case).
+const CSS_CLASS_FIELD: Field = { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" };
+const MARGIN_Y_FIELD: Field = { key: "marginY", labelKey: "designer-f-marginy", kind: "text" };
+
+// Grouped Styles panel (Framer/Webflow-style): buckets the same flat Field
+// lists (SECTION_FIELDS/COLUMN_FIELDS/ELS[type].fields) into collapsible
+// sections by what the field actually controls, instead of one long form.
+// Keyed by field.key since that's stable across section/column/element,
+// unlike labelKey which a few fields share for unrelated purposes.
+type FieldGroupKey = "content" | "typography" | "background" | "spacing" | "size" | "border" | "advanced";
+
+const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
+  text: "content", src: "content", alt: "content", href: "content", label: "content",
+  url: "content", name: "content", items: "content", html: "content", images: "content",
+  variant: "content", style: "content",
+  fontFamily: "typography", color: "typography", lineHeight: "typography",
+  letterSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
+  textTransform: "typography", fontStyle: "typography", textDecoration: "typography",
+  bg: "background", bgImage: "background", textColor: "background",
+  paddingY: "spacing", paddingX: "spacing", padding: "spacing", marginY: "spacing",
+  width: "size", valign: "size", height: "size", ratio: "size", columns: "size", size: "size",
+  border: "border", shadow: "border", radius: "border",
+  anchorId: "advanced", cssClass: "advanced",
+};
+
+const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type }[] = [
+  { key: "content", labelKey: "designer-group-content", icon: Type },
+  { key: "typography", labelKey: "designer-group-typography", icon: Baseline },
+  { key: "background", labelKey: "designer-group-background", icon: PaintBucket },
+  { key: "spacing", labelKey: "designer-group-spacing", icon: Frame },
+  { key: "size", labelKey: "designer-group-size", icon: RectangleHorizontal },
+  { key: "border", labelKey: "designer-group-border", icon: Square },
+  { key: "advanced", labelKey: "designer-group-advanced", icon: Hash },
 ];
 
 const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
@@ -580,6 +663,18 @@ const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25r
 function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
   if (!v) return fallback;
   return table[v] ?? v;
+}
+
+// Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
+// "0") into the rounded px number shown on the badge. rem assumed at the
+// browser default 16px root — this editor doesn't let authors change that.
+function pxLabel(len: string): string {
+  if (len === "0" || len === "0px") return "0";
+  const rem = /^(-?[\d.]+)rem$/.exec(len);
+  if (rem) return `${Math.round(parseFloat(rem[1]) * 16)}`;
+  const px = /^(-?[\d.]+)px$/.exec(len);
+  if (px) return `${Math.round(parseFloat(px[1]))}`;
+  return len;
 }
 
 // Row presets offered by "add row": each entry is the column span list.
@@ -634,20 +729,39 @@ function typoStyle(p: Record<string, string>): React.CSSProperties {
   if (p.lineHeight) s.lineHeight = p.lineHeight;
   if (p.letterSpacing) s.letterSpacing = p.letterSpacing;
   if (p.fontWeight) s.fontWeight = p.fontWeight;
+  if (p.textTransform) s.textTransform = p.textTransform as React.CSSProperties["textTransform"];
+  if (p.fontStyle) s.fontStyle = p.fontStyle;
+  if (p.textDecoration) s.textDecoration = p.textDecoration;
   return s;
 }
 
 function colStyle(cp?: Record<string, string>): React.CSSProperties {
   if (!cp) return {};
+  const anyPadding = cp.padding || cp.paddingTop || cp.paddingRight || cp.paddingBottom || cp.paddingLeft;
+  const padSide = (per: string) => lengthValue(cp[per] || cp.padding, PAD, "0");
+  const anyRadius = cp.radius || cp.radiusTopLeft || cp.radiusTopRight || cp.radiusBottomRight || cp.radiusBottomLeft;
+  const radCorner = (per: string) => lengthValue(cp[per] || cp.radius, RADIUS, RADIUS.none);
   return {
     background: cp.bg || undefined,
-    padding: cp.padding ? lengthValue(cp.padding, PAD, PAD.md) : undefined,
+    padding: anyPadding
+      ? `${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}`
+      : undefined,
     margin: cp.marginY ? `${lengthValue(cp.marginY, PAD, "0")} 0` : undefined,
     alignSelf: cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : cp.valign === "center" ? "center" : undefined,
     border: cp.border ? BORDER[cp.border] : undefined,
     boxShadow: cp.shadow ? SHADOW[cp.shadow] : undefined,
-    borderRadius: cp.radius ? RADIUS[cp.radius] : undefined,
+    borderRadius: anyRadius
+      ? `${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}`
+      : undefined,
   };
+}
+
+// Element radius (image/embed/gallery): same per-corner freedom as Section/
+// Column, but these elements default to a rounded "md" look out of the box
+// (see their ELS defaults), so the fallback is RADIUS.md, not RADIUS.none.
+function elRadius(p: Record<string, string>): string {
+  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.md);
+  return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
 }
 
 export default function Designer({
@@ -667,6 +781,123 @@ export default function Designer({
   const [sel, setSel] = useState<Sel>(null);
   const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Grouped Styles panel: which Inspector field-groups are collapsed. Shared
+  // across every selection (not reset per-select) — matches Framer/Webflow,
+  // where collapsing "Typography" stays collapsed while you click around.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<FieldGroupKey>>(new Set(["advanced"]));
+  // Four-side padding/radius controls (section Inspector): linked = one input
+  // sets all 4 sides/corners equal; unlinked = Top/Right/Bottom/Left edited
+  // independently. UI-only toggle, not persisted — doesn't change what's
+  // already stored, only which input(s) are shown.
+  const [linkedPadding, setLinkedPadding] = useState(true);
+  const [linkedRadius, setLinkedRadius] = useState(true);
+  function toggleGroup(g: FieldGroupKey) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(g)) next.delete(g);
+      else next.add(g);
+      return next;
+    });
+  }
+
+  // Breakpoint edit mode — admin-preview only (Framer-style Desktop/Tablet/
+  // Mobile toggle). Narrows the canvas width and routes Inspector field
+  // edits into each node's `bp` override bag instead of its base props.
+  // apps/frontend never reads `bp` — the real site is unaffected, this is
+  // purely how the page looks/edits inside this Designer session.
+  const [bp, setBp] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  function bpKey(key: string) {
+    return `${bp}:${key}`;
+  }
+  function bpGetValue(base: string | undefined, overrides: Record<string, string> | undefined, key: string) {
+    if (bp !== "desktop") {
+      const ov = overrides?.[bpKey(key)];
+      if (ov !== undefined) return ov;
+    }
+    return base ?? "";
+  }
+  // Canvas-preview equivalents of bpGetValue — resolve the active
+  // breakpoint's overrides into the same style objects colStyle()/the
+  // section wrapper/element margin already compute from desktop props.
+  // Resolves one side/corner of a four-side control: its own override (bp-
+  // aware) if set, else the shared axis/preset field's value (also bp-aware).
+  // Generic version of fourSideValue()/setFourSideValue() below — same
+  // fallback-chain resolution, but for any props/bp bag (Section, Column, or
+  // Element), not just SectionProps.
+  function sideValue(props: Record<string, string> | undefined, bpBag: Record<string, string> | undefined, perSideKey: string, fallbackKey: string): string {
+    const raw = bpGetValue(props?.[perSideKey], bpBag, perSideKey);
+    return raw || bpGetValue(props?.[fallbackKey], bpBag, fallbackKey);
+  }
+  function fourSideValue(sp: SectionProps, perSideKey: string, fallbackKey: string): string {
+    return sideValue(sp as unknown as Record<string, string>, sp.bp, perSideKey, fallbackKey);
+  }
+  function setFourSideValue(b: number, perSideKey: string, value: string) {
+    mutate((bs) => {
+      const block = bs[b];
+      if (bp === "desktop") {
+        (block.props as Record<string, unknown>)[perSideKey] = value;
+      } else {
+        const props = block.props as unknown as SectionProps;
+        props.bp = { ...(props.bp ?? {}), [bpKey(perSideKey)]: value };
+      }
+    });
+  }
+  function setColSideValue(b: number, r: number, c: number, perSideKey: string, value: string) {
+    mutate((bs) => {
+      const target = section(bs, b).rows[r].columns[c];
+      if (bp === "desktop") target.props = { ...(target.props ?? {}), [perSideKey]: value };
+      else target.bp = { ...(target.bp ?? {}), [bpKey(perSideKey)]: value };
+    });
+  }
+  function setElSideValue(b: number, r: number, c: number, e: number, perSideKey: string, value: string) {
+    mutate((bs) => {
+      const target = section(bs, b).rows[r].columns[c].elements[e];
+      if (bp === "desktop") target.props[perSideKey] = value;
+      else target.bp = { ...(target.bp ?? {}), [bpKey(perSideKey)]: value };
+    });
+  }
+  const PADDING_SIDE_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" } as const;
+  const PADDING_SIDE_FALLBACK = { top: "paddingY", right: "paddingX", bottom: "paddingY", left: "paddingX" } as const;
+  const RADIUS_CORNER_KEYS = {
+    top: "radiusTopLeft",
+    right: "radiusTopRight",
+    bottom: "radiusBottomRight",
+    left: "radiusBottomLeft",
+  } as const;
+  function sectionBpStyle(sp: SectionProps): React.CSSProperties {
+    const v = (key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
+    const bgImage = v("bgImage");
+    const border = v("border");
+    const shadow = v("shadow");
+    const side = (side: keyof typeof PADDING_SIDE_KEYS) =>
+      lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]), PAD, side === "top" || side === "bottom" ? PAD.md : "1.5rem");
+    const corner = (side: keyof typeof RADIUS_CORNER_KEYS) => {
+      const raw = fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius");
+      return lengthValue(raw, RADIUS, RADIUS.none);
+    };
+    return {
+      background: bgImage ? `url(${bgImage}) center/cover` : v("bg") || "#ffffff",
+      color: v("textColor") || "inherit",
+      padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}`,
+      margin: `${lengthValue(v("marginY"), PAD, "0")} 0`,
+      ...(border ? { border: BORDER[border] } : {}),
+      ...(shadow ? { boxShadow: SHADOW[shadow] } : {}),
+      borderRadius: `${corner("top")} ${corner("right")} ${corner("bottom")} ${corner("left")}`,
+    };
+  }
+  function bpColStyle(col: Col): React.CSSProperties {
+    if (bp === "desktop" || !col.bp) return colStyle(col.props);
+    const merged: Record<string, string> = { ...(col.props ?? {}) };
+    for (const key of [...COLUMN_FIELDS.map((f) => f.key), ...COLUMN_SPACING_KEYS]) {
+      const ov = col.bp[bpKey(key)];
+      if (ov !== undefined) merged[key] = ov;
+    }
+    return colStyle(merged);
+  }
+  function bpMarginStyle(el: El): React.CSSProperties | undefined {
+    const mv = bpGetValue(el.props.marginY, el.bp, "marginY");
+    return mv ? { margin: `${lengthValue(mv, SPACE, "0")} 0` } : undefined;
+  }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
   // selected node's on-screen box inside the iframe, used to position
@@ -706,7 +937,7 @@ export default function Designer({
   const [templatesBusy, setTemplatesBusy] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
-  const [mode, setMode] = useState<"blocks" | "live">("live");
+  const [mode, setMode] = useState<"blocks" | "live">("blocks");
   // Double-buffered iframe pair: the inactive slot loads a reload's new
   // content off-screen (opacity 0, pointer-events none) and only swaps to
   // visible once its onLoad fires, so the visible iframe is never mid-
@@ -737,6 +968,40 @@ export default function Designer({
     fn(next);
     setBlocks(next);
     setDirty(true);
+  }
+
+  // Figma-style drag-to-resize for the spacing-overlay badges: one history
+  // entry for the whole drag (pushed once, up front) instead of one per
+  // mousemove — every subsequent move re-derives the full next value from
+  // the drag's start snapshot and overwrites, rather than accumulating.
+  function startSpacingDrag(
+    e: React.MouseEvent,
+    startPx: number,
+    axis: "x" | "y",
+    sign: 1 | -1,
+    apply: (next: Block[], px: number) => void,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    const startPos = axis === "x" ? e.clientX : e.clientY;
+    const base = clone(blocks);
+    history.current.push(clone(blocks));
+    if (history.current.length > 50) history.current.shift();
+    future.current = [];
+    function onMove(ev: MouseEvent) {
+      const pos = axis === "x" ? ev.clientX : ev.clientY;
+      const px = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
+      const next = clone(base);
+      apply(next, px);
+      setBlocks(next);
+      setDirty(true);
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   function undo() {
@@ -901,17 +1166,38 @@ export default function Designer({
       } else if (e.data?.type === "designer:reorder") {
         const from = String(e.data.from).split(".").map(Number);
         const to = String(e.data.to).split(".").map(Number);
-        if (from.length !== 4 || to.length !== 4) return;
-        mutate((bs) => {
-          const [tb, tr, tc, te] = to;
-          let idx = te + (e.data.position === "after" ? 1 : 0);
-          // same-column move: removing the source first shifts later indexes
-          // down — same adjustment dropIntoColumn already makes for the
-          // block-canvas drag.
-          if (from[0] === tb && from[1] === tr && from[2] === tc && from[3] < idx) idx--;
-          const el = removeAt(bs, from);
-          insertEl(bs, [tb, tr, tc], el, idx);
-        });
+        // Path depth is the drag's kind (1=section, 3=column, 4=element) — a
+        // drag can only ever hover a same-depth target (BaseLayout.astro's
+        // pointermove only sets hoverPath when the target's depth matches
+        // dragState's), so a mismatch here means a stale/cross-kind message
+        // and must be a no-op, never a guess at which branch to take.
+        if (from.length !== to.length) return;
+        if (from.length === 4) {
+          mutate((bs) => {
+            const [tb, tr, tc, te] = to;
+            let idx = te + (e.data.position === "after" ? 1 : 0);
+            // same-column move: removing the source first shifts later indexes
+            // down — same adjustment dropIntoColumn already makes for the
+            // block-canvas drag.
+            if (from[0] === tb && from[1] === tr && from[2] === tc && from[3] < idx) idx--;
+            const el = removeAt(bs, from);
+            insertEl(bs, [tb, tr, tc], el, idx);
+          });
+        } else if (from.length === 3) {
+          // Column reorder is scoped to within its own row — a row's
+          // grid-template-columns and each column's span are only meaningful
+          // there, same restriction the Layers tree's drag-reorder applies.
+          if (from[0] !== to[0] || from[1] !== to[1]) return;
+          let idx = to[2] + (e.data.position === "after" ? 1 : 0);
+          if (from[2] < idx) idx--;
+          mutate((bs) => moveColumn(bs, from[0], from[1], from[2], idx));
+        } else if (from.length === 1) {
+          let idx = to[0] + (e.data.position === "after" ? 1 : 0);
+          if (from[0] < idx) idx--;
+          mutate((bs) => moveSection(bs, from[0], idx));
+        } else {
+          return;
+        }
         setSel(null);
         bumpStructural();
       }
@@ -928,7 +1214,20 @@ export default function Designer({
     if (mode !== "live" || !liveSrc || !liveFrame.current?.contentWindow) return;
     const win = liveFrame.current.contentWindow;
     const targetOrigin = new URL(liveSrc, window.location.href).origin;
-    win.postMessage({ type: "designer:selected", path: sel?.join(".") ?? null }, targetOrigin);
+    // Right after a reload/slot-swap sets a new src, this iframe's
+    // contentWindow briefly still belongs to the admin's own origin (the
+    // navigation to targetOrigin hasn't completed yet) — postMessage throws
+    // synchronously on that transient mismatch instead of silently no-op'ing.
+    // Harmless to skip: the next render (once navigation completes, or once
+    // sel/blocks changes again) re-sends the same sync.
+    const post = (msg: unknown) => {
+      try {
+        win.postMessage(msg, targetOrigin);
+      } catch {
+        /* transient cross-origin mismatch during reload — see comment above */
+      }
+    };
+    post({ type: "designer:selected", path: sel?.join(".") ?? null });
     if (!sel) return;
     const path = sel.join(".");
     if (sel.length === 4) {
@@ -953,13 +1252,13 @@ export default function Designer({
         return;
       }
       const style = typoStyle(el.props);
-      win.postMessage({ type: "designer:style", path, style }, targetOrigin);
-      win.postMessage({ type: "designer:text", path, editable: el.type === "heading" || el.type === "text" }, targetOrigin);
+      post({ type: "designer:style", path, style });
+      post({ type: "designer:text", path, editable: el.type === "heading" || el.type === "text" });
     } else if (sel.length === 3) {
       const [b, r, c] = sel;
       const col = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c];
       if (!col) return;
-      win.postMessage({ type: "designer:style", path, style: colStyle(col.props) }, targetOrigin);
+      post({ type: "designer:style", path, style: colStyle(col.props) });
     } else if (sel.length === 1) {
       const sp = blocks[sel[0]]?.props as unknown as SectionProps;
       if (!sp) return;
@@ -972,7 +1271,7 @@ export default function Designer({
         ...(sp.shadow ? { boxShadow: SHADOW[sp.shadow] } : {}),
         ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
       };
-      win.postMessage({ type: "designer:style", path, style }, targetOrigin);
+      post({ type: "designer:style", path, style });
     }
   }, [mode, sel, blocks, liveSrc]);
 
@@ -1373,25 +1672,16 @@ export default function Designer({
     if (slot === activeSlot) setReloading(false);
   }
 
-  async function toggleLive() {
-    if (mode === "live") {
-      setMode("blocks");
-      return;
-    }
-    try {
-      await enterLive(true);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  function toggleLive() {
+    setMode(mode === "live" ? "blocks" : "live");
   }
 
-  // Opens straight into Live Edit (Puck-style single edit surface) rather
-  // than the block canvas — see toggleLive's comment for why this needs an
-  // async token fetch and can't just be the mode's initial state.
-  useEffect(() => {
-    void enterLive().catch((err) => setError((err as Error).message));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Opens straight into the Blocks canvas by default — same-document
+  // React state + native drag/drop, no iframe/postMessage bridge to break.
+  // The old iframe-based "Live Edit" (enterLive/toggleLive, the double-
+  // buffered iframe JSX, BaseLayout.astro's designerEdit bridge) is kept
+  // intact and still reachable via the mode toggle button below, not
+  // deleted — just no longer the default on open.
 
   function close() {
     if (dirty && !confirm(t("designer-unsaved"))) return;
@@ -1559,6 +1849,34 @@ export default function Designer({
       "w-full rounded-lg border border-line/30 bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-line";
     if (field.kind === "textarea")
       return <textarea rows={4} className={base} value={value} onChange={(e) => onChange(e.target.value)} />;
+    if (field.kind === "select" && field.key === "align") {
+      const ALIGN_ICON: Record<string, typeof AlignLeft> = {
+        left: AlignLeft,
+        center: AlignCenter,
+        right: AlignRight,
+        justify: AlignJustify,
+      };
+      return (
+        <div className="flex gap-1">
+          {(field.options ?? []).map((o) => {
+            const Icon = ALIGN_ICON[o] ?? AlignLeft;
+            return (
+              <button
+                key={o}
+                type="button"
+                onClick={() => onChange(o)}
+                title={o}
+                className={`flex-1 rounded-lg border p-1.5 ${
+                  value === o ? "border-accent bg-accent/10 text-accent" : "border-line/30 text-sub hover:border-accent/40"
+                }`}
+              >
+                <Icon className="mx-auto h-3.5 w-3.5" />
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
     if (field.kind === "select")
       return (
         <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
@@ -1711,6 +2029,117 @@ export default function Designer({
     return <input className={base} value={value} onChange={(e) => onChange(e.target.value)} />;
   }
 
+  // Figma/Elementor-style four-side control: linked shows one input that
+  // sets all 4 sides/corners equal; unlinked shows independent Top/Right/
+  // Bottom/Left inputs. Values are whatever fourSideValue() resolves —
+  // either a per-side override or the shared axis/preset fallback.
+  function FourSideControl({
+    labelKey,
+    icon: Icon,
+    linked,
+    onToggleLink,
+    getSide,
+    setSide,
+  }: {
+    labelKey: Key;
+    icon: typeof Frame;
+    linked: boolean;
+    onToggleLink: () => void;
+    getSide: (side: "top" | "right" | "bottom" | "left") => string;
+    setSide: (side: "top" | "right" | "bottom" | "left", value: string) => void;
+  }) {
+    const sides = ["top", "right", "bottom", "left"] as const;
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-[11px] font-medium text-body">
+          <span className="flex items-center gap-1.5">
+            <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
+          </span>
+          <button
+            type="button"
+            onClick={onToggleLink}
+            title={t("designer-f-link-sides")}
+            className={`rounded p-1 ${linked ? "text-accent" : "text-sub hover:text-body"}`}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {linked ? (
+          <input
+            className="w-full rounded-lg border border-line/30 bg-white px-2 py-1.5 text-[11px]"
+            value={getSide("top")}
+            onChange={(e) => sides.forEach((s) => setSide(s, e.target.value))}
+          />
+        ) : (
+          <div className="grid grid-cols-4 gap-1">
+            {sides.map((s) => (
+              <input
+                key={s}
+                className="w-full rounded-lg border border-line/30 bg-white px-1 py-1.5 text-center text-[11px]"
+                value={getSide(s)}
+                placeholder={s[0].toUpperCase()}
+                title={s}
+                onChange={(e) => setSide(s, e.target.value)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Grouped Styles panel body: buckets `fields` by FIELD_GROUP_BY_KEY and
+  // renders each non-empty bucket as a collapsible section (Advanced starts
+  // collapsed, everything else starts open — see collapsedGroups above).
+  function FieldGroups({
+    fields,
+    getValue,
+    setValue,
+  }: {
+    fields: Field[];
+    getValue: (f: Field) => string;
+    setValue: (f: Field, v: string) => void;
+  }) {
+    const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
+    for (const f of fields) {
+      const g = FIELD_GROUP_BY_KEY[f.key] ?? "content";
+      (buckets[g] ??= []).push(f);
+    }
+    return (
+      <>
+        {GROUP_META.filter((g) => buckets[g.key]).map((g) => {
+          const groupFields = buckets[g.key]!;
+          const isOpen = !collapsedGroups.has(g.key);
+          const Icon = g.icon;
+          return (
+            <div key={g.key} className="border-b border-line/20 pb-2 last:border-b-0">
+              <button
+                type="button"
+                onClick={() => toggleGroup(g.key)}
+                className="flex w-full items-center justify-between py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-sub"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Icon className="h-3.5 w-3.5" /> {t(g.labelKey)}
+                </span>
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+              {isOpen && (
+                <div className="space-y-3 pb-1">
+                  {groupFields.map((f) => (
+                    <label key={f.key} className="block text-[11px] font-medium text-body">
+                      {FieldLabel(f.labelKey, t)}
+                      <div className="mt-1">{FieldInput({ field: f, value: getValue(f), onChange: (v) => setValue(f, v) })}</div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+
   function Inspector() {
     if (!sel || blocks[sel[0]]?.type !== "section") {
       return <p className="text-xs text-sub">{t("designer-none-selected")}</p>;
@@ -1722,18 +2151,36 @@ export default function Designer({
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t("designer-section")}</p>
-          {SECTION_FIELDS.map((f) => (
-            <label key={f.key} className="block text-[11px] font-medium text-body">
-              {FieldLabel(f.labelKey, t)}
-              <div className="mt-1">
-                {FieldInput({
-                  field: f,
-                  value: ((sp as unknown as Record<string, string>)[f.key] as string) ?? "",
-                  onChange: (v) => mutate((bs) => ((bs[b].props as Record<string, unknown>)[f.key] = v)),
-                })}
-              </div>
-            </label>
-          ))}
+          <FourSideControl
+            labelKey="designer-s-padding"
+            icon={Frame}
+            linked={linkedPadding}
+            onToggleLink={() => setLinkedPadding((v) => !v)}
+            getSide={(side) => fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side])}
+            setSide={(side, v) => setFourSideValue(b, PADDING_SIDE_KEYS[side], v)}
+          />
+          <FourSideControl
+            labelKey="designer-f-radius"
+            icon={SquareDashedBottom}
+            linked={linkedRadius}
+            onToggleLink={() => setLinkedRadius((v) => !v)}
+            getSide={(side) => fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius")}
+            setSide={(side, v) => setFourSideValue(b, RADIUS_CORNER_KEYS[side], v)}
+          />
+          <FieldGroups
+            fields={SECTION_FIELDS}
+            getValue={(f) => bpGetValue((sp as unknown as Record<string, string>)[f.key], sp.bp, f.key)}
+            setValue={(f, v) =>
+              mutate((bs) => {
+                if (bp === "desktop") {
+                  (bs[b].props as Record<string, unknown>)[f.key] = v;
+                } else {
+                  const props = bs[b].props as unknown as SectionProps;
+                  props.bp = { ...(props.bp ?? {}), [bpKey(f.key)]: v };
+                }
+              })
+            }
+          />
         </div>
       );
     }
@@ -1754,22 +2201,36 @@ export default function Designer({
               onChange={(ev) => mutate((bs) => (section(bs, b).rows[r].columns[c].span = Number(ev.target.value)))}
             />
           </label>
-          {COLUMN_FIELDS.map((f) => (
-            <label key={f.key} className="block text-[11px] font-medium text-body">
-              {FieldLabel(f.labelKey, t)}
-              <div className="mt-1">
-                {FieldInput({
-                  field: f,
-                  value: col.props?.[f.key] ?? "",
-                  onChange: (v) =>
-                    mutate((bs) => {
-                      const target = section(bs, b).rows[r].columns[c];
-                      target.props = { ...(target.props ?? {}), [f.key]: v };
-                    }),
-                })}
-              </div>
-            </label>
-          ))}
+          <FourSideControl
+            labelKey="designer-s-padding"
+            icon={Frame}
+            linked={linkedPadding}
+            onToggleLink={() => setLinkedPadding((v) => !v)}
+            getSide={(side) => sideValue(col.props, col.bp, PADDING_SIDE_KEYS[side], "padding")}
+            setSide={(side, v) => setColSideValue(b, r, c, PADDING_SIDE_KEYS[side], v)}
+          />
+          <FourSideControl
+            labelKey="designer-f-radius"
+            icon={SquareDashedBottom}
+            linked={linkedRadius}
+            onToggleLink={() => setLinkedRadius((v) => !v)}
+            getSide={(side) => sideValue(col.props, col.bp, RADIUS_CORNER_KEYS[side], "radius")}
+            setSide={(side, v) => setColSideValue(b, r, c, RADIUS_CORNER_KEYS[side], v)}
+          />
+          <FieldGroups
+            fields={COLUMN_FIELDS}
+            getValue={(f) => bpGetValue(col.props?.[f.key], col.bp, f.key)}
+            setValue={(f, v) =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                if (bp === "desktop") {
+                  target.props = { ...(target.props ?? {}), [f.key]: v };
+                } else {
+                  target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
+                }
+              })
+            }
+          />
           <div className="flex gap-3">
             <button onClick={() => copyColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
@@ -1805,38 +2266,30 @@ export default function Designer({
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
-          {def.fields.map((f) => (
-            <label key={f.key} className="block text-[11px] font-medium text-body">
-              {FieldLabel(f.labelKey, t)}
-              <div className="mt-1">
-                {FieldInput({
-                  field: f,
-                  value: el.props[f.key] ?? "",
-                  onChange: (v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props[f.key] = v)),
-                })}
-              </div>
-            </label>
-          ))}
-          <label className="block text-[11px] font-medium text-body">
-            {FieldLabel("designer-f-cssclass", t)}
-            <div className="mt-1">
-              {FieldInput({
-                field: { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
-                value: el.props.cssClass ?? "",
-                onChange: (v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.cssClass = v)),
-              })}
-            </div>
-          </label>
-          <label className="block text-[11px] font-medium text-body">
-            {FieldLabel("designer-f-marginy", t)}
-            <div className="mt-1">
-              {FieldInput({
-                field: { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
-                value: el.props.marginY ?? "",
-                onChange: (v) => mutate((bs) => (section(bs, b).rows[r].columns[c].elements[e].props.marginY = v)),
-              })}
-            </div>
-          </label>
+          {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
+            <FourSideControl
+              labelKey="designer-f-radius"
+              icon={SquareDashedBottom}
+              linked={linkedRadius}
+              onToggleLink={() => setLinkedRadius((v) => !v)}
+              getSide={(side) => sideValue(el.props, el.bp, RADIUS_CORNER_KEYS[side], "radius")}
+              setSide={(side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v)}
+            />
+          )}
+          <FieldGroups
+            fields={[...def.fields, CSS_CLASS_FIELD, MARGIN_Y_FIELD]}
+            getValue={(f) => bpGetValue(el.props[f.key], el.bp, f.key)}
+            setValue={(f, v) =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c].elements[e];
+                if (bp === "desktop") {
+                  target.props[f.key] = v;
+                } else {
+                  target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
+                }
+              })
+            }
+          />
           <div className="flex flex-wrap gap-3">
             <button onClick={() => copyElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
@@ -1936,7 +2389,7 @@ export default function Designer({
           <img
             src={p.src}
             alt={p.alt ?? ""}
-            style={{ borderRadius: RADIUS[p.radius ?? "md"], boxShadow: SHADOW[p.shadow ?? "none"], maxWidth: "100%" }}
+            style={{ borderRadius: elRadius(p), boxShadow: SHADOW[p.shadow ?? "none"], maxWidth: "100%" }}
           />
         ) : (
           <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
@@ -1966,7 +2419,10 @@ export default function Designer({
         return <hr className="border-current opacity-20" />;
       case "embed":
         return (
-          <div className="flex aspect-video items-center justify-center rounded-lg bg-black/70 text-white">
+          <div
+            className="flex aspect-video items-center justify-center bg-black/70 text-white"
+            style={{ borderRadius: elRadius(p), boxShadow: SHADOW[p.shadow ?? "none"] }}
+          >
             <Video className="mr-2 h-5 w-5" />
             <span className="max-w-[80%] truncate text-xs">{p.url || t("designer-f-url")}</span>
           </div>
@@ -2021,7 +2477,7 @@ export default function Designer({
                 src={src}
                 alt=""
                 className="aspect-square w-full object-cover"
-                style={{ borderRadius: RADIUS[p.radius ?? "md"] }}
+                style={{ borderRadius: elRadius(p) }}
               />
             ))}
           </div>
@@ -2077,6 +2533,30 @@ export default function Designer({
           <Trash2 className="h-3 w-3" />
         </button>
       </span>
+    );
+  }
+
+  // Grip-handle indicator for Live Edit mode — visual parity with Blocks
+  // mode's GripVertical (shown there only on a selected element), extended
+  // here to all 3 draggable depths (section/column/element) since Live
+  // Edit's own drag-reorder now covers all three too. Visual only: the
+  // actual grab still works from anywhere on the selected row, same as
+  // BaseLayout.astro's pointerdown already allows — this just makes the
+  // affordance discoverable. Reuses the same selectedRect + iframe-position
+  // math as LiveEditToolbar below.
+  function LiveEditGripHandle() {
+    if (!sel || !selectedRect || !liveFrame.current) return null;
+    const iframeRect = liveFrame.current.getBoundingClientRect();
+    const style: React.CSSProperties = {
+      position: "fixed",
+      left: iframeRect.left + selectedRect.left - 16,
+      top: iframeRect.top + selectedRect.top + selectedRect.height / 2 - 7,
+      zIndex: 50,
+    };
+    return (
+      <div style={style} className="pointer-events-none text-accent">
+        <GripVertical className="h-3.5 w-3.5" />
+      </div>
     );
   }
 
@@ -2216,6 +2696,25 @@ export default function Designer({
         >
           <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
         </button>
+        <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
+          {(
+            [
+              { key: "desktop", icon: Monitor, labelKey: "designer-bp-desktop" },
+              { key: "tablet", icon: Tablet, labelKey: "designer-bp-tablet" },
+              { key: "mobile", icon: Smartphone, labelKey: "designer-bp-mobile" },
+            ] as const
+          ).map(({ key, icon: Icon, labelKey }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setBp(key)}
+              title={t(labelKey)}
+              className={`rounded-full p-1.5 ${bp === key ? "bg-white text-accent shadow-sm" : "text-sub hover:text-body"}`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+        </div>
         {page.status === "published" && !dirty ? (
           <a
             href={api.previewUrl(tenantHost, page.slug as string)}
@@ -2297,41 +2796,11 @@ export default function Designer({
         </aside>
 
         {/* canvas */}
-        {mode === "live" ? (
-          <>
-            <div className="relative min-w-0 flex-1">
-              <iframe
-                ref={frameARef}
-                src={liveSrcA ?? undefined}
-                onLoad={() => handleFrameLoad("a")}
-                className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "a" ? "" : "pointer-events-none opacity-0"}`}
-                title="live-view"
-              />
-              <iframe
-                ref={frameBRef}
-                src={liveSrcB ?? undefined}
-                onLoad={() => handleFrameLoad("b")}
-                className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "b" ? "" : "pointer-events-none opacity-0"}`}
-                title="live-view-buffer"
-              />
-              {reloading && (
-                <div className="absolute inset-0 z-10 animate-pulse overflow-hidden bg-white p-6">
-                  <div className="mx-auto max-w-4xl space-y-4">
-                    <div className="h-8 w-2/3 rounded bg-canvas" />
-                    <div className="h-4 w-full rounded bg-canvas" />
-                    <div className="h-4 w-5/6 rounded bg-canvas" />
-                    <div className="h-40 w-full rounded bg-canvas" />
-                    <div className="h-4 w-3/4 rounded bg-canvas" />
-                    <div className="h-4 w-1/2 rounded bg-canvas" />
-                  </div>
-                </div>
-              )}
-            </div>
-            <LiveEditToolbar />
-          </>
-        ) : (
         <main className="min-w-0 flex-1 overflow-y-auto p-6" onClick={() => setSel(null)}>
-          <div className="mx-auto max-w-4xl space-y-4">
+          <div
+            className={`mx-auto ${mode === "live" ? "" : "space-y-4"}`}
+            style={{ maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem" }}
+          >
             {blocks.length === 0 && <p className="py-10 text-center text-xs text-sub">{t("designer-empty")}</p>}
             {blocks.map((block, b) => {
               if (block.type !== "section") {
@@ -2353,40 +2822,92 @@ export default function Designer({
               const sp = block.props as unknown as SectionProps;
               const contained = (sp.width ?? "contained") === "contained";
               return (
-                <div key={b} className={`group relative rounded-xl ${selCls([b])}`} onClick={(ev) => pick(ev, [b])}>
+                <div
+                  key={b}
+                  className={`group relative ${mode === "live" ? "" : "rounded-xl"} ${selCls([b])}`}
+                  onClick={(ev) => pick(ev, [b])}
+                >
                   <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
                     {t("designer-section")} {BlockControls({ b })}
                   </div>
+                  {selEq([b]) && (
+                    <>
+                      {(["top", "bottom"] as const).map((edge) => (
+                        <span
+                          key={edge}
+                          onMouseDown={(ev) => {
+                            const startPx =
+                              Number(pxLabel(lengthValue(bpGetValue(sp.paddingY, sp.bp, "paddingY"), PAD, PAD.md))) || 0;
+                            startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
+                              const block = next[b];
+                              if (bp === "desktop") {
+                                (block.props as Record<string, unknown>).paddingY = `${px}px`;
+                              } else {
+                                const props = block.props as unknown as SectionProps;
+                                props.bp = { ...(props.bp ?? {}), [bpKey("paddingY")]: `${px}px` };
+                              }
+                            });
+                          }}
+                          className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                            edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                          }`}
+                        >
+                          {pxLabel(lengthValue(bpGetValue(sp.paddingY, sp.bp, "paddingY"), PAD, PAD.md))}px
+                        </span>
+                      ))}
+                      {(["left", "right"] as const).map((edge) => (
+                        <span
+                          key={edge}
+                          onMouseDown={(ev) => {
+                            const startPx =
+                              Number(pxLabel(lengthValue(bpGetValue(sp.paddingX, sp.bp, "paddingX"), PAD, "1.5rem"))) || 0;
+                            startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => {
+                              const block = next[b];
+                              if (bp === "desktop") {
+                                (block.props as Record<string, unknown>).paddingX = `${px}px`;
+                              } else {
+                                const props = block.props as unknown as SectionProps;
+                                props.bp = { ...(props.bp ?? {}), [bpKey("paddingX")]: `${px}px` };
+                              }
+                            });
+                          }}
+                          className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                            edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                          }`}
+                        >
+                          {pxLabel(lengthValue(bpGetValue(sp.paddingX, sp.bp, "paddingX"), PAD, "1.5rem"))}px
+                        </span>
+                      ))}
+                    </>
+                  )}
                   <div
-                    className="overflow-hidden rounded-xl border border-line/20"
-                    style={{
-                      background: sp.bgImage ? `url(${sp.bgImage}) center/cover` : sp.bg || "#ffffff",
-                      color: sp.textColor || "inherit",
-                      padding: `${lengthValue(sp.paddingY, PAD, PAD.md)} ${lengthValue(sp.paddingX, PAD, "1.5rem")}`,
-                      margin: `${lengthValue(sp.marginY, PAD, "0")} 0`,
-                      // Only override when the author actually picked a value —
-                      // otherwise every existing section would flatten to
-                      // square/shadowless corners (RADIUS.none/SHADOW.none)
-                      // instead of keeping this wrapper's own default look.
-                      ...(sp.border ? { border: BORDER[sp.border] } : {}),
-                      ...(sp.shadow ? { boxShadow: SHADOW[sp.shadow] } : {}),
-                      ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
-                    }}
+                    className={mode === "live" ? "overflow-hidden" : "overflow-hidden rounded-xl border border-line/20"}
+                    style={sectionBpStyle(sp)}
                   >
-                    <div className={contained ? "mx-auto max-w-3xl space-y-5" : "space-y-5"}>
+                    <div
+                      className={
+                        mode === "live"
+                          ? contained
+                            ? "mx-auto max-w-[68rem] space-y-10"
+                            : "space-y-10"
+                          : contained
+                            ? "mx-auto max-w-3xl space-y-5"
+                            : "space-y-5"
+                      }
+                    >
                       {(sp.rows ?? []).map((row, r) => (
                         <div
                           key={r}
-                          className="grid gap-4"
+                          className={mode === "live" ? "grid gap-8" : "grid gap-4"}
                           style={{ gridTemplateColumns: row.columns.map((cc) => `${cc.span}fr`).join(" ") }}
                         >
                           {row.columns.map((col, c) => (
                             <div
                               key={c}
-                              className={`min-h-[3rem] space-y-3 rounded-lg p-1.5 transition-colors ${selCls([b, r, c])} ${
-                                dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""
-                              }`}
-                              style={colStyle(col.props)}
+                              className={`relative min-h-[3rem] transition-colors ${
+                                mode === "live" ? "space-y-5" : "space-y-3 rounded-lg p-1.5"
+                              } ${selCls([b, r, c])} ${dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""}`}
+                              style={bpColStyle(col)}
                               onClick={(ev) => pick(ev, [b, r, c])}
                               onDragOver={(ev) => {
                                 ev.preventDefault();
@@ -2399,6 +2920,27 @@ export default function Designer({
                                 dropIntoColumn([b, r, c]);
                               }}
                             >
+                              {selEq([b, r, c]) && (
+                                <span
+                                  onMouseDown={(ev) => {
+                                    const startPx =
+                                      Number(
+                                        pxLabel(lengthValue(bpGetValue(col.props?.padding, col.bp, "padding"), PAD, "0")),
+                                      ) || 0;
+                                    startSpacingDrag(ev, startPx, "y", 1, (next, px) => {
+                                      const target = section(next, b).rows[r].columns[c];
+                                      if (bp === "desktop") {
+                                        target.props = { ...(target.props ?? {}), padding: `${px}px` };
+                                      } else {
+                                        target.bp = { ...(target.bp ?? {}), [bpKey("padding")]: `${px}px` };
+                                      }
+                                    });
+                                  }}
+                                  className="absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white"
+                                >
+                                  {pxLabel(lengthValue(bpGetValue(col.props?.padding, col.bp, "padding"), PAD, "0"))}px
+                                </span>
+                              )}
                               {col.elements.length === 0 && (
                                 <div className="flex h-12 items-center justify-center rounded-lg border border-dashed border-line/40 text-[10px] font-medium text-sub">
                                   {t("designer-empty-col")}
@@ -2428,10 +2970,30 @@ export default function Designer({
                                     setCtxMenu({ path: [b, r, c, e], x: ev.clientX, y: ev.clientY });
                                   }}
                                   className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
-                                  style={el.props.marginY ? { margin: `${lengthValue(el.props.marginY, SPACE, "0")} 0` } : undefined}
+                                  style={bpMarginStyle(el)}
                                 >
                                   {selEq([b, r, c, e]) && (
-                                    <GripVertical className="absolute -left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
+                                    <GripVertical className="absolute left-1 top-1 h-3.5 w-3.5 text-accent" />
+                                  )}
+                                  {selEq([b, r, c, e]) && (
+                                    <span
+                                      onMouseDown={(ev) => {
+                                        const startPx =
+                                          Number(pxLabel(lengthValue(bpGetValue(el.props.marginY, el.bp, "marginY"), SPACE, "0"))) ||
+                                          0;
+                                        startSpacingDrag(ev, startPx, "y", 1, (next, px) => {
+                                          const target = section(next, b).rows[r].columns[c].elements[e];
+                                          if (bp === "desktop") {
+                                            target.props.marginY = `${px}px`;
+                                          } else {
+                                            target.bp = { ...(target.bp ?? {}), [bpKey("marginY")]: `${px}px` };
+                                          }
+                                        });
+                                      }}
+                                      className="absolute -top-2 right-1 z-20 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white"
+                                    >
+                                      {pxLabel(lengthValue(bpGetValue(el.props.marginY, el.bp, "marginY"), SPACE, "0"))}px
+                                    </span>
                                   )}
                                   {ElPreview({ el, path: [b, r, c, e] })}
                                 </div>
@@ -2476,7 +3038,6 @@ export default function Designer({
             </button>
           </div>
         </main>
-        )}
 
         {/* inspector */}
         <aside className="w-64 shrink-0 overflow-y-auto border-l border-line/30 bg-white p-4">
