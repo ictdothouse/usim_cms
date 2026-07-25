@@ -153,7 +153,7 @@ import {
   Zap,
 } from "lucide-react";
 import * as api from "@/lib/api";
-import { slugify } from "@/lib/utils";
+import { slugify, bestTextColor } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
 
@@ -213,6 +213,11 @@ export interface SectionProps {
   paddingBottom?: string;
   paddingLeft?: string;
   marginY?: string;
+  // Per-side overrides for marginY — top/bottom only (no marginX: sections
+  // are block-flow, horizontal margin isn't a real concept here). Same
+  // fallback convention as padding's per-side keys.
+  marginTop?: string;
+  marginBottom?: string;
   width?: string;
   border?: string;
   shadow?: string;
@@ -574,9 +579,9 @@ const SECTION_FIELDS: Field[] = [
   { key: "bg", labelKey: "designer-s-bg", kind: "color" },
   { key: "bgImage", labelKey: "designer-s-bgimage", kind: "image" },
   { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
-  // paddingY/paddingX/radius are edited via the FourSideControl composites
-  // (top-level "Padding"/"Border Radius" panels) instead of a plain row here.
-  { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
+  // paddingY/paddingX/radius/marginY are edited via the FourSideControl
+  // composites (top-level "Padding"/"Border Radius"/"Margin" panels) instead
+  // of a plain row here.
   { key: "width", labelKey: "designer-s-width", kind: "select", options: ["contained", "full"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
@@ -589,9 +594,8 @@ const SECTION_FIELDS: Field[] = [
 // what would otherwise need a dedicated Card/Testimonial element.
 const COLUMN_FIELDS: Field[] = [
   { key: "bg", labelKey: "designer-s-bg", kind: "color" },
-  // padding/radius are edited via the FourSideControl composites (same as
-  // SECTION_FIELDS) instead of a plain row here.
-  { key: "marginY", labelKey: "designer-f-marginy", kind: "text" },
+  // padding/radius/marginY are edited via the FourSideControl composites
+  // (same as SECTION_FIELDS) instead of a plain row here.
   { key: "valign", labelKey: "designer-f-valign", kind: "select", options: ["top", "center", "bottom"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
@@ -603,6 +607,7 @@ const COLUMN_FIELDS: Field[] = [
 const COLUMN_SPACING_KEYS = [
   "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
+  "marginY", "marginTop", "marginBottom",
 ];
 
 // Standalone fields appended to every element's own type-specific fields
@@ -610,7 +615,6 @@ const COLUMN_SPACING_KEYS = [
 // def.fields — hoisted so the grouped Inspector can bucket them like any
 // other field instead of rendering them as a special tail case).
 const CSS_CLASS_FIELD: Field = { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" };
-const MARGIN_Y_FIELD: Field = { key: "marginY", labelKey: "designer-f-marginy", kind: "text" };
 
 // Grouped Styles panel (Framer/Webflow-style): buckets the same flat Field
 // lists (SECTION_FIELDS/COLUMN_FIELDS/ELS[type].fields) into collapsible
@@ -722,6 +726,16 @@ function renderInline(text: string): string {
 // Only sets a style key when the field actually has a value, so an unset
 // typography field falls back to the base style (e.g. heading's default
 // bold weight) instead of being wiped to the browser default by `undefined`.
+// Matches apps/frontend/global.css's h1 vs h2-h6 rule: h1 reads the theme's
+// heading font, everything smaller reads subheading (falling back to heading,
+// then the body font). Was previously a hardcoded "font-display" Tailwind
+// class (always "Space Grotesk") — no per-tenant theme could ever override it.
+function headingFontFamily(level: string | undefined): string {
+  return level === "1"
+    ? "var(--font-heading, var(--font-family, inherit))"
+    : "var(--font-subheading, var(--font-heading, var(--font-family, inherit)))";
+}
+
 function typoStyle(p: Record<string, string>): React.CSSProperties {
   const s: React.CSSProperties = {};
   if (p.fontFamily) s.fontFamily = p.fontFamily;
@@ -741,12 +755,14 @@ function colStyle(cp?: Record<string, string>): React.CSSProperties {
   const padSide = (per: string) => lengthValue(cp[per] || cp.padding, PAD, "0");
   const anyRadius = cp.radius || cp.radiusTopLeft || cp.radiusTopRight || cp.radiusBottomRight || cp.radiusBottomLeft;
   const radCorner = (per: string) => lengthValue(cp[per] || cp.radius, RADIUS, RADIUS.none);
+  const anyMargin = cp.marginY || cp.marginTop || cp.marginBottom;
+  const marginSide = (per: string) => lengthValue(cp[per] || cp.marginY, PAD, "0");
   return {
     background: cp.bg || undefined,
     padding: anyPadding
       ? `${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}`
       : undefined,
-    margin: cp.marginY ? `${lengthValue(cp.marginY, PAD, "0")} 0` : undefined,
+    margin: anyMargin ? `${marginSide("marginTop")} 0 ${marginSide("marginBottom")} 0` : undefined,
     alignSelf: cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : cp.valign === "center" ? "center" : undefined,
     border: cp.border ? BORDER[cp.border] : undefined,
     boxShadow: cp.shadow ? SHADOW[cp.shadow] : undefined,
@@ -764,6 +780,32 @@ function elRadius(p: Record<string, string>): string {
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
 }
 
+// Hatched spacing-overlay band: shown while a padding/margin drag handle is
+// selected so the actual area being resized is visible, not just its number.
+// `outward` distinguishes margin (space outside the box) from padding (space
+// inside it) — same idea as the browser devtools box model, which is also
+// why the two get different stripe colors (blue padding, orange margin):
+// same color on both made it hard to tell which one was being dragged.
+const SPACING_STRIPE =
+  "repeating-linear-gradient(45deg, rgba(0,113,227,0.35) 0px, rgba(0,113,227,0.35) 6px, rgba(0,113,227,0.12) 6px, rgba(0,113,227,0.12) 12px)";
+const MARGIN_STRIPE =
+  "repeating-linear-gradient(45deg, rgba(245,158,11,0.35) 0px, rgba(245,158,11,0.35) 6px, rgba(245,158,11,0.12) 6px, rgba(245,158,11,0.12) 12px)";
+function spacingBand(edge: "top" | "bottom" | "left" | "right", px: number, outward = false) {
+  if (!px) return null;
+  const offset = outward ? -px : 0;
+  const style: React.CSSProperties =
+    edge === "top"
+      ? { left: 0, right: 0, height: px, top: offset }
+      : edge === "bottom"
+        ? { left: 0, right: 0, height: px, bottom: offset }
+        : edge === "left"
+          ? { top: 0, bottom: 0, width: px, left: offset }
+          : { top: 0, bottom: 0, width: px, right: offset };
+  return (
+    <div className="pointer-events-none absolute z-10" style={{ ...style, backgroundImage: outward ? MARGIN_STRIPE : SPACING_STRIPE }} />
+  );
+}
+
 export default function Designer({
   page,
   tenantHost,
@@ -778,6 +820,17 @@ export default function Designer({
   onClose: (saved: boolean) => void;
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
+  // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
+  // it always showed the tenant's actual theme colors/fonts. Once that became
+  // an in-app canvas (see mode === "live" below), it lost that for-free theme
+  // parity — this fetches the same merged theme apps/frontend reads and
+  // reapplies it as the same CSS custom properties BaseLayout.astro sets, so
+  // the canvas approximates the real site again instead of always showing
+  // Tailwind's default white/black.
+  const [siteTheme, setSiteTheme] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    api.getTheme(tenantHost, token).then(setSiteTheme).catch(() => {});
+  }, [tenantHost, token]);
   const [sel, setSel] = useState<Sel>(null);
   const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -791,6 +844,7 @@ export default function Designer({
   // already stored, only which input(s) are shown.
   const [linkedPadding, setLinkedPadding] = useState(true);
   const [linkedRadius, setLinkedRadius] = useState(true);
+  const [linkedMargin, setLinkedMargin] = useState(true);
   function toggleGroup(g: FieldGroupKey) {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -856,8 +910,34 @@ export default function Designer({
       else target.bp = { ...(target.bp ?? {}), [bpKey(perSideKey)]: value };
     });
   }
+  // Canvas drag-to-resize write for a four-side control: when `linked` is on
+  // (the chain-icon toggle), one dragged handle must move all sides together
+  // — same rule as the Inspector's linked input, which fans the same value
+  // out to every side key. `target` is already the cloned-next-state node
+  // (from startSpacingDrag's `apply` callback), mutated in place.
+  function writeDragSideKeys(
+    target: { props?: Record<string, string>; bp?: Record<string, string> },
+    keys: readonly string[],
+    activeKey: string,
+    px: number,
+    linked: boolean,
+  ) {
+    const touched = linked ? keys : [activeKey];
+    if (bp === "desktop") {
+      const patch: Record<string, string> = {};
+      for (const k of touched) patch[k] = `${px}px`;
+      target.props = { ...(target.props ?? {}), ...patch };
+    } else {
+      const patch: Record<string, string> = {};
+      for (const k of touched) patch[bpKey(k)] = `${px}px`;
+      target.bp = { ...(target.bp ?? {}), ...patch };
+    }
+  }
   const PADDING_SIDE_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" } as const;
   const PADDING_SIDE_FALLBACK = { top: "paddingY", right: "paddingX", bottom: "paddingY", left: "paddingX" } as const;
+  // Margin has no X axis (block-flow spacing only, always 0 horizontally) —
+  // just top/bottom, both falling back to the single shared marginY value.
+  const MARGIN_SIDE_KEYS = { top: "marginTop", bottom: "marginBottom" } as const;
   const RADIUS_CORNER_KEYS = {
     top: "radiusTopLeft",
     right: "radiusTopRight",
@@ -875,11 +955,13 @@ export default function Designer({
       const raw = fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius");
       return lengthValue(raw, RADIUS, RADIUS.none);
     };
+    const marginSide = (side: keyof typeof MARGIN_SIDE_KEYS) =>
+      lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], "marginY"), PAD, "0");
     return {
-      background: bgImage ? `url(${bgImage}) center/cover` : v("bg") || "#ffffff",
+      background: bgImage ? `url(${bgImage}) center/cover` : v("bg") || "var(--color-bg, #ffffff)",
       color: v("textColor") || "inherit",
       padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}`,
-      margin: `${lengthValue(v("marginY"), PAD, "0")} 0`,
+      margin: `${marginSide("top")} 0 ${marginSide("bottom")} 0`,
       ...(border ? { border: BORDER[border] } : {}),
       ...(shadow ? { boxShadow: SHADOW[shadow] } : {}),
       borderRadius: `${corner("top")} ${corner("right")} ${corner("bottom")} ${corner("left")}`,
@@ -895,8 +977,21 @@ export default function Designer({
     return colStyle(merged);
   }
   function bpMarginStyle(el: El): React.CSSProperties | undefined {
-    const mv = bpGetValue(el.props.marginY, el.bp, "marginY");
-    return mv ? { margin: `${lengthValue(mv, SPACE, "0")} 0` } : undefined;
+    const top = sideValue(el.props, el.bp, MARGIN_SIDE_KEYS.top, "marginY");
+    const bottom = sideValue(el.props, el.bp, MARGIN_SIDE_KEYS.bottom, "marginY");
+    if (!top && !bottom) return undefined;
+    return { margin: `${lengthValue(top, SPACE, "0")} 0 ${lengthValue(bottom, SPACE, "0")} 0` };
+  }
+  // Universal per-element padding — every element type gets it (unlike
+  // radius, which only makes visual sense on image/embed/gallery), same
+  // per-side/fallback convention as Column's padding.
+  function bpPaddingStyle(el: El): React.CSSProperties | undefined {
+    const has = (k: string) => bpGetValue(el.props[k], el.bp, k);
+    if (!has("padding") && !has("paddingTop") && !has("paddingRight") && !has("paddingBottom") && !has("paddingLeft")) {
+      return undefined;
+    }
+    const side = (s: keyof typeof PADDING_SIDE_KEYS) => lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[s], "padding"), PAD, "0");
+    return { padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}` };
   }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
@@ -1476,6 +1571,15 @@ export default function Designer({
     setSel(null);
     bumpStructural();
   }
+  // A freshly added-row preset has columns but no elements in them yet — the
+  // only way to remove it was previously to delete each of its columns one
+  // at a time (deleteColumn only cascades to the row once its last column is
+  // gone). This is the direct one-click equivalent.
+  function deleteRow(b: number, r: number) {
+    mutate((bs) => section(bs, b).rows.splice(r, 1));
+    setSel(null);
+    bumpStructural();
+  }
 
   function duplicateElement(b: number, r: number, c: number, e: number) {
     mutate((bs) => {
@@ -2040,6 +2144,7 @@ export default function Designer({
     onToggleLink,
     getSide,
     setSide,
+    sides = ["top", "right", "bottom", "left"],
   }: {
     labelKey: Key;
     icon: typeof Frame;
@@ -2047,8 +2152,10 @@ export default function Designer({
     onToggleLink: () => void;
     getSide: (side: "top" | "right" | "bottom" | "left") => string;
     setSide: (side: "top" | "right" | "bottom" | "left", value: string) => void;
+    // Defaults to all 4 (padding/radius); margin has no left/right concept
+    // (block-flow spacing only), so it passes just ["top", "bottom"].
+    sides?: readonly ("top" | "right" | "bottom" | "left")[];
   }) {
-    const sides = ["top", "right", "bottom", "left"] as const;
     return (
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[11px] font-medium text-body">
@@ -2067,11 +2174,11 @@ export default function Designer({
         {linked ? (
           <input
             className="w-full rounded-lg border border-line/30 bg-white px-2 py-1.5 text-[11px]"
-            value={getSide("top")}
+            value={getSide(sides[0])}
             onChange={(e) => sides.forEach((s) => setSide(s, e.target.value))}
           />
         ) : (
-          <div className="grid grid-cols-4 gap-1">
+          <div className={`grid gap-1 ${sides.length === 2 ? "grid-cols-2" : "grid-cols-4"}`}>
             {sides.map((s) => (
               <input
                 key={s}
@@ -2167,6 +2274,15 @@ export default function Designer({
             getSide={(side) => fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius")}
             setSide={(side, v) => setFourSideValue(b, RADIUS_CORNER_KEYS[side], v)}
           />
+          <FourSideControl
+            labelKey="designer-f-marginy"
+            icon={Frame}
+            sides={["top", "bottom"]}
+            linked={linkedMargin}
+            onToggleLink={() => setLinkedMargin((v) => !v)}
+            getSide={(side) => fourSideValue(sp, MARGIN_SIDE_KEYS[side as "top" | "bottom"], "marginY")}
+            setSide={(side, v) => setFourSideValue(b, MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+          />
           <FieldGroups
             fields={SECTION_FIELDS}
             getValue={(f) => bpGetValue((sp as unknown as Record<string, string>)[f.key], sp.bp, f.key)}
@@ -2217,6 +2333,15 @@ export default function Designer({
             getSide={(side) => sideValue(col.props, col.bp, RADIUS_CORNER_KEYS[side], "radius")}
             setSide={(side, v) => setColSideValue(b, r, c, RADIUS_CORNER_KEYS[side], v)}
           />
+          <FourSideControl
+            labelKey="designer-f-marginy"
+            icon={Frame}
+            sides={["top", "bottom"]}
+            linked={linkedMargin}
+            onToggleLink={() => setLinkedMargin((v) => !v)}
+            getSide={(side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side as "top" | "bottom"], "marginY")}
+            setSide={(side, v) => setColSideValue(b, r, c, MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+          />
           <FieldGroups
             fields={COLUMN_FIELDS}
             getValue={(f) => bpGetValue(col.props?.[f.key], col.bp, f.key)}
@@ -2266,6 +2391,14 @@ export default function Designer({
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
+          <FourSideControl
+            labelKey="designer-s-padding"
+            icon={Frame}
+            linked={linkedPadding}
+            onToggleLink={() => setLinkedPadding((v) => !v)}
+            getSide={(side) => sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding")}
+            setSide={(side, v) => setElSideValue(b, r, c, e, PADDING_SIDE_KEYS[side], v)}
+          />
           {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
             <FourSideControl
               labelKey="designer-f-radius"
@@ -2276,8 +2409,17 @@ export default function Designer({
               setSide={(side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v)}
             />
           )}
+          <FourSideControl
+            labelKey="designer-f-marginy"
+            icon={Frame}
+            sides={["top", "bottom"]}
+            linked={linkedMargin}
+            onToggleLink={() => setLinkedMargin((v) => !v)}
+            getSide={(side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side as "top" | "bottom"], "marginY")}
+            setSide={(side, v) => setElSideValue(b, r, c, e, MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+          />
           <FieldGroups
-            fields={[...def.fields, CSS_CLASS_FIELD, MARGIN_Y_FIELD]}
+            fields={[...def.fields, CSS_CLASS_FIELD]}
             getValue={(f) => bpGetValue(el.props[f.key], el.bp, f.key)}
             setValue={(f, v) =>
               mutate((bs) => {
@@ -2346,7 +2488,14 @@ export default function Designer({
         });
       const sharedStyle =
         el.type === "heading"
-          ? { ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2, ...typoStyle(p) }
+          ? {
+              ...align,
+              fontSize: H_SIZE[p.level ?? "2"],
+              fontWeight: 700,
+              lineHeight: 1.2,
+              fontFamily: headingFontFamily(p.level),
+              ...typoStyle(p),
+            }
           : { ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap" as const, lineHeight: 1.65, ...typoStyle(p) };
       return (
         <div
@@ -2356,7 +2505,7 @@ export default function Designer({
             if (node && document.activeElement !== node) node.focus();
           }}
           style={sharedStyle}
-          className={el.type === "heading" ? "font-display outline-none" : "outline-none"}
+          className="outline-none"
           onInput={(e) => commit(e.currentTarget.textContent ?? "")}
           onBlur={() => delete editingText.current[el.id]}
         >
@@ -2368,8 +2517,14 @@ export default function Designer({
       case "heading":
         return (
           <div
-            style={{ ...align, fontSize: H_SIZE[p.level ?? "2"], fontWeight: 700, lineHeight: 1.2, ...typoStyle(p) }}
-            className="font-display"
+            style={{
+              ...align,
+              fontSize: H_SIZE[p.level ?? "2"],
+              fontWeight: 700,
+              lineHeight: 1.2,
+              fontFamily: headingFontFamily(p.level),
+              ...typoStyle(p),
+            }}
             dangerouslySetInnerHTML={{ __html: p.text ? renderInline(p.text) : "Heading" }}
           />
         );
@@ -2404,7 +2559,7 @@ export default function Designer({
               style={
                 p.variant === "outline"
                   ? { border: "2px solid currentColor" }
-                  : { backgroundColor: "#0f62fe", color: "#fff" }
+                  : { backgroundColor: "var(--color-primary, #0f62fe)", color: "var(--color-primary-content, #fff)" }
               }
             >
               {p.label || "Button"}
@@ -2796,7 +2951,25 @@ export default function Designer({
         </aside>
 
         {/* canvas */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-6" onClick={() => setSel(null)}>
+        <main
+          className="min-w-0 flex-1 overflow-y-auto p-6"
+          onClick={() => setSel(null)}
+          style={
+            {
+              "--color-primary": siteTheme?.primaryColor,
+              "--color-primary-content": siteTheme?.primaryColor ? bestTextColor(siteTheme.primaryColor) : undefined,
+              "--color-secondary": siteTheme?.secondaryColor,
+              "--color-bg": siteTheme?.backgroundColor,
+              "--color-text": siteTheme?.textColor,
+              "--font-family": siteTheme?.fontFamily,
+              "--font-heading": siteTheme?.headingFont,
+              "--font-subheading": siteTheme?.subHeadingFont,
+              background: "var(--color-bg, #ffffff)",
+              color: "var(--color-text, inherit)",
+              fontFamily: "var(--font-family, inherit)",
+            } as React.CSSProperties
+          }
+        >
           <div
             className={`mx-auto ${mode === "live" ? "" : "space-y-4"}`}
             style={{ maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem" }}
@@ -2830,60 +3003,157 @@ export default function Designer({
                   <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
                     {t("designer-section")} {BlockControls({ b })}
                   </div>
-                  {selEq([b]) && (
-                    <>
-                      {(["top", "bottom"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          onMouseDown={(ev) => {
-                            const startPx =
-                              Number(pxLabel(lengthValue(bpGetValue(sp.paddingY, sp.bp, "paddingY"), PAD, PAD.md))) || 0;
-                            startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
-                              const block = next[b];
-                              if (bp === "desktop") {
-                                (block.props as Record<string, unknown>).paddingY = `${px}px`;
-                              } else {
-                                const props = block.props as unknown as SectionProps;
-                                props.bp = { ...(props.bp ?? {}), [bpKey("paddingY")]: `${px}px` };
-                              }
-                            });
-                          }}
-                          className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                            edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
-                          }`}
-                        >
-                          {pxLabel(lengthValue(bpGetValue(sp.paddingY, sp.bp, "paddingY"), PAD, PAD.md))}px
-                        </span>
-                      ))}
-                      {(["left", "right"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          onMouseDown={(ev) => {
-                            const startPx =
-                              Number(pxLabel(lengthValue(bpGetValue(sp.paddingX, sp.bp, "paddingX"), PAD, "1.5rem"))) || 0;
-                            startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => {
-                              const block = next[b];
-                              if (bp === "desktop") {
-                                (block.props as Record<string, unknown>).paddingX = `${px}px`;
-                              } else {
-                                const props = block.props as unknown as SectionProps;
-                                props.bp = { ...(props.bp ?? {}), [bpKey("paddingX")]: `${px}px` };
-                              }
-                            });
-                          }}
-                          className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                            edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
-                          }`}
-                        >
-                          {pxLabel(lengthValue(bpGetValue(sp.paddingX, sp.bp, "paddingX"), PAD, "1.5rem"))}px
-                        </span>
-                      ))}
-                    </>
-                  )}
+                  {selEq([b]) &&
+                    (() => {
+                      // Reads/writes go through the same per-side keys (PADDING_SIDE_KEYS,
+                      // fallback PADDING_SIDE_FALLBACK) as this section's own FourSideControl
+                      // in the Inspector — dragging here now agrees with what's actually
+                      // rendered instead of a separate paddingY/paddingX axis value that the
+                      // per-side override (once set) would silently ignore.
+                      const sidePx = (side: keyof typeof PADDING_SIDE_KEYS) =>
+                        Number(
+                          pxLabel(
+                            lengthValue(
+                              fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]),
+                              PAD,
+                              side === "top" || side === "bottom" ? PAD.md : "1.5rem",
+                            ),
+                          ),
+                        ) || 0;
+                      const topPx = sidePx("top");
+                      const rightPx = sidePx("right");
+                      const bottomPx = sidePx("bottom");
+                      const leftPx = sidePx("left");
+                      // Block's `bp` bag lives inside `props` (SectionProps.bp), not as a
+                      // sibling of it like Col/El — writeDragSideKeys' shape doesn't fit, so
+                      // this section writes directly instead.
+                      const applyDrag = (key: string, px: number) => (next: Block[]) => {
+                        const props = next[b].props as unknown as SectionProps;
+                        const keys = linkedPadding ? Object.values(PADDING_SIDE_KEYS) : [key];
+                        if (bp === "desktop") {
+                          for (const k of keys) (props as unknown as Record<string, string>)[k] = `${px}px`;
+                        } else {
+                          const patch: Record<string, string> = {};
+                          for (const k of keys) patch[bpKey(k)] = `${px}px`;
+                          props.bp = { ...(props.bp ?? {}), ...patch };
+                        }
+                      };
+                      return (
+                        <>
+                          {(["top", "bottom"] as const).map((edge) => (
+                            <span
+                              key={edge}
+                              onMouseDown={(ev) => {
+                                const startPx = edge === "top" ? topPx : bottomPx;
+                                const key = PADDING_SIDE_KEYS[edge];
+                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(key, px)(next));
+                              }}
+                              className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                              }`}
+                            >
+                              {edge === "top" ? topPx : bottomPx}px
+                            </span>
+                          ))}
+                          {(["left", "right"] as const).map((edge) => (
+                            <span
+                              key={edge}
+                              onMouseDown={(ev) => {
+                                const startPx = edge === "left" ? leftPx : rightPx;
+                                const key = PADDING_SIDE_KEYS[edge];
+                                startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => applyDrag(key, px)(next));
+                              }}
+                              className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                              }`}
+                            >
+                              {edge === "left" ? leftPx : rightPx}px
+                            </span>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  {selEq([b]) &&
+                    (() => {
+                      // Margin lives outside the box (outward bands), unlike padding — no
+                      // canvas drag handle existed for section margin before this at all
+                      // (Inspector-text-only). Right-aligned so it doesn't collide with the
+                      // centered padding badges or the -top-3 "Section" hover tag.
+                      const sidePx = (side: "top" | "bottom") =>
+                        Number(pxLabel(lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], "marginY"), PAD, "0"))) || 0;
+                      const topPx = sidePx("top");
+                      const bottomPx = sidePx("bottom");
+                      const applyDrag = (key: string, px: number) => (next: Block[]) => {
+                        const props = next[b].props as unknown as SectionProps;
+                        const keys = linkedMargin ? Object.values(MARGIN_SIDE_KEYS) : [key];
+                        if (bp === "desktop") {
+                          for (const k of keys) (props as unknown as Record<string, string>)[k] = `${px}px`;
+                        } else {
+                          const patch: Record<string, string> = {};
+                          for (const k of keys) patch[bpKey(k)] = `${px}px`;
+                          props.bp = { ...(props.bp ?? {}), ...patch };
+                        }
+                      };
+                      return (
+                        <>
+                          {spacingBand("top", topPx, true)}
+                          {spacingBand("bottom", bottomPx, true)}
+                          {(["top", "bottom"] as const).map((edge) => (
+                            <span
+                              key={edge}
+                              onMouseDown={(ev) => {
+                                const startPx = edge === "top" ? topPx : bottomPx;
+                                const key = MARGIN_SIDE_KEYS[edge];
+                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(key, px)(next));
+                              }}
+                              className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                edge === "top" ? "-top-2" : "-bottom-2"
+                              }`}
+                            >
+                              {edge === "top" ? topPx : bottomPx}px
+                            </span>
+                          ))}
+                        </>
+                      );
+                    })()}
                   <div
-                    className={mode === "live" ? "overflow-hidden" : "overflow-hidden rounded-xl border border-line/20"}
+                    className={`relative ${mode === "live" ? "overflow-hidden" : "overflow-hidden rounded-xl border border-line/20"}`}
                     style={sectionBpStyle(sp)}
                   >
+                    {selEq([b]) && (
+                      <>
+                        {spacingBand(
+                          "top",
+                          Number(
+                            pxLabel(lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.top, PADDING_SIDE_FALLBACK.top), PAD, PAD.md)),
+                          ) || 0,
+                        )}
+                        {spacingBand(
+                          "bottom",
+                          Number(
+                            pxLabel(
+                              lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.bottom, PADDING_SIDE_FALLBACK.bottom), PAD, PAD.md),
+                            ),
+                          ) || 0,
+                        )}
+                        {spacingBand(
+                          "left",
+                          Number(
+                            pxLabel(
+                              lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.left, PADDING_SIDE_FALLBACK.left), PAD, "1.5rem"),
+                            ),
+                          ) || 0,
+                        )}
+                        {spacingBand(
+                          "right",
+                          Number(
+                            pxLabel(
+                              lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.right, PADDING_SIDE_FALLBACK.right), PAD, "1.5rem"),
+                            ),
+                          ) || 0,
+                        )}
+                      </>
+                    )}
                     <div
                       className={
                         mode === "live"
@@ -2896,12 +3166,24 @@ export default function Designer({
                       }
                     >
                       {(sp.rows ?? []).map((row, r) => (
-                        <div
-                          key={r}
-                          className={mode === "live" ? "grid gap-8" : "grid gap-4"}
-                          style={{ gridTemplateColumns: row.columns.map((cc) => `${cc.span}fr`).join(" ") }}
-                        >
-                          {row.columns.map((col, c) => (
+                        <div key={r} className="group/row relative">
+                          {mode !== "live" && (
+                            <button
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                deleteRow(b, r);
+                              }}
+                              title={t("designer-delete-row")}
+                              className="absolute -right-2 -top-2 z-20 hidden rounded-full bg-white p-1 text-red-500 opacity-0 shadow-sm ring-1 ring-line/30 transition-opacity group-hover/row:flex group-hover/row:opacity-100"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                          <div
+                            className={mode === "live" ? "grid gap-8" : "grid gap-4"}
+                            style={{ gridTemplateColumns: row.columns.map((cc) => `${cc.span}fr`).join(" ") }}
+                          >
+                            {row.columns.map((col, c) => (
                             <div
                               key={c}
                               className={`relative min-h-[3rem] transition-colors ${
@@ -2920,27 +3202,121 @@ export default function Designer({
                                 dropIntoColumn([b, r, c]);
                               }}
                             >
-                              {selEq([b, r, c]) && (
-                                <span
-                                  onMouseDown={(ev) => {
-                                    const startPx =
-                                      Number(
-                                        pxLabel(lengthValue(bpGetValue(col.props?.padding, col.bp, "padding"), PAD, "0")),
-                                      ) || 0;
-                                    startSpacingDrag(ev, startPx, "y", 1, (next, px) => {
-                                      const target = section(next, b).rows[r].columns[c];
-                                      if (bp === "desktop") {
-                                        target.props = { ...(target.props ?? {}), padding: `${px}px` };
-                                      } else {
-                                        target.bp = { ...(target.bp ?? {}), [bpKey("padding")]: `${px}px` };
-                                      }
-                                    });
+                              {selEq([b, r, c]) && mode !== "live" && (
+                                <button
+                                  onClick={(ev) => {
+                                    ev.stopPropagation();
+                                    deleteColumn(b, r, c);
                                   }}
-                                  className="absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white"
+                                  title={t("designer-delete")}
+                                  className="absolute -right-2 -top-2 z-30 rounded-full bg-white p-1 text-red-500 shadow-sm ring-1 ring-line/30"
                                 >
-                                  {pxLabel(lengthValue(bpGetValue(col.props?.padding, col.bp, "padding"), PAD, "0"))}px
-                                </span>
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
                               )}
+                              {selEq([b, r, c]) &&
+                                (() => {
+                                  // Per-side padding (top/right/bottom/left), each falling back to the
+                                  // shared `padding` value when its own override isn't set — same
+                                  // fallback chain as the FourSideControl in the Inspector, so unlinked
+                                  // per-side edits there are draggable here too, not just the uniform case.
+                                  const sidePx = (key: string) =>
+                                    Number(pxLabel(lengthValue(sideValue(col.props, col.bp, key, "padding"), PAD, "0"))) || 0;
+                                  const topPx = sidePx(PADDING_SIDE_KEYS.top);
+                                  const rightPx = sidePx(PADDING_SIDE_KEYS.right);
+                                  const bottomPx = sidePx(PADDING_SIDE_KEYS.bottom);
+                                  const leftPx = sidePx(PADDING_SIDE_KEYS.left);
+                                  return (
+                                    <>
+                                      {spacingBand("top", topPx)}
+                                      {spacingBand("bottom", bottomPx)}
+                                      {spacingBand("left", leftPx)}
+                                      {spacingBand("right", rightPx)}
+                                      {(["top", "bottom"] as const).map((edge) => (
+                                        <span
+                                          key={edge}
+                                          onMouseDown={(ev) => {
+                                            const startPx = edge === "top" ? topPx : bottomPx;
+                                            const key = PADDING_SIDE_KEYS[edge];
+                                            startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
+                                              const target = section(next, b).rows[r].columns[c];
+                                              writeDragSideKeys(
+                                                target,
+                                                Object.values(PADDING_SIDE_KEYS),
+                                                key,
+                                                px,
+                                                linkedPadding,
+                                              );
+                                            });
+                                          }}
+                                          className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                            edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                                          }`}
+                                        >
+                                          {edge === "top" ? topPx : bottomPx}px
+                                        </span>
+                                      ))}
+                                      {(["left", "right"] as const).map((edge) => (
+                                        <span
+                                          key={edge}
+                                          onMouseDown={(ev) => {
+                                            const startPx = edge === "left" ? leftPx : rightPx;
+                                            const key = PADDING_SIDE_KEYS[edge];
+                                            startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => {
+                                              const target = section(next, b).rows[r].columns[c];
+                                              writeDragSideKeys(
+                                                target,
+                                                Object.values(PADDING_SIDE_KEYS),
+                                                key,
+                                                px,
+                                                linkedPadding,
+                                              );
+                                            });
+                                          }}
+                                          className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                            edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                                          }`}
+                                        >
+                                          {edge === "left" ? leftPx : rightPx}px
+                                        </span>
+                                      ))}
+                                    </>
+                                  );
+                                })()}
+                              {selEq([b, r, c]) &&
+                                (() => {
+                                  // Column margin — same outward-band pattern as Section's, no
+                                  // canvas drag existed for it before (Inspector-text-only).
+                                  const sidePx = (side: "top" | "bottom") =>
+                                    Number(pxLabel(lengthValue(sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], "marginY"), PAD, "0"))) ||
+                                    0;
+                                  const topPx = sidePx("top");
+                                  const bottomPx = sidePx("bottom");
+                                  return (
+                                    <>
+                                      {spacingBand("top", topPx, true)}
+                                      {spacingBand("bottom", bottomPx, true)}
+                                      {(["top", "bottom"] as const).map((edge) => (
+                                        <span
+                                          key={edge}
+                                          onMouseDown={(ev) => {
+                                            const startPx = edge === "top" ? topPx : bottomPx;
+                                            const key = MARGIN_SIDE_KEYS[edge];
+                                            startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
+                                              const target = section(next, b).rows[r].columns[c];
+                                              writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
+                                            });
+                                          }}
+                                          className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                            edge === "top" ? "-top-2" : "-bottom-2"
+                                          }`}
+                                        >
+                                          {edge === "top" ? topPx : bottomPx}px
+                                        </span>
+                                      ))}
+                                    </>
+                                  );
+                                })()}
                               {col.elements.length === 0 && (
                                 <div className="flex h-12 items-center justify-center rounded-lg border border-dashed border-line/40 text-[10px] font-medium text-sub">
                                   {t("designer-empty-col")}
@@ -2970,36 +3346,121 @@ export default function Designer({
                                     setCtxMenu({ path: [b, r, c, e], x: ev.clientX, y: ev.clientY });
                                   }}
                                   className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
-                                  style={bpMarginStyle(el)}
+                                  style={{ ...bpMarginStyle(el), ...bpPaddingStyle(el) }}
                                 >
                                   {selEq([b, r, c, e]) && (
-                                    <GripVertical className="absolute left-1 top-1 h-3.5 w-3.5 text-accent" />
+                                    <div className="absolute -left-2 -top-2 z-30 rounded-full bg-white p-1 text-accent shadow-sm ring-1 ring-line/30">
+                                      <GripVertical className="h-3 w-3" />
+                                    </div>
                                   )}
-                                  {selEq([b, r, c, e]) && (
-                                    <span
-                                      onMouseDown={(ev) => {
-                                        const startPx =
-                                          Number(pxLabel(lengthValue(bpGetValue(el.props.marginY, el.bp, "marginY"), SPACE, "0"))) ||
-                                          0;
-                                        startSpacingDrag(ev, startPx, "y", 1, (next, px) => {
-                                          const target = section(next, b).rows[r].columns[c].elements[e];
-                                          if (bp === "desktop") {
-                                            target.props.marginY = `${px}px`;
-                                          } else {
-                                            target.bp = { ...(target.bp ?? {}), [bpKey("marginY")]: `${px}px` };
-                                          }
-                                        });
+                                  {selEq([b, r, c, e]) && mode !== "live" && (
+                                    <button
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        deleteElement(b, r, c, e);
                                       }}
-                                      className="absolute -top-2 right-1 z-20 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white"
+                                      title={t("designer-delete")}
+                                      className="absolute -right-2 -top-2 z-30 rounded-full bg-white p-1 text-red-500 shadow-sm ring-1 ring-line/30"
                                     >
-                                      {pxLabel(lengthValue(bpGetValue(el.props.marginY, el.bp, "marginY"), SPACE, "0"))}px
-                                    </span>
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
                                   )}
+                                  {selEq([b, r, c, e]) &&
+                                    (() => {
+                                      const sidePx = (key: string) =>
+                                        Number(pxLabel(lengthValue(sideValue(el.props, el.bp, key, "marginY"), SPACE, "0"))) || 0;
+                                      const topPx = sidePx(MARGIN_SIDE_KEYS.top);
+                                      const bottomPx = sidePx(MARGIN_SIDE_KEYS.bottom);
+                                      return (
+                                        <>
+                                          {spacingBand("top", topPx, true)}
+                                          {spacingBand("bottom", bottomPx, true)}
+                                          {(["top", "bottom"] as const).map((edge) => (
+                                            <span
+                                              key={edge}
+                                              onMouseDown={(ev) => {
+                                                const startPx = edge === "top" ? topPx : bottomPx;
+                                                const key = MARGIN_SIDE_KEYS[edge];
+                                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
+                                                  const target = section(next, b).rows[r].columns[c].elements[e];
+                                                  writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
+                                                });
+                                              }}
+                                              className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                                edge === "top" ? "-top-2" : "-bottom-2"
+                                              }`}
+                                            >
+                                              {edge === "top" ? topPx : bottomPx}px
+                                            </span>
+                                          ))}
+                                        </>
+                                      );
+                                    })()}
+                                  {selEq([b, r, c, e]) &&
+                                    (() => {
+                                      // Universal element padding — inward bands/handles, same edge
+                                      // positions as Column's (top/bottom centered, left/right
+                                      // vertically centered), so it never collides with the grip,
+                                      // delete, or margin badges, which all live at the corners/edges
+                                      // outside the box.
+                                      const sidePx = (side: keyof typeof PADDING_SIDE_KEYS) =>
+                                        Number(pxLabel(lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding"), PAD, "0"))) ||
+                                        0;
+                                      const topPx = sidePx("top");
+                                      const rightPx = sidePx("right");
+                                      const bottomPx = sidePx("bottom");
+                                      const leftPx = sidePx("left");
+                                      return (
+                                        <>
+                                          {spacingBand("top", topPx)}
+                                          {spacingBand("bottom", bottomPx)}
+                                          {spacingBand("left", leftPx)}
+                                          {spacingBand("right", rightPx)}
+                                          {(["top", "bottom"] as const).map((edge) => (
+                                            <span
+                                              key={edge}
+                                              onMouseDown={(ev) => {
+                                                const startPx = edge === "top" ? topPx : bottomPx;
+                                                const key = PADDING_SIDE_KEYS[edge];
+                                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
+                                                  const target = section(next, b).rows[r].columns[c].elements[e];
+                                                  writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
+                                                });
+                                              }}
+                                              className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                                edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                                              }`}
+                                            >
+                                              {edge === "top" ? topPx : bottomPx}px
+                                            </span>
+                                          ))}
+                                          {(["left", "right"] as const).map((edge) => (
+                                            <span
+                                              key={edge}
+                                              onMouseDown={(ev) => {
+                                                const startPx = edge === "left" ? leftPx : rightPx;
+                                                const key = PADDING_SIDE_KEYS[edge];
+                                                startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => {
+                                                  const target = section(next, b).rows[r].columns[c].elements[e];
+                                                  writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
+                                                });
+                                              }}
+                                              className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                                edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                                              }`}
+                                            >
+                                              {edge === "left" ? leftPx : rightPx}px
+                                            </span>
+                                          ))}
+                                        </>
+                                      );
+                                    })()}
                                   {ElPreview({ el, path: [b, r, c, e] })}
                                 </div>
                               ))}
                             </div>
                           ))}
+                          </div>
                         </div>
                       ))}
                       {/* add-row presets */}
@@ -3159,6 +3620,19 @@ export default function Designer({
                 },
                 !styleHas("element"),
               )}
+              <div className="my-1 border-t border-line/20" />
+              {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => void saveAsTemplate())}
+              <div className="my-1 border-t border-line/20" />
+              <button
+                onClick={() => {
+                  deleteElement(b, r, c, e);
+                  setCtxMenu(null);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-red-500 hover:bg-canvas"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t("designer-delete")}
+              </button>
             </div>
           );
         })()}
