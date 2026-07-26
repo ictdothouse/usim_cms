@@ -1,0 +1,16 @@
+[Unit]
+Description=usim_cms ops monitor (port 5555)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=__NODE_BIN__ __REPO_DIR__/monitor/server.js
+WorkingDirectory=__REPO_DIR__
+EnvironmentFile=/etc/usim-cms-monitor.env
+Restart=on-failure
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
