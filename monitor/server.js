@@ -1,8 +1,18 @@
 #!/usr/bin/env node
-// Zero-dependency ops dashboard for the usim_cms docker-compose stack — no
-// npm install, just Node's own builtins, so installing it never touches
-// whatever package versions any other project on this VPS depends on.
-// Started by install.sh as a systemd unit; see monitor/usim-cms-monitor.service.
+// Zero-dependency ops dashboard for the usim_cms stack — no npm install,
+// just Node's own builtins, so installing it never touches whatever package
+// versions any other project on this VPS depends on.
+// Started by install.sh as a systemd unit; see monitor/usim-cms-monitor.service.template.
+//
+// Two backends, selected by $DEPLOY_MODE (set by install.sh):
+//   "docker"  — actions run `docker compose <action> <service>` against the
+//               db/api/frontend/admin services in docker-compose.yml.
+//   "systemd" — actions run `systemctl <action> usim-cms-<service>` against
+//               the bare-metal install's own units, and Postgres is only
+//               ever restarted if $DB_MANAGED=true (this install's own
+//               ensure_postgres actually installed it — if it instead
+//               reused an already-running cluster, restarting it could take
+//               down some other app on this VPS that also depends on it).
 "use strict";
 
 const http = require("http");
@@ -16,9 +26,19 @@ const REPO_DIR = process.env.REPO_DIR || process.cwd();
 const MONITOR_USER = process.env.MONITOR_USER || "admin";
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "";
 const DEPLOY_LOG = path.join(REPO_DIR, ".deploy.log");
+const DEPLOY_MODE = process.env.DEPLOY_MODE === "systemd" ? "systemd" : "docker";
+const DB_MANAGED = process.env.DB_MANAGED !== "false";
+// Only used in systemd mode's "pull latest & rebuild" — install.sh writes
+// these into the same env file this process already reads MONITOR_* from.
+const NODE_BIN = process.env.NODE_BIN || "node";
+const API_PORT = process.env.API_PORT || "3000";
+const FRONTEND_PORT = process.env.FRONTEND_PORT || "4321";
+const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
+
 // Whitelisted so a service name never reaches child_process from raw user
 // input — every route validates against this array before shelling out.
-const SERVICES = ["db", "api", "frontend", "admin"];
+const SERVICES = DEPLOY_MODE === "docker" ? ["db", "api", "frontend", "admin"] : ["api", "frontend", "admin"];
+const UNIT_MAP = { api: "usim-cms-api", frontend: "usim-cms-frontend", admin: "usim-cms-admin" };
 
 if (!MONITOR_PASSWORD) {
   console.error("MONITOR_PASSWORD is not set — refusing to start with no auth.");
@@ -69,9 +89,7 @@ function runCompose(args, cb) {
     "docker",
     ["compose", ...args],
     { cwd: REPO_DIR, timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      cb(err, stdout, stderr);
-    },
+    (err, stdout, stderr) => cb(err, stdout, stderr),
   );
 }
 
@@ -99,6 +117,23 @@ function getComposeStatus(cb) {
   });
 }
 
+function getSystemdStatus(cb) {
+  const results = [];
+  let pending = SERVICES.length;
+  if (pending === 0) return cb(null, results);
+  for (const name of SERVICES) {
+    execFile("systemctl", ["is-active", UNIT_MAP[name]], { timeout: 5_000 }, (err, stdout) => {
+      results.push({ Service: name, State: (stdout || (err ? "inactive" : "unknown")).trim() });
+      if (--pending === 0) cb(null, results);
+    });
+  }
+}
+
+function getStatus(cb) {
+  if (DEPLOY_MODE === "docker") return getComposeStatus(cb);
+  return getSystemdStatus(cb);
+}
+
 function getGitInfo(cb) {
   execFile("git", ["log", "-1", "--format=%h %cI %s"], { cwd: REPO_DIR, timeout: 10_000 }, (err, stdout) => {
     cb(err ? null : stdout.trim());
@@ -110,14 +145,16 @@ function getHostStats(cb) {
     "sh",
     ["-c", "df -h / | tail -1; echo ---; free -m | sed -n '2p'"],
     { timeout: 10_000 },
-    (err, stdout) => {
-      cb(err ? null : stdout.trim());
-    },
+    (err, stdout) => cb(err ? null : stdout.trim()),
   );
 }
 
+function handleConfig(req, res) {
+  sendJson(res, 200, { mode: DEPLOY_MODE, services: SERVICES, dbManaged: DEPLOY_MODE === "docker" ? true : DB_MANAGED });
+}
+
 function handleStatus(req, res) {
-  getComposeStatus((err, services) => {
+  getStatus((err, services) => {
     if (err) return sendJson(res, 500, { error: String(err.message || err) });
     getGitInfo((git) => {
       getHostStats((host) => {
@@ -130,7 +167,13 @@ function handleStatus(req, res) {
 function handleServiceAction(req, res, name, action) {
   if (!SERVICES.includes(name)) return sendJson(res, 400, { error: "unknown service" });
   if (!["start", "stop", "restart"].includes(action)) return sendJson(res, 400, { error: "unknown action" });
-  runCompose([action, name], (err, stdout, stderr) => {
+  if (DEPLOY_MODE === "docker") {
+    return runCompose([action, name], (err, stdout, stderr) => {
+      if (err) return sendJson(res, 500, { error: String(err.message || err), stderr });
+      sendJson(res, 200, { ok: true, stdout, stderr });
+    });
+  }
+  execFile("systemctl", [action, UNIT_MAP[name]], { timeout: 30_000 }, (err, stdout, stderr) => {
     if (err) return sendJson(res, 500, { error: String(err.message || err), stderr });
     sendJson(res, 200, { ok: true, stdout, stderr });
   });
@@ -139,46 +182,90 @@ function handleServiceAction(req, res, name, action) {
 function handleLogs(req, res, name, tail) {
   if (!SERVICES.includes(name)) return sendJson(res, 400, { error: "unknown service" });
   const n = String(Math.min(Math.max(Number(tail) || 200, 1), 2000));
-  execFile(
-    "docker",
-    ["compose", "logs", "--no-color", "--tail", n, name],
-    { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      if (err && !stdout) return sendJson(res, 500, { error: String(err.message || err), stderr });
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(stdout || stderr || "(no output)");
-    },
-  );
+  const respond = (err, stdout, stderr) => {
+    if (err && !stdout) return sendJson(res, 500, { error: String(err.message || err), stderr });
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(stdout || stderr || "(no output)");
+  };
+  if (DEPLOY_MODE === "docker") {
+    return execFile(
+      "docker",
+      ["compose", "logs", "--no-color", "--tail", n, name],
+      { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
+      respond,
+    );
+  }
+  execFile("journalctl", ["-u", UNIT_MAP[name], "-n", n, "--no-pager"], { timeout: 20_000, maxBuffer: 10 * 1024 * 1024 }, respond);
 }
 
 function handleDbStatus(req, res) {
-  execFile(
-    "docker",
-    ["compose", "exec", "-T", "db", "pg_isready", "-U", "postgres"],
-    { cwd: REPO_DIR, timeout: 10_000 },
-    (err, stdout, stderr) => {
-      sendJson(res, 200, { ok: !err, output: (stdout || stderr || "").trim() });
-    },
-  );
+  if (DEPLOY_MODE === "docker") {
+    return execFile(
+      "docker",
+      ["compose", "exec", "-T", "db", "pg_isready", "-U", "postgres"],
+      { cwd: REPO_DIR, timeout: 10_000 },
+      (err, stdout, stderr) => sendJson(res, 200, { ok: !err, output: (stdout || stderr || "").trim() }),
+    );
+  }
+  execFile("pg_isready", ["-h", "127.0.0.1", "-p", "5432"], { timeout: 10_000 }, (err, stdout, stderr) => {
+    sendJson(res, 200, { ok: !err, output: (stdout || stderr || "").trim(), managed: DB_MANAGED });
+  });
 }
 
-// git pull + rebuild + redeploy takes a while (can involve a from-scratch
-// docker build) — run detached, log to a file, and let the dashboard poll
-// /api/pull/status + /api/pull/log instead of holding the HTTP request open.
+function handleDbRestart(req, res) {
+  if (DEPLOY_MODE === "docker") return handleServiceAction(req, res, "db", "restart");
+  if (!DB_MANAGED) {
+    return sendJson(res, 409, {
+      error:
+        "This install reused an already-running PostgreSQL cluster instead of installing its own — restarting it here could affect other apps on this VPS, so it's not offered.",
+    });
+  }
+  execFile("systemctl", ["restart", "postgresql"], { timeout: 30_000 }, (err, stdout, stderr) => {
+    if (err) return sendJson(res, 500, { error: String(err.message || err), stderr });
+    sendJson(res, 200, { ok: true, stdout, stderr });
+  });
+}
+
+// git pull + rebuild + redeploy takes a while — run detached, log to a
+// file, and let the dashboard poll /api/pull/status + /api/pull/log instead
+// of holding the HTTP request open.
 function handlePull(req, res) {
   if (deployState.running) return sendJson(res, 409, { error: "a deploy is already running" });
   deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
   const logFd = fs.openSync(DEPLOY_LOG, "a");
   fs.writeSync(logFd, `\n\n=== deploy started ${deployState.startedAt} ===\n`);
-  const script = `
+
+  const pullStep = "git fetch origin && git reset --hard origin/main";
+  const script =
+    DEPLOY_MODE === "docker"
+      ? `
     set -e
     echo "--- git pull ---"
-    git fetch origin
-    git reset --hard origin/main
+    ${pullStep}
     echo "--- docker compose build ---"
     docker compose build
     echo "--- docker compose up -d ---"
     docker compose up -d db api frontend admin
+    echo "--- done ---"
+  `
+      : `
+    set -e
+    NODE_DIR="$(dirname "${NODE_BIN}")"
+    export PATH="$NODE_DIR:$PATH"
+    "$NODE_DIR/corepack" enable
+    echo "--- git pull ---"
+    ${pullStep}
+    echo "--- pnpm install ---"
+    pnpm install --frozen-lockfile
+    echo "--- build api ---"
+    pnpm --filter @usim-cms/api build
+    echo "--- build admin ---"
+    VITE_API_URL="http://${PUBLIC_HOST}:${API_PORT}" VITE_FRONTEND_URL="http://${PUBLIC_HOST}:${FRONTEND_PORT}" \\
+      pnpm --filter @usim-cms/admin build
+    echo "--- build frontend ---"
+    API_URL="http://127.0.0.1:${API_PORT}" pnpm --filter @usim-cms/frontend build
+    echo "--- restarting services ---"
+    systemctl restart usim-cms-api usim-cms-frontend usim-cms-admin
     echo "--- done ---"
   `;
   const child = spawn("sh", ["-c", script], {
@@ -232,7 +319,8 @@ const DASHBOARD_HTML = `<!doctype html>
 </head>
 <body>
 <h1>usim_cms — server monitor</h1>
-<p class="muted" id="git">loading…</p>
+<p class="muted" id="mode">loading…</p>
+<p class="muted" id="git"></p>
 <p class="muted" id="host"></p>
 
 <div class="row">
@@ -245,12 +333,19 @@ const DASHBOARD_HTML = `<!doctype html>
 
 <table id="services"><tbody></tbody></table>
 
+<h3>Database</h3>
+<div class="row">
+  <span class="muted" id="dbStatus">checking…</span>
+  <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
+</div>
+
 <h3>Logs</h3>
 <div class="row" id="logButtons"></div>
 <pre id="logs">Pick a service above to view its logs.</pre>
 
 <script>
-const SERVICES = ["db", "api", "frontend", "admin"];
+let SERVICES = [];
+let DB_MANAGED = true;
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -261,7 +356,7 @@ async function api(path, opts) {
 }
 
 function statusBadge(s) {
-  const up = /running|healthy/i.test(s.State || s.Health || "");
+  const up = /running|healthy|active/i.test(s.State || s.Health || "");
   const span = document.createElement("span");
   span.className = "badge " + (up ? "up" : "down");
   span.textContent = (s.State || "unknown") + (s.Health ? " (" + s.Health + ")" : "");
@@ -274,6 +369,26 @@ function actionButton(label, name, action, secondary) {
   b.textContent = label;
   b.onclick = () => act(name, action);
   return b;
+}
+
+async function init() {
+  const cfg = await api("/api/config");
+  SERVICES = cfg.services;
+  DB_MANAGED = cfg.dbManaged;
+  document.getElementById("mode").textContent = "Mode: " + cfg.mode;
+  document.getElementById("dbRestartBtn").style.display = DB_MANAGED ? "" : "none";
+  const logButtons = document.getElementById("logButtons");
+  for (const name of SERVICES) {
+    const b = document.createElement("button");
+    b.className = "secondary";
+    b.textContent = name;
+    b.onclick = () => showLogs(name);
+    logButtons.appendChild(b);
+  }
+  refresh();
+  refreshDb();
+  setInterval(refresh, 5000);
+  setInterval(refreshDb, 10000);
 }
 
 async function refresh() {
@@ -311,6 +426,24 @@ async function refresh() {
     if (d.running) pollDeployLog();
   } catch (e) {
     document.getElementById("git").textContent = "Error: " + e.message;
+  }
+}
+
+async function refreshDb() {
+  try {
+    const d = await api("/api/db/status");
+    document.getElementById("dbStatus").textContent = (d.ok ? "up — " : "down — ") + (d.output || "");
+  } catch (e) {
+    document.getElementById("dbStatus").textContent = "Error: " + e.message;
+  }
+}
+
+async function dbRestart() {
+  try {
+    await api("/api/db/restart", { method: "POST" });
+    setTimeout(refreshDb, 1500);
+  } catch (e) {
+    alert(e.message);
   }
 }
 
@@ -367,17 +500,7 @@ async function showLogs(name) {
   }
 }
 
-const logButtons = document.getElementById("logButtons");
-for (const name of SERVICES) {
-  const b = document.createElement("button");
-  b.className = "secondary";
-  b.textContent = name;
-  b.onclick = () => showLogs(name);
-  logButtons.appendChild(b);
-}
-
-refresh();
-setInterval(refresh, 5000);
+init();
 </script>
 </body>
 </html>`;
@@ -399,6 +522,8 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(DASHBOARD_HTML);
+    } else if (req.method === "GET" && url.pathname === "/api/config") {
+      handleConfig(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/status") {
       handleStatus(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "service" && parts[3]) {
@@ -408,7 +533,7 @@ const server = http.createServer((req, res) => {
     } else if (req.method === "GET" && url.pathname === "/api/db/status") {
       handleDbStatus(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/db/restart") {
-      handleServiceAction(req, res, "db", "restart");
+      handleDbRestart(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/pull") {
       handlePull(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/status") {
@@ -424,5 +549,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`usim_cms monitor listening on :${PORT} (repo: ${REPO_DIR})`);
+  console.log(`usim_cms monitor listening on :${PORT} (repo: ${REPO_DIR}, mode: ${DEPLOY_MODE})`);
 });
