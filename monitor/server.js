@@ -57,14 +57,22 @@ function checkAuth(req) {
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(data) });
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(data),
+  });
   res.end(data);
 }
 
 function runCompose(args, cb) {
-  execFile("docker", ["compose", ...args], { cwd: REPO_DIR, timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-    cb(err, stdout, stderr);
-  });
+  execFile(
+    "docker",
+    ["compose", ...args],
+    { cwd: REPO_DIR, timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
+    (err, stdout, stderr) => {
+      cb(err, stdout, stderr);
+    },
+  );
 }
 
 function getComposeStatus(cb) {
@@ -73,7 +81,10 @@ function getComposeStatus(cb) {
     // `docker compose ps --format json` emits one JSON object per line, not
     // a single array — has changed shape across Compose versions, so accept
     // both.
-    const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     let services = [];
     try {
       if (lines.length === 1 && lines[0].startsWith("[")) {
@@ -95,9 +106,14 @@ function getGitInfo(cb) {
 }
 
 function getHostStats(cb) {
-  execFile("sh", ["-c", "df -h / | tail -1; echo ---; free -m | sed -n '2p'"], { timeout: 10_000 }, (err, stdout) => {
-    cb(err ? null : stdout.trim());
-  });
+  execFile(
+    "sh",
+    ["-c", "df -h / | tail -1; echo ---; free -m | sed -n '2p'"],
+    { timeout: 10_000 },
+    (err, stdout) => {
+      cb(err ? null : stdout.trim());
+    },
+  );
 }
 
 function handleStatus(req, res) {
@@ -123,17 +139,27 @@ function handleServiceAction(req, res, name, action) {
 function handleLogs(req, res, name, tail) {
   if (!SERVICES.includes(name)) return sendJson(res, 400, { error: "unknown service" });
   const n = String(Math.min(Math.max(Number(tail) || 200, 1), 2000));
-  execFile("docker", ["compose", "logs", "--no-color", "--tail", n, name], { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err && !stdout) return sendJson(res, 500, { error: String(err.message || err), stderr });
-    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end(stdout || stderr || "(no output)");
-  });
+  execFile(
+    "docker",
+    ["compose", "logs", "--no-color", "--tail", n, name],
+    { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
+    (err, stdout, stderr) => {
+      if (err && !stdout) return sendJson(res, 500, { error: String(err.message || err), stderr });
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(stdout || stderr || "(no output)");
+    },
+  );
 }
 
 function handleDbStatus(req, res) {
-  execFile("docker", ["compose", "exec", "-T", "db", "pg_isready", "-U", "postgres"], { cwd: REPO_DIR, timeout: 10_000 }, (err, stdout, stderr) => {
-    sendJson(res, 200, { ok: !err, output: (stdout || stderr || "").trim() });
-  });
+  execFile(
+    "docker",
+    ["compose", "exec", "-T", "db", "pg_isready", "-U", "postgres"],
+    { cwd: REPO_DIR, timeout: 10_000 },
+    (err, stdout, stderr) => {
+      sendJson(res, 200, { ok: !err, output: (stdout || stderr || "").trim() });
+    },
+  );
 }
 
 // git pull + rebuild + redeploy takes a while (can involve a from-scratch
@@ -155,7 +181,11 @@ function handlePull(req, res) {
     docker compose up -d db api frontend admin
     echo "--- done ---"
   `;
-  const child = spawn("sh", ["-c", script], { cwd: REPO_DIR, stdio: ["ignore", logFd, logFd], detached: true });
+  const child = spawn("sh", ["-c", script], {
+    cwd: REPO_DIR,
+    stdio: ["ignore", logFd, logFd],
+    detached: true,
+  });
   child.unref();
   child.on("exit", (code) => {
     deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
@@ -354,7 +384,10 @@ setInterval(refresh, 5000);
 
 const server = http.createServer((req, res) => {
   if (!checkAuth(req)) {
-    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="usim_cms monitor"', "Content-Type": "text/plain" });
+    res.writeHead(401, {
+      "WWW-Authenticate": 'Basic realm="usim_cms monitor"',
+      "Content-Type": "text/plain",
+    });
     res.end("Auth required");
     return;
   }
