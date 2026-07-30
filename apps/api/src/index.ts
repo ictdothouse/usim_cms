@@ -11,6 +11,7 @@ import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
+import { validateLayout } from "./collections/validate-layout.js";
 import * as schema from "./db/schema.js";
 import {
   closePool,
@@ -97,6 +98,15 @@ const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 // Letters/digits/space only — this string ends up inside a Google Fonts URL
 // built by apps/frontend, so it must not carry `/`, `?`, `<`, etc.
 const FONT_FAMILY_RE = /^[A-Za-z0-9 ]*$/;
+// pages.settings.gap (and Row.gap inside pages.layout) is interpolated
+// directly into a raw CSS string by SectionBlock.astro
+// (`gap:${row.gap ?? pageGap ?? "2rem"}`), not set via a safe DOM style API —
+// an unconstrained value could break out of that one declaration via `;` and
+// inject arbitrary CSS (or worse) into every visitor's page for this tenant.
+// Same "reject anything that isn't a bare number+unit" defense as the color/
+// font checks above, expressed as a JSON-schema pattern so Fastify's AJV
+// validation rejects a bad value before it ever reaches the DB.
+const GAP_PATTERN = "^$|^[0-9]+(\\.[0-9]+)?(px|rem|em|%|vh|vw)?$";
 
 // fontFamily = body font; headingFont/postTitleFont are the other two roles
 // in the type system (Header/Title, Blog/Post Title) — all three end up in
@@ -705,6 +715,15 @@ app.get("/api/portal/tenants/:host/static-export", async (req, reply) => {
 // posts already gets and pages never did.
 const pagesBeforeChange = (data: unknown) => {
   const record = data as Record<string, unknown>;
+  if (record.layout !== undefined) {
+    const err = validateLayout(record.layout);
+    // beforeChange has no `reply` in its signature (see config-types.ts) —
+    // throwing here happens before generic-crud.ts's insert/update try block,
+    // so it's never swallowed into a 23505 500; Fastify's default error
+    // handler honors `.statusCode` on a thrown Error, giving a clean 400
+    // instead of the 500 an unannotated throw would produce.
+    if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  }
   if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
   record.updatedAt = new Date();
   return record;
@@ -723,7 +742,11 @@ const pagesCollection: CollectionConfig = {
       layout: { type: "array" },
       bannerImageUrl: { type: "string" },
       status: { type: "string", enum: ["draft", "published"] },
-      settings: { type: "object" },
+      settings: {
+        type: "object",
+        additionalProperties: false,
+        properties: { gap: { type: "string", pattern: GAP_PATTERN } },
+      },
     },
   },
   shareable: {

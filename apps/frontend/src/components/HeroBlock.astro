@@ -5,8 +5,20 @@ interface Props {
   imageUrl?: string;
 }
 const { title, subtitle, imageUrl } = Astro.props;
+// imageUrl is concatenated into a raw url(...) CSS function below, not bound
+// through a safe attribute — an unguarded value is a stored CSS-injection
+// vector (same reasoning as SectionBlock.astro's bgImage/safeUrl). apps/api
+// already rejects an unsafe imageUrl at write time (validate-layout.ts); this
+// is defense-in-depth for any row written before that check existed.
+const safeImageUrl = (u?: string) => {
+  const v = u?.trim();
+  if (!v || /['";(){}\s]/.test(v)) return undefined;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : undefined;
+  return v;
+};
+const bgUrl = safeImageUrl(imageUrl);
 ---
-<section class="hero" style={imageUrl ? `background-image:url(${imageUrl})` : undefined}>
+<section class="hero" style={bgUrl ? `background-image:url('${bgUrl}')` : undefined}>
   {title && <h1>{title}</h1>}
   {subtitle && <p>{subtitle}</p>}
 </section>

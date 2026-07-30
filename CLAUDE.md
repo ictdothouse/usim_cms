@@ -62,7 +62,24 @@ pnpm workspace monorepo with two apps:
   - `src/db/schema.ts` defines the `pages` table. Page content is a dynamic block layout stored in the
     `layout` JSONB column, not as separate relational tables per block type. `settings` (JSONB, migration
     `0012_page_settings.sql`) is page-wide Designer defaults — currently just `{ gap?: string }`, the
-    default column gap a row falls back to when it doesn't set its own (`Row.gap`, below).
+    default column gap a row falls back to when it doesn't set its own (`Row.gap`, below); its `gap` key is
+    constrained to `GAP_PATTERN` (a bare number or number+unit) via `pagesCollection.createSchema`'s JSON
+    schema, since it's interpolated straight into a raw CSS string by `SectionBlock.astro`
+    (`` gap:${row.gap ?? pageGap ?? "2rem"} ``) — an unconstrained value would be a stored CSS-injection
+    vector into every visitor's page. The much larger surface for the same risk is `layout` itself: every
+    section/row/column/element prop (`El.props`/`Col.props`/`SectionProps` are all just
+    `Record<string,string>`) ends up in a raw CSS string or attribute the same way, so
+    `src/collections/validate-layout.ts`'s `validateLayout()` walks the whole tree in `pagesBeforeChange`
+    and rejects (400, via a thrown `Error` carrying `.statusCode` — `beforeChange` has no `reply` to call
+    directly) anything that isn't a recognized, safely-shaped value for its key: hex color, CSS length,
+    an exact enum match (mirroring Designer.tsx's own `options: [...]` arrays), a scheme-checked URL, or
+    (for `bgImage`/gallery `images`, which land in a raw `url(...)`, not a safe attribute) a URL with no
+    quote/semicolon/paren/brace/whitespace. `html` (the Custom HTML element) is deliberately exempt — a raw
+    HTML/CSS/JS embed is an intentional, documented trust boundary, not a gap to close. The legacy
+    BlockBuilder's `hero` block gets the same `imageUrl` check (also a raw `url(...)`); `HeroBlock.astro`
+    additionally got its own render-time `safeImageUrl` guard as defense-in-depth (it previously had none
+    at all, unlike `SectionBlock.astro`'s `bgImage`/`safeUrl`), for any row written before this validator
+    existed.
   - `src/collections/config-types.ts` + `src/plugins/generic-crud.ts` are the code-first collection
     system: a `CollectionConfig` (slug, `access` functions keyed by role/department, `beforeChange`/
     `afterChange` hooks — both receive `(data, args, req)`, so a hook can tell `POST` from `PATCH` via
