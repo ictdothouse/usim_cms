@@ -17,6 +17,9 @@ export interface Page {
   title: string;
   layout: Array<{ type: string; props?: Record<string, unknown> }>;
   bannerImageUrl: string | null;
+  // Page-wide Designer defaults — currently just the default column gap for
+  // rows that don't set their own (see SectionBlock.astro's pageGap prop).
+  settings?: { gap?: string };
 }
 
 // token, when present, is forwarded as a Bearer header so apps/api's

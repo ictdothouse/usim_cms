@@ -6,6 +6,10 @@ export const pages = pgTable("pages", {
   title: text("title").notNull(),
   // Dynamic block layout for the page, e.g. [{ type: "hero", props: {...} }, ...]
   layout: jsonb("layout").notNull().default([]),
+  // Page-wide Designer defaults (currently just { gap?: string }, the
+  // default column gap for rows that don't set their own — see
+  // apps/admin/src/Designer.tsx's Inspector "nothing selected" panel).
+  settings: jsonb("settings").notNull().default({}),
   bannerImageUrl: text("banner_image_url"),
   status: text("status").notNull().default("draft"), // "draft" | "published"
   publishedAt: timestamp("published_at"),

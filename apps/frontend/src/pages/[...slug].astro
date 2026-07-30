@@ -50,7 +50,14 @@ const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boole
   {page.layout.map((block, b) => {
     switch (block.type) {
       case "section":
-        return <SectionBlock {...(block.props ?? {})} designerEdit={designerEdit} blockIndex={b} />;
+        return (
+          <SectionBlock
+            {...(block.props ?? {})}
+            pageGap={page.settings?.gap}
+            designerEdit={designerEdit}
+            blockIndex={b}
+          />
+        );
       case "hero":
         return <HeroBlock {...(block.props ?? {})} />;
       case "text":

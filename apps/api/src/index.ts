@@ -723,6 +723,7 @@ const pagesCollection: CollectionConfig = {
       layout: { type: "array" },
       bannerImageUrl: { type: "string" },
       status: { type: "string", enum: ["draft", "published"] },
+      settings: { type: "object" },
     },
   },
   shareable: {
