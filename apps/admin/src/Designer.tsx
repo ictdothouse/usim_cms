@@ -196,6 +196,19 @@ export interface Col {
 }
 export interface Row {
   columns: Col[];
+  // Gap between this row's columns. Unset falls back to the same default
+  // the real frontend's .ds-row CSS uses (SectionBlock.astro) — "2rem".
+  gap?: string;
+  // Space above/below this row (the gap *between rows* stacked in the same
+  // section). Unset marginTop falls back to the old fixed space-y value
+  // (see the rows container below) — except row 0, which never got a
+  // leading gap under the old space-y-based layout either.
+  marginTop?: string;
+  marginBottom?: string;
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
 }
 export interface SectionProps {
   bg?: string;
@@ -213,13 +226,25 @@ export interface SectionProps {
   paddingBottom?: string;
   paddingLeft?: string;
   marginY?: string;
-  // Per-side overrides for marginY — top/bottom only (no marginX: sections
-  // are block-flow, horizontal margin isn't a real concept here). Same
-  // fallback convention as padding's per-side keys.
+  marginX?: string;
+  // Per-side overrides — same fallback convention as padding's per-side keys
+  // (marginTop/Bottom -> marginY, marginLeft/Right -> marginX).
   marginTop?: string;
   marginBottom?: string;
+  marginLeft?: string;
+  marginRight?: string;
   width?: string;
   border?: string;
+  // Real stroke (replaces the border preset above for anything edited after
+  // this was added): borderWidth set means "use these", otherwise render
+  // falls back to the legacy none/thin/thick preset so old pages don't move.
+  borderWidth?: string;
+  borderColor?: string;
+  borderStyle?: string;
+  // 0-100 percent string, CSS opacity applied to the whole section (backdrop
+  // + content) — unset means fully opaque, same convention as every other
+  // optional style prop here.
+  opacity?: string;
   shadow?: string;
   radius?: string;
   // Per-corner overrides, same fallback convention: unset falls back to the
@@ -241,7 +266,7 @@ export interface Block {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery" | "length" | "icon";
+type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery" | "length" | "icon" | "shadow";
 interface Field {
   key: string;
   labelKey: Key;
@@ -263,6 +288,10 @@ const FIELD_ICONS: Partial<Record<Key, typeof Check>> = {
   "designer-f-marginy": MoveVertical,
   "designer-s-width": RectangleHorizontal,
   "designer-s-border": Square,
+  "designer-s-borderwidth": Square,
+  "designer-s-bordercolor": Palette,
+  "designer-s-borderstyle": Square,
+  "designer-s-opacity": Percent,
   "designer-s-shadow": Blend,
   "designer-f-radius": SquareDashedBottom,
   "designer-f-anchorid": Anchor,
@@ -472,7 +501,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "src", labelKey: "designer-f-src", kind: "image" },
       { key: "alt", labelKey: "designer-f-alt", kind: "text" },
       // radius edited via FourSideControl (element Inspector) — see Designer.tsx's ELS-radius branch.
-      { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
     ],
   },
   button: {
@@ -501,7 +530,7 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "url", labelKey: "designer-f-url", kind: "text" },
       { key: "ratio", labelKey: "designer-f-ratio", kind: "select", options: ["16:9", "4:3", "1:1"] },
       // radius edited via FourSideControl (element Inspector) — see Designer.tsx's ELS-radius branch.
-      { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
     ],
   },
   icon: {
@@ -563,14 +592,16 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   spacer: [],
   divider: [],
 };
-type ClipLevel = "section" | "column" | "element";
+type ClipLevel = "section" | "row" | "column" | "element";
 const CLIP_KEYS: Record<ClipLevel, string> = {
   section: "designer:clip:section",
+  row: "designer:clip:row",
   column: "designer:clip:column",
   element: "designer:clip:element",
 };
 const CLIPSTYLE_KEYS: Record<ClipLevel, string> = {
   section: "designer:clipstyle:section",
+  row: "designer:clipstyle:row",
   column: "designer:clipstyle:column",
   element: "designer:clipstyle:element",
 };
@@ -583,8 +614,11 @@ const SECTION_FIELDS: Field[] = [
   // composites (top-level "Padding"/"Border Radius"/"Margin" panels) instead
   // of a plain row here.
   { key: "width", labelKey: "designer-s-width", kind: "select", options: ["contained", "full"] },
-  { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
-  { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
+  { key: "opacity", labelKey: "designer-s-opacity", kind: "text" },
+  { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+  { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+  { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+  { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
   { key: "anchorId", labelKey: "designer-f-anchorid", kind: "text" },
   { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
 ];
@@ -598,7 +632,7 @@ const COLUMN_FIELDS: Field[] = [
   // (same as SECTION_FIELDS) instead of a plain row here.
   { key: "valign", labelKey: "designer-f-valign", kind: "select", options: ["top", "center", "bottom"] },
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
-  { key: "shadow", labelKey: "designer-s-shadow", kind: "select", options: ["none", "sm", "md", "lg"] },
+  { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
   { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
 ];
 // Bp-merge list for bpColStyle() — covers the base padding/radius fields plus
@@ -607,7 +641,7 @@ const COLUMN_FIELDS: Field[] = [
 const COLUMN_SPACING_KEYS = [
   "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
-  "marginY", "marginTop", "marginBottom",
+  "marginY", "marginX", "marginTop", "marginRight", "marginBottom", "marginLeft",
 ];
 
 // Standalone fields appended to every element's own type-specific fields
@@ -621,7 +655,7 @@ const CSS_CLASS_FIELD: Field = { key: "cssClass", labelKey: "designer-f-cssclass
 // sections by what the field actually controls, instead of one long form.
 // Keyed by field.key since that's stable across section/column/element,
 // unlike labelKey which a few fields share for unrelated purposes.
-type FieldGroupKey = "content" | "typography" | "background" | "spacing" | "size" | "border" | "advanced";
+type FieldGroupKey = "content" | "typography" | "background" | "spacing" | "size" | "appearance" | "border" | "advanced";
 
 const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   text: "content", src: "content", alt: "content", href: "content", label: "content",
@@ -633,7 +667,10 @@ const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   bg: "background", bgImage: "background", textColor: "background",
   paddingY: "spacing", paddingX: "spacing", padding: "spacing", marginY: "spacing",
   width: "size", valign: "size", height: "size", ratio: "size", columns: "size", size: "size",
-  border: "border", shadow: "border", radius: "border",
+  // Figma-style split: Appearance (opacity/shadow/radius — visual effects)
+  // vs Stroke (the actual border color/width/style), each its own card.
+  opacity: "appearance", shadow: "appearance", radius: "appearance",
+  border: "border", borderWidth: "border", borderColor: "border", borderStyle: "border",
   anchorId: "advanced", cssClass: "advanced",
 };
 
@@ -643,22 +680,66 @@ const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type }[] = [
   { key: "background", labelKey: "designer-group-background", icon: PaintBucket },
   { key: "spacing", labelKey: "designer-group-spacing", icon: Frame },
   { key: "size", labelKey: "designer-group-size", icon: RectangleHorizontal },
+  { key: "appearance", labelKey: "designer-group-appearance", icon: Blend },
   { key: "border", labelKey: "designer-group-border", icon: Square },
   { key: "advanced", labelKey: "designer-group-advanced", icon: Hash },
 ];
 
 const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
+// Row/page gap is stored as a plain CSS length ("24px", "0") rather than a
+// preset table — authors type an exact px value, no rem/preset guessing.
+// gapPx() round-trips that string to/from the <input type="number"> shown
+// in the Inspector; assumes rem = 16px like pxLabel() does everywhere else.
+function gapPx(v: string | undefined): number | "" {
+  if (!v) return "";
+  const n = parseFloat(v);
+  if (Number.isNaN(n)) return "";
+  return Math.round(v.endsWith("rem") ? n * 16 : n);
+}
 const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
 const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
 const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
-const SHADOW: Record<string, string> = {
-  none: "none",
+// Legacy preset keywords (existing pages' saved shadow="sm"/"md"/"lg" values)
+// still resolve via this table. New edits store a pipe-delimited custom
+// shadow instead — see shadowToCss()/SHADOW_DEFAULT_PARTS — no presets, a
+// real X/Y/blur/spread/color/opacity panel (user: "saya taknak preset...
+// letakkan option nombor").
+const LEGACY_SHADOW: Record<string, string | undefined> = {
+  none: undefined,
   sm: "0 1px 3px rgba(0,0,0,.1)",
   md: "0 4px 12px rgba(0,0,0,.12)",
   lg: "0 12px 32px rgba(0,0,0,.16)",
 };
+// Seed values a freshly-added shadow starts from — visually close to the old
+// "md" preset, so switching a legacy preset into the new panel doesn't jump.
+const SHADOW_DEFAULT_PARTS = ["0", "4", "12", "0", "#000000", "0.12"] as const;
+function hexToRgba(hex: string, alpha: number): string {
+  const h = (hex || "#000000").replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
+  const n = parseInt(full, 16) || 0;
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Number.isFinite(alpha) ? alpha : 1})`;
+}
+// Canvas overlay chrome (dashed guides, drop hints) is drawn straight on top
+// of whatever bg color the section/column actually has, which the tenant
+// can set to anything — the old fixed light-gray `border-line` line vanished
+// on a bright/white background. bestTextColor already answers "black or
+// white reads better on this bg" for button labels; reuse it here to flip
+// the guide-line/hint-text color dark-on-light vs light-on-dark instead.
+function overlayColors(bg: string): { line: string; text: string } {
+  const dark = bestTextColor(bg) === "#000000";
+  return dark
+    ? { line: hexToRgba("#000000", 0.35), text: hexToRgba("#000000", 0.55) }
+    : { line: hexToRgba("#ffffff", 0.45), text: hexToRgba("#ffffff", 0.75) };
+}
+function shadowToCss(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (raw in LEGACY_SHADOW) return LEGACY_SHADOW[raw];
+  const [x, y, blur, spread, color, opacity] = raw.split("|");
+  if (!x) return undefined;
+  return `${x}px ${y}px ${blur ?? 0}px ${spread ?? 0}px ${hexToRgba(color, Number(opacity))}`;
+}
 const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
 // Resolves a spacing value that may be either a legacy preset keyword
 // ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
@@ -755,17 +836,19 @@ function colStyle(cp?: Record<string, string>): React.CSSProperties {
   const padSide = (per: string) => lengthValue(cp[per] || cp.padding, PAD, "0");
   const anyRadius = cp.radius || cp.radiusTopLeft || cp.radiusTopRight || cp.radiusBottomRight || cp.radiusBottomLeft;
   const radCorner = (per: string) => lengthValue(cp[per] || cp.radius, RADIUS, RADIUS.none);
-  const anyMargin = cp.marginY || cp.marginTop || cp.marginBottom;
-  const marginSide = (per: string) => lengthValue(cp[per] || cp.marginY, PAD, "0");
+  const anyMargin = cp.marginY || cp.marginX || cp.marginTop || cp.marginRight || cp.marginBottom || cp.marginLeft;
+  const marginSide = (per: string, axis: string) => lengthValue(cp[per] || cp[axis], PAD, "0");
   return {
     background: cp.bg || undefined,
     padding: anyPadding
       ? `${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}`
       : undefined,
-    margin: anyMargin ? `${marginSide("marginTop")} 0 ${marginSide("marginBottom")} 0` : undefined,
+    margin: anyMargin
+      ? `${marginSide("marginTop", "marginY")} ${marginSide("marginRight", "marginX")} ${marginSide("marginBottom", "marginY")} ${marginSide("marginLeft", "marginX")}`
+      : undefined,
     alignSelf: cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : cp.valign === "center" ? "center" : undefined,
     border: cp.border ? BORDER[cp.border] : undefined,
-    boxShadow: cp.shadow ? SHADOW[cp.shadow] : undefined,
+    boxShadow: shadowToCss(cp.shadow),
     borderRadius: anyRadius
       ? `${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}`
       : undefined,
@@ -838,6 +921,11 @@ export default function Designer({
   // across every selection (not reset per-select) — matches Framer/Webflow,
   // where collapsing "Typography" stays collapsed while you click around.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<FieldGroupKey>>(new Set(["advanced"]));
+  // Element Inspector only — Content (raw data: text/src/href/items/etc) vs
+  // Style (spacing + every other GROUP_META bucket) tabs, so a long element
+  // like Heading doesn't force scrolling past Padding/Margin/Typography just
+  // to reach the Text field, or vice versa.
+  const [inspectorTab, setInspectorTab] = useState<"content" | "style">("content");
   // Four-side padding/radius controls (section Inspector): linked = one input
   // sets all 4 sides/corners equal; unlinked = Top/Right/Bottom/Left edited
   // independently. UI-only toggle, not persisted — doesn't change what's
@@ -935,9 +1023,12 @@ export default function Designer({
   }
   const PADDING_SIDE_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" } as const;
   const PADDING_SIDE_FALLBACK = { top: "paddingY", right: "paddingX", bottom: "paddingY", left: "paddingX" } as const;
-  // Margin has no X axis (block-flow spacing only, always 0 horizontally) —
-  // just top/bottom, both falling back to the single shared marginY value.
-  const MARGIN_SIDE_KEYS = { top: "marginTop", bottom: "marginBottom" } as const;
+  const MARGIN_SIDE_KEYS = { top: "marginTop", right: "marginRight", bottom: "marginBottom", left: "marginLeft" } as const;
+  // top/bottom fall back to the shared marginY value, left/right to marginX —
+  // same fallback-chain convention as PADDING_SIDE_FALLBACK. Row keeps its
+  // own margin top/bottom-only (a row already spans the full section width;
+  // its Inspector control still passes sides={["top","bottom"]}).
+  const MARGIN_SIDE_FALLBACK = { top: "marginY", right: "marginX", bottom: "marginY", left: "marginX" } as const;
   const RADIUS_CORNER_KEYS = {
     top: "radiusTopLeft",
     right: "radiusTopRight",
@@ -948,7 +1039,11 @@ export default function Designer({
     const v = (key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
     const bgImage = v("bgImage");
     const border = v("border");
+    const borderWidth = v("borderWidth");
+    const borderColor = v("borderColor");
+    const borderStyle = v("borderStyle");
     const shadow = v("shadow");
+    const opacity = v("opacity");
     const side = (side: keyof typeof PADDING_SIDE_KEYS) =>
       lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]), PAD, side === "top" || side === "bottom" ? PAD.md : "1.5rem");
     const corner = (side: keyof typeof RADIUS_CORNER_KEYS) => {
@@ -956,15 +1051,22 @@ export default function Designer({
       return lengthValue(raw, RADIUS, RADIUS.none);
     };
     const marginSide = (side: keyof typeof MARGIN_SIDE_KEYS) =>
-      lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], "marginY"), PAD, "0");
+      lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0");
     return {
       background: bgImage ? `url(${bgImage}) center/cover` : v("bg") || "var(--color-bg, #ffffff)",
       color: v("textColor") || "inherit",
       padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}`,
-      margin: `${marginSide("top")} 0 ${marginSide("bottom")} 0`,
-      ...(border ? { border: BORDER[border] } : {}),
-      ...(shadow ? { boxShadow: SHADOW[shadow] } : {}),
+      margin: `${marginSide("top")} ${marginSide("right")} ${marginSide("bottom")} ${marginSide("left")}`,
+      // borderWidth set = the new real stroke fields win; otherwise fall
+      // back to the legacy none/thin/thick preset so old pages don't move.
+      ...(borderWidth
+        ? { border: `${borderWidth}px ${borderStyle || "solid"} ${borderColor || "currentColor"}` }
+        : border
+          ? { border: BORDER[border] }
+          : {}),
+      boxShadow: shadowToCss(shadow),
       borderRadius: `${corner("top")} ${corner("right")} ${corner("bottom")} ${corner("left")}`,
+      opacity: opacity ? Math.max(0, Math.min(100, Number(opacity))) / 100 : undefined,
     };
   }
   function bpColStyle(col: Col): React.CSSProperties {
@@ -977,10 +1079,15 @@ export default function Designer({
     return colStyle(merged);
   }
   function bpMarginStyle(el: El): React.CSSProperties | undefined {
-    const top = sideValue(el.props, el.bp, MARGIN_SIDE_KEYS.top, "marginY");
-    const bottom = sideValue(el.props, el.bp, MARGIN_SIDE_KEYS.bottom, "marginY");
-    if (!top && !bottom) return undefined;
-    return { margin: `${lengthValue(top, SPACE, "0")} 0 ${lengthValue(bottom, SPACE, "0")} 0` };
+    const side = (s: keyof typeof MARGIN_SIDE_KEYS) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[s], MARGIN_SIDE_FALLBACK[s]);
+    const top = side("top");
+    const right = side("right");
+    const bottom = side("bottom");
+    const left = side("left");
+    if (!top && !right && !bottom && !left) return undefined;
+    return {
+      margin: `${lengthValue(top, SPACE, "0")} ${lengthValue(right, SPACE, "0")} ${lengthValue(bottom, SPACE, "0")} ${lengthValue(left, SPACE, "0")}`,
+    };
   }
   // Universal per-element padding — every element type gets it (unlike
   // radius, which only makes visual sense on image/embed/gallery), same
@@ -992,6 +1099,23 @@ export default function Designer({
     }
     const side = (s: keyof typeof PADDING_SIDE_KEYS) => lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[s], "padding"), PAD, "0");
     return { padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}` };
+  }
+  // Row's own margin/padding — no `bp` breakpoint bag on Row (desktop-only
+  // for now, unlike Section/Column/Element), so this skips bpGetValue's
+  // fallback chain and reads row.marginTop/paddingTop etc directly.
+  // marginTop's default replaces the old fixed space-y-* gap between rows
+  // (see the rows container below) — row 0 never got a leading gap under
+  // that either, so it defaults to "0" instead.
+  function rowMarginStyle(row: Row, isFirst: boolean): React.CSSProperties {
+    return {
+      marginTop: lengthValue(row.marginTop, SPACE, isFirst ? "0" : mode === "live" ? "2.5rem" : "1.25rem"),
+      marginBottom: lengthValue(row.marginBottom, SPACE, "0"),
+    };
+  }
+  function rowPaddingStyle(row: Row): React.CSSProperties | undefined {
+    if (!row.paddingTop && !row.paddingRight && !row.paddingBottom && !row.paddingLeft) return undefined;
+    const v = (x?: string) => lengthValue(x, PAD, "0");
+    return { padding: `${v(row.paddingTop)} ${v(row.paddingRight)} ${v(row.paddingBottom)} ${v(row.paddingLeft)}` };
   }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
@@ -1030,6 +1154,15 @@ export default function Designer({
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
+  // Naming step for "Save as template" — an in-app field, not window.prompt():
+  // Chrome/Firefox silently suppress repeated JS dialogs in one tab ("prevent
+  // this page from creating additional dialogs"), after which prompt() just
+  // returns null instantly with no visible sign anything happened, which
+  // made a real save look like a dead button.
+  const [pendingTemplate, setPendingTemplate] = useState<{ kind: string; value: unknown } | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [templateFilter, setTemplateFilter] = useState<"all" | "section" | "row" | "column" | "element">("all");
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
   const [mode, setMode] = useState<"blocks" | "live">("blocks");
@@ -1047,6 +1180,35 @@ export default function Designer({
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
+  // Page-wide Designer defaults (currently just the default column gap) —
+  // separate from `blocks`/history since it's not part of the undo stack,
+  // same convention as slugDraft above. Persisted via save()'s `settings`.
+  const [pageSettings, setPageSettings] = useState<{ gap?: string }>(() => (page.settings as { gap?: string }) ?? {});
+  // Figma-style spacing overlay: the hatched fill band only shows while the
+  // matching handle is hovered or actively dragged, not for the whole
+  // selected box's perimeter at once — a persistent 4-sided hatch on every
+  // selection was too visually noisy (user feedback). The small "Npx" badge
+  // itself still always shows once selected; only the colored band is gated.
+  const [hoverBand, setHoverBand] = useState<string | null>(null);
+  // A drag in progress must keep its band shown even once the mouse leaves
+  // the small handle it started on — dragging moves the cursor away from
+  // that ~20px hit target almost immediately, which used to fire
+  // onMouseLeave and clear hoverBand right as the drag began (the band
+  // would then only reappear if the cursor happened to re-enter a handle).
+  // startSpacingDrag sets this before the first onMouseLeave can fire.
+  const draggingBand = useRef(false);
+  // When the four/two sides are linked (dragging one moves them all), a
+  // single shared key for the whole group means hovering/dragging any one
+  // handle shows every linked side's band together, not just the one edge
+  // under the cursor — since they're all the same value anyway. Unlinked
+  // sides keep their own distinct key, so only that one edge's band shows.
+  const bandKey = (prefix: string, edge: string, linked: boolean) => (linked ? `${prefix}.*` : `${prefix}.${edge}`);
+  const bandHoverProps = (key: string) => ({
+    onMouseEnter: () => setHoverBand(key),
+    onMouseLeave: () => {
+      if (!draggingBand.current) setHoverBand((k) => (k === key ? null : k));
+    },
+  });
   const history = useRef<Block[][]>([]);
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
@@ -1055,13 +1217,25 @@ export default function Designer({
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
 
+  // Uses the functional setState form so multiple mutate() calls fired
+  // synchronously in the same tick each build on the PREVIOUS call's result
+  // instead of all cloning the same pre-edit `blocks` closure value and
+  // racing to overwrite each other. This came up for real: a "linked"
+  // FourSideControl commit calls setSide once per side (sides.forEach) — 4
+  // separate mutate() calls back to back — and with a plain `const next =
+  // clone(blocks)` here, all 4 cloned the same stale snapshot and only the
+  // LAST call's single-side change actually stuck (every other side's
+  // change was silently discarded), even though the linked value looked
+  // right in the input itself.
   function mutate(fn: (next: Block[]) => void) {
     history.current.push(clone(blocks));
     if (history.current.length > 50) history.current.shift();
     future.current = [];
-    const next = clone(blocks);
-    fn(next);
-    setBlocks(next);
+    setBlocks((prev) => {
+      const next = clone(prev);
+      fn(next);
+      return next;
+    });
     setDirty(true);
   }
 
@@ -1075,6 +1249,7 @@ export default function Designer({
     axis: "x" | "y",
     sign: 1 | -1,
     apply: (next: Block[], px: number) => void,
+    bandKey?: string,
   ) {
     e.stopPropagation();
     e.preventDefault();
@@ -1083,6 +1258,8 @@ export default function Designer({
     history.current.push(clone(blocks));
     if (history.current.length > 50) history.current.shift();
     future.current = [];
+    draggingBand.current = true;
+    if (bandKey) setHoverBand(bandKey);
     function onMove(ev: MouseEvent) {
       const pos = axis === "x" ? ev.clientX : ev.clientY;
       const px = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
@@ -1094,6 +1271,8 @@ export default function Designer({
     function onUp() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      draggingBand.current = false;
+      if (bandKey) setHoverBand((k) => (k === bandKey ? null : k));
     }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -1242,7 +1421,11 @@ export default function Designer({
         const p = String(e.data.path ?? "")
           .split(".")
           .map(Number);
-        if (p.length !== 4 || !liveFrame.current) return;
+        // Row has no data-designer-path of its own in SectionBlock.astro (only
+        // section/column/element do), so a live-mode right-click can only ever
+        // resolve to one of those 3 depths — 2 (row) is unreachable here, Row
+        // right-click only works in Blocks mode.
+        if (![1, 3, 4].includes(p.length) || !liveFrame.current) return;
         const rect = liveFrame.current.getBoundingClientRect();
         setSel(p);
         setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0), y: rect.top + Number(e.data.y ?? 0) });
@@ -1363,7 +1546,7 @@ export default function Designer({
         padding: `${lengthValue(sp.paddingY, PAD, PAD.md)} ${lengthValue(sp.paddingX, PAD, "1.5rem")}`,
         margin: `${lengthValue(sp.marginY, PAD, "0")} 0`,
         ...(sp.border ? { border: BORDER[sp.border] } : {}),
-        ...(sp.shadow ? { boxShadow: SHADOW[sp.shadow] } : {}),
+        boxShadow: shadowToCss(sp.shadow),
         ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
       };
       post({ type: "designer:style", path, style });
@@ -1382,29 +1565,58 @@ export default function Designer({
     }
   }
 
-  // Saveable at any selection depth — sel[0] is always the containing
+  // Saveable at any selection depth — path[0] is always the containing
   // section's index regardless of depth, so this derives which level
-  // (section/column/element) the current selection actually points at.
-  function templateKind(): "section" | "column" | "element" | null {
-    if (!sel || blocks[sel[0]]?.type !== "section") return null;
-    return sel.length === 1 ? "section" : sel.length === 3 ? "column" : sel.length === 4 ? "element" : null;
+  // (section/row/column/element) a given path actually points at. Defaults
+  // to the left-click `sel` state, but the right-click context menu passes
+  // its own `ctxMenu.path` explicitly — right-clicking an element never
+  // updates `sel`, so relying on `sel` there silently no-ops on whatever was
+  // previously (or never) left-click selected. Row is included because
+  // clicking a section's background/grid area selects its Row, not the
+  // section itself (see the Row Inspector note above) — without this, a
+  // user trying to save "the whole section" via a background click always
+  // hit a silently-disabled Save button.
+  function templateKind(path: Sel = sel): "section" | "row" | "column" | "element" | null {
+    if (!path || blocks[path[0]]?.type !== "section") return null;
+    return path.length === 1
+      ? "section"
+      : path.length === 2
+        ? "row"
+        : path.length === 3
+          ? "column"
+          : path.length === 4
+            ? "element"
+            : null;
   }
 
-  async function saveAsTemplate() {
-    const kind = templateKind();
-    if (!kind || !sel) return;
+  // Stages the save (opens the modal's inline name field) — the actual API
+  // call happens in confirmSaveTemplate() once a name is entered.
+  function saveAsTemplate(path: Sel = sel) {
+    const kind = templateKind(path);
+    if (!kind || !path) return;
     const value: unknown =
       kind === "section"
-        ? blocks[sel[0]]
-        : kind === "column"
-          ? section(blocks, sel[0]).rows[sel[1]].columns[sel[2]]
-          : section(blocks, sel[0]).rows[sel[1]].columns[sel[2]].elements[sel[3]];
-    const name = prompt(t("designer-templates-save-prompt"));
+        ? blocks[path[0]]
+        : kind === "row"
+          ? section(blocks, path[0]).rows[path[1]]
+          : kind === "column"
+            ? section(blocks, path[0]).rows[path[1]].columns[path[2]]
+            : section(blocks, path[0]).rows[path[1]].columns[path[2]].elements[path[3]];
+    setShowTemplates(true);
+    setTemplateName("");
+    setPendingTemplate({ kind, value });
+  }
+
+  async function confirmSaveTemplate() {
+    if (!pendingTemplate) return;
+    const name = templateName.trim();
     if (!name) return;
     setTemplatesBusy(true);
     try {
-      await api.createTemplate(tenantHost, token, name, { kind, value } as unknown as Record<string, unknown>);
+      await api.createTemplate(tenantHost, token, name, pendingTemplate as unknown as Record<string, unknown>);
       setTemplates(await api.listTemplates(tenantHost, token));
+      setPendingTemplate(null);
+      setTemplateName("");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1415,9 +1627,17 @@ export default function Designer({
   // Pre-migration rows have no `kind`/`value` wrapper — `data` itself was
   // the raw section block, so a missing `kind` falls back to that shape.
   function insertTemplate(tpl: api.DesignTemplate) {
-    const kind = tpl.data?.kind as "section" | "column" | "element" | undefined;
+    const kind = tpl.data?.kind as "section" | "row" | "column" | "element" | undefined;
     const value = kind ? tpl.data.value : tpl.data;
-    if (kind === "column" || kind === "element") {
+    if (kind === "row") {
+      if (!sel || sel.length < 1) {
+        alert(t("designer-templates-need-column"));
+        return;
+      }
+      const b = sel[0];
+      const index = sel.length >= 2 ? sel[1] + 1 : section(blocks, b).rows.length;
+      mutate((bs) => section(bs, b).rows.splice(index, 0, clone(value) as Row));
+    } else if (kind === "column" || kind === "element") {
       if (!sel || sel.length < 3) {
         alert(t("designer-templates-need-column"));
         return;
@@ -1541,6 +1761,10 @@ export default function Designer({
     bumpStructural();
   }
 
+  function duplicateColumn(b: number, r: number, c: number) {
+    mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(section(bs, b).rows[r].columns[c])));
+    bumpStructural();
+  }
   function copyColumn(b: number, r: number, c: number) {
     clipCopy("column", section(blocks, b).rows[r].columns[c]);
   }
@@ -1579,6 +1803,37 @@ export default function Designer({
     mutate((bs) => section(bs, b).rows.splice(r, 1));
     setSel(null);
     bumpStructural();
+  }
+  function duplicateRow(b: number, r: number) {
+    mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(section(bs, b).rows[r])));
+    bumpStructural();
+  }
+  function copyRow(b: number, r: number) {
+    clipCopy("row", section(blocks, b).rows[r]);
+  }
+  function pasteRow(b: number, r: number) {
+    const data = clipRead<Row>("row");
+    if (data) {
+      mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(data)));
+      bumpStructural();
+    }
+  }
+  function copyStyleRow(b: number, r: number) {
+    const { columns: _columns, ...styleProps } = section(blocks, b).rows[r];
+    styleCopy("row", styleProps as unknown as Record<string, string>);
+  }
+  function pasteStyleRow(b: number, r: number) {
+    const style = styleRead("row");
+    if (style) mutate((bs) => Object.assign(section(bs, b).rows[r], style));
+  }
+  function setRowGap(b: number, r: number, gap: string | undefined) {
+    mutate((bs) => {
+      section(bs, b).rows[r].gap = gap;
+    });
+  }
+  function setPageGap(gap: string | undefined) {
+    setPageSettings((s) => ({ ...s, gap }));
+    setDirty(true);
   }
 
   function duplicateElement(b: number, r: number, c: number, e: number) {
@@ -1672,6 +1927,7 @@ export default function Designer({
     try {
       await api.updatePage(tenantHost, token, page.id as string, {
         layout: blocks,
+        settings: pageSettings,
         ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
       });
       if (status) page.status = status;
@@ -1888,9 +2144,12 @@ export default function Designer({
                 sp.rows.map((row, r) => (
                   <div key={r} className="ml-3">
                     {sp.rows.length > 1 && (
-                      <p className="px-1.5 py-0.5 text-[10px] font-semibold text-sub">
+                      <div
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer ${selEq([b, r]) ? "bg-accent/10 text-accent" : "text-sub hover:bg-canvas"}`}
+                        onClick={(e) => pick(e, [b, r])}
+                      >
                         {t("designer-layers-row")} {r + 1}
-                      </p>
+                      </div>
                     )}
                     {row.columns.map((col, c) => {
                       const colKey = `${b}.${r}.${c}`;
@@ -1951,8 +2210,7 @@ export default function Designer({
   function FieldInput({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
     const base =
       "w-full rounded-lg border border-line/30 bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-line";
-    if (field.kind === "textarea")
-      return <textarea rows={4} className={base} value={value} onChange={(e) => onChange(e.target.value)} />;
+    if (field.kind === "textarea") return <BufferedTextarea rows={4} className={base} value={value} onCommit={onChange} />;
     if (field.kind === "select" && field.key === "align") {
       const ALIGN_ICON: Record<string, typeof AlignLeft> = {
         left: AlignLeft,
@@ -2000,7 +2258,7 @@ export default function Designer({
             onChange={(e) => onChange(e.target.value)}
             className="h-7 w-9 cursor-pointer rounded border border-line/30"
           />
-          <input className={base} value={value} placeholder="#" onChange={(e) => onChange(e.target.value)} />
+          <BufferedInput className={base} value={value} placeholder="#" onCommit={onChange} />
           {value && (
             <button onClick={() => onChange("")} className="text-[10px] font-semibold text-sub hover:text-red-500">
               ✕
@@ -2011,7 +2269,7 @@ export default function Designer({
     if (field.kind === "image")
       return (
         <div className="space-y-1.5">
-          <input className={base} value={value} placeholder="https://" onChange={(e) => onChange(e.target.value)} />
+          <BufferedInput className={base} value={value} placeholder="https://" onCommit={onChange} />
           <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
             {uploading ? t("designer-uploading") : t("designer-upload")}
             <input
@@ -2033,12 +2291,12 @@ export default function Designer({
       const unit = m ? m[2] : "px";
       return (
         <div className="flex gap-2">
-          <input
+          <BufferedInput
             type="number"
             step={unit === "em" || unit === "rem" ? 0.05 : 1}
             className={base}
             value={num}
-            onChange={(e) => onChange(e.target.value === "" ? "" : `${e.target.value}${unit}`)}
+            onCommit={(v) => onChange(v === "" ? "" : `${v}${unit}`)}
           />
           <select
             className={`${base} w-20 shrink-0`}
@@ -2098,11 +2356,11 @@ export default function Designer({
           {urls.map((u, i) => (
             <div key={i} className="flex items-center gap-2">
               {u && <img src={u} alt="" className="h-9 w-9 rounded object-cover" />}
-              <input
+              <BufferedInput
                 className={base}
                 value={u}
                 placeholder="https://"
-                onChange={(e) => setUrls(urls.map((x, j) => (j === i ? e.target.value : x)))}
+                onCommit={(v) => setUrls(urls.map((x, j) => (j === i ? v : x)))}
               />
               <label className="cursor-pointer text-[10px] font-semibold text-accent">
                 {uploading ? t("designer-uploading") : t("designer-upload")}
@@ -2130,7 +2388,186 @@ export default function Designer({
         </div>
       );
     }
-    return <input className={base} value={value} onChange={(e) => onChange(e.target.value)} />;
+    if (field.kind === "shadow") {
+      const legacyDefault = value && value in LEGACY_SHADOW && value !== "none";
+      const parts = value.includes("|") ? value.split("|") : legacyDefault ? SHADOW_DEFAULT_PARTS : null;
+      if (!parts) {
+        return (
+          <button
+            type="button"
+            onClick={() => onChange(SHADOW_DEFAULT_PARTS.join("|"))}
+            className="w-full rounded-lg border border-dashed border-line/40 py-1.5 text-[11px] font-semibold text-accent"
+          >
+            {t("designer-shadow-add")}
+          </button>
+        );
+      }
+      const [x, y, blur, spread, color, opacity] = parts;
+      const commit = (i: number, v: string) => {
+        const next = [x, y, blur, spread, color, opacity];
+        next[i] = v;
+        onChange(next.join("|"));
+      };
+      return (
+        <div className="space-y-2 rounded-lg border border-line/30 p-2">
+          <div className="grid grid-cols-2 gap-1.5">
+            <NumberStepper label="X" value={x} onCommit={(v) => commit(0, v)} />
+            <NumberStepper label="Y" value={y} onCommit={(v) => commit(1, v)} />
+            <NumberStepper label={t("designer-shadow-blur")} value={blur} min={0} onCommit={(v) => commit(2, v)} />
+            <NumberStepper label={t("designer-shadow-spread")} value={spread} onCommit={(v) => commit(3, v)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={color || "#000000"}
+              onChange={(e) => commit(4, e.target.value)}
+              className="h-7 w-9 shrink-0 cursor-pointer rounded border border-line/30"
+            />
+            <div className="flex-1">
+              <NumberStepper
+                label={t("designer-shadow-opacity")}
+                value={opacity}
+                step={0.05}
+                min={0}
+                onCommit={(v) => commit(5, String(Math.min(1, Number(v))))}
+              />
+            </div>
+          </div>
+          <button type="button" onClick={() => onChange("")} className="text-[10px] font-semibold text-sub hover:text-red-500">
+            {t("designer-shadow-remove")}
+          </button>
+        </div>
+      );
+    }
+    return <BufferedInput className={base} value={value} onCommit={onChange} />;
+  }
+
+  // Local-buffered text input: typing updates only this component's own
+  // state (cheap) instead of committing on every keystroke — commit
+  // (calling onCommit, which runs the real mutate()/history-clone) happens
+  // on blur or Enter instead. Every Inspector field used to call onCommit
+  // straight from onChange, so on a page with many sections/rows, typing a
+  // padding/margin number (or any text field) re-cloned the whole block
+  // tree per character — laggy, and occasionally dropped/misplaced
+  // keystrokes since a slow re-render can land after focus has already
+  // moved. useEffect only re-syncs from the external value while NOT
+  // focused, so an in-progress edit is never clobbered by, e.g., a canvas
+  // drag changing the same value elsewhere.
+  function BufferedInput({
+    value,
+    onCommit,
+    className,
+    type,
+    placeholder,
+    title,
+    step,
+  }: {
+    value: string;
+    onCommit: (v: string) => void;
+    className?: string;
+    type?: string;
+    placeholder?: string;
+    title?: string;
+    step?: number;
+  }) {
+    const [draft, setDraft] = useState(value);
+    const focused = useRef(false);
+    useEffect(() => {
+      if (!focused.current) setDraft(value);
+    }, [value]);
+    return (
+      <input
+        type={type}
+        step={step}
+        className={className}
+        placeholder={placeholder}
+        title={title}
+        value={draft}
+        onFocus={() => (focused.current = true)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          focused.current = false;
+          if (draft !== value) onCommit(draft);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+        }}
+      />
+    );
+  }
+  function BufferedTextarea({
+    value,
+    onCommit,
+    className,
+    rows,
+  }: {
+    value: string;
+    onCommit: (v: string) => void;
+    className?: string;
+    rows?: number;
+  }) {
+    const [draft, setDraft] = useState(value);
+    const focused = useRef(false);
+    useEffect(() => {
+      if (!focused.current) setDraft(value);
+    }, [value]);
+    return (
+      <textarea
+        rows={rows}
+        className={className}
+        value={draft}
+        onFocus={() => (focused.current = true)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          focused.current = false;
+          if (draft !== value) onCommit(draft);
+        }}
+      />
+    );
+  }
+
+  // "Volume up/down" style numeric stepper — a BufferedInput flanked by
+  // −/+ buttons, used by the shadow panel's X/Y/blur/spread fields (no
+  // preset dropdown; user explicitly asked for real numbers here).
+  function NumberStepper({
+    label,
+    value,
+    step = 1,
+    min,
+    onCommit,
+  }: {
+    label: string;
+    value: string;
+    step?: number;
+    min?: number;
+    onCommit: (v: string) => void;
+  }) {
+    const n = Number(value) || 0;
+    const round = (x: number) => Math.round(x * 100) / 100;
+    return (
+      <label className="block text-[10px] font-medium text-sub">
+        {label}
+        <div className="mt-0.5 flex items-center rounded-lg border border-line/30 bg-canvas">
+          <button
+            type="button"
+            onClick={() => onCommit(String(round(Math.max(min ?? -Infinity, n - step))))}
+            className="px-2 py-1 text-sub hover:text-ink"
+          >
+            −
+          </button>
+          <BufferedInput
+            type="number"
+            step={step}
+            value={value}
+            onCommit={onCommit}
+            className="w-full border-0 bg-transparent px-1 py-1 text-center text-[11px] outline-none"
+          />
+          <button type="button" onClick={() => onCommit(String(round(n + step)))} className="px-2 py-1 text-sub hover:text-ink">
+            +
+          </button>
+        </div>
+      </label>
+    );
   }
 
   // Figma/Elementor-style four-side control: linked shows one input that
@@ -2172,21 +2609,21 @@ export default function Designer({
           </button>
         </div>
         {linked ? (
-          <input
+          <BufferedInput
             className="w-full rounded-lg border border-line/30 bg-white px-2 py-1.5 text-[11px]"
             value={getSide(sides[0])}
-            onChange={(e) => sides.forEach((s) => setSide(s, e.target.value))}
+            onCommit={(v) => sides.forEach((s) => setSide(s, v))}
           />
         ) : (
           <div className={`grid gap-1 ${sides.length === 2 ? "grid-cols-2" : "grid-cols-4"}`}>
             {sides.map((s) => (
-              <input
+              <BufferedInput
                 key={s}
                 className="w-full rounded-lg border border-line/30 bg-white px-1 py-1.5 text-center text-[11px]"
                 value={getSide(s)}
                 placeholder={s[0].toUpperCase()}
                 title={s}
-                onChange={(e) => setSide(s, e.target.value)}
+                onCommit={(v) => setSide(s, v)}
               />
             ))}
           </div>
@@ -2202,10 +2639,15 @@ export default function Designer({
     fields,
     getValue,
     setValue,
+    only,
   }: {
     fields: Field[];
     getValue: (f: Field) => string;
     setValue: (f: Field, v: string) => void;
+    // Element Inspector's Content/Style tabs (see hasContentFields below)
+    // reuse this same bucketing instead of a separate content-vs-style
+    // split — "content" is its own tab, every other bucket is "style".
+    only?: "content" | "style";
   }) {
     const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
     for (const f of fields) {
@@ -2214,7 +2656,7 @@ export default function Designer({
     }
     return (
       <>
-        {GROUP_META.filter((g) => buckets[g.key]).map((g) => {
+        {GROUP_META.filter((g) => buckets[g.key] && (!only || (g.key === "content") === (only === "content"))).map((g) => {
           const groupFields = buckets[g.key]!;
           const isOpen = !collapsedGroups.has(g.key);
           const Icon = g.icon;
@@ -2247,8 +2689,70 @@ export default function Designer({
     );
   }
 
+  function templateKindLabel(kind: string): string {
+    return kind === "row"
+      ? t("designer-row")
+      : kind === "column"
+        ? t("designer-column")
+        : kind === "element"
+          ? t("designer-elements")
+          : t("designer-section");
+  }
+
+  // Rough layout impression only ("shape2 susunan" — not a pixel-accurate
+  // render, no real colors/fonts/media) so a list of 100+ templates stays
+  // scannable without the cost/dependency of a real screenshot thumbnail
+  // (would need a headless-browser render pipeline just for this). Every
+  // kind normalizes to a rows[] shape so one render path covers all 4 —
+  // row/column/element templates are just a 1-row (and 1-column) section.
+  function TemplatePreview({ tpl }: { tpl: api.DesignTemplate }) {
+    const kind = (tpl.data?.kind as string | undefined) ?? "section";
+    const value = tpl.data?.kind ? tpl.data.value : tpl.data;
+    const rows: Row[] =
+      kind === "section"
+        ? ((value as SectionProps).rows ?? [])
+        : kind === "row"
+          ? [value as Row]
+          : kind === "column"
+            ? [{ columns: [value as Col] } as Row]
+            : [{ columns: [{ elements: [value as El] }] } as Row];
+    return (
+      <div className="flex h-14 flex-col gap-0.5 overflow-hidden rounded-md border border-line/30 bg-canvas/40 p-1">
+        {rows.slice(0, 4).map((row, i) => (
+          <div key={i} className="flex flex-1 gap-0.5">
+            {(row.columns ?? []).slice(0, 5).map((col, j) => (
+              <div key={j} className="flex flex-1 flex-col justify-center gap-[1px] rounded-sm bg-white/70 p-[1px]">
+                {(col.elements ?? []).slice(0, 3).map((_, k) => (
+                  <div key={k} className="h-[3px] w-full rounded-full bg-accent/40" />
+                ))}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   function Inspector() {
-    if (!sel || blocks[sel[0]]?.type !== "section") {
+    if (!sel) {
+      return (
+        <div className="space-y-3">
+          <p className="text-xs font-bold text-ink">{t("designer-page-settings")}</p>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-gap")}
+            <BufferedInput
+              type="number"
+              placeholder="32"
+              value={String(gapPx(pageSettings.gap))}
+              onCommit={(v) => setPageGap(v === "" ? undefined : `${v}px`)}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            />
+          </label>
+          <p className="text-[10px] text-sub">{t("designer-none-selected")}</p>
+        </div>
+      );
+    }
+    if (blocks[sel[0]]?.type !== "section") {
       return <p className="text-xs text-sub">{t("designer-none-selected")}</p>;
     }
     const [b, r, c, e] = sel;
@@ -2277,11 +2781,10 @@ export default function Designer({
           <FourSideControl
             labelKey="designer-f-marginy"
             icon={Frame}
-            sides={["top", "bottom"]}
             linked={linkedMargin}
             onToggleLink={() => setLinkedMargin((v) => !v)}
-            getSide={(side) => fourSideValue(sp, MARGIN_SIDE_KEYS[side as "top" | "bottom"], "marginY")}
-            setSide={(side, v) => setFourSideValue(b, MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+            getSide={(side) => fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
+            setSide={(side, v) => setFourSideValue(b, MARGIN_SIDE_KEYS[side], v)}
           />
           <FieldGroups
             fields={SECTION_FIELDS}
@@ -2297,6 +2800,76 @@ export default function Designer({
               })
             }
           />
+        </div>
+      );
+    }
+    if (sel.length === 2) {
+      const row = sp.rows[r];
+      if (!row) return null;
+      const setRowSide = (key: string, v: string) =>
+        mutate((bs) => {
+          (section(bs, b).rows[r] as unknown as Record<string, string>)[key] = v;
+        });
+      return (
+        <div className="space-y-3">
+          <p className="text-xs font-bold text-ink">{t("designer-row")}</p>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-row-gap")}
+            <BufferedInput
+              type="number"
+              placeholder={String(gapPx(pageSettings.gap) || 32)}
+              value={String(gapPx(row.gap))}
+              onCommit={(v) => setRowGap(b, r, v === "" ? undefined : `${v}px`)}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            />
+          </label>
+          <FourSideControl
+            labelKey="designer-s-padding"
+            icon={Frame}
+            linked={linkedPadding}
+            onToggleLink={() => setLinkedPadding((v) => !v)}
+            getSide={(side) => (row as unknown as Record<string, string>)[PADDING_SIDE_KEYS[side]] ?? ""}
+            setSide={(side, v) => setRowSide(PADDING_SIDE_KEYS[side], v)}
+          />
+          <FourSideControl
+            labelKey="designer-f-marginy"
+            icon={Frame}
+            sides={["top", "bottom"]}
+            linked={linkedMargin}
+            onToggleLink={() => setLinkedMargin((v) => !v)}
+            getSide={(side) => (row as unknown as Record<string, string>)[MARGIN_SIDE_KEYS[side as "top" | "bottom"]] ?? ""}
+            setSide={(side, v) => setRowSide(MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+          />
+          <div className="flex gap-3">
+            <button onClick={() => duplicateRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+              <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
+            </button>
+            <button onClick={() => copyRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+              <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
+            </button>
+            <button
+              onClick={() => pasteRow(b, r)}
+              disabled={!clipHas("row")}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
+            </button>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => copyStyleRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+              <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
+            </button>
+            <button
+              onClick={() => pasteStyleRow(b, r)}
+              disabled={!styleHas("row")}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            >
+              <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
+            </button>
+          </div>
+          <button onClick={() => deleteRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
+            <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete-row")}
+          </button>
         </div>
       );
     }
@@ -2336,11 +2909,10 @@ export default function Designer({
           <FourSideControl
             labelKey="designer-f-marginy"
             icon={Frame}
-            sides={["top", "bottom"]}
             linked={linkedMargin}
             onToggleLink={() => setLinkedMargin((v) => !v)}
-            getSide={(side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side as "top" | "bottom"], "marginY")}
-            setSide={(side, v) => setColSideValue(b, r, c, MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+            getSide={(side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
+            setSide={(side, v) => setColSideValue(b, r, c, MARGIN_SIDE_KEYS[side], v)}
           />
           <FieldGroups
             fields={COLUMN_FIELDS}
@@ -2378,6 +2950,12 @@ export default function Designer({
               <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
             </button>
           </div>
+          <button
+            onClick={() => saveAsTemplate([b, r, c])}
+            className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
+          </button>
           <button onClick={() => deleteColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
             <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
           </button>
@@ -2388,50 +2966,71 @@ export default function Designer({
       const el = sp.rows[r]?.columns[c]?.elements[e];
       if (!el) return null;
       const def = ELS[el.type];
+      const elFields = [...def.fields, CSS_CLASS_FIELD];
+      const hasContentFields = elFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
+      const fieldGroupsProps = {
+        fields: elFields,
+        getValue: (f: Field) => bpGetValue(el.props[f.key], el.bp, f.key),
+        setValue: (f: Field, v: string) =>
+          mutate((bs) => {
+            const target = section(bs, b).rows[r].columns[c].elements[e];
+            if (bp === "desktop") {
+              target.props[f.key] = v;
+            } else {
+              target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
+            }
+          }),
+      };
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
-          <FourSideControl
-            labelKey="designer-s-padding"
-            icon={Frame}
-            linked={linkedPadding}
-            onToggleLink={() => setLinkedPadding((v) => !v)}
-            getSide={(side) => sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding")}
-            setSide={(side, v) => setElSideValue(b, r, c, e, PADDING_SIDE_KEYS[side], v)}
-          />
-          {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
-            <FourSideControl
-              labelKey="designer-f-radius"
-              icon={SquareDashedBottom}
-              linked={linkedRadius}
-              onToggleLink={() => setLinkedRadius((v) => !v)}
-              getSide={(side) => sideValue(el.props, el.bp, RADIUS_CORNER_KEYS[side], "radius")}
-              setSide={(side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v)}
-            />
+          {hasContentFields && (
+            <div className="flex gap-1 rounded-full bg-canvas p-0.5">
+              {(["content", "style"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setInspectorTab(tab)}
+                  className={`flex-1 rounded-full py-1 text-[11px] font-semibold ${
+                    inspectorTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
+                  }`}
+                >
+                  {t(tab === "content" ? "designer-inspector-tab-content" : "designer-inspector-tab-style")}
+                </button>
+              ))}
+            </div>
           )}
-          <FourSideControl
-            labelKey="designer-f-marginy"
-            icon={Frame}
-            sides={["top", "bottom"]}
-            linked={linkedMargin}
-            onToggleLink={() => setLinkedMargin((v) => !v)}
-            getSide={(side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side as "top" | "bottom"], "marginY")}
-            setSide={(side, v) => setElSideValue(b, r, c, e, MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
-          />
-          <FieldGroups
-            fields={[...def.fields, CSS_CLASS_FIELD]}
-            getValue={(f) => bpGetValue(el.props[f.key], el.bp, f.key)}
-            setValue={(f, v) =>
-              mutate((bs) => {
-                const target = section(bs, b).rows[r].columns[c].elements[e];
-                if (bp === "desktop") {
-                  target.props[f.key] = v;
-                } else {
-                  target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
-                }
-              })
-            }
-          />
+          {(!hasContentFields || inspectorTab === "style") && (
+            <>
+              <FourSideControl
+                labelKey="designer-s-padding"
+                icon={Frame}
+                linked={linkedPadding}
+                onToggleLink={() => setLinkedPadding((v) => !v)}
+                getSide={(side) => sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding")}
+                setSide={(side, v) => setElSideValue(b, r, c, e, PADDING_SIDE_KEYS[side], v)}
+              />
+              {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
+                <FourSideControl
+                  labelKey="designer-f-radius"
+                  icon={SquareDashedBottom}
+                  linked={linkedRadius}
+                  onToggleLink={() => setLinkedRadius((v) => !v)}
+                  getSide={(side) => sideValue(el.props, el.bp, RADIUS_CORNER_KEYS[side], "radius")}
+                  setSide={(side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v)}
+                />
+              )}
+              <FourSideControl
+                labelKey="designer-f-marginy"
+                icon={Frame}
+                linked={linkedMargin}
+                onToggleLink={() => setLinkedMargin((v) => !v)}
+                getSide={(side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
+                setSide={(side, v) => setElSideValue(b, r, c, e, MARGIN_SIDE_KEYS[side], v)}
+              />
+              <FieldGroups {...fieldGroupsProps} only={hasContentFields ? "style" : undefined} />
+            </>
+          )}
+          {hasContentFields && inspectorTab === "content" && <FieldGroups {...fieldGroupsProps} only="content" />}
           <div className="flex flex-wrap gap-3">
             <button onClick={() => copyElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
@@ -2544,7 +3143,7 @@ export default function Designer({
           <img
             src={p.src}
             alt={p.alt ?? ""}
-            style={{ borderRadius: elRadius(p), boxShadow: SHADOW[p.shadow ?? "none"], maxWidth: "100%" }}
+            style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow), maxWidth: "100%" }}
           />
         ) : (
           <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
@@ -2576,7 +3175,7 @@ export default function Designer({
         return (
           <div
             className="flex aspect-video items-center justify-center bg-black/70 text-white"
-            style={{ borderRadius: elRadius(p), boxShadow: SHADOW[p.shadow ?? "none"] }}
+            style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow) }}
           >
             <Video className="mr-2 h-5 w-5" />
             <span className="max-w-[80%] truncate text-xs">{p.url || t("designer-f-url")}</span>
@@ -2684,6 +3283,9 @@ export default function Designer({
         >
           <Paintbrush className="h-3 w-3 opacity-50" />
         </button>
+        <button onClick={() => saveAsTemplate([b])} className="px-0.5 text-accent" title={t("designer-templates-save")}>
+          <LayoutTemplate className="h-3 w-3" />
+        </button>
         <button onClick={() => deleteSection(b)} className="px-0.5 text-red-500" title={t("designer-delete")}>
           <Trash2 className="h-3 w-3" />
         </button>
@@ -2743,6 +3345,7 @@ export default function Designer({
           <button onClick={() => pasteSection(b)} disabled={!clipHas("section")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
           <button onClick={() => copyStyleSection(b)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
           <button onClick={() => pasteStyleSection(b)} disabled={!styleHas("section")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+          <button onClick={() => saveAsTemplate([b])} className={iconBtn} title={t("designer-templates-save")}><LayoutTemplate className="h-3.5 w-3.5" /></button>
           <button onClick={() => deleteSection(b)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
         </div>
       );
@@ -2755,6 +3358,7 @@ export default function Designer({
           <button onClick={() => pasteColumn(b, r, c)} disabled={!clipHas("column")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
           <button onClick={() => copyStyleColumn(b, r, c)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
           <button onClick={() => pasteStyleColumn(b, r, c)} disabled={!styleHas("column")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+          <button onClick={() => saveAsTemplate([b, r, c])} className={iconBtn} title={t("designer-templates-save")}><LayoutTemplate className="h-3.5 w-3.5" /></button>
           <button onClick={() => deleteColumn(b, r, c)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
         </div>
       );
@@ -2994,11 +3598,35 @@ export default function Designer({
               }
               const sp = block.props as unknown as SectionProps;
               const contained = (sp.width ?? "contained") === "contained";
+              // Split so overflow-hidden (needed to clip the background/rounded
+              // corners, and this section's own padding bands, cleanly) only
+              // ever wraps a decorative backdrop layer — never the real rows/
+              // columns/elements content. A column or element with little/no
+              // padding of its own sits flush against this box's edge, and its
+              // grip/delete/drag-handle badges stick out a few px past that
+              // edge by design (see the -left-2/-top-2 offsets below); the old
+              // single overflow-hidden div clipped those badges away entirely
+              // whenever there wasn't enough padding to absorb the overhang.
+              const { padding: sectionPadding, margin: sectionMargin, color: sectionColor, opacity: sectionOpacity, ...sectionBgStyle } = sectionBpStyle(sp);
+              const sectionEffectiveBg = sp.bg || siteTheme?.backgroundColor || "#ffffff";
+              const sectionOverlay = overlayColors(sectionEffectiveBg);
+              // Real stroke set (new fields or the legacy preset) already
+              // draws its own border via sectionBgStyle.border — the overlay
+              // tint below is only a structural guide for an unset border,
+              // so it must never paint over a color the author actually chose.
+              const hasRealBorder = Boolean(sp.borderWidth || sp.border);
               return (
                 <div
                   key={b}
                   className={`group relative ${mode === "live" ? "" : "rounded-xl"} ${selCls([b])}`}
+                  style={{ opacity: sectionOpacity }}
                   onClick={(ev) => pick(ev, [b])}
+                  onContextMenu={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    setSel([b]);
+                    setCtxMenu({ path: [b], x: ev.clientX, y: ev.clientY });
+                  }}
                 >
                   <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
                     {t("designer-section")} {BlockControls({ b })}
@@ -3046,11 +3674,24 @@ export default function Designer({
                               onMouseDown={(ev) => {
                                 const startPx = edge === "top" ? topPx : bottomPx;
                                 const key = PADDING_SIDE_KEYS[edge];
-                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(key, px)(next));
+                                startSpacingDrag(
+                                  ev,
+                                  startPx,
+                                  "y",
+                                  edge === "top" ? 1 : -1,
+                                  (next, px) => applyDrag(key, px)(next),
+                                  bandKey(`sec.${b}.padding`, edge, linkedPadding),
+                                );
                               }}
+                              {...bandHoverProps(bandKey(`sec.${b}.padding`, edge, linkedPadding))}
                               className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                                edge === "top" ? "-translate-y-1/2" : "translate-y-1/2"
                               }`}
+                              // -1px, not 0, to land on the backdrop's own 1px
+                              // border/outline instead of just inside it —
+                              // the badge otherwise visibly floats off the
+                              // selection line (user feedback).
+                              style={{ top: edge === "top" ? "-2px" : undefined, bottom: edge === "bottom" ? "-2px" : undefined }}
                             >
                               {edge === "top" ? topPx : bottomPx}px
                             </span>
@@ -3061,11 +3702,20 @@ export default function Designer({
                               onMouseDown={(ev) => {
                                 const startPx = edge === "left" ? leftPx : rightPx;
                                 const key = PADDING_SIDE_KEYS[edge];
-                                startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => applyDrag(key, px)(next));
+                                startSpacingDrag(
+                                  ev,
+                                  startPx,
+                                  "x",
+                                  edge === "left" ? 1 : -1,
+                                  (next, px) => applyDrag(key, px)(next),
+                                  bandKey(`sec.${b}.padding`, edge, linkedPadding),
+                                );
                               }}
+                              {...bandHoverProps(bandKey(`sec.${b}.padding`, edge, linkedPadding))}
                               className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                                edge === "left" ? "-translate-x-1/2" : "translate-x-1/2"
                               }`}
+                              style={{ left: edge === "left" ? "-2px" : undefined, right: edge === "right" ? "-2px" : undefined }}
                             >
                               {edge === "left" ? leftPx : rightPx}px
                             </span>
@@ -3077,12 +3727,16 @@ export default function Designer({
                     (() => {
                       // Margin lives outside the box (outward bands), unlike padding — no
                       // canvas drag handle existed for section margin before this at all
-                      // (Inspector-text-only). Right-aligned so it doesn't collide with the
-                      // centered padding badges or the -top-3 "Section" hover tag.
-                      const sidePx = (side: "top" | "bottom") =>
-                        Number(pxLabel(lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], "marginY"), PAD, "0"))) || 0;
+                      // (Inspector-text-only). Top/bottom right-aligned so they don't collide
+                      // with the centered padding badges or the -top-3 "Section" hover tag;
+                      // left/right offset down from the top edge so they don't collide with
+                      // top/bottom's own badges.
+                      const sidePx = (side: keyof typeof MARGIN_SIDE_KEYS) =>
+                        Number(pxLabel(lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0"))) || 0;
                       const topPx = sidePx("top");
+                      const rightPx = sidePx("right");
                       const bottomPx = sidePx("bottom");
+                      const leftPx = sidePx("left");
                       const applyDrag = (key: string, px: number) => (next: Block[]) => {
                         const props = next[b].props as unknown as SectionProps;
                         const keys = linkedMargin ? Object.values(MARGIN_SIDE_KEYS) : [key];
@@ -3094,103 +3748,146 @@ export default function Designer({
                           props.bp = { ...(props.bp ?? {}), ...patch };
                         }
                       };
+                      const k = (edge: string) => bandKey(`sec.${b}.margin`, edge, linkedMargin);
+                      const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
                       return (
                         <>
-                          {spacingBand("top", topPx, true)}
-                          {spacingBand("bottom", bottomPx, true)}
+                          {hoverBand === k("top") && spacingBand("top", topPx, true)}
+                          {hoverBand === k("bottom") && spacingBand("bottom", bottomPx, true)}
+                          {hoverBand === k("left") && spacingBand("left", leftPx, true)}
+                          {hoverBand === k("right") && spacingBand("right", rightPx, true)}
                           {(["top", "bottom"] as const).map((edge) => (
                             <span
                               key={edge}
                               onMouseDown={(ev) => {
-                                const startPx = edge === "top" ? topPx : bottomPx;
-                                const key = MARGIN_SIDE_KEYS[edge];
-                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(key, px)(next));
+                                startSpacingDrag(ev, pxOf[edge], "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), k(edge));
                               }}
+                              {...bandHoverProps(k(edge))}
                               className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
                                 edge === "top" ? "-top-2" : "-bottom-2"
                               }`}
                             >
-                              {edge === "top" ? topPx : bottomPx}px
+                              {pxOf[edge]}px
+                            </span>
+                          ))}
+                          {(["left", "right"] as const).map((edge) => (
+                            <span
+                              key={edge}
+                              onMouseDown={(ev) => {
+                                startSpacingDrag(ev, pxOf[edge], "x", edge === "left" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), k(edge));
+                              }}
+                              {...bandHoverProps(k(edge))}
+                              className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                edge === "left" ? "-left-2" : "-right-2"
+                              }`}
+                            >
+                              {pxOf[edge]}px
                             </span>
                           ))}
                         </>
                       );
                     })()}
-                  <div
-                    className={`relative ${mode === "live" ? "overflow-hidden" : "overflow-hidden rounded-xl border border-line/20"}`}
-                    style={sectionBpStyle(sp)}
-                  >
+                  <div className="relative" style={{ margin: sectionMargin, color: sectionColor }}>
+                    <div
+                      className={`pointer-events-none absolute inset-0 overflow-hidden ${mode === "live" ? "" : "rounded-xl border"}`}
+                      style={{ ...sectionBgStyle, borderColor: mode === "live" || hasRealBorder ? undefined : sectionOverlay.line }}
+                    />
+                    <div className="relative" style={{ padding: sectionPadding }}>
                     {selEq([b]) && (
                       <>
-                        {spacingBand(
-                          "top",
-                          Number(
-                            pxLabel(lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.top, PADDING_SIDE_FALLBACK.top), PAD, PAD.md)),
-                          ) || 0,
-                        )}
-                        {spacingBand(
-                          "bottom",
-                          Number(
-                            pxLabel(
-                              lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.bottom, PADDING_SIDE_FALLBACK.bottom), PAD, PAD.md),
-                            ),
-                          ) || 0,
-                        )}
-                        {spacingBand(
-                          "left",
-                          Number(
-                            pxLabel(
-                              lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.left, PADDING_SIDE_FALLBACK.left), PAD, "1.5rem"),
-                            ),
-                          ) || 0,
-                        )}
-                        {spacingBand(
-                          "right",
-                          Number(
-                            pxLabel(
-                              lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.right, PADDING_SIDE_FALLBACK.right), PAD, "1.5rem"),
-                            ),
-                          ) || 0,
-                        )}
+                        {hoverBand === bandKey(`sec.${b}.padding`, "top", linkedPadding) &&
+                          spacingBand(
+                            "top",
+                            Number(
+                              pxLabel(lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.top, PADDING_SIDE_FALLBACK.top), PAD, PAD.md)),
+                            ) || 0,
+                          )}
+                        {hoverBand === bandKey(`sec.${b}.padding`, "bottom", linkedPadding) &&
+                          spacingBand(
+                            "bottom",
+                            Number(
+                              pxLabel(
+                                lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.bottom, PADDING_SIDE_FALLBACK.bottom), PAD, PAD.md),
+                              ),
+                            ) || 0,
+                          )}
+                        {hoverBand === bandKey(`sec.${b}.padding`, "left", linkedPadding) &&
+                          spacingBand(
+                            "left",
+                            Number(
+                              pxLabel(
+                                lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.left, PADDING_SIDE_FALLBACK.left), PAD, "1.5rem"),
+                              ),
+                            ) || 0,
+                          )}
+                        {hoverBand === bandKey(`sec.${b}.padding`, "right", linkedPadding) &&
+                          spacingBand(
+                            "right",
+                            Number(
+                              pxLabel(
+                                lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.right, PADDING_SIDE_FALLBACK.right), PAD, "1.5rem"),
+                              ),
+                            ) || 0,
+                          )}
                       </>
                     )}
-                    <div
-                      className={
-                        mode === "live"
-                          ? contained
-                            ? "mx-auto max-w-[68rem] space-y-10"
-                            : "space-y-10"
-                          : contained
-                            ? "mx-auto max-w-3xl space-y-5"
-                            : "space-y-5"
-                      }
-                    >
+                    <div className={mode === "live" ? (contained ? "mx-auto max-w-[68rem]" : "") : contained ? "mx-auto max-w-3xl" : ""}>
                       {(sp.rows ?? []).map((row, r) => (
-                        <div key={r} className="group/row relative">
+                        <div key={r} className="group/row relative" style={rowMarginStyle(row, r === 0)}>
                           {mode !== "live" && (
-                            <button
-                              onClick={(ev) => {
-                                ev.stopPropagation();
-                                deleteRow(b, r);
-                              }}
-                              title={t("designer-delete-row")}
-                              className="absolute -right-2 -top-2 z-20 hidden rounded-full bg-white p-1 text-red-500 opacity-0 shadow-sm ring-1 ring-line/30 transition-opacity group-hover/row:flex group-hover/row:opacity-100"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
+                            <>
+                              <button
+                                onClick={(ev) => pick(ev, [b, r])}
+                                title={t("designer-row-gap")}
+                                className="absolute -left-2 -top-2 z-20 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm opacity-0 transition-opacity group-hover/row:flex group-hover/row:opacity-100"
+                              >
+                                {t("designer-row")}
+                              </button>
+                              <button
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  deleteRow(b, r);
+                                }}
+                                title={t("designer-delete-row")}
+                                className="absolute -right-2 -top-2 z-20 hidden rounded-full bg-white p-1 text-red-500 opacity-0 shadow-sm ring-1 ring-line/30 transition-opacity group-hover/row:flex group-hover/row:opacity-100"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </>
                           )}
                           <div
-                            className={mode === "live" ? "grid gap-8" : "grid gap-4"}
-                            style={{ gridTemplateColumns: row.columns.map((cc) => `${cc.span}fr`).join(" ") }}
+                            className={`grid ${mode !== "live" ? "rounded-lg" : ""} ${selCls([b, r])}`}
+                            onClick={(ev) => pick(ev, [b, r])}
+                            onContextMenu={(ev) => {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              setSel([b, r]);
+                              setCtxMenu({ path: [b, r], x: ev.clientX, y: ev.clientY });
+                            }}
+                            style={{
+                              gridTemplateColumns:
+                                bp === "mobile" ? "1fr" : row.columns.map((cc) => `${cc.span}fr`).join(" "),
+                              gap: row.gap ?? pageSettings.gap ?? (mode === "live" ? "2rem" : "1rem"),
+                              ...rowPaddingStyle(row),
+                            }}
                           >
-                            {row.columns.map((col, c) => (
+                            {row.columns.map((col, c) => {
+                            const colBg = col.props?.bg || sectionEffectiveBg;
+                            const colOverlay = overlayColors(colBg);
+                            return (
                             <div
                               key={c}
                               className={`relative min-h-[3rem] transition-colors ${
-                                mode === "live" ? "space-y-5" : "space-y-3 rounded-lg p-1.5"
+                                mode === "live" ? "" : "rounded-lg border border-dashed p-1.5"
                               } ${selCls([b, r, c])} ${dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""}`}
-                              style={bpColStyle(col)}
+                              style={{ ...bpColStyle(col), borderColor: mode === "live" ? undefined : colOverlay.line }}
                               onClick={(ev) => pick(ev, [b, r, c])}
+                              onContextMenu={(ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                setSel([b, r, c]);
+                                setCtxMenu({ path: [b, r, c], x: ev.clientX, y: ev.clientY });
+                              }}
                               onDragOver={(ev) => {
                                 ev.preventDefault();
                                 setDropHint(`${b}.${r}.${c}`);
@@ -3226,32 +3923,44 @@ export default function Designer({
                                   const rightPx = sidePx(PADDING_SIDE_KEYS.right);
                                   const bottomPx = sidePx(PADDING_SIDE_KEYS.bottom);
                                   const leftPx = sidePx(PADDING_SIDE_KEYS.left);
+                                  const k = (edge: string) => bandKey(`col.${b}.${r}.${c}.padding`, edge, linkedPadding);
                                   return (
                                     <>
-                                      {spacingBand("top", topPx)}
-                                      {spacingBand("bottom", bottomPx)}
-                                      {spacingBand("left", leftPx)}
-                                      {spacingBand("right", rightPx)}
+                                      {hoverBand === k("top") && spacingBand("top", topPx)}
+                                      {hoverBand === k("bottom") && spacingBand("bottom", bottomPx)}
+                                      {hoverBand === k("left") && spacingBand("left", leftPx)}
+                                      {hoverBand === k("right") && spacingBand("right", rightPx)}
                                       {(["top", "bottom"] as const).map((edge) => (
                                         <span
                                           key={edge}
                                           onMouseDown={(ev) => {
                                             const startPx = edge === "top" ? topPx : bottomPx;
                                             const key = PADDING_SIDE_KEYS[edge];
-                                            startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
-                                              const target = section(next, b).rows[r].columns[c];
-                                              writeDragSideKeys(
-                                                target,
-                                                Object.values(PADDING_SIDE_KEYS),
-                                                key,
-                                                px,
-                                                linkedPadding,
-                                              );
-                                            });
+                                            startSpacingDrag(
+                                              ev,
+                                              startPx,
+                                              "y",
+                                              edge === "top" ? 1 : -1,
+                                              (next, px) => {
+                                                const target = section(next, b).rows[r].columns[c];
+                                                writeDragSideKeys(
+                                                  target,
+                                                  Object.values(PADDING_SIDE_KEYS),
+                                                  key,
+                                                  px,
+                                                  linkedPadding,
+                                                );
+                                              },
+                                              k(edge),
+                                            );
                                           }}
+                                          {...bandHoverProps(k(edge))}
                                           className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                            edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                                            edge === "top" ? "-translate-y-1/2" : "translate-y-1/2"
                                           }`}
+                                          // Same -2px both edges — this column has its own 1px
+                                          // border-dashed, same reasoning as Section's badges above.
+                                          style={{ top: edge === "top" ? "-2px" : undefined, bottom: edge === "bottom" ? "-2px" : undefined }}
                                         >
                                           {edge === "top" ? topPx : bottomPx}px
                                         </span>
@@ -3262,20 +3971,29 @@ export default function Designer({
                                           onMouseDown={(ev) => {
                                             const startPx = edge === "left" ? leftPx : rightPx;
                                             const key = PADDING_SIDE_KEYS[edge];
-                                            startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => {
-                                              const target = section(next, b).rows[r].columns[c];
-                                              writeDragSideKeys(
-                                                target,
-                                                Object.values(PADDING_SIDE_KEYS),
-                                                key,
-                                                px,
-                                                linkedPadding,
-                                              );
-                                            });
+                                            startSpacingDrag(
+                                              ev,
+                                              startPx,
+                                              "x",
+                                              edge === "left" ? 1 : -1,
+                                              (next, px) => {
+                                                const target = section(next, b).rows[r].columns[c];
+                                                writeDragSideKeys(
+                                                  target,
+                                                  Object.values(PADDING_SIDE_KEYS),
+                                                  key,
+                                                  px,
+                                                  linkedPadding,
+                                                );
+                                              },
+                                              k(edge),
+                                            );
                                           }}
+                                          {...bandHoverProps(k(edge))}
                                           className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                            edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                                            edge === "left" ? "-translate-x-1/2" : "translate-x-1/2"
                                           }`}
+                                          style={{ left: edge === "left" ? "-2px" : undefined, right: edge === "right" ? "-2px" : undefined }}
                                         >
                                           {edge === "left" ? leftPx : rightPx}px
                                         </span>
@@ -3287,38 +4005,75 @@ export default function Designer({
                                 (() => {
                                   // Column margin — same outward-band pattern as Section's, no
                                   // canvas drag existed for it before (Inspector-text-only).
-                                  const sidePx = (side: "top" | "bottom") =>
-                                    Number(pxLabel(lengthValue(sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], "marginY"), PAD, "0"))) ||
+                                  const sidePx = (side: keyof typeof MARGIN_SIDE_KEYS) =>
+                                    Number(pxLabel(lengthValue(sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0"))) ||
                                     0;
                                   const topPx = sidePx("top");
+                                  const rightPx = sidePx("right");
                                   const bottomPx = sidePx("bottom");
+                                  const leftPx = sidePx("left");
+                                  const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
+                                  const k = (edge: string) => bandKey(`col.${b}.${r}.${c}.margin`, edge, linkedMargin);
+                                  const drag = (edge: "top" | "right" | "bottom" | "left") => (ev: React.MouseEvent) => {
+                                    const axis = edge === "top" || edge === "bottom" ? "y" : "x";
+                                    const dir = edge === "top" || edge === "left" ? 1 : -1;
+                                    const key = MARGIN_SIDE_KEYS[edge];
+                                    startSpacingDrag(
+                                      ev,
+                                      pxOf[edge],
+                                      axis,
+                                      dir,
+                                      (next, px) => {
+                                        const target = section(next, b).rows[r].columns[c];
+                                        writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
+                                      },
+                                      k(edge),
+                                    );
+                                  };
                                   return (
                                     <>
-                                      {spacingBand("top", topPx, true)}
-                                      {spacingBand("bottom", bottomPx, true)}
+                                      {hoverBand === k("top") && spacingBand("top", topPx, true)}
+                                      {hoverBand === k("bottom") && spacingBand("bottom", bottomPx, true)}
+                                      {hoverBand === k("left") && spacingBand("left", leftPx, true)}
+                                      {hoverBand === k("right") && spacingBand("right", rightPx, true)}
                                       {(["top", "bottom"] as const).map((edge) => (
                                         <span
                                           key={edge}
-                                          onMouseDown={(ev) => {
-                                            const startPx = edge === "top" ? topPx : bottomPx;
-                                            const key = MARGIN_SIDE_KEYS[edge];
-                                            startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
-                                              const target = section(next, b).rows[r].columns[c];
-                                              writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
-                                            });
-                                          }}
+                                          onMouseDown={drag(edge)}
+                                          {...bandHoverProps(k(edge))}
                                           className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
                                             edge === "top" ? "-top-2" : "-bottom-2"
                                           }`}
                                         >
-                                          {edge === "top" ? topPx : bottomPx}px
+                                          {pxOf[edge]}px
+                                        </span>
+                                      ))}
+                                      {(["left", "right"] as const).map((edge) => (
+                                        <span
+                                          key={edge}
+                                          onMouseDown={drag(edge)}
+                                          {...bandHoverProps(k(edge))}
+                                          className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                            edge === "left" ? "-left-2" : "-right-2"
+                                          }`}
+                                        >
+                                          {pxOf[edge]}px
                                         </span>
                                       ))}
                                     </>
                                   );
                                 })()}
+                              {/* space-y-* lives here, not on the outer column div — that div also
+                                  holds the absolutely-positioned padding/margin badges as direct
+                                  children, and space-y's sibling-selector margin-top doesn't know
+                                  those are overlay UI, not real content: it was shoving every badge
+                                  down by an extra 12px, off the selection outline it should sit on. */}
+                              <div className={mode === "live" ? "space-y-5" : "space-y-3"}>
                               {col.elements.length === 0 && (
-                                <div className="flex h-12 items-center justify-center rounded-lg border border-dashed border-line/40 text-[10px] font-medium text-sub">
+                                <div
+                                  className="flex h-12 items-center justify-center rounded-lg border border-dashed text-[10px] font-medium"
+                                  style={{ borderColor: colOverlay.line, color: colOverlay.text }}
+                                >
                                   {t("designer-empty-col")}
                                 </div>
                               )}
@@ -3367,30 +4122,58 @@ export default function Designer({
                                   )}
                                   {selEq([b, r, c, e]) &&
                                     (() => {
-                                      const sidePx = (key: string) =>
-                                        Number(pxLabel(lengthValue(sideValue(el.props, el.bp, key, "marginY"), SPACE, "0"))) || 0;
-                                      const topPx = sidePx(MARGIN_SIDE_KEYS.top);
-                                      const bottomPx = sidePx(MARGIN_SIDE_KEYS.bottom);
+                                      const sidePx = (side: keyof typeof MARGIN_SIDE_KEYS) =>
+                                        Number(pxLabel(lengthValue(sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), SPACE, "0"))) || 0;
+                                      const topPx = sidePx("top");
+                                      const rightPx = sidePx("right");
+                                      const bottomPx = sidePx("bottom");
+                                      const leftPx = sidePx("left");
+                                      const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
+                                      const k = (edge: string) => bandKey(`el.${b}.${r}.${c}.${e}.margin`, edge, linkedMargin);
+                                      const drag = (edge: "top" | "right" | "bottom" | "left") => (ev: React.MouseEvent) => {
+                                        const axis = edge === "top" || edge === "bottom" ? "y" : "x";
+                                        const dir = edge === "top" || edge === "left" ? 1 : -1;
+                                        const key = MARGIN_SIDE_KEYS[edge];
+                                        startSpacingDrag(
+                                          ev,
+                                          pxOf[edge],
+                                          axis,
+                                          dir,
+                                          (next, px) => {
+                                            const target = section(next, b).rows[r].columns[c].elements[e];
+                                            writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
+                                          },
+                                          k(edge),
+                                        );
+                                      };
                                       return (
                                         <>
-                                          {spacingBand("top", topPx, true)}
-                                          {spacingBand("bottom", bottomPx, true)}
+                                          {hoverBand === k("top") && spacingBand("top", topPx, true)}
+                                          {hoverBand === k("bottom") && spacingBand("bottom", bottomPx, true)}
+                                          {hoverBand === k("left") && spacingBand("left", leftPx, true)}
+                                          {hoverBand === k("right") && spacingBand("right", rightPx, true)}
                                           {(["top", "bottom"] as const).map((edge) => (
                                             <span
                                               key={edge}
-                                              onMouseDown={(ev) => {
-                                                const startPx = edge === "top" ? topPx : bottomPx;
-                                                const key = MARGIN_SIDE_KEYS[edge];
-                                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
-                                                  const target = section(next, b).rows[r].columns[c].elements[e];
-                                                  writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
-                                                });
-                                              }}
+                                              onMouseDown={drag(edge)}
+                                              {...bandHoverProps(k(edge))}
                                               className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
                                                 edge === "top" ? "-top-2" : "-bottom-2"
                                               }`}
                                             >
-                                              {edge === "top" ? topPx : bottomPx}px
+                                              {pxOf[edge]}px
+                                            </span>
+                                          ))}
+                                          {(["left", "right"] as const).map((edge) => (
+                                            <span
+                                              key={edge}
+                                              onMouseDown={drag(edge)}
+                                              {...bandHoverProps(k(edge))}
+                                              className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
+                                                edge === "left" ? "-left-2" : "-right-2"
+                                              }`}
+                                            >
+                                              {pxOf[edge]}px
                                             </span>
                                           ))}
                                         </>
@@ -3410,26 +4193,39 @@ export default function Designer({
                                       const rightPx = sidePx("right");
                                       const bottomPx = sidePx("bottom");
                                       const leftPx = sidePx("left");
+                                      const k = (edge: string) => bandKey(`el.${b}.${r}.${c}.${e}.padding`, edge, linkedPadding);
                                       return (
                                         <>
-                                          {spacingBand("top", topPx)}
-                                          {spacingBand("bottom", bottomPx)}
-                                          {spacingBand("left", leftPx)}
-                                          {spacingBand("right", rightPx)}
+                                          {hoverBand === k("top") && spacingBand("top", topPx)}
+                                          {hoverBand === k("bottom") && spacingBand("bottom", bottomPx)}
+                                          {hoverBand === k("left") && spacingBand("left", leftPx)}
+                                          {hoverBand === k("right") && spacingBand("right", rightPx)}
                                           {(["top", "bottom"] as const).map((edge) => (
                                             <span
                                               key={edge}
                                               onMouseDown={(ev) => {
                                                 const startPx = edge === "top" ? topPx : bottomPx;
                                                 const key = PADDING_SIDE_KEYS[edge];
-                                                startSpacingDrag(ev, startPx, "y", edge === "top" ? 1 : -1, (next, px) => {
-                                                  const target = section(next, b).rows[r].columns[c].elements[e];
-                                                  writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
-                                                });
+                                                startSpacingDrag(
+                                                  ev,
+                                                  startPx,
+                                                  "y",
+                                                  edge === "top" ? 1 : -1,
+                                                  (next, px) => {
+                                                    const target = section(next, b).rows[r].columns[c].elements[e];
+                                                    writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
+                                                  },
+                                                  k(edge),
+                                                );
                                               }}
+                                              {...bandHoverProps(k(edge))}
                                               className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                                edge === "top" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2"
+                                                edge === "top" ? "-translate-y-1/2" : "translate-y-1/2"
                                               }`}
+                                              // -1px (no border on this wrapper, unlike Section/Column's
+                                              // -2px) so the badge centers on the 2px selection outline's
+                                              // own centerline instead of the plain padding edge.
+                                              style={{ top: edge === "top" ? "-1px" : undefined, bottom: edge === "bottom" ? "-1px" : undefined }}
                                             >
                                               {edge === "top" ? topPx : bottomPx}px
                                             </span>
@@ -3440,14 +4236,23 @@ export default function Designer({
                                               onMouseDown={(ev) => {
                                                 const startPx = edge === "left" ? leftPx : rightPx;
                                                 const key = PADDING_SIDE_KEYS[edge];
-                                                startSpacingDrag(ev, startPx, "x", edge === "left" ? 1 : -1, (next, px) => {
-                                                  const target = section(next, b).rows[r].columns[c].elements[e];
-                                                  writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
-                                                });
+                                                startSpacingDrag(
+                                                  ev,
+                                                  startPx,
+                                                  "x",
+                                                  edge === "left" ? 1 : -1,
+                                                  (next, px) => {
+                                                    const target = section(next, b).rows[r].columns[c].elements[e];
+                                                    writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
+                                                  },
+                                                  k(edge),
+                                                );
                                               }}
+                                              {...bandHoverProps(k(edge))}
                                               className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                                edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+                                                edge === "left" ? "-translate-x-1/2" : "translate-x-1/2"
                                               }`}
+                                              style={{ left: edge === "left" ? "-1px" : undefined, right: edge === "right" ? "-1px" : undefined }}
                                             >
                                               {edge === "left" ? leftPx : rightPx}px
                                             </span>
@@ -3458,8 +4263,10 @@ export default function Designer({
                                   {ElPreview({ el, path: [b, r, c, e] })}
                                 </div>
                               ))}
+                              </div>
                             </div>
-                          ))}
+                            );
+                          })}
                           </div>
                         </div>
                       ))}
@@ -3484,6 +4291,7 @@ export default function Designer({
                         ))}
                       </div>
                     </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -3507,66 +4315,144 @@ export default function Designer({
         </aside>
       </div>
 
-      {showTemplates && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
-          onClick={() => setShowTemplates(false)}
-        >
-          <div
-            className="max-h-[70vh] w-96 overflow-y-auto rounded-xl bg-white p-4 shadow-xl"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-bold text-ink">{t("designer-templates")}</p>
-              <button onClick={() => setShowTemplates(false)} className="text-body hover:text-ink">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <button
-              onClick={() => void saveAsTemplate()}
-              disabled={!templateKind() || templatesBusy}
-              className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
+      {showTemplates &&
+        (() => {
+          const filteredTemplates = templates.filter((tpl) => {
+            const kind = (tpl.data?.kind as string | undefined) ?? "section";
+            if (templateFilter !== "all" && kind !== templateFilter) return false;
+            if (templateSearch.trim() && !tpl.name.toLowerCase().includes(templateSearch.trim().toLowerCase())) return false;
+            return true;
+          });
+          return (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
+              onClick={() => {
+                setShowTemplates(false);
+                setPendingTemplate(null);
+              }}
             >
-              <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
-            </button>
-            {templates.length === 0 ? (
-              <p className="text-xs text-sub">{t("designer-templates-empty")}</p>
-            ) : (
-              <ul className="space-y-2">
-                {templates.map((tpl) => {
-                  const kind = (tpl.data?.kind as string | undefined) ?? "section";
-                  const kindLabel =
-                    kind === "column" ? t("designer-column") : kind === "element" ? t("designer-elements") : t("designer-section");
-                  return (
-                  <li key={tpl.id} className="flex items-center justify-between rounded-lg border border-line/30 px-3 py-2">
-                    <span className="min-w-0 truncate text-xs font-medium text-ink">
-                      {tpl.name} <span className="text-[10px] font-normal text-sub">({kindLabel})</span>
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <button onClick={() => insertTemplate(tpl)} className="text-[11px] font-semibold text-accent">
-                        {t("designer-templates-insert")}
-                      </button>
-                      <button
-                        onClick={() => void deleteTemplateHandler(tpl.id)}
-                        className="text-[11px] font-semibold text-red-500"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </span>
-                  </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
+              <div
+                className="flex max-h-[85vh] w-[min(90vw,52rem)] flex-col overflow-hidden rounded-xl bg-white p-4 shadow-xl"
+                onClick={(ev) => ev.stopPropagation()}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-xs font-bold text-ink">{t("designer-templates")}</p>
+                  <button
+                    onClick={() => {
+                      setShowTemplates(false);
+                      setPendingTemplate(null);
+                    }}
+                    className="text-body hover:text-ink"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                {pendingTemplate ? (
+                  <form
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      void confirmSaveTemplate();
+                    }}
+                    className="mb-3 flex items-center gap-1.5"
+                  >
+                    <input
+                      autoFocus
+                      value={templateName}
+                      onChange={(ev) => setTemplateName(ev.target.value)}
+                      placeholder={t("designer-templates-save-prompt")}
+                      className="min-w-0 flex-1 rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!templateName.trim() || templatesBusy}
+                      className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                    >
+                      {t("designer-templates-save")}
+                    </button>
+                    <button type="button" onClick={() => setPendingTemplate(null)} className="text-body hover:text-ink">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => saveAsTemplate()}
+                    disabled={!templateKind() || templatesBusy}
+                    className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
+                  >
+                    <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
+                  </button>
+                )}
+                {!pendingTemplate && !templateKind() && !templatesBusy && (
+                  <p className="-mt-2 mb-3 text-[10px] text-sub">{t("designer-templates-need-selection")}</p>
+                )}
+                {templates.length === 0 ? (
+                  <p className="text-xs text-sub">{t("designer-templates-empty")}</p>
+                ) : (
+                  <>
+                    <input
+                      value={templateSearch}
+                      onChange={(ev) => setTemplateSearch(ev.target.value)}
+                      placeholder={t("designer-templates-search-placeholder")}
+                      className="mb-2 w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                    />
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {(["all", "section", "row", "column", "element"] as const).map((k) => (
+                        <button
+                          key={k}
+                          onClick={() => setTemplateFilter(k)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                            templateFilter === k ? "bg-accent text-white" : "bg-canvas text-body hover:bg-[#e8e8ed]"
+                          }`}
+                        >
+                          {k === "all" ? t("designer-templates-filter-all") : templateKindLabel(k)}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      {filteredTemplates.length === 0 ? (
+                        <p className="text-xs text-sub">{t("designer-templates-no-match")}</p>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          {filteredTemplates.map((tpl) => {
+                            const kind = (tpl.data?.kind as string | undefined) ?? "section";
+                            return (
+                              <div key={tpl.id} className="flex flex-col gap-1.5 rounded-lg border border-line/30 p-2">
+                                <TemplatePreview tpl={tpl} />
+                                <span className="truncate text-[11px] font-medium text-ink" title={tpl.name}>
+                                  {tpl.name}
+                                </span>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-sub">{templateKindLabel(kind)}</span>
+                                  <span className="flex items-center gap-2">
+                                    <button onClick={() => insertTemplate(tpl)} className="text-[11px] font-semibold text-accent">
+                                      {t("designer-templates-insert")}
+                                    </button>
+                                    <button
+                                      onClick={() => void deleteTemplateHandler(tpl.id)}
+                                      className="text-red-500"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
       {ctxMenu &&
         (() => {
-          const [b, r, c, e] = ctxMenu.path;
-          const el = section(blocks, b).rows[r]?.columns[c]?.elements[e];
-          if (!el) return null;
+          const path = ctxMenu.path;
+          const kind = templateKind(path);
+          if (!kind) return null;
           const item = (icon: React.ReactNode, label: string, onClick: () => void, disabled?: boolean) => (
             <button
               onClick={() => {
@@ -3580,59 +4466,99 @@ export default function Designer({
               {label}
             </button>
           );
+          const deleteItem = (label: string, onClick: () => void) => (
+            <button
+              onClick={() => {
+                onClick();
+                setCtxMenu(null);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-red-500 hover:bg-canvas"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          );
+          const divider = <div className="my-1 border-t border-line/20" />;
+          // Same set of actions at every depth (section/row/column/element) —
+          // each level already has its own duplicate/copy/paste/copy-style/
+          // paste-style/delete function (BlockControls/Inspector/
+          // LiveEditToolbar already call these), so the menu just reuses them
+          // instead of re-deriving the same splice/clip logic per depth.
+          let body: React.ReactNode;
+          if (kind === "section") {
+            const [b] = path;
+            body = (
+              <>
+                {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b]))}
+                {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => duplicateSection(b))}
+                {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => copySection(b))}
+                {item(<ClipboardPaste className="h-3.5 w-3.5" />, t("designer-paste"), () => pasteSection(b), !clipHas("section"))}
+                {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () => copyStyleSection(b))}
+                {item(<Paintbrush className="h-3.5 w-3.5 opacity-50" />, t("designer-paste-style"), () => pasteStyleSection(b), !styleHas("section"))}
+                {divider}
+                {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b]))}
+                {divider}
+                {deleteItem(t("designer-delete"), () => deleteSection(b))}
+              </>
+            );
+          } else if (kind === "row") {
+            const [b, r] = path;
+            body = (
+              <>
+                {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b, r]))}
+                {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => duplicateRow(b, r))}
+                {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => copyRow(b, r))}
+                {item(<ClipboardPaste className="h-3.5 w-3.5" />, t("designer-paste"), () => pasteRow(b, r), !clipHas("row"))}
+                {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () => copyStyleRow(b, r))}
+                {item(<Paintbrush className="h-3.5 w-3.5 opacity-50" />, t("designer-paste-style"), () => pasteStyleRow(b, r), !styleHas("row"))}
+                {divider}
+                {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b, r]))}
+                {divider}
+                {deleteItem(t("designer-delete-row"), () => deleteRow(b, r))}
+              </>
+            );
+          } else if (kind === "column") {
+            const [b, r, c] = path;
+            body = (
+              <>
+                {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b, r, c]))}
+                {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => duplicateColumn(b, r, c))}
+                {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => copyColumn(b, r, c))}
+                {item(<ClipboardPaste className="h-3.5 w-3.5" />, t("designer-paste"), () => pasteColumn(b, r, c), !clipHas("column"))}
+                {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () => copyStyleColumn(b, r, c))}
+                {item(<Paintbrush className="h-3.5 w-3.5 opacity-50" />, t("designer-paste-style"), () => pasteStyleColumn(b, r, c), !styleHas("column"))}
+                {divider}
+                {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b, r, c]))}
+                {divider}
+                {deleteItem(t("designer-delete"), () => deleteColumn(b, r, c))}
+              </>
+            );
+          } else {
+            const [b, r, c, e] = path;
+            const el = section(blocks, b).rows[r]?.columns[c]?.elements[e];
+            if (!el) return null;
+            body = (
+              <>
+                {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b, r, c, e]))}
+                {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => duplicateElement(b, r, c, e))}
+                {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => copyElement(b, r, c, e))}
+                {item(<ClipboardPaste className="h-3.5 w-3.5" />, t("designer-paste"), () => pasteElement(b, r, c, e), !clipHas("element"))}
+                {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () => copyStyleElement(b, r, c, e))}
+                {item(<Paintbrush className="h-3.5 w-3.5 opacity-50" />, t("designer-paste-style"), () => pasteStyleElement(b, r, c, e), !styleHas("element"))}
+                {divider}
+                {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b, r, c, e]))}
+                {divider}
+                {deleteItem(t("designer-delete"), () => deleteElement(b, r, c, e))}
+              </>
+            );
+          }
           return (
             <div
               className="fixed z-[70] w-44 overflow-hidden rounded-lg border border-line/30 bg-white py-1 shadow-xl"
               style={{ left: ctxMenu.x, top: ctxMenu.y }}
               onClick={(ev) => ev.stopPropagation()}
             >
-              {item(<Pencil className="h-3.5 w-3.5" />, t("designer-edit"), () => setSel([b, r, c, e]))}
-              {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => {
-                mutate((bs) => insertEl(bs, [b, r, c], { ...clone(el), id: uid() }, e + 1));
-                bumpStructural();
-              })}
-              {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => clipCopy("element", el))}
-              {item(
-                <ClipboardPaste className="h-3.5 w-3.5" />,
-                t("designer-paste"),
-                () => {
-                  const data = clipRead<El>("element");
-                  if (data) {
-                    mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
-                    bumpStructural();
-                  }
-                },
-                !clipHas("element"),
-              )}
-              {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () =>
-                styleCopy("element", el.props, el.type),
-              )}
-              {item(
-                <Paintbrush className="h-3.5 w-3.5 opacity-50" />,
-                t("designer-paste-style"),
-                () => {
-                  const style = styleRead("element");
-                  if (style)
-                    mutate((bs) => {
-                      const target = section(bs, b).rows[r].columns[c].elements[e];
-                      target.props = { ...target.props, ...style };
-                    });
-                },
-                !styleHas("element"),
-              )}
-              <div className="my-1 border-t border-line/20" />
-              {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => void saveAsTemplate())}
-              <div className="my-1 border-t border-line/20" />
-              <button
-                onClick={() => {
-                  deleteElement(b, r, c, e);
-                  setCtxMenu(null);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-red-500 hover:bg-canvas"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t("designer-delete")}
-              </button>
+              {body}
             </div>
           );
         })()}

@@ -60,7 +60,9 @@ pnpm workspace monorepo with two apps:
   - `src/db/tenant-pool.ts` resolves each tenant host to its own database (see "Multi-tenancy:
     database-per-tenant" below) and lazily creates/caches one Drizzle/pg pool per connection string.
   - `src/db/schema.ts` defines the `pages` table. Page content is a dynamic block layout stored in the
-    `layout` JSONB column, not as separate relational tables per block type.
+    `layout` JSONB column, not as separate relational tables per block type. `settings` (JSONB, migration
+    `0012_page_settings.sql`) is page-wide Designer defaults — currently just `{ gap?: string }`, the
+    default column gap a row falls back to when it doesn't set its own (`Row.gap`, below).
   - `src/collections/config-types.ts` + `src/plugins/generic-crud.ts` are the code-first collection
     system: a `CollectionConfig` (slug, `access` functions keyed by role/department, `beforeChange`/
     `afterChange` hooks — both receive `(data, args, req)`, so a hook can tell `POST` from `PATCH` via
@@ -198,7 +200,91 @@ pnpm workspace monorepo with two apps:
   `defaultBlockSpecs`'s already-plain entries; and a React block spec's `toExternalHTML` is typed as a
   React FC returning JSX (same props as `render`, plus `context`), not the DOM-node-returning function
   `BlockImplementation` uses on the non-React `@blocknote/core` side — both are called out inline in
-  `bookmarkCard.tsx` so the next block spec added there doesn't have to rediscover them.
+  `bookmarkCard.tsx` so the next block spec added there doesn't have to rediscover them. A section's
+  `Row` (`sp.rows[]`) is independently selectable in Blocks mode — click its background/grid area or the
+  hover-revealed "Row" tag, or click "Row N" in the Layers tab — surfacing its own Inspector panel
+  (`sel.length === 2`, a case that never collides with section/column/element's `sel.length`
+  1/3/4) with per-side `padding`, top/bottom `margin` (the gap *between* stacked rows — replaces the old
+  fixed `space-y-*`/flex-`gap` spacing, so rows are plain block-flow now and adjacent rows' margins
+  collapse like normal HTML), a plain px `gap` field for the gap *between this row's columns*
+  (`Row.gap`, custom px only, no presets — falls back to the page-wide default in `pages.settings.gap`,
+  set from the Inspector's "nothing selected" panel, then to a hardcoded 2rem), and
+  duplicate/copy/paste/copy-style/paste-style/delete — the same `ClipLevel` clipboard mechanism
+  (`"row"` alongside `"section"/"column"/"element"`) Column already used, Inspector-panel buttons only,
+  no on-canvas widget or context menu (matches Column's pattern, not Section's). Mobile breakpoint
+  preview (bp === "mobile") forces every row's `gridTemplateColumns` to `1fr`, stacking columns — mirrors
+  `SectionBlock.astro`'s own `@media (max-width: 768px)` rule, which the canvas didn't previously
+  simulate. The padding/margin spacing-overlay hatch band (blue = padding, amber = margin) only renders
+  while its matching drag handle is hovered or actively dragged (`hoverBand` state) — the small "Npx"
+  badge itself still always shows once selected; a persistent hatch on every side at once, just from
+  selecting the item, was too visually noisy. The canvas's dashed section/row/column guide lines and
+  empty-column hint text are drawn directly on top of that block's actual configured background (which
+  a tenant can set to anything), so they no longer use a fixed admin-chrome gray (`border-line`) — that
+  vanished on a bright/white section or column background. `overlayColors()` (next to `hexToRgba`) picks
+  a dark- or light-tinted line/text color per block via the same `bestTextColor` black-vs-white contrast
+  check `ThemeForm`'s button preview uses, keyed off that block's own resolved bg (`col.props.bg` falling
+  back to the section's, falling back to the site theme's). Row's own grid container has no permanent
+  dashed border (removed — it was purely redundant with each Column's own dashed border directly inside
+  it); Row selection/hover still comes from the same `selCls([b, r])` outline every other level uses. The
+  Section Inspector's Grouped Styles panel (`FieldGroupKey`) has a dedicated `"appearance"` card (Opacity +
+  Shadow — Figma calls this "Appearance") split out from the `"border"` card, which now holds a real
+  Stroke control (`borderWidth`/`borderColor`/`borderStyle`) instead of the old `border`
+  none/thin/thick preset — `borderWidth` set wins over the legacy preset (`sectionBpStyle()` in
+  Designer.tsx, mirrored in `SectionBlock.astro`), so existing pages saved before this field existed don't
+  move. `opacity` (0-100, CSS `opacity` on the whole section — backdrop and content together) is a new
+  Section-only field, same fallback-to-fully-opaque-when-unset convention as every other optional style
+  prop here. The canvas's guide-line overlay tint (`overlayColors()`, previous paragraph) only ever
+  substitutes for an *unset* border — it never overrides a real `borderColor`/legacy `border` preset the
+  author actually picked, so a configured Stroke shows its true color while editing, not just on the
+  published site. "Save as Template"/the Templates modal (`saveAsTemplate`/`templateKind`/`insertTemplate`,
+  backed by `apps/api`'s `design_templates` table) reads whichever selection path is passed in — the
+  right-click context menu passes its own `ctxMenu.path` explicitly rather than the left-click `sel` state,
+  since right-clicking an unselected element never updates `sel` and silently no-opped there before this was
+  fixed. `templateKind` recognizes 4 depths, not 3: `section` (path length 1), **`row`** (length 2), `column`
+  (length 3), `element` (length 4) — row was added because clicking a section's background/grid area selects
+  its Row (see the Row Inspector paragraph above), not the section itself, so "save the whole section" via a
+  background click always hit a silently-disabled Save button until row became a valid template kind too.
+  The modal also shows a hint line whenever nothing template-able is currently selected, instead of just a
+  dead-looking disabled button. Naming a new template uses an in-app field inside the modal
+  (`pendingTemplate`/`templateName` state, submitted via `confirmSaveTemplate()`), not `window.prompt()` —
+  a browser that's already shown several JS dialogs in the same tab (alert/confirm/prompt) offers to
+  "prevent this page from creating additional dialogs," and once that's ticked `prompt()` returns `null`
+  instantly with zero visible sign anything happened, which made a real Save click look identical to a
+  disabled one. `saveAsTemplate()` itself is synchronous now — it only stages `pendingTemplate` and opens
+  the modal; the actual `POST /api/templates` call happens in `confirmSaveTemplate()` once a name is typed.
+  Section and Column each also have their own explicit-path `saveAsTemplate([b])`/`saveAsTemplate([b, r, c])`
+  button (`LayoutTemplate` icon) wired into every place their other per-level actions (copy/paste/copy-style/
+  delete) already live — Section's canvas-header `BlockControls`, Column's Inspector button row, and both
+  branches of `LiveEditToolbar`. Right-click (`ctxMenu`) is no longer Element-only either: the single
+  `ctxMenu` render block branches on `templateKind(ctxMenu.path)` and shows the same 8-item menu (Edit,
+  Duplicate, Copy, Paste, Copy style, Paste style, Save as template, Delete) at all 4 depths, calling
+  whichever level's already-existing helper functions (`duplicateSection`/`duplicateRow`/`duplicateColumn`
+  — the last one newly added, Column previously had no standalone duplicate — /`duplicateElement`, and
+  their copy/paste/copy-style/paste-style/delete counterparts). Blocks mode's Section/Row/Column canvas
+  containers each got their own `onContextMenu` (mirroring Element's, which already existed) that calls
+  `setSel` + `setCtxMenu` with their own path. Live Edit's iframe bridge (`designer:contextmenu` in the
+  postMessage handler) accepts path lengths 1/3/4 now, not just 4 — but never 2 (row): `SectionBlock.astro`
+  only stamps `data-designer-path` on section/column/element nodes, not the row wrapper, so a live-mode
+  right-click can never resolve to a Row; Row's context menu only works in Blocks mode. The Templates modal
+  itself scales for a large personal library (a flat, ungrouped list was fine at a handful of saved templates,
+  not at 100+): it's a wider grid (`w-[min(90vw,52rem)]`, 2-3 columns) with a name search box and kind-filter
+  pills (All/Section/Row/Column/Element, `templateFilter`/`templateSearch` state, filtered client-side —
+  no new API params, the full list is already fetched by `listTemplates`) above the grid, and each card
+  renders `TemplatePreview`: a rough layout-only impression (stacked rows → columns → a bar per element,
+  `rows.slice(0,4)`/`columns.slice(0,5)`/`elements.slice(0,3)` so one oversized template can't blow up a
+  card), not a real screenshot — an actual rendered thumbnail would need a headless-browser pipeline just
+  for this, and a rough shape is enough to recognize a saved layout at a glance. Every template kind
+  normalizes to the same `rows[]` shape for this (`row`/`column`/`element` templates are treated as a
+  1-row, and for column/element also 1-column, section), so `TemplatePreview` has one render path for all
+  4 kinds. The Element Inspector (only Element — Section/Row/Column's own field lists have no `"content"`-
+  bucket fields at all, so a Content tab there would always be empty) splits into Kandungan/Content and
+  Gaya/Style tabs (`inspectorTab` state) once it actually has content fields (`hasContentFields`, checked
+  against `FIELD_GROUP_BY_KEY`) — Content shows only the `"content"` bucket (Text/URL/HTML/items/etc, an
+  element's raw data), Style shows the Padding/Radius/Margin `FourSideControl`s plus every other
+  `GROUP_META` bucket (typography/background/size/appearance/border/advanced). `FieldGroups` grew an
+  `only?: "content" | "style"` prop for this — its 3 existing call sites (Section/Column/Element field
+  lists) are unaffected when the prop is omitted. Copy/paste/duplicate/delete stay outside the tabs
+  (always visible), since they're actions, not settings to browse.
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on

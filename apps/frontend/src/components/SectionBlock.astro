@@ -13,6 +13,13 @@ interface Col {
 }
 interface Row {
   columns?: Col[];
+  gap?: string;
+  marginTop?: string;
+  marginBottom?: string;
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
 }
 interface Props {
   bg?: string;
@@ -25,10 +32,17 @@ interface Props {
   paddingBottom?: string;
   paddingLeft?: string;
   marginY?: string;
+  marginX?: string;
   marginTop?: string;
   marginBottom?: string;
+  marginLeft?: string;
+  marginRight?: string;
   width?: string;
   border?: string;
+  borderWidth?: string;
+  borderColor?: string;
+  borderStyle?: string;
+  opacity?: string;
   shadow?: string;
   radius?: string;
   radiusTopLeft?: string;
@@ -47,6 +61,9 @@ interface Props {
   // valid preview token).
   designerEdit?: boolean;
   blockIndex?: number;
+  // Page-wide default column gap ([...slug].astro's page.settings.gap) — a
+  // row's own `gap` (Row.gap, set in Designer.tsx) always wins over this.
+  pageGap?: string;
 }
 const {
   bg,
@@ -59,10 +76,17 @@ const {
   paddingBottom,
   paddingLeft,
   marginY,
+  marginX,
   marginTop,
   marginBottom,
+  marginLeft,
+  marginRight,
   width = "contained",
   border,
+  borderWidth,
+  borderColor,
+  borderStyle,
+  opacity,
   shadow,
   radius,
   radiusTopLeft,
@@ -74,6 +98,7 @@ const {
   rows = [],
   designerEdit = false,
   blockIndex = 0,
+  pageGap,
 } = Astro.props;
 
 const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
@@ -82,12 +107,30 @@ const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem",
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
 const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
-const SHADOW: Record<string, string> = {
-  none: "none",
+// Legacy preset keywords (existing content saved before the custom shadow
+// panel) still resolve here. A new edit stores a pipe-delimited
+// "x|y|blur|spread|color|opacity" string instead — mirrors
+// apps/admin/src/Designer.tsx's shadowToCss()/LEGACY_SHADOW, kept in sync by
+// hand like every other lookup table this file duplicates from there.
+const LEGACY_SHADOW: Record<string, string | undefined> = {
+  none: undefined,
   sm: "0 1px 3px rgba(0,0,0,.1)",
   md: "0 4px 12px rgba(0,0,0,.12)",
   lg: "0 12px 32px rgba(0,0,0,.16)",
 };
+function hexToRgba(hex: string, alpha: number): string {
+  const h = (hex || "#000000").replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
+  const n = parseInt(full, 16) || 0;
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Number.isFinite(alpha) ? alpha : 1})`;
+}
+function shadowToCss(raw?: string): string | null {
+  if (!raw) return null;
+  if (raw in LEGACY_SHADOW) return LEGACY_SHADOW[raw] ?? null;
+  const [x, y, blur, spread, color, opacity] = raw.split("|");
+  if (!x) return null;
+  return `${x}px ${y}px ${blur ?? 0}px ${spread ?? 0}px ${hexToRgba(color, Number(opacity))}`;
+}
 const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
 // Matches apps/admin/src/Designer.tsx's ICONS map by name — hand-simplified
 // stroke path data (24x24, lucide-style) so this zero-JS renderer doesn't
@@ -241,13 +284,15 @@ function lengthValue(v: string | undefined, table: Record<string, string>, fallb
   if (!v) return fallback;
   return table[v] ?? v;
 }
-// Every element accepts marginY, or independent top/bottom overrides (see
-// Designer.tsx's Inspector) — no marginX, block-flow spacing only.
+// Every element accepts marginY/marginX, or independent per-side overrides
+// (see Designer.tsx's Inspector) — same fallback convention as paddingStyle.
 function marginStyle(p: Record<string, string>) {
-  if (!p.marginY && !p.marginTop && !p.marginBottom) return null;
+  if (!p.marginY && !p.marginX && !p.marginTop && !p.marginRight && !p.marginBottom && !p.marginLeft) return null;
   const top = lengthValue(p.marginTop || p.marginY, SPACE, "0");
+  const right = lengthValue(p.marginRight || p.marginX, SPACE, "0");
   const bottom = lengthValue(p.marginBottom || p.marginY, SPACE, "0");
-  return `margin:${top} 0 ${bottom} 0`;
+  const left = lengthValue(p.marginLeft || p.marginX, SPACE, "0");
+  return `margin:${top} ${right} ${bottom} ${left}`;
 }
 // Universal per-element padding (all 4 sides) — unlike radius, which only
 // makes visual sense on image/embed/gallery, every element type gets this.
@@ -284,12 +329,12 @@ function colStyle(cp?: Record<string, string>) {
   return [
     cp.bg ? `background:${cp.bg}` : null,
     anyPadding ? `padding:${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}` : null,
-    cp.marginY || cp.marginTop || cp.marginBottom
-      ? `margin:${lengthValue(cp.marginTop || cp.marginY, PAD, "0")} 0 ${lengthValue(cp.marginBottom || cp.marginY, PAD, "0")} 0`
+    cp.marginY || cp.marginX || cp.marginTop || cp.marginRight || cp.marginBottom || cp.marginLeft
+      ? `margin:${lengthValue(cp.marginTop || cp.marginY, PAD, "0")} ${lengthValue(cp.marginRight || cp.marginX, PAD, "0")} ${lengthValue(cp.marginBottom || cp.marginY, PAD, "0")} ${lengthValue(cp.marginLeft || cp.marginX, PAD, "0")}`
       : null,
     cp.valign ? `align-self:${cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : "center"}` : null,
     cp.border ? `border:${BORDER[cp.border]}` : null,
-    cp.shadow ? `box-shadow:${SHADOW[cp.shadow]}` : null,
+    shadowToCss(cp.shadow) ? `box-shadow:${shadowToCss(cp.shadow)}` : null,
     anyRadius ? `border-radius:${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}` : null,
   ]
     .filter(Boolean)
@@ -317,7 +362,9 @@ const padLeft = lengthValue(paddingLeft || paddingX, PAD, "1.5rem");
 // Margin has no X axis (block-flow spacing only) — top/bottom, each falling
 // back to the shared marginY value, same convention as padding above.
 const marginTopVal = lengthValue(marginTop || marginY, PAD, "0");
+const marginRightVal = lengthValue(marginRight || marginX, PAD, "0");
 const marginBottomVal = lengthValue(marginBottom || marginY, PAD, "0");
+const marginLeftVal = lengthValue(marginLeft || marginX, PAD, "0");
 const radTopLeft = lengthValue(radiusTopLeft || radius, RADIUS, RADIUS.none);
 const radTopRight = lengthValue(radiusTopRight || radius, RADIUS, RADIUS.none);
 const radBottomRight = lengthValue(radiusBottomRight || radius, RADIUS, RADIUS.none);
@@ -327,19 +374,31 @@ const sectionStyle = [
   bgImage && safeUrl(bgImage) ? `background:url('${safeUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
   textColor ? `color:${textColor}` : null,
   `padding:${padTop} ${padRight} ${padBottom} ${padLeft}`,
-  `margin:${marginTopVal} 0 ${marginBottomVal} 0`,
+  `margin:${marginTopVal} ${marginRightVal} ${marginBottomVal} ${marginLeftVal}`,
   // Only override border/shadow when the author actually picked a value —
   // otherwise every existing section would flatten to square/shadowless
   // corners instead of its current default look. Radius always applies
   // (falls back to RADIUS.none = 0, same visual result as unset).
-  border ? `border:${BORDER[border]}` : null,
-  shadow ? `box-shadow:${SHADOW[shadow]}` : null,
+  // borderWidth set = real stroke fields win, mirrors Designer.tsx's
+  // sectionBpStyle(); otherwise fall back to the legacy preset so old pages
+  // saved before this field existed don't move.
+  borderWidth ? `border:${borderWidth}px ${borderStyle || "solid"} ${borderColor || "currentColor"}` : border ? `border:${BORDER[border]}` : null,
+  shadowToCss(shadow) ? `box-shadow:${shadowToCss(shadow)}` : null,
   `border-radius:${radTopLeft} ${radTopRight} ${radBottomRight} ${radBottomLeft}`,
+  opacity ? `opacity:${Math.max(0, Math.min(100, Number(opacity))) / 100}` : null,
 ]
   .filter(Boolean)
   .join(";");
 
-const gridStyle = (cols: Col[]) => `grid-template-columns:${cols.map((c) => `${c.span ?? 1}fr`).join(" ")}`;
+// marginTop's default (2.5rem, matching the old fixed .ds-inner flex gap)
+// is skipped for the first row — that layout never had a leading gap either.
+const rowStyle = (row: Row, isFirst: boolean) => {
+  const pad =
+    row.paddingTop || row.paddingRight || row.paddingBottom || row.paddingLeft
+      ? `padding:${row.paddingTop ?? "0"} ${row.paddingRight ?? "0"} ${row.paddingBottom ?? "0"} ${row.paddingLeft ?? "0"};`
+      : "";
+  return `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
+};
 const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
 ---
 
@@ -351,7 +410,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
 >
   <div class={width === "full" ? "ds-inner ds-full" : "ds-inner"}>
     {rows.map((row, r) => (
-      <div class="ds-row" style={gridStyle(row.columns ?? [])}>
+      <div class="ds-row" style={rowStyle(row, r === 0)}>
         {(row.columns ?? []).map((col, c) => (
           <div
             class={cls("ds-col", col.props?.cssClass)}
@@ -399,7 +458,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       loading="lazy"
                       style={[
                         `border-radius:${elRadius(p)}`,
-                        p.shadow ? `box-shadow:${SHADOW[p.shadow]}` : null,
+                        shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
                         marginStyle(p),
                         paddingStyle(p),
                       ]
@@ -437,7 +496,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       style={[
                         `aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`,
                         `border-radius:${elRadius(p)}`,
-                        p.shadow ? `box-shadow:${SHADOW[p.shadow]}` : null,
+                        shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
                         marginStyle(p),
                         paddingStyle(p),
                       ]
@@ -543,9 +602,6 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   .ds-inner {
     max-width: 68rem;
     margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 2.5rem;
   }
   .ds-full {
     max-width: none;
