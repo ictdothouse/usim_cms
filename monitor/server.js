@@ -150,7 +150,11 @@ function getHostStats(cb) {
 }
 
 function handleConfig(req, res) {
-  sendJson(res, 200, { mode: DEPLOY_MODE, services: SERVICES, dbManaged: DEPLOY_MODE === "docker" ? true : DB_MANAGED });
+  sendJson(res, 200, {
+    mode: DEPLOY_MODE,
+    services: SERVICES,
+    dbManaged: DEPLOY_MODE === "docker" ? true : DB_MANAGED,
+  });
 }
 
 function handleStatus(req, res) {
@@ -195,7 +199,12 @@ function handleLogs(req, res, name, tail) {
       respond,
     );
   }
-  execFile("journalctl", ["-u", UNIT_MAP[name], "-n", n, "--no-pager"], { timeout: 20_000, maxBuffer: 10 * 1024 * 1024 }, respond);
+  execFile(
+    "journalctl",
+    ["-u", UNIT_MAP[name], "-n", n, "--no-pager"],
+    { timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
+    respond,
+  );
 }
 
 function handleDbStatus(req, res) {
