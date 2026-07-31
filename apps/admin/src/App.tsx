@@ -26,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "@/lib/api";
-import { slugify, oklchToHex, contrastRatio, bestTextColor } from "@/lib/utils";
+import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
 import Designer from "@/Designer";
@@ -1244,20 +1244,6 @@ function randomTheme() {
     textColor: dark ? oklchToHex(0.92, 0.02, hue) : oklchToHex(0.2, 0.02, hue),
   };
 }
-
-// Curated, not exhaustive — a scrollable/typeable starting list (the field
-// still accepts any Google Font name typed by hand, curated or not).
-const GOOGLE_FONTS = [
-  "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Nunito", "Raleway",
-  "Playfair Display", "Merriweather", "Oswald", "Source Sans Pro", "PT Sans", "Ubuntu", "Rubik",
-  "Work Sans", "Fira Sans", "Noto Sans", "Quicksand", "Josefin Sans", "Karla", "Mulish",
-  "DM Sans", "Barlow", "Manrope", "Space Grotesk", "Outfit", "Plus Jakarta Sans",
-  "Libre Baskerville", "Crimson Text", "Cormorant Garamond", "Bitter", "Domine", "Lora",
-  "EB Garamond", "Vollkorn", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", "Archivo",
-  "Heebo", "Hind", "Titillium Web", "Cabin", "Dosis", "Comfortaa", "Pacifico", "Caveat",
-  "Dancing Script", "Lobster", "Bebas Neue", "Anton", "Abril Fatface", "Righteous",
-  "Permanent Marker", "Shadows Into Light", "Amatic SC", "Indie Flower",
-];
 
 // Color contrast can be perfect and a font can still be hard to read —
 // script/handwriting faces are illegible in any role, especially at small

@@ -136,11 +136,40 @@ function isSafeSlideButton(b: unknown): boolean {
   if (o.y !== undefined && (typeof o.y !== "string" || !NUM_RE.test(o.y))) return false;
   return true;
 }
+// heading/subtitle got the same position/color/fontSize treatment as
+// buttons (Designer.tsx's SlideText/parseSlideText) — a plain string is
+// still accepted as legacy content (pages saved before this upgrade), same
+// dual-shape convention as `slides` itself.
+function isSafeSlideText(v: unknown): boolean {
+  if (typeof v === "string") return true;
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.text !== "string") return false;
+  if (o.color !== undefined && o.color !== "" && (typeof o.color !== "string" || !HEX_COLOR_RE.test(o.color))) return false;
+  if (o.fontSize !== undefined && o.fontSize !== "" && (typeof o.fontSize !== "string" || !NUM_RE.test(o.fontSize))) return false;
+  if (o.align !== undefined && !["left", "center", "right"].includes(o.align as string)) return false;
+  // Same shapes/enums every other element's Typography fields already use
+  // (FONT_FAMILY_RE, LENGTH_RE via LENGTH_KEYS' lineHeight/letterSpacing,
+  // ENUM_VALUES.fontWeight/textTransform/fontStyle/textDecoration) — reused
+  // here rather than re-declared, since SlideText isn't part of the generic
+  // props-bag validatePropsBag() walks.
+  if (o.fontFamily !== undefined && o.fontFamily !== "" && (typeof o.fontFamily !== "string" || !FONT_FAMILY_RE.test(o.fontFamily))) return false;
+  if (o.fontWeight !== undefined && o.fontWeight !== "" && !ENUM_VALUES.fontWeight.includes(o.fontWeight as string)) return false;
+  if (o.lineHeight !== undefined && o.lineHeight !== "" && (typeof o.lineHeight !== "string" || !LENGTH_RE.test(o.lineHeight))) return false;
+  if (o.letterSpacing !== undefined && o.letterSpacing !== "" && (typeof o.letterSpacing !== "string" || !LENGTH_RE.test(o.letterSpacing))) return false;
+  if (o.textTransform !== undefined && o.textTransform !== "" && !ENUM_VALUES.textTransform.includes(o.textTransform as string)) return false;
+  if (o.fontStyle !== undefined && o.fontStyle !== "" && !ENUM_VALUES.fontStyle.includes(o.fontStyle as string)) return false;
+  if (o.textDecoration !== undefined && o.textDecoration !== "" && !ENUM_VALUES.textDecoration.includes(o.textDecoration as string)) return false;
+  if (o.position !== undefined && o.position !== "flow" && o.position !== "custom") return false;
+  if (o.x !== undefined && (typeof o.x !== "string" || !NUM_RE.test(o.x))) return false;
+  if (o.y !== undefined && (typeof o.y !== "string" || !NUM_RE.test(o.y))) return false;
+  return true;
+}
 function isSafeSlide(s: unknown): boolean {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
   if (typeof o.imageUrl !== "string" || (o.imageUrl && !isSafeCssUrl(o.imageUrl))) return false;
-  if (typeof o.heading !== "string" || typeof o.subtitle !== "string") return false;
+  if (!isSafeSlideText(o.heading) || !isSafeSlideText(o.subtitle)) return false;
   if (o.textPosition !== undefined && !["left", "center", "right"].includes(o.textPosition as string)) return false;
   if (o.overlayColor !== undefined && (typeof o.overlayColor !== "string" || !HEX_COLOR_RE.test(o.overlayColor))) return false;
   if (o.overlayOpacity !== undefined && (typeof o.overlayOpacity !== "string" || !NUM_RE.test(o.overlayOpacity))) return false;

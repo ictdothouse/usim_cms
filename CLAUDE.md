@@ -220,8 +220,117 @@ pnpm workspace monorepo with two apps:
   live cursor position plus its pre-drag size snapshot. `sliderGuide` (transient React state, tagged with
   `elId` so only the slider block actually being dragged draws its own guide) drives the overlay and is
   cleared on pointerup. Each tick also shows its own rounded px length as a small label at its midpoint —
-  a bare tick mark didn't read as meaningfully different at a glance without the actual number. This was
-  a deliberate schema evolution off the original
+  a bare tick mark didn't read as meaningfully different at a glance without the actual number.
+  Heading and subtitle get most of this same treatment — position (flow/custom x/y), color, and fontSize —
+  not just buttons: `heading`/`subtitle` evolved from plain strings to a `SlideText` object
+  `{text, color, fontSize, align, position, x, y}` (`parseSlideText()`, same string-input-means-legacy-
+  content fallback as everywhere else here), and `Positionable` (`{position, x, y}`) is the shape
+  `SlideButton` and `SlideText` both structurally satisfy — `dragPosition`/`nudgePosition`/`POSITION_PRESETS`
+  all operate on `Positionable` generically rather than being duplicated per item kind. On the canvas,
+  `ElPreview`'s `"slider"` case is generalized the same way: `previewRefs.items` is one flat
+  `Record<string, HTMLElement|null>` keyed `"heading"|"subtitle"|"btn-<i>"` (not separate text/button ref
+  buckets), `ItemRef` (`{kind:"heading"}|{kind:"subtitle"}|{kind:"button",bi}`) is what
+  `startMove`/`startResize`/`updateItem` take instead of a bare button index, and the smart-guide candidate
+  search just iterates every OTHER key in that one map — so heading-vs-subtitle, heading-vs-button, and
+  button-vs-button spacing/alignment all fall out of the same code path instead of three special cases.
+  Heading/subtitle stayed fully hand-drag/resizable on the canvas, exactly like buttons — that part was
+  never in question. What changed, after a first pass got this wrong: the Inspector's per-button minimap
+  (`renderPositionEditor()`, drag-or-preset-click on a small preview box) stayed **button-only** — heading/
+  subtitle "tiba2 jd tak best...sama macam button" with a minimap of their own, so instead they get
+  `renderTextAlign()`, the exact same left/center/right icon-button row (`ALIGN_ICON`) the standalone
+  heading/text element types already render for their own `align` field (`FieldInput`'s
+  `field.kind === "select" && field.key === "align"` branch) — no manual fontSize input either; resizing a
+  heading/subtitle, like a button, is canvas-drag-only. `align` only affects a flow item's own text-align;
+  a custom-positioned one ignores it (there's no "alignment" for an absolutely-placed floating box).
+  Heading/subtitle also got a real Typography section in the Inspector (fontFamily/fontWeight/lineHeight/
+  letterSpacing/textTransform/fontStyle/textDecoration) — added by literally reusing `TYPOGRAPHY_FIELDS`
+  (the same field list the standalone heading/text element types render in their own Style tab) and calling
+  `FieldInput` directly as a plain function (it holds no hooks of its own, same reasoning that already lets
+  `ElPreview` be called directly), rather than hand-writing a second set of font controls that could drift
+  out of sync. On the canvas, the single bottom-right resize dot was replaced with a proper 4-corner
+  resize box (dashed border + a small square handle at each corner, all four driving the same
+  `startResize()` — there's only one dimension to scale, fontSize, so all corners are equivalent, this is
+  purely about reading as a real resizable object like a standard shape/text box, not a floating dot).
+  Getting that box to hug the actual rendered text required `whitespace-nowrap` on the chip: an
+  `inline-block` that DOES wrap (a long heading vs. the slide's `max-w-[80%]`) shrink-to-fits to the
+  *available* width, not the widest wrapped line, so the box floated visibly past the glyphs whenever a
+  heading wrapped to 2+ lines — forcing single-line in this canvas approximation (the real published page
+  in SectionBlock.astro still wraps normally) keeps the box meaningful.
+  That Typography section's `fontFamily`/`lineHeight`/`letterSpacing` fields got two more `FieldKind`s (not
+  slider-specific — `TYPOGRAPHY_FIELDS` is shared with the standalone heading/text/list elements' own Style
+  tab, so both picked up the same upgrade for free): `"font"` renders `FontPickerInput`, a typeable input
+  with a dropdown of matches from `GOOGLE_FONTS` (moved to `lib/utils.ts` so both this and App.tsx's
+  `ThemeForm`/`FontField` draw from one list) where every option is styled `fontFamily: f` so it previews in
+  its own face instead of just naming itself — freeform names typed by hand still work, the dropdown is a
+  narrowing filter, not a closed enum. Designer.tsx also preloads the whole curated list as one batched
+  Google Fonts stylesheet on mount (`id="admin-font-picker-preview"`, same guarded-`<link>` approach
+  `ThemeForm` already used) so every dropdown option actually renders in its real font immediately, not just
+  whichever fonts happen to already be in use on the page (the existing per-block font-scanning effect below
+  it still covers hand-typed names outside the curated list). `"stepper"` renders a "−/+ flanking a number
+  input" control (Field gained an optional `step?: number`) — the same visual pattern the shadow panel's
+  X/Y/blur/spread fields already used via `NumberStepper`, inlined here without that component's own
+  `<label>` wrapper since `FieldInput`'s other kinds are all bare controls (FieldGroups/
+  renderTypographyFields already render each field's label above it).
+  `startMove`'s smart guides gained sibling-to-sibling center alignment (a pink line, distinct from the
+  red page-center/spacing-tick lines) — before this, `vCenter`/`hCenter` only snapped to the slide box's
+  own 50% center; now, while dragging any item, its center is also compared against every OTHER item's
+  center on the box (`previewRefs.items`, same candidate set `vGap`/`hGap` already iterate) and snaps
+  there within a small px tolerance when close (nearest-match only, mirrors the `vGap`/`hGap` "keep
+  smallest" pattern) — e.g. two buttons lining up with each other, or a button centering under the
+  heading. `sliderGuide` gained `alignX`/`alignY` (box-relative px, null when no match) for this.
+  Two more canvas-only bugs surfaced once Typography/align were actually used: the resize box's default
+  line-height (unset → browser's ~1.2 "normal") left visible space above/below the glyphs inside the
+  dashed box — worse the larger fontSize got — so `textChip`'s style now defaults `lineHeight` to `"1"`
+  when the field is unset (an explicit Typography lineHeight still wins; only the un-set default changed).
+  Separately, per-item `align` had silently stopped doing anything the moment `whitespace-nowrap` (above)
+  made the chip shrink-to-fit its own single line — `text-align` only has a visible effect when a box is
+  wider than its content, and shrink-to-fit means it never is. Fixed by moving alignment out of the chip's
+  own `text-align` and into `justify-content` on a `w-full` flex wrapper each flow-mode heading/subtitle
+  now renders inside (`ALIGN_JUSTIFY`) — the wrapper takes the full row width, `justify-*` positions the
+  shrink-wrapped chip within it. This also made the slide's older `first.textPosition`-driven
+  `text-left`/`text-center`/`text-right` classes on the outer block dead weight (they only ever affected
+  inline/inline-block children, and both text items are now wrapped in block-level flex divs) — removed,
+  keeping just `textPosition`'s `self-start ml-6`/`self-end mr-6` block-position classes.
+  Equal-spacing detection was added alongside the existing nearest-neighbor `vGap`/`hGap` tick: while
+  dragging, besides the dragged item's own gap to its nearest neighbor, `set()` also walks every pair of
+  OTHER (non-dragged) items and, if any of THEIR gaps on that axis already equals the dragged item's gap
+  (±2px), pushes an extra tick for it (`vGapMatches`/`hGapMatches`) — e.g. dragging the middle item of 3 in
+  a row now also confirms when the two outer buttons are already exactly as far apart as the gap just
+  formed, not just showing the one nearest tick. Rendered identically to `vGap`/`hGap` (same red tick +
+  px-label style), just once per match found.
+  Sibling alignment (`alignX`) was center-only at first — a screenshot showed 3 stacked items flush-left
+  (heading/subtitle/a button all sharing the same left edge) asking for that case to get its own guide
+  line too, not just centered stacks. Since `alignX` already stores "where dragRect's own center would
+  have to sit" for a match (so one line/snap value covers every case), this only needed more candidate
+  targets per sibling: besides that sibling's own center-x, also its `left + halfW` (the center position
+  that makes dragRect's left edge land on the sibling's left edge) and `right - halfW` (same for the right
+  edge) — whichever of the three is nearest wins, same as before. `alignY` stayed center-only (not asked
+  for; Y-axis top/bottom edge guides would be the same pattern if ever requested).
+  Equal-spacing matching (previous paragraph) originally compared raw gap length within a ±2px float
+  tolerance, which a screenshot caught showing three simultaneous ticks reading "31px"/"32px"/"32px" —
+  correctly flagged as "matching" by that tolerance, but visually reading as a bug since matched ticks
+  showed disagreeing numbers. Root cause: flex layout can round two CSS-identical gaps to different
+  device-pixel widths (sub-pixel drift in child box sizing, not an actual spacing difference), so the raw
+  float distance between them can be up to ~1-2px even when they're "the same" gap. Fixed by comparing
+  `Math.round(length)` equality instead of a float tolerance — a match is now only flagged when the two
+  ticks would display the exact same rounded number, which is the only thing the user can actually see.
+  Left/right-edge `alignX` (previous paragraph) shipped with a real bug: it drew the guide line at the same
+  value used to reposition the dragged item's own center, but for an edge match that snap-center is offset
+  from the sibling's true edge by the dragged item's own half-width — so the line visibly sat away from the
+  actual left/right edge whenever the two items weren't the same width (worked fine for center-matches only
+  because there the two values happen to coincide). Fixed by tracking them separately: each X candidate now
+  carries both `snap` (screen-space target for repositioning, unchanged math) and `line` (the sibling's real
+  matched coordinate — its own left/center/right, never offset by the dragged item's size) — `snapCenterX`
+  drives the reposition, `alignX` (from `line`) drives only where the pink guide is drawn.
+  `SectionBlock.astro` mirrors this: `slideTextStyle()` (color/fontSize/text-align/typography inline
+  overrides, same pattern as `slideButtonStyle()`, each new field checked against the same
+  `FONT_FAMILY_RE`/`LENGTH_RE`/enum shapes validate-layout.ts already uses for every other element's
+  Typography fields) plus a `headingFlow`/`subtitleFlow` split identical to buttons'
+  `flowButtons`/`freeButtons` — a flow heading/subtitle renders in `.ds-slide-content` as before, a custom
+  one renders as a new `.ds-slide-text-free` (`position:absolute`, `transform:translate(-50%,-50%)`, mirrors
+  `.ds-slide-btn-free`) sibling. `validate-layout.ts`'s `isSafeSlideText()` accepts either a plain string
+  (legacy) or the new object shape (now including `align`), same dual-format convention as
+  `isSafeSlideButton`/`isSafeSlide` themselves. This was a deliberate schema evolution off the original
   needed once slides gained more fields than a flat line can hold. `parseSlides`/`stringifySlides`
   (Designer.tsx) and their SectionBlock.astro mirror both accept **either** shape — `JSON.parse` first,
   falling back to the old pipe-line parse on failure — so a page saved before this change keeps

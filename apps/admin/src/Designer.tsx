@@ -156,7 +156,7 @@ import {
   Zap,
 } from "lucide-react";
 import * as api from "@/lib/api";
-import { slugify, bestTextColor } from "@/lib/utils";
+import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
 
@@ -273,7 +273,20 @@ export interface Block {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery" | "length" | "icon" | "shadow" | "pairs" | "slides";
+type FieldKind =
+  | "text"
+  | "textarea"
+  | "select"
+  | "color"
+  | "image"
+  | "gallery"
+  | "length"
+  | "icon"
+  | "shadow"
+  | "pairs"
+  | "slides"
+  | "font"
+  | "stepper";
 interface Field {
   key: string;
   labelKey: Key;
@@ -281,6 +294,8 @@ interface Field {
   options?: string[];
   // "pairs" kind only: i18n keys for the two sub-field placeholders (e.g. Question/Answer vs Label/Content).
   subLabels?: [Key, Key];
+  // "stepper" kind only: +/- nudge amount (default 1 if omitted).
+  step?: number;
 }
 
 // One glyph per field label, so the inspector reads at a glance instead of
@@ -459,10 +474,10 @@ const ICONS: Record<string, typeof Check> = {
 // any Google Font name; see the useEffect near the component body that
 // keeps a matching <link> synced into document.head for canvas preview.
 const TYPOGRAPHY_FIELDS: Field[] = [
-  { key: "fontFamily", labelKey: "designer-f-fontfamily", kind: "text" },
+  { key: "fontFamily", labelKey: "designer-f-fontfamily", kind: "font" },
   { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
-  { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "text" },
-  { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "text" },
+  { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "stepper", step: 0.1 },
+  { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "stepper", step: 0.5 },
   { key: "fontWeight", labelKey: "designer-f-fontweight", kind: "select", options: ["400", "500", "600", "700", "800"] },
   {
     key: "textTransform",
@@ -886,12 +901,100 @@ interface SlideButton {
 const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
 interface SlideItem {
   imageUrl: string;
-  heading: string;
-  subtitle: string;
+  heading: SlideText;
+  subtitle: SlideText;
   textPosition: "left" | "center" | "right";
   overlayColor: string;
   overlayOpacity: string; // "0".."100"
   buttons: SlideButton[];
+}
+// Same "flow vs custom x/y" idea buttons already have, applied to the
+// heading/subtitle too — the shared shape both extend is `Positionable`,
+// used by dragPosition/nudgePosition/PositionEditor so all three item kinds
+// (heading, subtitle, button) drive the exact same drag/nudge/preset code.
+interface Positionable {
+  position: "flow" | "custom";
+  x: string;
+  y: string;
+}
+// Deliberately NOT `Positionable` — heading/subtitle tried free x/y placement
+// (like buttons) and it felt wrong in practice ("tiba2 jd tak best la heading
+// dan subtitle sama macam button"): dropped in favor of a plain `align`
+// select, the same left/center/right control the standalone heading/text
+// element types already use (`designer-f-align`), and `fontSize` moved from
+// a canvas resize-handle to a typed number input next to it — a "Typography"
+// mini-section, not a drag interaction.
+// `Positionable` again (canvas hand-drag/resize for heading/subtitle stays —
+// only the Inspector's minimap went away, replaced by a simple align
+// icon-row, same ALIGN_ICON control the standard heading/text element types
+// already use). `align` only matters while `position === "flow"` (it's the
+// text-align inside the shared content block); it's ignored once dragged to
+// a custom x/y, same as a standalone positioned box has no "alignment".
+// Typography fields mirror TYPOGRAPHY_FIELDS' own keys/options exactly (see
+// below) so the Inspector can render them by literally reusing that same
+// field list + FieldInput, rather than a second hand-written set of
+// fontWeight/textTransform/etc. controls — kept in lockstep by construction.
+interface SlideText extends Positionable {
+  text: string;
+  color: string; // hex text-color override, "" = inherit the slide's default
+  fontSize: string; // px, "" = derive from TEXT_BASE_PX below — set by canvas resize handle
+  align: "left" | "center" | "right";
+  fontFamily: string;
+  fontWeight: string;
+  lineHeight: string;
+  letterSpacing: string;
+  textTransform: string;
+  fontStyle: string;
+  textDecoration: string;
+}
+const TEXT_DEFAULTS: SlideText = {
+  text: "",
+  color: "",
+  fontSize: "",
+  align: "left",
+  fontFamily: "",
+  fontWeight: "",
+  lineHeight: "",
+  letterSpacing: "",
+  textTransform: "",
+  fontStyle: "",
+  textDecoration: "",
+  position: "flow",
+  x: "50",
+  y: "50",
+};
+// Baseline px used as the canvas resize handle's starting point when
+// heading/subtitle have no explicit fontSize yet (mirrors SIZE_PX for
+// buttons, just no discrete sm/md/lg enum of their own to derive from).
+const TEXT_BASE_PX = { heading: 20, subtitle: 13 };
+// Heading/subtitle were plain strings before this upgrade — a string input
+// here means legacy content, wrapped into TEXT_DEFAULTS with that string as
+// `text` (same JSON-then-legacy-shape fallback convention as everywhere else
+// in this file), so a page saved before this change keeps opening/saving
+// and silently upgrades the next time its slider is edited.
+function parseSlideText(raw: unknown): SlideText {
+  if (typeof raw === "string") return { ...TEXT_DEFAULTS, text: raw };
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const str = (key: keyof SlideText) => (typeof o[key] === "string" ? (o[key] as string) : TEXT_DEFAULTS[key]);
+    return {
+      text: typeof o.text === "string" ? o.text : "",
+      color: str("color"),
+      fontSize: str("fontSize"),
+      align: o.align === "center" || o.align === "right" ? o.align : "left",
+      fontFamily: str("fontFamily"),
+      fontWeight: str("fontWeight"),
+      lineHeight: str("lineHeight"),
+      letterSpacing: str("letterSpacing"),
+      textTransform: str("textTransform"),
+      fontStyle: str("fontStyle"),
+      textDecoration: str("textDecoration"),
+      position: o.position === "custom" ? "custom" : "flow",
+      x: typeof o.x === "string" ? o.x : TEXT_DEFAULTS.x,
+      y: typeof o.y === "string" ? o.y : TEXT_DEFAULTS.y,
+    };
+  }
+  return { ...TEXT_DEFAULTS };
 }
 const SLIDE_DEFAULTS = { textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
 const BUTTON_DEFAULTS: SlideButton = {
@@ -938,22 +1041,23 @@ function dragPosition(e: React.PointerEvent<HTMLDivElement>, onMove: (x: string,
   window.addEventListener("pointerup", up);
 }
 const POSITION_NUDGE_STEP = 2; // percent per arrow-key press
-// Arrow-key nudge for whichever button chip currently has keyboard focus —
-// same x/y percent space as dragPosition/POSITION_PRESETS above, just a
-// smaller fixed step instead of a pointer position. A "flow" button has no
-// x/y yet, so the first nudge starts it from BUTTON_DEFAULTS' center and
-// switches it to "custom", same as dragging it does.
-function nudgeButton(btn: SlideButton, key: string): Partial<SlideButton> | null {
+// Arrow-key nudge for whichever canvas chip (button, heading, or subtitle)
+// currently has keyboard focus — same x/y percent space as
+// dragPosition/POSITION_PRESETS above, just a smaller fixed step instead of
+// a pointer position. Generic over `Positionable` since a still-"flow" item
+// of any of the three kinds has no x/y yet — the first nudge starts it from
+// the shared 50/50 center and switches it to "custom", same as dragging does.
+function nudgePosition<T extends Positionable>(item: T, key: string): Partial<T> | null {
   const dx = key === "ArrowLeft" ? -POSITION_NUDGE_STEP : key === "ArrowRight" ? POSITION_NUDGE_STEP : 0;
   const dy = key === "ArrowUp" ? -POSITION_NUDGE_STEP : key === "ArrowDown" ? POSITION_NUDGE_STEP : 0;
   if (dx === 0 && dy === 0) return null;
-  const baseX = btn.position === "custom" ? Number(btn.x) : Number(BUTTON_DEFAULTS.x);
-  const baseY = btn.position === "custom" ? Number(btn.y) : Number(BUTTON_DEFAULTS.y);
+  const baseX = item.position === "custom" ? Number(item.x) : 50;
+  const baseY = item.position === "custom" ? Number(item.y) : 50;
   return {
     position: "custom",
     x: String(Math.min(100, Math.max(0, baseX + dx))),
     y: String(Math.min(100, Math.max(0, baseY + dy))),
-  };
+  } as Partial<T>;
 }
 // Minimal DOMRect-shaped bag — the canvas smart-guide math only ever needs
 // these four numbers, and building a plain object (vs. a real DOMRect) keeps
@@ -1017,8 +1121,8 @@ function parseSlides(raw: string | undefined): SlideItem[] {
         const s = (item ?? {}) as Record<string, unknown>;
         return {
           imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
-          heading: typeof s.heading === "string" ? s.heading : "",
-          subtitle: typeof s.subtitle === "string" ? s.subtitle : "",
+          heading: parseSlideText(s.heading),
+          subtitle: parseSlideText(s.subtitle),
           textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
           overlayColor: typeof s.overlayColor === "string" ? s.overlayColor : SLIDE_DEFAULTS.overlayColor,
           overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : SLIDE_DEFAULTS.overlayOpacity,
@@ -1037,8 +1141,8 @@ function parseSlides(raw: string | undefined): SlideItem[] {
       const [imageUrl = "", heading = "", subtitle = "", buttonLabel = "", buttonHref = ""] = line.split("|");
       return {
         imageUrl,
-        heading,
-        subtitle,
+        heading: parseSlideText(heading),
+        subtitle: parseSlideText(subtitle),
         ...SLIDE_DEFAULTS,
         buttons: buttonLabel ? [{ ...BUTTON_DEFAULTS, label: buttonLabel, href: buttonHref }] : [],
       };
@@ -1518,9 +1622,12 @@ export default function Designer({
   // guide" state a drag shows (center-alignment lines + a text-block spacing
   // indicator) — tagged with elId so only the slider block actually being
   // dragged renders its own guide, not every slider on the page.
-  const sliderPreviewRefs = useRef<
-    Record<string, { box: HTMLElement | null; text: HTMLElement | null; buttons: Record<number, HTMLElement | null> }>
-  >({});
+  // `items` is keyed "heading" | "subtitle" | "btn-<index>" — one flat map
+  // for every draggable/resizable thing a slide can have, so the smart-guide
+  // candidate search (below) doesn't need to special-case text vs buttons.
+  const sliderPreviewRefs = useRef<Record<string, { box: HTMLElement | null; items: Record<string, HTMLElement | null> }>>(
+    {},
+  );
   const [sliderGuide, setSliderGuide] = useState<{
     elId: string;
     vCenter: boolean;
@@ -1530,6 +1637,19 @@ export default function Designer({
     // button) is nearest on that axis, not every candidate at once.
     vGap: { top: number; left: number; length: number } | null;
     hGap: { top: number; left: number; length: number } | null;
+    // vGapMatches/hGapMatches = every OTHER pair of items (not involving the
+    // dragged one) whose own gap on that axis happens to equal vGap/hGap's
+    // length — e.g. the two untouched buttons either side of the one being
+    // dragged already sit 33px apart, same as the gap just formed by the
+    // drag, so both get a tick, not just the dragged item's own nearest one.
+    vGapMatches: { top: number; left: number; length: number }[];
+    hGapMatches: { top: number; left: number; length: number }[];
+    // alignX/alignY = a full-height/full-width pink guide line (box-relative
+    // px) when the dragged item's own center lands on another item's center
+    // on that axis — sibling-to-sibling alignment, distinct from vCenter/
+    // hCenter above (which only snap to the slide box's own 50% center).
+    alignX: number | null;
+    alignY: number | null;
   } | null>(null);
   const frameARef = useRef<HTMLIFrameElement>(null);
   const frameBRef = useRef<HTMLIFrameElement>(null);
@@ -2003,9 +2123,26 @@ export default function Designer({
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // Preloads the whole curated GOOGLE_FONTS list as one stylesheet so the
+  // Typography font picker's dropdown can render every option in its own
+  // face (not just whichever font is already applied somewhere) — same
+  // batched-<link> approach ThemeForm uses for its own font pickers
+  // (App.tsx, id="admin-font-picker-preview"), guarded by the same id since
+  // this admin build never mounts both pages at once but the guard is free.
+  useEffect(() => {
+    if (document.getElementById("admin-font-picker-preview")) return;
+    const link = document.createElement("link");
+    link.id = "admin-font-picker-preview";
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`;
+    document.head.appendChild(link);
+  }, []);
+
   // Keeps a Google Font <link> in document.head for every distinct
   // fontFamily in use, so the canvas preview approximates the real render
-  // (SectionBlock.astro/[...slug].astro do the equivalent server-side).
+  // (SectionBlock.astro/[...slug].astro do the equivalent server-side) —
+  // covers fonts picked outside the curated GOOGLE_FONTS list above (hand-typed
+  // names), which the batched preload doesn't include.
   useEffect(() => {
     const fonts = new Set<string>();
     for (const block of blocks) {
@@ -2630,6 +2767,29 @@ export default function Designer({
         </div>
       );
     }
+    if (field.kind === "font") return <FontPickerInput value={value} onChange={onChange} className={base} />;
+    if (field.kind === "stepper") {
+      const step = field.step ?? 1;
+      const n = Number(value) || 0;
+      const round = (x: number) => Math.round(x * 100) / 100;
+      return (
+        <div className="flex items-center rounded-lg border border-line/30 bg-canvas">
+          <button type="button" onClick={() => onChange(String(round(n - step)))} className="px-2 py-1.5 text-sub hover:text-ink">
+            <Minus className="h-3 w-3" />
+          </button>
+          <BufferedInput
+            type="number"
+            step={step}
+            value={value}
+            onCommit={onChange}
+            className="w-full border-0 bg-transparent px-1 py-1.5 text-center text-xs outline-none"
+          />
+          <button type="button" onClick={() => onChange(String(round(n + step)))} className="px-2 py-1.5 text-sub hover:text-ink">
+            <Plus className="h-3 w-3" />
+          </button>
+        </div>
+      );
+    }
     if (field.kind === "icon") {
       const q = iconSearch.trim().toLowerCase();
       const options = (field.options ?? []).filter((name) => !q || name.includes(q));
@@ -2753,6 +2913,107 @@ export default function Designer({
       const update = (i: number, patch: Partial<SlideItem>) =>
         setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
       const updateButtons = (i: number, buttons: SlideButton[]) => update(i, { buttons });
+      // Shared by the button card AND the heading/subtitle editors below —
+      // same preset grid + drag-or-click minimap + keyboard nudge for
+      // whichever `Positionable` is passed in, so all three item kinds edit
+      // their x/y through identical UI.
+      const renderPositionEditor = (
+        pos: Positionable,
+        onChange: (patch: Partial<Positionable>) => void,
+        previewImage?: string,
+      ) => (
+        <div className="space-y-1 rounded border border-line/20 p-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-sub">{t("designer-f-slider-position")}</span>
+            <button
+              onClick={() => onChange({ position: "flow" })}
+              className={`text-[10px] font-semibold ${pos.position === "flow" ? "text-accent" : "text-sub"}`}
+            >
+              {t("designer-f-slider-positionflow")}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <div className="grid w-16 shrink-0 grid-cols-3 gap-0.5">
+              {POSITION_PRESETS.map((pp, pi) => (
+                <button
+                  key={pi}
+                  onClick={() => onChange({ position: "custom", x: pp.x, y: pp.y })}
+                  className="h-4 w-4 rounded-sm border border-line/40 bg-canvas hover:bg-accent/20"
+                />
+              ))}
+            </div>
+            <div
+              tabIndex={0}
+              className="relative h-16 flex-1 overflow-hidden rounded border border-line/30 bg-line/10 focus:outline-none focus:ring-2 focus:ring-accent"
+              style={previewImage ? { backgroundImage: `url(${previewImage})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+              onPointerDown={(ev) => dragPosition(ev, (x, y) => onChange({ position: "custom", x, y }))}
+              onKeyDown={(ev) => {
+                const patch = nudgePosition(pos, ev.key);
+                if (patch) {
+                  ev.preventDefault();
+                  onChange(patch);
+                }
+              }}
+            >
+              {pos.position === "custom" && (
+                <div
+                  className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-accent shadow"
+                  style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      );
+      // Heading/subtitle's align control — the same icon-button row
+      // (left/center/right) FieldInput already renders for the standalone
+      // heading/text element types' own "align" field (see the
+      // `field.kind === "select" && field.key === "align"` branch above).
+      // No minimap here and no manual fontSize input: position/resize for
+      // heading/subtitle are canvas-drag-only, exactly like buttons.
+      const ALIGN_ICONS: Record<SlideText["align"], typeof AlignLeft> = { left: AlignLeft, center: AlignCenter, right: AlignRight };
+      const renderTextAlign = (txt: SlideText, onChange: (patch: Partial<SlideText>) => void) => (
+        <div className="flex gap-1">
+          {(["left", "center", "right"] as const).map((o) => {
+            const Icon = ALIGN_ICONS[o];
+            return (
+              <button
+                key={o}
+                type="button"
+                onClick={() => onChange({ align: o })}
+                title={o}
+                className={`flex-1 rounded-lg border p-1.5 ${
+                  txt.align === o ? "border-accent bg-accent/10 text-accent" : "border-line/30 text-sub hover:border-accent/40"
+                }`}
+              >
+                <Icon className="mx-auto h-3.5 w-3.5" />
+              </button>
+            );
+          })}
+        </div>
+      );
+      // Heading/subtitle's font-family/weight/line-height/letter-spacing/
+      // text-transform/italic/decoration controls — literally reuses
+      // TYPOGRAPHY_FIELDS + FieldInput (the same field list/renderer the
+      // standalone heading/text element types use for their own Style tab),
+      // minus "color" since that already has its own dedicated swatch above.
+      // FieldInput is a plain function (no hooks of its own), safe to call
+      // directly in a .map() the same way ElPreview is called elsewhere here.
+      const renderTypographyFields = (txt: SlideText, onChange: (patch: Partial<SlideText>) => void) => (
+        <div className="space-y-1.5 rounded border border-line/20 p-2">
+          <span className="text-[10px] font-semibold text-sub">{t("designer-group-typography")}</span>
+          {TYPOGRAPHY_FIELDS.filter((f) => f.key !== "color").map((f) => (
+            <div key={f.key} className="space-y-0.5">
+              <span className="text-[9px] text-sub">{t(f.labelKey)}</span>
+              {FieldInput({
+                field: f,
+                value: (txt as unknown as Record<string, string>)[f.key] ?? "",
+                onChange: (v) => onChange({ [f.key]: v } as Partial<SlideText>),
+              })}
+            </div>
+          ))}
+        </div>
+      );
       return (
         <div className="space-y-2">
           {items.map((s, i) => (
@@ -2787,18 +3048,60 @@ export default function Designer({
                   />
                 </label>
               </div>
-              <BufferedInput
-                className={base}
-                value={s.heading}
-                placeholder={t("designer-f-slider-heading")}
-                onCommit={(v) => update(i, { heading: v })}
-              />
-              <BufferedInput
-                className={base}
-                value={s.subtitle}
-                placeholder={t("designer-f-slider-subtitle")}
-                onCommit={(v) => update(i, { subtitle: v })}
-              />
+              <div className="space-y-1.5 rounded border border-line/20 p-2">
+                <span className="text-[10px] font-semibold text-sub">{t("designer-f-slider-heading")}</span>
+                <BufferedInput
+                  className={base}
+                  value={s.heading.text}
+                  placeholder={t("designer-f-slider-heading")}
+                  onCommit={(v) => update(i, { heading: { ...s.heading, text: v } })}
+                />
+                <label className="flex w-fit items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-textcolor")}>
+                  <input
+                    type="color"
+                    value={s.heading.color || "#ffffff"}
+                    onChange={(e) => update(i, { heading: { ...s.heading, color: e.target.value } })}
+                    className="h-6 w-8 cursor-pointer rounded border border-line/30"
+                  />
+                  {s.heading.color && (
+                    <button
+                      onClick={() => update(i, { heading: { ...s.heading, color: "" } })}
+                      className="font-semibold text-red-500"
+                    >
+                      ×
+                    </button>
+                  )}
+                </label>
+                {renderTextAlign(s.heading, (patch) => update(i, { heading: { ...s.heading, ...patch } }))}
+                {renderTypographyFields(s.heading, (patch) => update(i, { heading: { ...s.heading, ...patch } }))}
+              </div>
+              <div className="space-y-1.5 rounded border border-line/20 p-2">
+                <span className="text-[10px] font-semibold text-sub">{t("designer-f-slider-subtitle")}</span>
+                <BufferedInput
+                  className={base}
+                  value={s.subtitle.text}
+                  placeholder={t("designer-f-slider-subtitle")}
+                  onCommit={(v) => update(i, { subtitle: { ...s.subtitle, text: v } })}
+                />
+                <label className="flex w-fit items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-textcolor")}>
+                  <input
+                    type="color"
+                    value={s.subtitle.color || "#ffffff"}
+                    onChange={(e) => update(i, { subtitle: { ...s.subtitle, color: e.target.value } })}
+                    className="h-6 w-8 cursor-pointer rounded border border-line/30"
+                  />
+                  {s.subtitle.color && (
+                    <button
+                      onClick={() => update(i, { subtitle: { ...s.subtitle, color: "" } })}
+                      className="font-semibold text-red-500"
+                    >
+                      ×
+                    </button>
+                  )}
+                </label>
+                {renderTextAlign(s.subtitle, (patch) => update(i, { subtitle: { ...s.subtitle, ...patch } }))}
+                {renderTypographyFields(s.subtitle, (patch) => update(i, { subtitle: { ...s.subtitle, ...patch } }))}
+              </div>
               <div className="flex gap-2">
                 <select
                   className={`${base} w-1/2`}
@@ -2911,52 +3214,7 @@ export default function Designer({
                           )}
                         </label>
                       </div>
-                      <div className="space-y-1 rounded border border-line/20 p-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-sub">{t("designer-f-slider-buttonposition")}</span>
-                          <button
-                            onClick={() => updateBtn({ position: "flow" })}
-                            className={`text-[10px] font-semibold ${btn.position === "flow" ? "text-accent" : "text-sub"}`}
-                          >
-                            {t("designer-f-slider-positionflow")}
-                          </button>
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="grid w-16 shrink-0 grid-cols-3 gap-0.5">
-                            {POSITION_PRESETS.map((pp, pi) => (
-                              <button
-                                key={pi}
-                                onClick={() => updateBtn({ position: "custom", x: pp.x, y: pp.y })}
-                                className="h-4 w-4 rounded-sm border border-line/40 bg-canvas hover:bg-accent/20"
-                              />
-                            ))}
-                          </div>
-                          <div
-                            tabIndex={0}
-                            className="relative h-16 flex-1 overflow-hidden rounded border border-line/30 bg-line/10 focus:outline-none focus:ring-2 focus:ring-accent"
-                            style={
-                              s.imageUrl
-                                ? { backgroundImage: `url(${s.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-                                : undefined
-                            }
-                            onPointerDown={(ev) => dragPosition(ev, (x, y) => updateBtn({ position: "custom", x, y }))}
-                            onKeyDown={(ev) => {
-                              const patch = nudgeButton(btn, ev.key);
-                              if (patch) {
-                                ev.preventDefault();
-                                updateBtn(patch);
-                              }
-                            }}
-                          >
-                            {btn.position === "custom" && (
-                              <div
-                                className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-accent shadow"
-                                style={{ left: `${btn.x}%`, top: `${btn.y}%` }}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                      {renderPositionEditor(btn, (patch) => updateBtn(patch), s.imageUrl)}
                     </div>
                   );
                 })}
@@ -2973,7 +3231,7 @@ export default function Designer({
             onClick={() =>
               setItems([
                 ...items,
-                { imageUrl: "", heading: "", subtitle: "", ...SLIDE_DEFAULTS, buttons: [] },
+                { imageUrl: "", heading: { ...TEXT_DEFAULTS }, subtitle: { ...TEXT_DEFAULTS }, ...SLIDE_DEFAULTS, buttons: [] },
               ])
             }
             className="text-[11px] font-semibold text-accent"
@@ -3121,6 +3379,59 @@ export default function Designer({
           if (draft !== value) onCommit(draft);
         }}
       />
+    );
+  }
+
+  // Typeable/scrollable Google Font picker — mirrors App.tsx's ThemeForm
+  // FontField exactly (typing filters a dropdown of matches, each option
+  // rendered in its own font-family so it previews rather than just naming
+  // itself), but with no <label> of its own since FieldInput's other kinds
+  // are bare controls — FieldGroups/renderTypographyFields already render
+  // the field's label above it.
+  function FontPickerInput({
+    value,
+    onChange,
+    className,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    className?: string;
+  }) {
+    const [open, setOpen] = useState(false);
+    const matches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(value.toLowerCase()));
+    return (
+      <div className="relative">
+        <input
+          className={className}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Poppins"
+        />
+        {open && matches.length > 0 && (
+          <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
+            {matches.map((f) => (
+              <li key={f}>
+                <button
+                  type="button"
+                  onMouseDown={() => {
+                    onChange(f);
+                    setOpen(false);
+                  }}
+                  className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
+                  style={{ fontFamily: f }}
+                >
+                  {f}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     );
   }
 
@@ -3888,50 +4199,62 @@ export default function Designer({
         const slides = parseSlides(p.slides);
         if (slides.length === 0) return <span className="text-xs opacity-40">{t("designer-f-slider-slides")}…</span>;
         const first = slides[0];
-        if (!sliderPreviewRefs.current[el.id]) sliderPreviewRefs.current[el.id] = { box: null, text: null, buttons: {} };
+        if (!sliderPreviewRefs.current[el.id]) sliderPreviewRefs.current[el.id] = { box: null, items: {} };
         const previewRefs = sliderPreviewRefs.current[el.id];
-        // Canvas-direct button drag/resize, same idea as the heading/text
+        // One item ref covers all three draggable kinds this slide can have —
+        // heading, subtitle, or a specific button — keyed into the same flat
+        // `previewRefs.items` map so the smart-guide candidate search doesn't
+        // need to special-case text vs buttons. Heading/subtitle keep the
+        // same hand-drag/resize interaction buttons have; only the
+        // Inspector's minimap went away for them (see renderTextAlign above),
+        // replaced there by a plain align icon-row — dragging on the canvas
+        // is still the only way to set a custom x/y, and the Inspector never
+        // shows one for text, unlike buttons' full renderPositionEditor.
+        type ItemRef = { kind: "heading" } | { kind: "subtitle" } | { kind: "button"; bi: number };
+        const itemKey = (ref: ItemRef) => (ref.kind === "button" ? `btn-${ref.bi}` : ref.kind);
+        // Canvas-direct drag/resize, same idea as the heading/text
         // contentEditable commit() above: always read the freshest slides off
         // `bs` inside mutate() rather than off the `first`/`slides` captured by
         // this render, since a pointermove fires many times per drag.
-        const updateButtonAt = (bi: number, patch: Partial<SlideButton>) => {
+        const updateItem = (ref: ItemRef, patch: Record<string, unknown>) => {
           if (!path) return;
           const [b, r, c, e] = path;
           mutate((bs) => {
             const elx = section(bs, b).rows[r].columns[c].elements[e];
             const currentSlides = parseSlides(elx.props.slides);
-            if (!currentSlides[0]) return;
-            currentSlides[0] = {
-              ...currentSlides[0],
-              buttons: currentSlides[0].buttons.map((x, j) => (j === bi ? { ...x, ...patch } : x)),
-            };
+            const s0 = currentSlides[0];
+            if (!s0) return;
+            if (ref.kind === "heading") currentSlides[0] = { ...s0, heading: { ...s0.heading, ...patch } };
+            else if (ref.kind === "subtitle") currentSlides[0] = { ...s0, subtitle: { ...s0.subtitle, ...patch } };
+            else currentSlides[0] = { ...s0, buttons: s0.buttons.map((x, j) => (j === ref.bi ? { ...x, ...patch } : x)) };
             elx.props.slides = stringifySlides(currentSlides);
           });
         };
-        // Drag-to-place: works from anywhere the button currently renders
-        // (inline "flow" pill or an already-"custom" chip) — starting a drag
+        // Drag-to-place: works from anywhere the item currently renders
+        // (inline "flow" or an already-"custom" chip) — starting a drag
         // always switches it to "custom" at the pointer's position. Percent is
         // computed against the slide box itself (closest [data-slide-box]),
-        // not the button's own small rect. While dragging, also snaps to the
+        // not the item's own small rect. While dragging, also snaps to the
         // box's own center on each axis within a small threshold (Figma-style
         // "smart guide") and shows spacing ticks (both vertical top/bottom AND
-        // horizontal left/right) against whichever is nearest among the
-        // heading/subtitle text block and every OTHER button on this slide —
-        // all surfaced via `sliderGuide` state so the render below can draw
-        // the actual guide lines.
+        // horizontal left/right) against whichever is nearest among every
+        // OTHER item on this slide — all surfaced via `sliderGuide` state so
+        // the render below can draw the actual guide lines.
         const CENTER_SNAP_THRESHOLD = 3; // percent
-        const startMove = (bi: number, ev: React.PointerEvent<HTMLElement>) => {
+        const startMove = (ref: ItemRef, ev: React.PointerEvent<HTMLElement>) => {
           ev.stopPropagation();
           ev.preventDefault();
           const box = (ev.target as HTMLElement).closest<HTMLElement>("[data-slide-box]");
           if (!box) return;
           const rect = box.getBoundingClientRect();
+          const key = itemKey(ref);
           // The dragged chip's own size, captured once at drag start — it
           // doesn't change size mid-drag, only position, so a snapshot is
           // enough to build its "virtual" rect around the live cursor point.
-          const chipRect = previewRefs.buttons[bi]?.getBoundingClientRect();
+          const chipRect = previewRefs.items[key]?.getBoundingClientRect();
           const halfW = (chipRect?.width ?? 80) / 2;
           const halfH = (chipRect?.height ?? 32) / 2;
+          const SIBLING_SNAP_PX = 6;
           const set = (clientX: number, clientY: number) => {
             let x = Math.round(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)));
             let y = Math.round(Math.min(100, Math.max(0, ((clientY - rect.top) / rect.height) * 100)));
@@ -3939,25 +4262,107 @@ export default function Designer({
             const hCenter = Math.abs(y - 50) <= CENTER_SNAP_THRESHOLD;
             if (vCenter) x = 50;
             if (hCenter) y = 50;
-            updateButtonAt(bi, { position: "custom", x: String(x), y: String(y) });
 
-            const snappedX = rect.left + (x / 100) * rect.width;
-            const snappedY = rect.top + (y / 100) * rect.height;
+            let snappedX = rect.left + (x / 100) * rect.width;
+            let snappedY = rect.top + (y / 100) * rect.height;
+
+            // Sibling alignment (Figma-style "smart guide"): snap this item
+            // onto another item on either axis when close, independent of
+            // the page-center snap above. Y only checks center-to-center
+            // (heading centering under a button, etc); X also checks
+            // left-edge-to-left-edge and right-edge-to-right-edge (not just
+            // center) — three items stacked flush-left/flush-right is exactly
+            // as common a layout as centered, and needed its own guide line.
+            // Each X candidate carries TWO values that are only the same
+            // number for a center-match: `snap` (where the DRAGGED item's own
+            // center has to move to, used below to reposition it) and `line`
+            // (the sibling's actual matched coordinate — its real left/right
+            // edge or center, used only to draw the guide line). Drawing the
+            // line at `snap` instead of `line` was a real bug: for an edge
+            // match `snap` is offset from the true edge by the dragged item's
+            // own half-width, so the line visibly sat away from the sibling's
+            // actual edge whenever the two items weren't the same width.
+            // Picks the nearest match overall, same "keep smallest" pattern
+            // the vGap/hGap loop below uses.
+            let alignX: number | null = null;
+            let alignY: number | null = null;
+            let snapCenterX: number | null = null;
+            let bestDX = SIBLING_SNAP_PX;
+            let bestDY = SIBLING_SNAP_PX;
+            Object.entries(previewRefs.items).forEach(([k, node]) => {
+              if (k === key || !node) return;
+              const cr = node.getBoundingClientRect();
+              const ccy = (cr.top + cr.bottom) / 2;
+              const dy = Math.abs(snappedY - ccy);
+              if (dy <= bestDY) {
+                bestDY = dy;
+                alignY = ccy - rect.top;
+              }
+              const ccx = (cr.left + cr.right) / 2;
+              const xTargets = [
+                { snap: ccx, line: ccx },
+                { snap: cr.left + halfW, line: cr.left },
+                { snap: cr.right - halfW, line: cr.right },
+              ];
+              for (const t of xTargets) {
+                const dx = Math.abs(snappedX - t.snap);
+                if (dx <= bestDX) {
+                  bestDX = dx;
+                  snapCenterX = t.snap;
+                  alignX = t.line - rect.left;
+                }
+              }
+            });
+            if (snapCenterX !== null) {
+              snappedX = snapCenterX;
+              x = Math.round(((snapCenterX - rect.left) / rect.width) * 100);
+            }
+            if (alignY !== null) {
+              snappedY = rect.top + alignY;
+              y = Math.round((alignY / rect.height) * 100);
+            }
+            updateItem(ref, { position: "custom", x: String(x), y: String(y) });
+
             const dragRect: EdgeRect = { left: snappedX - halfW, right: snappedX + halfW, top: snappedY - halfH, bottom: snappedY + halfH };
-            const candidates: EdgeRect[] = [];
-            if (previewRefs.text) candidates.push(previewRefs.text.getBoundingClientRect());
-            Object.entries(previewRefs.buttons).forEach(([j, node]) => {
-              if (Number(j) !== bi && node) candidates.push(node.getBoundingClientRect());
+            const others: EdgeRect[] = [];
+            Object.entries(previewRefs.items).forEach(([k, node]) => {
+              if (k !== key && node) others.push(node.getBoundingClientRect());
             });
             let vGap: GapMark | null = null;
             let hGap: GapMark | null = null;
-            for (const c of candidates) {
+            for (const c of others) {
               const v = edgeGap(dragRect, c, rect, "v");
               if (v && (!vGap || v.length < vGap.length)) vGap = v;
               const h = edgeGap(dragRect, c, rect, "h");
               if (h && (!hGap || h.length < hGap.length)) hGap = h;
             }
-            setSliderGuide({ elId: el.id, vCenter, hCenter, vGap, hGap });
+            // Equal-spacing check: does the gap the drag just formed match a
+            // gap that ALREADY exists between two OTHER (non-dragged) items?
+            // e.g. two untouched buttons either side of this one are already
+            // 33px apart — surfacing that match too (not just the dragged
+            // item's own nearest gap) is what actually reads as "aligned" to
+            // someone eyeballing 3+ items in a row, matching Figma's own
+            // equal-spacing guide. Compared by ROUNDED px (what the badge
+            // actually displays), not raw sub-pixel distance — flex layout
+            // can round two CSS-identical gaps to e.g. 31px vs 32px, and a
+            // small float tolerance would flag those as "matching" while
+            // still showing disagreeing numbers on screen, which reads as
+            // broken rather than helpful.
+            const vGapMatches: GapMark[] = [];
+            const hGapMatches: GapMark[] = [];
+            for (let i = 0; i < others.length; i++) {
+              for (let j = i + 1; j < others.length; j++) {
+                if (vGap) {
+                  const v = edgeGap(others[i], others[j], rect, "v");
+                  if (v && Math.round(v.length) === Math.round(vGap.length)) vGapMatches.push(v);
+                }
+                if (hGap) {
+                  const h = edgeGap(others[i], others[j], rect, "h");
+                  if (h && Math.round(h.length) === Math.round(hGap.length)) hGapMatches.push(h);
+                }
+              }
+            }
+            setSliderGuide({ elId: el.id, vCenter, hCenter, vGap, hGap, vGapMatches, hGapMatches, alignX, alignY });
           };
           set(ev.clientX, ev.clientY);
           const move = (mv: PointerEvent) => set(mv.clientX, mv.clientY);
@@ -3970,16 +4375,16 @@ export default function Designer({
           window.addEventListener("pointerup", up);
         };
         // Drag-to-resize: horizontal drag distance scales fontSize directly
-        // (px, clamped 10-40) off whatever size the button starts at —
-        // mirrors the existing padding/margin edge-drag handles elsewhere in
-        // this file, just driving fontSize instead of a length prop.
-        const startResize = (bi: number, startFont: number, ev: React.PointerEvent<HTMLElement>) => {
+        // (px, clamped 10-40) off whatever size the item starts at — mirrors
+        // the existing padding/margin edge-drag handles elsewhere in this
+        // file, just driving fontSize instead of a length prop.
+        const startResize = (ref: ItemRef, startFont: number, ev: React.PointerEvent<HTMLElement>) => {
           ev.stopPropagation();
           ev.preventDefault();
           const startX = ev.clientX;
           const move = (mv: PointerEvent) => {
             const next = Math.min(40, Math.max(10, Math.round(startFont + (mv.clientX - startX) / 3)));
-            updateButtonAt(bi, { fontSize: String(next) });
+            updateItem(ref, { fontSize: String(next) });
           };
           const up = () => {
             window.removeEventListener("pointermove", move);
@@ -3990,11 +4395,12 @@ export default function Designer({
         };
         const btnChip = (btn: SlideButton, bi: number) => {
           const fontPx = Number(btn.fontSize) || SIZE_PX[btn.size];
+          const ref: ItemRef = { kind: "button", bi };
           return (
             <span
               key={bi}
               ref={(node) => {
-                previewRefs.buttons[bi] = node;
+                previewRefs.items[itemKey(ref)] = node;
               }}
               tabIndex={0}
               className="relative inline-flex cursor-move select-none items-center rounded-full font-semibold shadow focus:outline-none focus:ring-2 focus:ring-accent"
@@ -4006,26 +4412,111 @@ export default function Designer({
                 border: btn.variant === "outline" ? `2px solid ${btn.textColor || "#fff"}` : undefined,
                 borderRadius: btn.radius ? `${btn.radius}px` : "9999px",
               }}
-              onPointerDown={(ev) => startMove(bi, ev)}
+              onPointerDown={(ev) => startMove(ref, ev)}
               onKeyDown={(ev) => {
-                const patch = nudgeButton(btn, ev.key);
+                const patch = nudgePosition(btn, ev.key);
                 if (patch) {
                   ev.preventDefault();
                   ev.stopPropagation();
-                  updateButtonAt(bi, patch);
+                  updateItem(ref, patch);
                 }
               }}
             >
               {btn.label || "Button"}
               <span
                 className="absolute -bottom-1 -right-1 h-2.5 w-2.5 cursor-nwse-resize rounded-full border border-white bg-accent"
-                onPointerDown={(ev) => startResize(bi, fontPx, ev)}
+                onPointerDown={(ev) => startResize(ref, fontPx, ev)}
               />
+            </span>
+          );
+        };
+        // Same drag/resize/nudge treatment as buttons, for the heading and
+        // subtitle — kind picks the TEXT_BASE_PX fallback and default class
+        // (bold/larger for heading, lighter/smaller for subtitle). `align`
+        // applies as text-align regardless of flow/custom.
+        // Corner handles for a Figma/PowerPoint-style "shape resize" box —
+        // replaces the earlier single bottom-right dot, which read as
+        // disconnected from the text's actual (possibly multi-line) bounding
+        // box. All 4 corners drive the exact same startResize() (there's
+        // only one dimension to scale, fontSize), this is purely about the
+        // box reading as a real resizable object, not a floating dot.
+        const RESIZE_CORNERS = [
+          { key: "nw", pos: "-top-1 -left-1", cursor: "cursor-nwse-resize" },
+          { key: "ne", pos: "-top-1 -right-1", cursor: "cursor-nesw-resize" },
+          { key: "sw", pos: "-bottom-1 -left-1", cursor: "cursor-nesw-resize" },
+          { key: "se", pos: "-bottom-1 -right-1", cursor: "cursor-nwse-resize" },
+        ] as const;
+        const textChip = (kind: "heading" | "subtitle", txt: SlideText, fallback: string, extraClass: string) => {
+          const fontPx = Number(txt.fontSize) || TEXT_BASE_PX[kind];
+          const ref: ItemRef = { kind };
+          return (
+            <span
+              ref={(node) => {
+                previewRefs.items[itemKey(ref)] = node;
+              }}
+              tabIndex={0}
+              // whitespace-nowrap keeps the resize box's dashed border/corner
+              // handles tight around the actual rendered text — an
+              // inline-block that DOES wrap (long heading vs. the slide's
+              // max-w-[80%]) shrink-to-fits to the *available* width, not the
+              // widest wrapped line, so the box floated way past the visible
+              // glyphs. The real published page (SectionBlock.astro) still
+              // wraps normally; this only keeps the Blocks-canvas approximation
+              // single-line so its resize box stays meaningful.
+              className={`relative inline-block cursor-move select-none whitespace-nowrap border border-dashed border-white/40 focus:outline-none focus:ring-2 focus:ring-accent ${extraClass}`}
+              style={{
+                fontSize: `${fontPx}px`,
+                color: txt.color || undefined,
+                fontFamily: txt.fontFamily || undefined,
+                fontWeight: txt.fontWeight || undefined,
+                // Defaults to 1 (not the browser's ~1.2 normal) so the dashed
+                // resize box hugs the glyphs — at normal line-height the box's
+                // own top/bottom (line-box) sits visibly above/below the actual
+                // ink, worse the larger fontSize gets, reading as a box that
+                // doesn't fit its text. An explicit lineHeight from Typography
+                // still wins; this is only the un-set default.
+                lineHeight: txt.lineHeight || "1",
+                letterSpacing: txt.letterSpacing || undefined,
+                textTransform: (txt.textTransform || undefined) as React.CSSProperties["textTransform"],
+                fontStyle: txt.fontStyle || undefined,
+                textDecoration: txt.textDecoration || undefined,
+              }}
+              onPointerDown={(ev) => startMove(ref, ev)}
+              onKeyDown={(ev) => {
+                const patch = nudgePosition(txt, ev.key);
+                if (patch) {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  updateItem(ref, patch);
+                }
+              }}
+            >
+              {txt.text || fallback}
+              {RESIZE_CORNERS.map((c) => (
+                <span
+                  key={c.key}
+                  className={`absolute h-2 w-2 rounded-sm border border-white bg-accent shadow ${c.pos} ${c.cursor}`}
+                  onPointerDown={(ev) => startResize(ref, fontPx, ev)}
+                />
+              ))}
             </span>
           );
         };
         const flowButtons = first.buttons.filter((btn) => btn.position !== "custom");
         const freeButtons = first.buttons.filter((btn) => btn.position === "custom");
+        const headingFlow = first.heading.position !== "custom";
+        const subtitleFlow = first.subtitle.position !== "custom";
+        const showSubtitle = first.subtitle.text.length > 0;
+        // textChip is whitespace-nowrap + shrink-to-fit, so `text-align` on
+        // the chip itself has zero visible effect (box width == content
+        // width, nothing to align within) — each flow item's own `align`
+        // instead has to come from where it sits inside a full-width flex
+        // row, same idea as justify-content in any other layout.
+        const ALIGN_JUSTIFY: Record<SlideText["align"], string> = {
+          left: "justify-start",
+          center: "justify-center",
+          right: "justify-end",
+        };
         return (
           <div
             data-slide-box
@@ -4036,17 +4527,32 @@ export default function Designer({
             style={first.imageUrl ? { background: `url(${first.imageUrl}) center/cover` } : undefined}
           >
             <div
-              ref={(node) => {
-                previewRefs.text = node;
-              }}
-              className={`max-w-[80%] ${first.textPosition === "left" ? "self-start text-left ml-6" : first.textPosition === "right" ? "self-end text-right mr-6" : "text-center"}`}
+              className={`max-w-[80%] ${first.textPosition === "left" ? "self-start ml-6" : first.textPosition === "right" ? "self-end mr-6" : ""}`}
             >
-              <p className="text-sm font-bold">{first.heading || "Slide heading"}</p>
-              {first.subtitle && <p className="mt-1 text-xs opacity-80">{first.subtitle}</p>}
+              {headingFlow && (
+                <div className={`flex ${ALIGN_JUSTIFY[first.heading.align]}`}>
+                  {textChip("heading", first.heading, "Slide heading", "text-sm font-bold")}
+                </div>
+              )}
+              {subtitleFlow && showSubtitle && (
+                <div className={`mt-1 flex ${ALIGN_JUSTIFY[first.subtitle.align]}`}>
+                  {textChip("subtitle", first.subtitle, "", "text-xs opacity-80")}
+                </div>
+              )}
               {flowButtons.length > 0 && (
                 <div className="mt-2 flex flex-wrap justify-center gap-1.5">{flowButtons.map((btn) => btnChip(btn, first.buttons.indexOf(btn)))}</div>
               )}
             </div>
+            {!headingFlow && (
+              <div className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${first.heading.x}%`, top: `${first.heading.y}%` }}>
+                {textChip("heading", first.heading, "Slide heading", "text-sm font-bold")}
+              </div>
+            )}
+            {!subtitleFlow && showSubtitle && (
+              <div className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${first.subtitle.x}%`, top: `${first.subtitle.y}%` }}>
+                {textChip("subtitle", first.subtitle, "", "text-xs opacity-80")}
+              </div>
+            )}
             {freeButtons.map((btn) => (
               <div
                 key={first.buttons.indexOf(btn)}
@@ -4061,6 +4567,12 @@ export default function Designer({
             )}
             {sliderGuide?.elId === el.id && sliderGuide.hCenter && (
               <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-red-500" />
+            )}
+            {sliderGuide?.elId === el.id && sliderGuide.alignX !== null && (
+              <div className="pointer-events-none absolute inset-y-0 w-px bg-fuchsia-400" style={{ left: sliderGuide.alignX }} />
+            )}
+            {sliderGuide?.elId === el.id && sliderGuide.alignY !== null && (
+              <div className="pointer-events-none absolute inset-x-0 h-px bg-fuchsia-400" style={{ top: sliderGuide.alignY }} />
             )}
             {sliderGuide?.elId === el.id && sliderGuide.vGap && (
               <div
@@ -4086,6 +4598,34 @@ export default function Designer({
                 </span>
               </div>
             )}
+            {sliderGuide?.elId === el.id &&
+              sliderGuide.vGapMatches.map((m, i) => (
+                <div
+                  key={`vm-${i}`}
+                  className="pointer-events-none absolute w-px bg-red-500"
+                  style={{ left: m.left, top: m.top, height: m.length }}
+                >
+                  <span className="absolute -left-1 top-0 h-px w-2 bg-red-500" />
+                  <span className="absolute -left-1 bottom-0 h-px w-2 bg-red-500" />
+                  <span className="absolute left-1 top-1/2 -translate-y-1/2 whitespace-nowrap rounded bg-red-500 px-1 py-0.5 text-[9px] font-semibold leading-none text-white">
+                    {Math.round(m.length)}px
+                  </span>
+                </div>
+              ))}
+            {sliderGuide?.elId === el.id &&
+              sliderGuide.hGapMatches.map((m, i) => (
+                <div
+                  key={`hm-${i}`}
+                  className="pointer-events-none absolute h-px bg-red-500"
+                  style={{ left: m.left, top: m.top, width: m.length }}
+                >
+                  <span className="absolute left-0 -top-1 h-2 w-px bg-red-500" />
+                  <span className="absolute right-0 -top-1 h-2 w-px bg-red-500" />
+                  <span className="absolute left-1/2 top-1 -translate-x-1/2 whitespace-nowrap rounded bg-red-500 px-1 py-0.5 text-[9px] font-semibold leading-none text-white">
+                    {Math.round(m.length)}px
+                  </span>
+                </div>
+              ))}
             <div className="absolute bottom-2 flex justify-center gap-1">
               {slides.map((_, i) => (
                 <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-white" : "bg-white/40"}`} />

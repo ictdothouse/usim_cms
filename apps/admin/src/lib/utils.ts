@@ -71,3 +71,19 @@ export function contrastRatio(hexA: string, hexB: string): number {
 export function bestTextColor(hex: string): string {
   return contrastRatio("#ffffff", hex) >= contrastRatio("#000000", hex) ? "#ffffff" : "#000000";
 }
+
+// Curated, not exhaustive — a scrollable/typeable starting list (every font
+// picker built on this still accepts any Google Font name typed by hand,
+// curated or not). Shared by App.tsx's ThemeForm font pickers and
+// Designer.tsx's Typography fontFamily field so both draw from one list.
+export const GOOGLE_FONTS = [
+  "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Nunito", "Raleway",
+  "Playfair Display", "Merriweather", "Oswald", "Source Sans Pro", "PT Sans", "Ubuntu", "Rubik",
+  "Work Sans", "Fira Sans", "Noto Sans", "Quicksand", "Josefin Sans", "Karla", "Mulish",
+  "DM Sans", "Barlow", "Manrope", "Space Grotesk", "Outfit", "Plus Jakarta Sans",
+  "Libre Baskerville", "Crimson Text", "Cormorant Garamond", "Bitter", "Domine", "Lora",
+  "EB Garamond", "Vollkorn", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", "Archivo",
+  "Heebo", "Hind", "Titillium Web", "Cabin", "Dosis", "Comfortaa", "Pacifico", "Caveat",
+  "Dancing Script", "Lobster", "Bebas Neue", "Anton", "Abril Fatface", "Righteous",
+  "Permanent Marker", "Shadows Into Light", "Amatic SC", "Indie Flower",
+];
