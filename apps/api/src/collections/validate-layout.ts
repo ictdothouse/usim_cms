@@ -115,12 +115,25 @@ const SKIP_KEYS = new Set(["html"]);
 // JSON.parse throws on that, so it falls through to the legacy check below
 // and keeps saving until the author re-opens/re-edits the slider (which
 // rewrites it as JSON) — this must accept both shapes, never just the new one.
+// Position/style overrides added for the drag-to-place button upgrade
+// (Designer.tsx's dragPosition/POSITION_PRESETS): x/y are percent strings
+// (0-100, clamped again at render time in both Designer.tsx's canvas and
+// SectionBlock.astro), color/textColor are hex, radius is a bare px number,
+// size is a closed enum — all optional, missing means "use theme default".
 function isSafeSlideButton(b: unknown): boolean {
   if (typeof b !== "object" || b === null) return false;
   const o = b as Record<string, unknown>;
   if (typeof o.label !== "string") return false;
   if (typeof o.href !== "string" || !isSafeUrl(o.href)) return false;
   if (o.variant !== undefined && o.variant !== "primary" && o.variant !== "outline") return false;
+  if (o.color !== undefined && o.color !== "" && (typeof o.color !== "string" || !HEX_COLOR_RE.test(o.color))) return false;
+  if (o.textColor !== undefined && o.textColor !== "" && (typeof o.textColor !== "string" || !HEX_COLOR_RE.test(o.textColor))) return false;
+  if (o.radius !== undefined && o.radius !== "" && (typeof o.radius !== "string" || !NUM_RE.test(o.radius))) return false;
+  if (o.size !== undefined && !["sm", "md", "lg"].includes(o.size as string)) return false;
+  if (o.fontSize !== undefined && o.fontSize !== "" && (typeof o.fontSize !== "string" || !NUM_RE.test(o.fontSize))) return false;
+  if (o.position !== undefined && o.position !== "flow" && o.position !== "custom") return false;
+  if (o.x !== undefined && (typeof o.x !== "string" || !NUM_RE.test(o.x))) return false;
+  if (o.y !== undefined && (typeof o.y !== "string" || !NUM_RE.test(o.y))) return false;
   return true;
 }
 function isSafeSlide(s: unknown): boolean {

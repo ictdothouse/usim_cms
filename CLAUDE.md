@@ -164,8 +164,64 @@ pnpm workspace monorepo with two apps:
   event-delegated `<script>` Astro bundles once per page regardless of how many instances render.
   Slider/banner's `slides` field is a **JSON array**, one object per slide (`imageUrl`, `heading`,
   `subtitle`, `textPosition` — left/center/right —, `overlayColor`+`overlayOpacity` for the darkening
-  scrim, and a `buttons` array — each `{label, href, variant}`, not just one button) — a deliberate
-  schema evolution off the original `imageUrl|heading|subtitle|buttonLabel|buttonHref` pipe-line format,
+  scrim, and a `buttons` array — each button its own card in the Inspector (not a cramped single-line
+  row) with `label`/`href`, `variant` (primary/outline), `size` (sm/md/lg), an optional hex `color`/
+  `textColor` override (empty = theme default; `textColor` also recolors an outline button's border
+  since its CSS uses `currentColor`), an optional `radius` (px), and `position` — `"flow"` (default,
+  laid out inside the slide's text block same as before) or `"custom"` (absolutely placed anywhere in
+  the slide via `x`/`y` percent). Custom placement is set either by dragging inside a small position
+  minimap next to each button (`dragPosition()` in Designer.tsx — plain pointerdown/pointermove/pointerup
+  against the minimap's own bounding rect, not a hook, safe to call from inside the buttons `.map()`) or
+  by clicking one of 9 preset dots (`POSITION_PRESETS`, just canonical x/y shortcuts — there's no
+  separate named-preset enum to keep in sync across admin/frontend/validator, a preset is only ever
+  `{x, y}` like a hand-dragged one). SectionBlock.astro splits a slide's buttons into `flowButtons`
+  (rendered inside `.ds-slide-content` as before) and `freeButtons` (rendered as `.ds-slide-btn-free`
+  siblings, `position:absolute; left:{x}%; top:{y}%` on `.ds-slide`, which already has `position:relative`)
+  — `slideButtonStyle()` turns color/textColor/radius/`fontSize` into inline style overrides, each
+  re-checked against a hex/numeric regex at render time (defense-in-depth, same as `bgImage`'s
+  `safeCssUrl` guard) on top of `validate-layout.ts`'s write-time check. `.ds-btn`'s padding is `em`, not
+  `rem` — an inline `fontSize` override scales the whole pill (label + padding) together instead of just
+  enlarging the text inside a fixed-size button.
+  A button also has an optional `fontSize` (px, "" = derive from `size`) — the canvas's drag-to-resize
+  handle (below) sets this directly; the `size` sm/md/lg dropdown is still the quick discrete preset,
+  `fontSize` is the continuous override on top of it, same additive relationship as `color`/`radius`.
+  The Inspector's small per-button minimap (drag-or-preset-click to set `x`/`y`) coexists with a second,
+  richer way to do the same thing directly on the canvas: `ElPreview`'s `"slider"` case (Blocks-mode
+  canvas preview, not Live Edit) renders slide 1's actual buttons with their real style/position — a flow
+  button inline next to heading/subtitle, a custom one absolutely placed at its `x`/`y` — and every button
+  chip is itself draggable (`startMove`, mirrors `dragPosition`'s pointerdown/pointermove/pointerup-on-
+  window pattern, but resolves the containing slide box via `closest("[data-slide-box]")` instead of using
+  its own small rect, and works from either starting position — dragging a "flow" button switches it to
+  "custom" at the drop point) and has a small corner handle for drag-to-resize (`startResize`, horizontal
+  drag delta scales `fontSize` px, clamped 10-40 — same interaction shape as this file's existing
+  padding/margin edge-drag handles, just driving a font size instead of a length prop). Both write through
+  `updateButtonAt()`, which — like the heading/text canvas-edit `commit()` above it — always re-reads the
+  current `slides` off the fresh `bs` inside `mutate()` rather than off a value captured at render time,
+  since a drag fires many pointermove events against what would otherwise be a stale closure. Both
+  surfaces (the Inspector minimap and each canvas button chip) are also keyboard-focusable
+  (`tabIndex={0}`) with an arrow-key nudge (`nudgeButton()`, shared by both) — 2% per press, clamped
+  0-100, for anyone who doesn't want to hand-drag or needs a precise realign; nudging a still-"flow"
+  button starts it from `BUTTON_DEFAULTS`' center and switches it to `"custom"`, same as a drag would.
+  Dragging on the canvas also shows Figma-style smart guides: a red center-alignment line on whichever
+  axis the button is within 3% of the slide's own center (and snaps to exactly 50 on that axis), plus
+  red spacing ticks on BOTH axes — vertical (top/bottom) and horizontal (left/right) — against whichever
+  candidate is nearest, where a candidate is the heading/subtitle text block or any OTHER button on the
+  same slide (`edgeGap()`, module-level: only returns a mark when the two rects don't overlap on the
+  requested axis but do overlap on the other, so the tick has a sensible perpendicular anchor point;
+  `startMove` calls it once per axis per candidate and keeps only the smallest/nearest result per axis, so
+  a slide with several buttons doesn't draw a cluttered mark against every one of them at once). This reads
+  real DOM rects (`sliderPreviewRefs`, keyed by `el.id` like `editingText` above it — a flat single ref
+  would get clobbered by whichever slider block rendered last if a page has more than one — and holding a
+  `buttons: Record<number, HTMLElement | null>` map too, keyed by button index, since a button's own
+  rendered size varies with its `fontSize`/padding and can't be derived from the x/y percent model the rest
+  of this feature uses) rather than that percent model, since alignment-to-actual-rendered-content needs
+  real pixel geometry — the dragged button itself doesn't have a live DOM rect mid-drag (it's still
+  animating toward its new spot), so its own rect is reconstructed as a same-shaped `EdgeRect` from the
+  live cursor position plus its pre-drag size snapshot. `sliderGuide` (transient React state, tagged with
+  `elId` so only the slider block actually being dragged draws its own guide) drives the overlay and is
+  cleared on pointerup. Each tick also shows its own rounded px length as a small label at its midpoint —
+  a bare tick mark didn't read as meaningfully different at a glance without the actual number. This was
+  a deliberate schema evolution off the original
   needed once slides gained more fields than a flat line can hold. `parseSlides`/`stringifySlides`
   (Designer.tsx) and their SectionBlock.astro mirror both accept **either** shape — `JSON.parse` first,
   falling back to the old pipe-line parse on failure — so a page saved before this change keeps

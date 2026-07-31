@@ -134,6 +134,14 @@ interface SlideButton {
   label: string;
   href: string;
   variant: "primary" | "outline";
+  color: string;
+  textColor: string;
+  radius: string;
+  size: "sm" | "md" | "lg";
+  fontSize: string;
+  position: "flow" | "custom";
+  x: string;
+  y: string;
 }
 interface Slide {
   imageUrl: string;
@@ -144,6 +152,19 @@ interface Slide {
   overlayOpacity: string;
   buttons: SlideButton[];
 }
+const BUTTON_DEFAULTS: SlideButton = {
+  label: "",
+  href: "",
+  variant: "primary",
+  color: "",
+  textColor: "",
+  radius: "",
+  size: "md",
+  fontSize: "",
+  position: "flow",
+  x: "50",
+  y: "50",
+};
 function parseSlideButtons(raw: unknown): SlideButton[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((b) => {
@@ -152,6 +173,14 @@ function parseSlideButtons(raw: unknown): SlideButton[] {
       label: typeof btn.label === "string" ? btn.label : "",
       href: typeof btn.href === "string" ? btn.href : "",
       variant: btn.variant === "outline" ? "outline" : ("primary" as const),
+      color: typeof btn.color === "string" ? btn.color : BUTTON_DEFAULTS.color,
+      textColor: typeof btn.textColor === "string" ? btn.textColor : BUTTON_DEFAULTS.textColor,
+      radius: typeof btn.radius === "string" ? btn.radius : BUTTON_DEFAULTS.radius,
+      size: btn.size === "sm" || btn.size === "lg" ? btn.size : "md",
+      fontSize: typeof btn.fontSize === "string" ? btn.fontSize : BUTTON_DEFAULTS.fontSize,
+      position: btn.position === "custom" ? "custom" : "flow",
+      x: typeof btn.x === "string" ? btn.x : BUTTON_DEFAULTS.x,
+      y: typeof btn.y === "string" ? btn.y : BUTTON_DEFAULTS.y,
     };
   });
 }
@@ -189,7 +218,7 @@ function parseSlides(raw: string | undefined): Slide[] {
         textPosition: "center" as const,
         overlayColor: "#000000",
         overlayOpacity: "35",
-        buttons: buttonLabel ? [{ label: buttonLabel, href: buttonHref, variant: "primary" as const }] : [],
+        buttons: buttonLabel ? [{ ...BUTTON_DEFAULTS, label: buttonLabel, href: buttonHref }] : [],
       };
     });
 }
@@ -205,6 +234,28 @@ const LEGACY_SHADOW: Record<string, string | undefined> = {
   md: "0 4px 12px rgba(0,0,0,.12)",
   lg: "0 12px 32px rgba(0,0,0,.16)",
 };
+// Render-time defense-in-depth for slide button style overrides — same
+// pattern as bgImage's own safeCssUrl guard, on top of (not instead of)
+// validate-layout.ts's write-time isSafeSlideButton check.
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+const NUM_RE = /^[0-9]+(\.[0-9]+)?$/;
+// color overrides `background` for both variants — for `ds-btn-outline`
+// (border: 2px solid currentColor; color: inherit) setting textColor also
+// recolors the border for free, since currentColor picks up `color` either way.
+function slideButtonStyle(btn: SlideButton): string | undefined {
+  return (
+    [
+      btn.color && HEX_RE.test(btn.color) ? `background:${btn.color}` : null,
+      btn.textColor && HEX_RE.test(btn.textColor) ? `color:${btn.textColor}` : null,
+      btn.radius && NUM_RE.test(btn.radius) ? `border-radius:${btn.radius}px` : null,
+      // Overrides the size class's font-size — .ds-btn's padding is in em, so
+      // this scales padding along with it (set by the canvas resize handle).
+      btn.fontSize && NUM_RE.test(btn.fontSize) ? `font-size:${btn.fontSize}px` : null,
+    ]
+      .filter(Boolean)
+      .join(";") || undefined
+  );
+}
 function hexToRgba(hex: string, alpha: number): string {
   const h = (hex || "#000000").replace("#", "");
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
@@ -768,6 +819,8 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                           {slides.map((s) => {
                             const bgUrl = s.imageUrl ? safeCssUrl(s.imageUrl) : undefined;
                             const overlayOpacity = Math.min(100, Math.max(0, Number(s.overlayOpacity) || 0)) / 100;
+                            const flowButtons = s.buttons.filter((btn) => btn.position !== "custom");
+                            const freeButtons = s.buttons.filter((btn) => btn.position === "custom");
                             return (
                               <div class="ds-slide" style={bgUrl ? `background-image:url('${bgUrl}')` : undefined}>
                                 {overlayOpacity > 0 && (
@@ -776,11 +829,16 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                                 <div class={cls("ds-slide-content", `ds-slide-${s.textPosition}`)}>
                                   {s.heading && <p class="ds-slide-heading" set:html={renderInline(s.heading)} />}
                                   {s.subtitle && <p class="ds-slide-subtitle" set:html={renderInline(s.subtitle)} />}
-                                  {s.buttons.length > 0 && (
+                                  {flowButtons.length > 0 && (
                                     <div class="ds-slide-buttons">
-                                      {s.buttons.map((btn) => (
+                                      {flowButtons.map((btn) => (
                                         <a
-                                          class={btn.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary"}
+                                          class={cls(
+                                            "ds-btn",
+                                            btn.variant === "outline" ? "ds-btn-outline" : "ds-btn-primary",
+                                            btn.size !== "md" ? `ds-btn-${btn.size}` : undefined,
+                                          )}
+                                          style={slideButtonStyle(btn)}
                                           href={safeUrl(btn.href) ?? "#"}
                                         >
                                           {btn.label}
@@ -789,6 +847,24 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                                     </div>
                                   )}
                                 </div>
+                                {freeButtons.map((btn) => {
+                                  const x = Math.min(100, Math.max(0, Number(btn.x) || 50));
+                                  const y = Math.min(100, Math.max(0, Number(btn.y) || 50));
+                                  return (
+                                    <a
+                                      class={cls(
+                                        "ds-btn",
+                                        "ds-slide-btn-free",
+                                        btn.variant === "outline" ? "ds-btn-outline" : "ds-btn-primary",
+                                        btn.size !== "md" ? `ds-btn-${btn.size}` : undefined,
+                                      )}
+                                      style={[`left:${x}%`, `top:${y}%`, slideButtonStyle(btn)].filter(Boolean).join(";")}
+                                      href={safeUrl(btn.href) ?? "#"}
+                                    >
+                                      {btn.label}
+                                    </a>
+                                  );
+                                })}
                               </div>
                             );
                           })}
@@ -867,7 +943,10 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   }
   .ds-btn {
     display: inline-block;
-    padding: 0.65rem 1.6rem;
+    /* em, not rem — a fontSize override (the canvas resize handle, or a
+       future inline style) scales padding along with the text instead of
+       just enlarging the label inside a fixed-size pill. */
+    padding: 0.65em 1.6em;
     border-radius: 9999px;
     font-weight: 600;
     font-size: 0.95rem;
@@ -884,6 +963,12 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   .ds-btn-outline {
     border: 2px solid currentColor;
     color: inherit;
+  }
+  .ds-btn-sm {
+    font-size: 0.8rem;
+  }
+  .ds-btn-lg {
+    font-size: 1.1rem;
   }
   .ds-divider {
     border: none;
@@ -1076,6 +1161,11 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   }
   .ds-slide-content.ds-slide-center .ds-slide-buttons {
     justify-content: center;
+  }
+  .ds-slide-btn-free {
+    position: absolute;
+    z-index: 1;
+    transform: translate(-50%, -50%);
   }
   .ds-slider-prev,
   .ds-slider-next {

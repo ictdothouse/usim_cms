@@ -869,7 +869,21 @@ interface SlideButton {
   label: string;
   href: string;
   variant: "primary" | "outline";
+  color: string; // hex bg override, "" = theme default
+  textColor: string; // hex text/border override, "" = theme default
+  radius: string; // px number, "" = default pill radius
+  size: "sm" | "md" | "lg";
+  fontSize: string; // px number, "" = derive from size — set by the canvas resize handle
+  // "flow" = original behavior, laid out inside the slide's text block
+  // alongside heading/subtitle; "custom" = absolutely positioned anywhere
+  // in the slide via x/y percent (drag-placed or preset-snapped below).
+  position: "flow" | "custom";
+  x: string; // "0".."100", only meaningful when position === "custom"
+  y: string;
 }
+// Baseline px used as the resize-handle drag's starting point when a button
+// has no explicit fontSize yet — purely a UI convenience, not stored.
+const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
 interface SlideItem {
   imageUrl: string;
   heading: string;
@@ -880,6 +894,101 @@ interface SlideItem {
   buttons: SlideButton[];
 }
 const SLIDE_DEFAULTS = { textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
+const BUTTON_DEFAULTS: SlideButton = {
+  label: "",
+  href: "",
+  variant: "primary",
+  color: "",
+  textColor: "",
+  radius: "",
+  size: "md",
+  fontSize: "",
+  position: "flow",
+  x: "50",
+  y: "50",
+};
+// 3x3 anchor grid offered as one-click shortcuts — clicking a dot just sets
+// x/y to a canonical spot and switches position to "custom"; there's no
+// separate named-preset enum to keep in sync between admin/frontend/
+// validator, presets are purely a UI convenience over the same x/y percent
+// every custom-dragged button already uses.
+const POSITION_PRESETS: { x: string; y: string }[] = [
+  { x: "10", y: "15" }, { x: "50", y: "15" }, { x: "90", y: "15" },
+  { x: "10", y: "50" }, { x: "50", y: "50" }, { x: "90", y: "50" },
+  { x: "10", y: "85" }, { x: "50", y: "85" }, { x: "90", y: "85" },
+];
+// Click-or-drag inside a position minimap: computes percent from the
+// pointerdown target's own bounding box (captured once, cheap — the
+// minimap doesn't resize mid-drag) and tracks the pointer on window until
+// release. Plain function, not a hook — safe to call from inside a .map().
+function dragPosition(e: React.PointerEvent<HTMLDivElement>, onMove: (x: string, y: string) => void) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const set = (clientX: number, clientY: number) => {
+    const x = Math.round(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)));
+    const y = Math.round(Math.min(100, Math.max(0, ((clientY - rect.top) / rect.height) * 100)));
+    onMove(String(x), String(y));
+  };
+  set(e.clientX, e.clientY);
+  const move = (ev: PointerEvent) => set(ev.clientX, ev.clientY);
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+const POSITION_NUDGE_STEP = 2; // percent per arrow-key press
+// Arrow-key nudge for whichever button chip currently has keyboard focus —
+// same x/y percent space as dragPosition/POSITION_PRESETS above, just a
+// smaller fixed step instead of a pointer position. A "flow" button has no
+// x/y yet, so the first nudge starts it from BUTTON_DEFAULTS' center and
+// switches it to "custom", same as dragging it does.
+function nudgeButton(btn: SlideButton, key: string): Partial<SlideButton> | null {
+  const dx = key === "ArrowLeft" ? -POSITION_NUDGE_STEP : key === "ArrowRight" ? POSITION_NUDGE_STEP : 0;
+  const dy = key === "ArrowUp" ? -POSITION_NUDGE_STEP : key === "ArrowDown" ? POSITION_NUDGE_STEP : 0;
+  if (dx === 0 && dy === 0) return null;
+  const baseX = btn.position === "custom" ? Number(btn.x) : Number(BUTTON_DEFAULTS.x);
+  const baseY = btn.position === "custom" ? Number(btn.y) : Number(BUTTON_DEFAULTS.y);
+  return {
+    position: "custom",
+    x: String(Math.min(100, Math.max(0, baseX + dx))),
+    y: String(Math.min(100, Math.max(0, baseY + dy))),
+  };
+}
+// Minimal DOMRect-shaped bag — the canvas smart-guide math only ever needs
+// these four numbers, and building a plain object (vs. a real DOMRect) keeps
+// the dragged button's "virtual" rect (built from clientX/Y, not an actual
+// live DOM node — it's mid-drag) the same type as every real rect it's
+// compared against.
+interface EdgeRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+type GapMark = { top: number; left: number; length: number };
+// Figma-style "nearest neighbor" spacing tick: only returns a mark when the
+// two rects don't overlap on that axis AND do overlap on the other (so the
+// line has a sensible perpendicular anchor point) — a vertical gap needs
+// x-overlap, a horizontal gap needs y-overlap. `axis` picks which one to
+// compute; startMove below calls this once per axis per candidate and keeps
+// only the smallest (nearest) result.
+function edgeGap(a: EdgeRect, b: EdgeRect, boxRect: EdgeRect, axis: "v" | "h"): GapMark | null {
+  if (axis === "v") {
+    const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    if (xOverlap <= 0) return null;
+    const midX = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2;
+    if (a.bottom <= b.top) return { top: a.bottom - boxRect.top, left: midX - boxRect.left, length: b.top - a.bottom };
+    if (b.bottom <= a.top) return { top: b.bottom - boxRect.top, left: midX - boxRect.left, length: a.top - b.bottom };
+    return null;
+  }
+  const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  if (yOverlap <= 0) return null;
+  const midY = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2;
+  if (a.right <= b.left) return { top: midY - boxRect.top, left: a.right - boxRect.left, length: b.left - a.right };
+  if (b.right <= a.left) return { top: midY - boxRect.top, left: b.right - boxRect.left, length: a.left - b.right };
+  return null;
+}
 function parseSlideButtons(raw: unknown): SlideButton[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((b) => {
@@ -888,6 +997,14 @@ function parseSlideButtons(raw: unknown): SlideButton[] {
       label: typeof btn.label === "string" ? btn.label : "",
       href: typeof btn.href === "string" ? btn.href : "",
       variant: btn.variant === "outline" ? "outline" : ("primary" as const),
+      color: typeof btn.color === "string" ? btn.color : BUTTON_DEFAULTS.color,
+      textColor: typeof btn.textColor === "string" ? btn.textColor : BUTTON_DEFAULTS.textColor,
+      radius: typeof btn.radius === "string" ? btn.radius : BUTTON_DEFAULTS.radius,
+      size: btn.size === "sm" || btn.size === "lg" ? btn.size : "md",
+      fontSize: typeof btn.fontSize === "string" ? btn.fontSize : BUTTON_DEFAULTS.fontSize,
+      position: btn.position === "custom" ? "custom" : "flow",
+      x: typeof btn.x === "string" ? btn.x : BUTTON_DEFAULTS.x,
+      y: typeof btn.y === "string" ? btn.y : BUTTON_DEFAULTS.y,
     };
   });
 }
@@ -923,7 +1040,7 @@ function parseSlides(raw: string | undefined): SlideItem[] {
         heading,
         subtitle,
         ...SLIDE_DEFAULTS,
-        buttons: buttonLabel ? [{ label: buttonLabel, href: buttonHref, variant: "primary" as const }] : [],
+        buttons: buttonLabel ? [{ ...BUTTON_DEFAULTS, label: buttonLabel, href: buttonHref }] : [],
       };
     });
 }
@@ -1394,6 +1511,26 @@ export default function Designer({
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
+  // Slider button canvas drag: DOM refs for each slider element's own preview
+  // box + text block (keyed by el.id, same convention as editingText above —
+  // a flat single ref would get overwritten by whichever slider block
+  // rendered last if a page has more than one), and the transient "smart
+  // guide" state a drag shows (center-alignment lines + a text-block spacing
+  // indicator) — tagged with elId so only the slider block actually being
+  // dragged renders its own guide, not every slider on the page.
+  const sliderPreviewRefs = useRef<
+    Record<string, { box: HTMLElement | null; text: HTMLElement | null; buttons: Record<number, HTMLElement | null> }>
+  >({});
+  const [sliderGuide, setSliderGuide] = useState<{
+    elId: string;
+    vCenter: boolean;
+    hCenter: boolean;
+    // vGap = a vertical (top/bottom) spacing tick, hGap = a horizontal
+    // (left/right) one — against whichever candidate (text block or another
+    // button) is nearest on that axis, not every candidate at once.
+    vGap: { top: number; left: number; length: number } | null;
+    hGap: { top: number; left: number; length: number } | null;
+  } | null>(null);
   const frameARef = useRef<HTMLIFrameElement>(null);
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
@@ -2691,47 +2828,140 @@ export default function Designer({
                 />
               </div>
               <div className="space-y-1.5 rounded-lg border border-line/20 p-1.5">
-                {s.buttons.map((btn, bi) => (
-                  <div key={bi} className="flex items-center gap-1.5">
-                    <BufferedInput
-                      className={base}
-                      value={btn.label}
-                      placeholder={t("designer-f-slider-buttonlabel")}
-                      onCommit={(v) =>
-                        updateButtons(i, s.buttons.map((x, j) => (j === bi ? { ...x, label: v } : x)))
-                      }
-                    />
-                    <BufferedInput
-                      className={base}
-                      value={btn.href}
-                      placeholder={t("designer-f-slider-buttonhref")}
-                      onCommit={(v) => updateButtons(i, s.buttons.map((x, j) => (j === bi ? { ...x, href: v } : x)))}
-                    />
-                    <select
-                      className={`${base} w-24 shrink-0`}
-                      value={btn.variant}
-                      onChange={(e) =>
-                        updateButtons(
-                          i,
-                          s.buttons.map((x, j) =>
-                            j === bi ? { ...x, variant: e.target.value as SlideButton["variant"] } : x,
-                          ),
-                        )
-                      }
-                    >
-                      <option value="primary">primary</option>
-                      <option value="outline">outline</option>
-                    </select>
-                    <button
-                      onClick={() => updateButtons(i, s.buttons.filter((_, j) => j !== bi))}
-                      className="shrink-0 text-[10px] font-semibold text-red-500"
-                    >
-                      {t("designer-gallery-remove")}
-                    </button>
-                  </div>
-                ))}
+                {s.buttons.map((btn, bi) => {
+                  const updateBtn = (patch: Partial<SlideButton>) =>
+                    updateButtons(i, s.buttons.map((x, j) => (j === bi ? { ...x, ...patch } : x)));
+                  return (
+                    <div key={bi} className="space-y-1.5 rounded border border-line/20 p-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-sub">
+                          {t("designer-f-slider-button")} #{bi + 1}
+                        </span>
+                        <button
+                          onClick={() => updateButtons(i, s.buttons.filter((_, j) => j !== bi))}
+                          className="text-[10px] font-semibold text-red-500"
+                        >
+                          {t("designer-gallery-remove")}
+                        </button>
+                      </div>
+                      <BufferedInput
+                        className={base}
+                        value={btn.label}
+                        placeholder={t("designer-f-slider-buttonlabel")}
+                        onCommit={(v) => updateBtn({ label: v })}
+                      />
+                      <BufferedInput
+                        className={base}
+                        value={btn.href}
+                        placeholder={t("designer-f-slider-buttonhref")}
+                        onCommit={(v) => updateBtn({ href: v })}
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          className={`${base} flex-1`}
+                          value={btn.variant}
+                          onChange={(e) => updateBtn({ variant: e.target.value as SlideButton["variant"] })}
+                        >
+                          <option value="primary">primary</option>
+                          <option value="outline">outline</option>
+                        </select>
+                        <select
+                          className={`${base} flex-1`}
+                          value={btn.size}
+                          onChange={(e) => updateBtn({ size: e.target.value as SlideButton["size"] })}
+                          title={t("designer-f-slider-buttonsize")}
+                        >
+                          <option value="sm">sm</option>
+                          <option value="md">md</option>
+                          <option value="lg">lg</option>
+                        </select>
+                        <BufferedInput
+                          type="number"
+                          className={`${base} w-16 shrink-0`}
+                          value={btn.radius}
+                          placeholder={t("designer-f-slider-buttonradius")}
+                          onCommit={(v) => updateBtn({ radius: v })}
+                        />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-buttoncolor")}>
+                          <input
+                            type="color"
+                            value={btn.color || "#2563eb"}
+                            onChange={(e) => updateBtn({ color: e.target.value })}
+                            className="h-6 w-8 cursor-pointer rounded border border-line/30"
+                          />
+                          {btn.color && (
+                            <button onClick={() => updateBtn({ color: "" })} className="font-semibold text-red-500">
+                              ×
+                            </button>
+                          )}
+                        </label>
+                        <label className="flex items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-buttontextcolor")}>
+                          <input
+                            type="color"
+                            value={btn.textColor || "#ffffff"}
+                            onChange={(e) => updateBtn({ textColor: e.target.value })}
+                            className="h-6 w-8 cursor-pointer rounded border border-line/30"
+                          />
+                          {btn.textColor && (
+                            <button onClick={() => updateBtn({ textColor: "" })} className="font-semibold text-red-500">
+                              ×
+                            </button>
+                          )}
+                        </label>
+                      </div>
+                      <div className="space-y-1 rounded border border-line/20 p-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-sub">{t("designer-f-slider-buttonposition")}</span>
+                          <button
+                            onClick={() => updateBtn({ position: "flow" })}
+                            className={`text-[10px] font-semibold ${btn.position === "flow" ? "text-accent" : "text-sub"}`}
+                          >
+                            {t("designer-f-slider-positionflow")}
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <div className="grid w-16 shrink-0 grid-cols-3 gap-0.5">
+                            {POSITION_PRESETS.map((pp, pi) => (
+                              <button
+                                key={pi}
+                                onClick={() => updateBtn({ position: "custom", x: pp.x, y: pp.y })}
+                                className="h-4 w-4 rounded-sm border border-line/40 bg-canvas hover:bg-accent/20"
+                              />
+                            ))}
+                          </div>
+                          <div
+                            tabIndex={0}
+                            className="relative h-16 flex-1 overflow-hidden rounded border border-line/30 bg-line/10 focus:outline-none focus:ring-2 focus:ring-accent"
+                            style={
+                              s.imageUrl
+                                ? { backgroundImage: `url(${s.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+                                : undefined
+                            }
+                            onPointerDown={(ev) => dragPosition(ev, (x, y) => updateBtn({ position: "custom", x, y }))}
+                            onKeyDown={(ev) => {
+                              const patch = nudgeButton(btn, ev.key);
+                              if (patch) {
+                                ev.preventDefault();
+                                updateBtn(patch);
+                              }
+                            }}
+                          >
+                            {btn.position === "custom" && (
+                              <div
+                                className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-accent shadow"
+                                style={{ left: `${btn.x}%`, top: `${btn.y}%` }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
                 <button
-                  onClick={() => updateButtons(i, [...s.buttons, { label: "", href: "", variant: "primary" }])}
+                  onClick={() => updateButtons(i, [...s.buttons, { ...BUTTON_DEFAULTS }])}
                   className="text-[11px] font-semibold text-accent"
                 >
                   {t("designer-slides-add-button")}
@@ -3658,20 +3888,204 @@ export default function Designer({
         const slides = parseSlides(p.slides);
         if (slides.length === 0) return <span className="text-xs opacity-40">{t("designer-f-slider-slides")}…</span>;
         const first = slides[0];
+        if (!sliderPreviewRefs.current[el.id]) sliderPreviewRefs.current[el.id] = { box: null, text: null, buttons: {} };
+        const previewRefs = sliderPreviewRefs.current[el.id];
+        // Canvas-direct button drag/resize, same idea as the heading/text
+        // contentEditable commit() above: always read the freshest slides off
+        // `bs` inside mutate() rather than off the `first`/`slides` captured by
+        // this render, since a pointermove fires many times per drag.
+        const updateButtonAt = (bi: number, patch: Partial<SlideButton>) => {
+          if (!path) return;
+          const [b, r, c, e] = path;
+          mutate((bs) => {
+            const elx = section(bs, b).rows[r].columns[c].elements[e];
+            const currentSlides = parseSlides(elx.props.slides);
+            if (!currentSlides[0]) return;
+            currentSlides[0] = {
+              ...currentSlides[0],
+              buttons: currentSlides[0].buttons.map((x, j) => (j === bi ? { ...x, ...patch } : x)),
+            };
+            elx.props.slides = stringifySlides(currentSlides);
+          });
+        };
+        // Drag-to-place: works from anywhere the button currently renders
+        // (inline "flow" pill or an already-"custom" chip) — starting a drag
+        // always switches it to "custom" at the pointer's position. Percent is
+        // computed against the slide box itself (closest [data-slide-box]),
+        // not the button's own small rect. While dragging, also snaps to the
+        // box's own center on each axis within a small threshold (Figma-style
+        // "smart guide") and shows spacing ticks (both vertical top/bottom AND
+        // horizontal left/right) against whichever is nearest among the
+        // heading/subtitle text block and every OTHER button on this slide —
+        // all surfaced via `sliderGuide` state so the render below can draw
+        // the actual guide lines.
+        const CENTER_SNAP_THRESHOLD = 3; // percent
+        const startMove = (bi: number, ev: React.PointerEvent<HTMLElement>) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          const box = (ev.target as HTMLElement).closest<HTMLElement>("[data-slide-box]");
+          if (!box) return;
+          const rect = box.getBoundingClientRect();
+          // The dragged chip's own size, captured once at drag start — it
+          // doesn't change size mid-drag, only position, so a snapshot is
+          // enough to build its "virtual" rect around the live cursor point.
+          const chipRect = previewRefs.buttons[bi]?.getBoundingClientRect();
+          const halfW = (chipRect?.width ?? 80) / 2;
+          const halfH = (chipRect?.height ?? 32) / 2;
+          const set = (clientX: number, clientY: number) => {
+            let x = Math.round(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)));
+            let y = Math.round(Math.min(100, Math.max(0, ((clientY - rect.top) / rect.height) * 100)));
+            const vCenter = Math.abs(x - 50) <= CENTER_SNAP_THRESHOLD;
+            const hCenter = Math.abs(y - 50) <= CENTER_SNAP_THRESHOLD;
+            if (vCenter) x = 50;
+            if (hCenter) y = 50;
+            updateButtonAt(bi, { position: "custom", x: String(x), y: String(y) });
+
+            const snappedX = rect.left + (x / 100) * rect.width;
+            const snappedY = rect.top + (y / 100) * rect.height;
+            const dragRect: EdgeRect = { left: snappedX - halfW, right: snappedX + halfW, top: snappedY - halfH, bottom: snappedY + halfH };
+            const candidates: EdgeRect[] = [];
+            if (previewRefs.text) candidates.push(previewRefs.text.getBoundingClientRect());
+            Object.entries(previewRefs.buttons).forEach(([j, node]) => {
+              if (Number(j) !== bi && node) candidates.push(node.getBoundingClientRect());
+            });
+            let vGap: GapMark | null = null;
+            let hGap: GapMark | null = null;
+            for (const c of candidates) {
+              const v = edgeGap(dragRect, c, rect, "v");
+              if (v && (!vGap || v.length < vGap.length)) vGap = v;
+              const h = edgeGap(dragRect, c, rect, "h");
+              if (h && (!hGap || h.length < hGap.length)) hGap = h;
+            }
+            setSliderGuide({ elId: el.id, vCenter, hCenter, vGap, hGap });
+          };
+          set(ev.clientX, ev.clientY);
+          const move = (mv: PointerEvent) => set(mv.clientX, mv.clientY);
+          const up = () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            setSliderGuide(null);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up);
+        };
+        // Drag-to-resize: horizontal drag distance scales fontSize directly
+        // (px, clamped 10-40) off whatever size the button starts at —
+        // mirrors the existing padding/margin edge-drag handles elsewhere in
+        // this file, just driving fontSize instead of a length prop.
+        const startResize = (bi: number, startFont: number, ev: React.PointerEvent<HTMLElement>) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          const startX = ev.clientX;
+          const move = (mv: PointerEvent) => {
+            const next = Math.min(40, Math.max(10, Math.round(startFont + (mv.clientX - startX) / 3)));
+            updateButtonAt(bi, { fontSize: String(next) });
+          };
+          const up = () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up);
+        };
+        const btnChip = (btn: SlideButton, bi: number) => {
+          const fontPx = Number(btn.fontSize) || SIZE_PX[btn.size];
+          return (
+            <span
+              key={bi}
+              ref={(node) => {
+                previewRefs.buttons[bi] = node;
+              }}
+              tabIndex={0}
+              className="relative inline-flex cursor-move select-none items-center rounded-full font-semibold shadow focus:outline-none focus:ring-2 focus:ring-accent"
+              style={{
+                padding: "0.4em 1em",
+                fontSize: `${fontPx}px`,
+                background: btn.color || (btn.variant === "outline" ? "transparent" : "#fff"),
+                color: btn.textColor || (btn.variant === "outline" ? "#fff" : "#111827"),
+                border: btn.variant === "outline" ? `2px solid ${btn.textColor || "#fff"}` : undefined,
+                borderRadius: btn.radius ? `${btn.radius}px` : "9999px",
+              }}
+              onPointerDown={(ev) => startMove(bi, ev)}
+              onKeyDown={(ev) => {
+                const patch = nudgeButton(btn, ev.key);
+                if (patch) {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  updateButtonAt(bi, patch);
+                }
+              }}
+            >
+              {btn.label || "Button"}
+              <span
+                className="absolute -bottom-1 -right-1 h-2.5 w-2.5 cursor-nwse-resize rounded-full border border-white bg-accent"
+                onPointerDown={(ev) => startResize(bi, fontPx, ev)}
+              />
+            </span>
+          );
+        };
+        const flowButtons = first.buttons.filter((btn) => btn.position !== "custom");
+        const freeButtons = first.buttons.filter((btn) => btn.position === "custom");
         return (
           <div
+            data-slide-box
+            ref={(node) => {
+              previewRefs.box = node;
+            }}
             className="relative flex aspect-[21/9] items-center justify-center overflow-hidden rounded-lg bg-black/70 text-white"
             style={first.imageUrl ? { background: `url(${first.imageUrl}) center/cover` } : undefined}
           >
-            <div className={`max-w-[80%] ${first.textPosition === "left" ? "self-start text-left ml-6" : first.textPosition === "right" ? "self-end text-right mr-6" : "text-center"}`}>
+            <div
+              ref={(node) => {
+                previewRefs.text = node;
+              }}
+              className={`max-w-[80%] ${first.textPosition === "left" ? "self-start text-left ml-6" : first.textPosition === "right" ? "self-end text-right mr-6" : "text-center"}`}
+            >
               <p className="text-sm font-bold">{first.heading || "Slide heading"}</p>
               {first.subtitle && <p className="mt-1 text-xs opacity-80">{first.subtitle}</p>}
-              {first.buttons.length > 0 && (
-                <span className="mt-2 inline-block rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-ink">
-                  {first.buttons[0].label || "Button"}
-                </span>
+              {flowButtons.length > 0 && (
+                <div className="mt-2 flex flex-wrap justify-center gap-1.5">{flowButtons.map((btn) => btnChip(btn, first.buttons.indexOf(btn)))}</div>
               )}
             </div>
+            {freeButtons.map((btn) => (
+              <div
+                key={first.buttons.indexOf(btn)}
+                className="absolute -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${btn.x}%`, top: `${btn.y}%` }}
+              >
+                {btnChip(btn, first.buttons.indexOf(btn))}
+              </div>
+            ))}
+            {sliderGuide?.elId === el.id && sliderGuide.vCenter && (
+              <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px bg-red-500" />
+            )}
+            {sliderGuide?.elId === el.id && sliderGuide.hCenter && (
+              <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-red-500" />
+            )}
+            {sliderGuide?.elId === el.id && sliderGuide.vGap && (
+              <div
+                className="pointer-events-none absolute w-px bg-red-500"
+                style={{ left: sliderGuide.vGap.left, top: sliderGuide.vGap.top, height: sliderGuide.vGap.length }}
+              >
+                <span className="absolute -left-1 top-0 h-px w-2 bg-red-500" />
+                <span className="absolute -left-1 bottom-0 h-px w-2 bg-red-500" />
+                <span className="absolute left-1 top-1/2 -translate-y-1/2 whitespace-nowrap rounded bg-red-500 px-1 py-0.5 text-[9px] font-semibold leading-none text-white">
+                  {Math.round(sliderGuide.vGap.length)}px
+                </span>
+              </div>
+            )}
+            {sliderGuide?.elId === el.id && sliderGuide.hGap && (
+              <div
+                className="pointer-events-none absolute h-px bg-red-500"
+                style={{ left: sliderGuide.hGap.left, top: sliderGuide.hGap.top, width: sliderGuide.hGap.length }}
+              >
+                <span className="absolute left-0 -top-1 h-2 w-px bg-red-500" />
+                <span className="absolute right-0 -top-1 h-2 w-px bg-red-500" />
+                <span className="absolute left-1/2 top-1 -translate-x-1/2 whitespace-nowrap rounded bg-red-500 px-1 py-0.5 text-[9px] font-semibold leading-none text-white">
+                  {Math.round(sliderGuide.hGap.length)}px
+                </span>
+              </div>
+            )}
             <div className="absolute bottom-2 flex justify-center gap-1">
               {slides.map((_, i) => (
                 <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-white" : "bg-white/40"}`} />
