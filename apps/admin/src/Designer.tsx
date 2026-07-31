@@ -34,6 +34,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Clipboard,
   ClipboardPaste,
   Clock,
@@ -55,6 +56,7 @@ import {
   Flag,
   Folder,
   Frame,
+  GalleryHorizontal,
   Gift,
   Globe,
   GraduationCap,
@@ -72,6 +74,7 @@ import {
   Info,
   Laptop,
   Layers,
+  LayoutPanelTop,
   LayoutTemplate,
   Leaf,
   Link,
@@ -174,7 +177,11 @@ type ElType =
   | "icon"
   | "list"
   | "html"
-  | "gallery";
+  | "gallery"
+  | "accordion"
+  | "infobox"
+  | "tabs"
+  | "slider";
 
 export interface El {
   id: string;
@@ -266,12 +273,14 @@ export interface Block {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery" | "length" | "icon" | "shadow";
+type FieldKind = "text" | "textarea" | "select" | "color" | "image" | "gallery" | "length" | "icon" | "shadow" | "pairs" | "slides";
 interface Field {
   key: string;
   labelKey: Key;
   kind: FieldKind;
   options?: string[];
+  // "pairs" kind only: i18n keys for the two sub-field placeholders (e.g. Question/Answer vs Label/Content).
+  subLabels?: [Key, Key];
 }
 
 // One glyph per field label, so the inspector reads at a glance instead of
@@ -573,6 +582,84 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       // radius edited via FourSideControl (element Inspector) — see Designer.tsx's ELS-radius branch.
     ],
   },
+  // Question|Answer pairs, one per line — same simple delimited-line
+  // convention as `list`'s items, chosen over building a whole new
+  // structured-repeater Field kind just for this. Rendered as native
+  // <details>/<summary> (SectionBlock.astro) — zero client JS, free
+  // accessibility, matches this app's "no client-side JS" frontend
+  // convention exactly instead of fighting it.
+  accordion: {
+    labelKey: "designer-el-accordion",
+    icon: ChevronsUpDown,
+    defaults: { items: "Question one|Answer to question one\nQuestion two|Answer to question two", exclusive: "false" },
+    fields: [
+      {
+        key: "items",
+        labelKey: "designer-f-accordion-items",
+        kind: "pairs",
+        subLabels: ["designer-f-accordion-question", "designer-f-accordion-answer"],
+      },
+      { key: "exclusive", labelKey: "designer-f-accordion-exclusive", kind: "select", options: ["false", "true"] },
+    ],
+  },
+  // Icon + heading + short text — the common "feature card" building block
+  // (Elementor's Icon Box). Drop 3 of these into a 3-column Row for a
+  // features section; background/border/shadow "card" look comes from the
+  // Column it sits in (see COLUMN_FIELDS), not from this element itself.
+  infobox: {
+    labelKey: "designer-el-infobox",
+    icon: Info,
+    defaults: { name: "star", heading: "Feature title", text: "Feature description", align: "left", iconPosition: "top" },
+    fields: [
+      { key: "name", labelKey: "designer-f-icon-name", kind: "icon", options: Object.keys(ICONS) },
+      { key: "color", labelKey: "designer-f-icon-color", kind: "color" },
+      { key: "heading", labelKey: "designer-f-infobox-heading", kind: "text" },
+      { key: "text", labelKey: "designer-f-text", kind: "textarea" },
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center"] },
+      { key: "iconPosition", labelKey: "designer-f-infobox-iconposition", kind: "select", options: ["top", "left"] },
+    ],
+  },
+  // Label|Content pairs, one per line — same delimited-line convention as
+  // accordion. Switching panels needs a click handler (unlike accordion's
+  // native <details>), so this is the one static element that ships a small
+  // vanilla-JS listener (SectionBlock.astro's own <script>, event-delegated
+  // so it initializes every .ds-tabs instance on the page with one listener,
+  // not a heavier tabs library).
+  tabs: {
+    labelKey: "designer-el-tabs",
+    icon: LayoutPanelTop,
+    defaults: { items: "Tab one|Content for tab one\nTab two|Content for tab two" },
+    fields: [
+      {
+        key: "items",
+        labelKey: "designer-f-tabs-items",
+        kind: "pairs",
+        subLabels: ["designer-f-tabs-label", "designer-f-tabs-content"],
+      },
+    ],
+  },
+  // A JSON array of slide objects (image, heading, subtitle, text position,
+  // overlay color/opacity, multiple buttons) — see parseSlides/stringifySlides
+  // above. Rendered by SectionBlock.astro via Embla Carousel (headless,
+  // vanilla JS — drag/swipe/momentum/looping) instead of hand-rolled scroll
+  // math, with an optional autoplay plugin.
+  slider: {
+    labelKey: "designer-el-slider",
+    icon: GalleryHorizontal,
+    defaults: {
+      slides: JSON.stringify([
+        { imageUrl: "", heading: "Slide one heading", subtitle: "Slide one subtitle", textPosition: "center", overlayColor: "#000000", overlayOpacity: "35", buttons: [] },
+        { imageUrl: "", heading: "Slide two heading", subtitle: "Slide two subtitle", textPosition: "center", overlayColor: "#000000", overlayOpacity: "35", buttons: [] },
+      ]),
+      autoplay: "0",
+      height: "md",
+    },
+    fields: [
+      { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
+      { key: "autoplay", labelKey: "designer-f-slider-autoplay", kind: "select", options: ["0", "3", "5", "8"] },
+      { key: "height", labelKey: "designer-f-slider-height", kind: "select", options: ["sm", "md", "lg", "full"] },
+    ],
+  },
 };
 
 // "Paste style" strips these before merging onto a target, so copying a
@@ -591,6 +678,10 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   embed: ["url"],
   spacer: [],
   divider: [],
+  accordion: ["items"],
+  infobox: ["name", "heading", "text"],
+  tabs: ["items"],
+  slider: ["slides"],
 };
 type ClipLevel = "section" | "row" | "column" | "element";
 const CLIP_KEYS: Record<ClipLevel, string> = {
@@ -748,6 +839,96 @@ const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25r
 function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
   if (!v) return fallback;
   return table[v] ?? v;
+}
+
+// Shared "one item per line, first `|` splits it in two" parser for
+// accordion (question|answer) and tabs (label|content) — same simple
+// delimited-line convention `list`'s items already uses, just two fields
+// instead of one. Duplicated in SectionBlock.astro like every other table.
+function parsePairs(raw: string | undefined): { a: string; b: string }[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const i = line.indexOf("|");
+      return i === -1 ? { a: line, b: "" } : { a: line.slice(0, i), b: line.slice(i + 1) };
+    });
+}
+
+// Slider slide repeater. Storage is a JSON array (one object per slide) —
+// the Embla Carousel rewrite's richer per-slide fields (multiple buttons,
+// overlay color/opacity, text position) don't fit the old single
+// imageUrl|heading|subtitle|buttonLabel|buttonHref line format. parseSlides()
+// still accepts that legacy format too (JSON.parse throws on it, falls
+// through) so a page saved before this change keeps opening/saving — it
+// silently upgrades to the JSON format the next time it's edited here.
+// SectionBlock.astro's render-side parser mirrors this same fallback, and
+// validate-layout.ts's isSafeSlides() accepts both shapes on write.
+interface SlideButton {
+  label: string;
+  href: string;
+  variant: "primary" | "outline";
+}
+interface SlideItem {
+  imageUrl: string;
+  heading: string;
+  subtitle: string;
+  textPosition: "left" | "center" | "right";
+  overlayColor: string;
+  overlayOpacity: string; // "0".."100"
+  buttons: SlideButton[];
+}
+const SLIDE_DEFAULTS = { textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
+function parseSlideButtons(raw: unknown): SlideButton[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((b) => {
+    const btn = (b ?? {}) as Record<string, unknown>;
+    return {
+      label: typeof btn.label === "string" ? btn.label : "",
+      href: typeof btn.href === "string" ? btn.href : "",
+      variant: btn.variant === "outline" ? "outline" : ("primary" as const),
+    };
+  });
+}
+function parseSlides(raw: string | undefined): SlideItem[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        const s = (item ?? {}) as Record<string, unknown>;
+        return {
+          imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+          heading: typeof s.heading === "string" ? s.heading : "",
+          subtitle: typeof s.subtitle === "string" ? s.subtitle : "",
+          textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
+          overlayColor: typeof s.overlayColor === "string" ? s.overlayColor : SLIDE_DEFAULTS.overlayColor,
+          overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : SLIDE_DEFAULTS.overlayOpacity,
+          buttons: parseSlideButtons(s.buttons),
+        };
+      });
+    }
+  } catch {
+    // Not JSON — fall through to the legacy pipe-line format below.
+  }
+  return raw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [imageUrl = "", heading = "", subtitle = "", buttonLabel = "", buttonHref = ""] = line.split("|");
+      return {
+        imageUrl,
+        heading,
+        subtitle,
+        ...SLIDE_DEFAULTS,
+        buttons: buttonLabel ? [{ label: buttonLabel, href: buttonHref, variant: "primary" as const }] : [],
+      };
+    });
+}
+function stringifySlides(items: SlideItem[]): string {
+  return JSON.stringify(items);
 }
 
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
@@ -2388,6 +2569,190 @@ export default function Designer({
         </div>
       );
     }
+    if (field.kind === "pairs") {
+      const items = parsePairs(value);
+      const setItems = (next: { a: string; b: string }[]) => onChange(next.map((it) => `${it.a}|${it.b}`).join("\n"));
+      const [labelAKey, labelBKey] = field.subLabels ?? ["designer-f-accordion-question", "designer-f-accordion-answer"];
+      return (
+        <div className="space-y-2">
+          {items.map((it, i) => (
+            <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+                <button
+                  onClick={() => setItems(items.filter((_, j) => j !== i))}
+                  className="text-[10px] font-semibold text-red-500"
+                >
+                  {t("designer-gallery-remove")}
+                </button>
+              </div>
+              <BufferedInput
+                className={base}
+                value={it.a}
+                placeholder={t(labelAKey)}
+                onCommit={(v) => setItems(items.map((x, j) => (j === i ? { ...x, a: v } : x)))}
+              />
+              <BufferedTextarea
+                rows={2}
+                className={base}
+                value={it.b}
+                placeholder={t(labelBKey)}
+                onCommit={(v) => setItems(items.map((x, j) => (j === i ? { ...x, b: v } : x)))}
+              />
+            </div>
+          ))}
+          <button
+            onClick={() => setItems([...items, { a: "", b: "" }])}
+            className="text-[11px] font-semibold text-accent"
+          >
+            {t("designer-pairs-add")}
+          </button>
+        </div>
+      );
+    }
+    if (field.kind === "slides") {
+      const items = parseSlides(value);
+      const setItems = (next: SlideItem[]) => onChange(stringifySlides(next));
+      const update = (i: number, patch: Partial<SlideItem>) =>
+        setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+      const updateButtons = (i: number, buttons: SlideButton[]) => update(i, { buttons });
+      return (
+        <div className="space-y-2">
+          {items.map((s, i) => (
+            <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+                <button
+                  onClick={() => setItems(items.filter((_, j) => j !== i))}
+                  className="text-[10px] font-semibold text-red-500"
+                >
+                  {t("designer-gallery-remove")}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                {s.imageUrl && <img src={s.imageUrl} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />}
+                <BufferedInput
+                  className={base}
+                  value={s.imageUrl}
+                  placeholder={t("designer-f-slider-image")}
+                  onCommit={(v) => update(i, { imageUrl: v })}
+                />
+                <label className="shrink-0 cursor-pointer text-[10px] font-semibold text-accent">
+                  {uploading ? t("designer-uploading") : t("designer-upload")}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void uploadImage(f, (v) => update(i, { imageUrl: v }));
+                    }}
+                  />
+                </label>
+              </div>
+              <BufferedInput
+                className={base}
+                value={s.heading}
+                placeholder={t("designer-f-slider-heading")}
+                onCommit={(v) => update(i, { heading: v })}
+              />
+              <BufferedInput
+                className={base}
+                value={s.subtitle}
+                placeholder={t("designer-f-slider-subtitle")}
+                onCommit={(v) => update(i, { subtitle: v })}
+              />
+              <div className="flex gap-2">
+                <select
+                  className={`${base} w-1/2`}
+                  value={s.textPosition}
+                  onChange={(e) => update(i, { textPosition: e.target.value as SlideItem["textPosition"] })}
+                  title={t("designer-f-slider-textposition")}
+                >
+                  {(["left", "center", "right"] as const).map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="color"
+                  value={s.overlayColor || "#000000"}
+                  onChange={(e) => update(i, { overlayColor: e.target.value })}
+                  title={t("designer-f-slider-overlaycolor")}
+                  className="h-7 w-9 shrink-0 cursor-pointer rounded border border-line/30"
+                />
+                <BufferedInput
+                  type="number"
+                  className={`${base} w-1/2`}
+                  value={s.overlayOpacity}
+                  placeholder={t("designer-f-slider-overlayopacity")}
+                  onCommit={(v) => update(i, { overlayOpacity: v })}
+                />
+              </div>
+              <div className="space-y-1.5 rounded-lg border border-line/20 p-1.5">
+                {s.buttons.map((btn, bi) => (
+                  <div key={bi} className="flex items-center gap-1.5">
+                    <BufferedInput
+                      className={base}
+                      value={btn.label}
+                      placeholder={t("designer-f-slider-buttonlabel")}
+                      onCommit={(v) =>
+                        updateButtons(i, s.buttons.map((x, j) => (j === bi ? { ...x, label: v } : x)))
+                      }
+                    />
+                    <BufferedInput
+                      className={base}
+                      value={btn.href}
+                      placeholder={t("designer-f-slider-buttonhref")}
+                      onCommit={(v) => updateButtons(i, s.buttons.map((x, j) => (j === bi ? { ...x, href: v } : x)))}
+                    />
+                    <select
+                      className={`${base} w-24 shrink-0`}
+                      value={btn.variant}
+                      onChange={(e) =>
+                        updateButtons(
+                          i,
+                          s.buttons.map((x, j) =>
+                            j === bi ? { ...x, variant: e.target.value as SlideButton["variant"] } : x,
+                          ),
+                        )
+                      }
+                    >
+                      <option value="primary">primary</option>
+                      <option value="outline">outline</option>
+                    </select>
+                    <button
+                      onClick={() => updateButtons(i, s.buttons.filter((_, j) => j !== bi))}
+                      className="shrink-0 text-[10px] font-semibold text-red-500"
+                    >
+                      {t("designer-gallery-remove")}
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => updateButtons(i, [...s.buttons, { label: "", href: "", variant: "primary" }])}
+                  className="text-[11px] font-semibold text-accent"
+                >
+                  {t("designer-slides-add-button")}
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            onClick={() =>
+              setItems([
+                ...items,
+                { imageUrl: "", heading: "", subtitle: "", ...SLIDE_DEFAULTS, buttons: [] },
+              ])
+            }
+            className="text-[11px] font-semibold text-accent"
+          >
+            {t("designer-slides-add")}
+          </button>
+        </div>
+      );
+    }
     if (field.kind === "shadow") {
       const legacyDefault = value && value in LEGACY_SHADOW && value !== "none";
       const parts = value.includes("|") ? value.split("|") : legacyDefault ? SHADOW_DEFAULT_PARTS : null;
@@ -2500,11 +2865,13 @@ export default function Designer({
     onCommit,
     className,
     rows,
+    placeholder,
   }: {
     value: string;
     onCommit: (v: string) => void;
     className?: string;
     rows?: number;
+    placeholder?: string;
   }) {
     const [draft, setDraft] = useState(value);
     const focused = useRef(false);
@@ -2515,6 +2882,7 @@ export default function Designer({
       <textarea
         rows={rows}
         className={className}
+        placeholder={placeholder}
         value={draft}
         onFocus={() => (focused.current = true)}
         onChange={(e) => setDraft(e.target.value)}
@@ -3234,6 +3602,81 @@ export default function Designer({
                 style={{ borderRadius: elRadius(p) }}
               />
             ))}
+          </div>
+        );
+      }
+      case "accordion": {
+        const items = parsePairs(p.items);
+        if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-accordion-items")}…</span>;
+        return (
+          <div className="space-y-1.5">
+            {items.map((it, i) => (
+              <div key={i} className="rounded-lg border border-line/30">
+                <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold">
+                  {it.a || `Q${i + 1}`}
+                  <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                </div>
+                {i === 0 && it.b && <div className="border-t border-line/20 px-3 py-2 text-xs text-sub">{it.b}</div>}
+              </div>
+            ))}
+          </div>
+        );
+      }
+      case "infobox": {
+        const Icon = ICONS[p.name ?? "star"] ?? Star;
+        const left = p.iconPosition === "left";
+        return (
+          <div className={left ? "flex items-start gap-3" : "space-y-2"} style={{ textAlign: p.align === "center" ? "center" : "left" }}>
+            <Icon className={left ? "h-6 w-6 shrink-0" : "mx-auto h-6 w-6"} style={{ color: p.color || undefined, marginInline: left ? undefined : p.align === "center" ? "auto" : undefined }} />
+            <div>
+              <p className="text-sm font-bold">{p.heading || t("designer-f-infobox-heading")}</p>
+              {p.text && <p className="mt-1 text-xs text-sub">{p.text}</p>}
+            </div>
+          </div>
+        );
+      }
+      case "tabs": {
+        const items = parsePairs(p.items);
+        if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-tabs-items")}…</span>;
+        return (
+          <div className="rounded-lg border border-line/30">
+            <div className="flex gap-1 border-b border-line/20 px-2 pt-1.5">
+              {items.map((it, i) => (
+                <span
+                  key={i}
+                  className={`rounded-t px-2.5 py-1 text-xs font-semibold ${i === 0 ? "bg-canvas text-ink" : "text-sub"}`}
+                >
+                  {it.a || `Tab ${i + 1}`}
+                </span>
+              ))}
+            </div>
+            <div className="px-3 py-2 text-xs text-sub">{items[0]?.b}</div>
+          </div>
+        );
+      }
+      case "slider": {
+        const slides = parseSlides(p.slides);
+        if (slides.length === 0) return <span className="text-xs opacity-40">{t("designer-f-slider-slides")}…</span>;
+        const first = slides[0];
+        return (
+          <div
+            className="relative flex aspect-[21/9] items-center justify-center overflow-hidden rounded-lg bg-black/70 text-white"
+            style={first.imageUrl ? { background: `url(${first.imageUrl}) center/cover` } : undefined}
+          >
+            <div className={`max-w-[80%] ${first.textPosition === "left" ? "self-start text-left ml-6" : first.textPosition === "right" ? "self-end text-right mr-6" : "text-center"}`}>
+              <p className="text-sm font-bold">{first.heading || "Slide heading"}</p>
+              {first.subtitle && <p className="mt-1 text-xs opacity-80">{first.subtitle}</p>}
+              {first.buttons.length > 0 && (
+                <span className="mt-2 inline-block rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-ink">
+                  {first.buttons[0].label || "Button"}
+                </span>
+              )}
+            </div>
+            <div className="absolute bottom-2 flex justify-center gap-1">
+              {slides.map((_, i) => (
+                <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-white" : "bg-white/40"}`} />
+              ))}
+            </div>
           </div>
         );
       }

@@ -45,7 +45,13 @@ async function request(path: string, tenantHost: string | null, token: string | 
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
   const body = await res.json();
-  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  // Hand-written routes return `{ error: "..." }` directly; a thrown Error
+  // with `.statusCode` instead goes through Fastify's default error handler,
+  // whose JSON body is `{ statusCode, error: "<generic reason phrase like
+  // 'Bad Request'>", message: "<the actual thrown message>" }` — message
+  // must win there, or every validateLayout/schema rejection just shows
+  // "Bad Request" with the real reason silently discarded.
+  if (!res.ok) throw new Error(body.message ?? body.error ?? `Request failed (${res.status})`);
   return body;
 }
 

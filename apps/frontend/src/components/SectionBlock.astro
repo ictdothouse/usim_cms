@@ -1,6 +1,9 @@
 ---
 // Renders a Web Designer `section` block (see apps/admin/src/Designer.tsx for
-// the model + the matching canvas preview). Pure HTML + scoped CSS, zero JS.
+// the model + the matching canvas preview). Pure HTML + scoped CSS for every
+// element except tabs/slider, which need a small vanilla-JS listener (see
+// the <script> at the bottom) — accordion stays zero-JS via native
+// <details>/<summary>.
 interface El {
   id?: string;
   type: string;
@@ -106,6 +109,90 @@ const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: 
 const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
+const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
+// Shared "one item per line, first `|` splits it in two" parser for
+// accordion (question|answer) and tabs (label|content) — mirrors
+// apps/admin/src/Designer.tsx's parsePairs(), kept in sync by hand like
+// every other table this file duplicates from there.
+function parsePairs(raw?: string): { a: string; b: string }[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const i = line.indexOf("|");
+      return i === -1 ? { a: line, b: "" } : { a: line.slice(0, i), b: line.slice(i + 1) };
+    });
+}
+// Slider slide data. Storage is a JSON array (see Designer.tsx's
+// parseSlides/stringifySlides, added alongside the Embla Carousel rewrite) —
+// parseSlides() here mirrors that same dual-format parser: JSON.parse first,
+// falling back to the OLD imageUrl|heading|subtitle|buttonLabel|buttonHref
+// pipe-line format for any page saved before this rewrite (never re-written
+// until the author next edits that slider in Designer.tsx).
+interface SlideButton {
+  label: string;
+  href: string;
+  variant: "primary" | "outline";
+}
+interface Slide {
+  imageUrl: string;
+  heading: string;
+  subtitle: string;
+  textPosition: "left" | "center" | "right";
+  overlayColor: string;
+  overlayOpacity: string;
+  buttons: SlideButton[];
+}
+function parseSlideButtons(raw: unknown): SlideButton[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((b) => {
+    const btn = (b ?? {}) as Record<string, unknown>;
+    return {
+      label: typeof btn.label === "string" ? btn.label : "",
+      href: typeof btn.href === "string" ? btn.href : "",
+      variant: btn.variant === "outline" ? "outline" : ("primary" as const),
+    };
+  });
+}
+function parseSlides(raw: string | undefined): Slide[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        const s = (item ?? {}) as Record<string, unknown>;
+        return {
+          imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+          heading: typeof s.heading === "string" ? s.heading : "",
+          subtitle: typeof s.subtitle === "string" ? s.subtitle : "",
+          textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
+          overlayColor: typeof s.overlayColor === "string" ? s.overlayColor : "#000000",
+          overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : "35",
+          buttons: parseSlideButtons(s.buttons),
+        };
+      });
+    }
+  } catch {
+    // Not JSON — fall through to the legacy pipe-line format below.
+  }
+  return raw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [imageUrl = "", heading = "", subtitle = "", buttonLabel = "", buttonHref = ""] = line.split("|");
+      return {
+        imageUrl,
+        heading,
+        subtitle,
+        textPosition: "center" as const,
+        overlayColor: "#000000",
+        overlayOpacity: "35",
+        buttons: buttonLabel ? [{ label: buttonLabel, href: buttonHref, variant: "primary" as const }] : [],
+      };
+    });
+}
 const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
 // Legacy preset keywords (existing content saved before the custom shadow
 // panel) still resolve here. A new edit stores a pipe-delimited
@@ -257,6 +344,17 @@ const safeUrl = (u?: string) => {
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : undefined;
   return v;
 };
+// bgImage/slider slide images are concatenated into a raw url(...) CSS
+// function, not bound through a safe attribute — safeUrl()'s scheme check
+// alone isn't enough here, a stray quote/semicolon/paren/brace could still
+// break out of that one declaration (apps/api's validate-layout.ts already
+// rejects these at write time; this is defense-in-depth for any row written
+// before that check existed — same reasoning as HeroBlock.astro's
+// safeImageUrl).
+const safeCssUrl = (u?: string) => {
+  const v = safeUrl(u);
+  return v && !/['";(){}\s]/.test(v) ? v : undefined;
+};
 
 function escapeHtml(s: string) {
   const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -371,7 +469,7 @@ const radBottomRight = lengthValue(radiusBottomRight || radius, RADIUS, RADIUS.n
 const radBottomLeft = lengthValue(radiusBottomLeft || radius, RADIUS, RADIUS.none);
 
 const sectionStyle = [
-  bgImage && safeUrl(bgImage) ? `background:url('${safeUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
+  bgImage && safeCssUrl(bgImage) ? `background:url('${safeCssUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
   textColor ? `color:${textColor}` : null,
   `padding:${padTop} ${padRight} ${padBottom} ${padLeft}`,
   `margin:${marginTopVal} ${marginRightVal} ${marginBottomVal} ${marginLeftVal}`,
@@ -579,6 +677,137 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                     </div>
                   );
                 }
+                case "accordion": {
+                  const items = parsePairs(p.items);
+                  if (items.length === 0) return null;
+                  // <details name="..."> makes a group mutually exclusive
+                  // (native, no JS) — only set it when the author opted in,
+                  // since by default multiple items can stay open at once.
+                  const groupName = p.exclusive === "true" ? `ds-acc-${blockIndex}-${r}-${c}-${e}` : undefined;
+                  return (
+                    <div class={cls("ds-accordion", p.cssClass)} style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+                      {items.map((it) => (
+                        <details class="ds-accordion-item" name={groupName}>
+                          <summary class="ds-accordion-q" set:html={renderInline(it.a)} />
+                          <div class="ds-accordion-a" set:html={renderInline(it.b)} />
+                        </details>
+                      ))}
+                    </div>
+                  );
+                }
+                case "infobox": {
+                  const iconPath = ICON_PATHS[p.name ?? "star"] ?? ICON_PATHS.star;
+                  const left = p.iconPosition === "left";
+                  return (
+                    <div
+                      class={cls(
+                        "ds-infobox",
+                        left ? "ds-infobox-left" : "ds-infobox-top",
+                        !left && p.align === "center" ? "ds-infobox-center" : undefined,
+                        p.cssClass,
+                      )}
+                      style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
+                    >
+                      <svg
+                        class="ds-infobox-icon"
+                        width="2rem"
+                        height="2rem"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke={p.color || "currentColor"}
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d={iconPath} />
+                      </svg>
+                      <div>
+                        {p.heading && <p class="ds-infobox-heading" set:html={renderInline(p.heading)} />}
+                        {p.text && <p class="ds-infobox-text" set:html={renderInline(p.text)} />}
+                      </div>
+                    </div>
+                  );
+                }
+                case "tabs": {
+                  const items = parsePairs(p.items);
+                  if (items.length === 0) return null;
+                  return (
+                    <div class={cls("ds-tabs", p.cssClass)} style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+                      <div class="ds-tabs-labels">
+                        {items.map((it, i) => (
+                          <button
+                            type="button"
+                            class={cls("ds-tabs-label", i === 0 ? "is-active" : undefined)}
+                            data-idx={i}
+                            set:html={renderInline(it.a)}
+                          />
+                        ))}
+                      </div>
+                      <div class="ds-tabs-panels">
+                        {items.map((it, i) => (
+                          <div class={cls("ds-tabs-panel", i === 0 ? "is-active" : undefined)} data-idx={i} set:html={renderInline(it.b)} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                case "slider": {
+                  const slides = parseSlides(p.slides);
+                  if (slides.length === 0) return null;
+                  const autoplayMs = Math.round(Number(p.autoplay || "0") * 1000);
+                  return (
+                    <div
+                      class={cls("ds-slider", p.cssClass)}
+                      style={[`height:${lengthValue(p.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`, marginStyle(p), paddingStyle(p)]
+                        .filter(Boolean)
+                        .join(";")}
+                      data-autoplay={autoplayMs > 0 ? autoplayMs : undefined}
+                    >
+                      <div class="ds-slider-viewport">
+                        <div class="ds-slider-track">
+                          {slides.map((s) => {
+                            const bgUrl = s.imageUrl ? safeCssUrl(s.imageUrl) : undefined;
+                            const overlayOpacity = Math.min(100, Math.max(0, Number(s.overlayOpacity) || 0)) / 100;
+                            return (
+                              <div class="ds-slide" style={bgUrl ? `background-image:url('${bgUrl}')` : undefined}>
+                                {overlayOpacity > 0 && (
+                                  <div class="ds-slide-overlay" style={`background:${hexToRgba(s.overlayColor, overlayOpacity)}`} />
+                                )}
+                                <div class={cls("ds-slide-content", `ds-slide-${s.textPosition}`)}>
+                                  {s.heading && <p class="ds-slide-heading" set:html={renderInline(s.heading)} />}
+                                  {s.subtitle && <p class="ds-slide-subtitle" set:html={renderInline(s.subtitle)} />}
+                                  {s.buttons.length > 0 && (
+                                    <div class="ds-slide-buttons">
+                                      {s.buttons.map((btn) => (
+                                        <a
+                                          class={btn.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary"}
+                                          href={safeUrl(btn.href) ?? "#"}
+                                        >
+                                          {btn.label}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {slides.length > 1 && (
+                        <>
+                          <button type="button" class="ds-slider-prev" aria-label="Previous slide">‹</button>
+                          <button type="button" class="ds-slider-next" aria-label="Next slide">›</button>
+                          <div class="ds-slider-dots">
+                            {slides.map((_, i) => (
+                              <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i} />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                }
                 default:
                   return null;
               }
@@ -685,6 +914,210 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     object-fit: cover;
     display: block;
   }
+  .ds-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .ds-accordion-item {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  .ds-accordion-q {
+    cursor: pointer;
+    padding: 0.85rem 1rem;
+    font-weight: 600;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ds-accordion-q::-webkit-details-marker {
+    display: none;
+  }
+  .ds-accordion-q::after {
+    content: "+";
+    margin-left: 0.5rem;
+    transition: transform 0.15s ease;
+  }
+  .ds-accordion-item[open] .ds-accordion-q::after {
+    transform: rotate(45deg);
+  }
+  .ds-accordion-a {
+    padding: 0 1rem 1rem;
+    line-height: 1.6;
+  }
+  .ds-infobox {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .ds-infobox-left {
+    flex-direction: row;
+  }
+  .ds-infobox-center {
+    align-items: center;
+    text-align: center;
+  }
+  .ds-infobox-icon {
+    flex-shrink: 0;
+  }
+  .ds-infobox-heading {
+    margin: 0;
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+  .ds-infobox-text {
+    margin: 0.35rem 0 0;
+    line-height: 1.6;
+    opacity: 0.85;
+  }
+  .ds-tabs-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  }
+  .ds-tabs-label {
+    padding: 0.6rem 1.1rem;
+    font-weight: 600;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    cursor: pointer;
+    opacity: 0.6;
+    font: inherit;
+    color: inherit;
+  }
+  .ds-tabs-label.is-active {
+    opacity: 1;
+    border-bottom-color: var(--color-primary, #0f62fe);
+  }
+  .ds-tabs-panel {
+    display: none;
+    padding: 1rem 0.25rem;
+    line-height: 1.6;
+  }
+  .ds-tabs-panel.is-active {
+    display: block;
+  }
+  .ds-slider {
+    position: relative;
+    height: 100%;
+  }
+  .ds-slider-viewport {
+    overflow: hidden;
+    border-radius: 0.5rem;
+    height: 100%;
+  }
+  .ds-slider-track {
+    display: flex;
+    height: 100%;
+  }
+  .ds-slide {
+    position: relative;
+    flex: 0 0 100%;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ds-slide-overlay {
+    position: absolute;
+    inset: 0;
+  }
+  .ds-slide-content {
+    position: relative;
+    z-index: 1;
+    max-width: 36rem;
+    padding: 1.5rem;
+    color: #fff;
+    text-align: center;
+  }
+  /* Auto margins on a flex item override justify-content:center for that
+     item, pushing it to one edge without changing .ds-slide's own layout —
+     center (no override) falls back to .ds-slide's own centering. */
+  .ds-slide-content.ds-slide-left {
+    text-align: left;
+    margin-right: auto;
+  }
+  .ds-slide-content.ds-slide-right {
+    text-align: right;
+    margin-left: auto;
+  }
+  .ds-slide-heading {
+    margin: 0;
+    font-size: clamp(1.5rem, 4vw, 2.5rem);
+    font-weight: 700;
+  }
+  .ds-slide-subtitle {
+    margin: 0.75rem 0 0;
+    font-size: 1.05rem;
+    opacity: 0.9;
+  }
+  .ds-slide-buttons {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    justify-content: inherit;
+  }
+  .ds-slide-content.ds-slide-left .ds-slide-buttons {
+    justify-content: flex-start;
+  }
+  .ds-slide-content.ds-slide-right .ds-slide-buttons {
+    justify-content: flex-end;
+  }
+  .ds-slide-content.ds-slide-center .ds-slide-buttons {
+    justify-content: center;
+  }
+  .ds-slider-prev,
+  .ds-slider-next {
+    position: absolute;
+    top: 50%;
+    z-index: 2;
+    width: 2.25rem;
+    height: 2.25rem;
+    transform: translateY(-50%);
+    border: none;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.85);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .ds-slider-prev {
+    left: 1rem;
+  }
+  .ds-slider-next {
+    right: 1rem;
+  }
+  .ds-slider-dots {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    z-index: 2;
+    display: flex;
+    gap: 0.4rem;
+    transform: translateX(-50%);
+  }
+  .ds-slider-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border: none;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+  }
+  .ds-slider-dot.is-active {
+    background: #fff;
+  }
   @media (max-width: 768px) {
     .ds-row {
       grid-template-columns: 1fr !important;
@@ -692,5 +1125,53 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     .ds-gallery {
       grid-template-columns: repeat(2, 1fr) !important;
     }
+    .ds-infobox-left {
+      flex-direction: column;
+    }
   }
 </style>
+
+<script>
+  import EmblaCarousel from "embla-carousel";
+  import Autoplay from "embla-carousel-autoplay";
+
+  // Tabs: click a label -> activate its panel. Event-delegated on document
+  // so one listener covers every .ds-tabs instance on the page (Astro
+  // bundles this <script> once per page regardless of how many SectionBlock
+  // instances render), no per-instance re-init needed.
+  document.addEventListener("click", (e) => {
+    const label = (e.target as HTMLElement).closest(".ds-tabs-label") as HTMLElement | null;
+    if (!label) return;
+    const tabs = label.closest(".ds-tabs");
+    if (!tabs) return;
+    const idx = label.dataset.idx;
+    tabs.querySelectorAll(".ds-tabs-label").forEach((el) => el.classList.remove("is-active"));
+    tabs.querySelectorAll(".ds-tabs-panel").forEach((el) => el.classList.remove("is-active"));
+    label.classList.add("is-active");
+    tabs.querySelector(`.ds-tabs-panel[data-idx="${idx}"]`)?.classList.add("is-active");
+  });
+
+  // Slider: Embla Carousel (headless, vanilla JS — see package.json) drives
+  // drag/swipe/momentum/looping; this just wires our own prev/next/dot
+  // buttons + an optional autoplay plugin (data-autoplay = ms, set only when
+  // the author picked something other than "off") to its API instead of
+  // hand-rolling scroll math. .ds-slider-viewport/.ds-slider-track/.ds-slide
+  // are exactly Embla's expected viewport > container > slide structure.
+  document.querySelectorAll<HTMLElement>(".ds-slider").forEach((slider) => {
+    const viewport = slider.querySelector<HTMLElement>(".ds-slider-viewport");
+    const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
+    if (!viewport) return;
+    const autoplayMs = Number(slider.dataset.autoplay || "0");
+    const plugins = autoplayMs > 0 ? [Autoplay({ delay: autoplayMs, stopOnInteraction: false })] : [];
+    const embla = EmblaCarousel(viewport, { loop: true }, plugins);
+    const updateDots = () => {
+      const selected = embla.selectedScrollSnap();
+      dots.forEach((d, di) => d.classList.toggle("is-active", di === selected));
+    };
+    slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => embla.scrollPrev());
+    slider.querySelector(".ds-slider-next")?.addEventListener("click", () => embla.scrollNext());
+    dots.forEach((d, di) => d.addEventListener("click", () => embla.scrollTo(di)));
+    embla.on("select", updateDots);
+    updateDots();
+  });
+</script>

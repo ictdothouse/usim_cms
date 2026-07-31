@@ -17,7 +17,13 @@
 // HTML/CSS/JS embed is an intentional, documented trust boundary (same as
 // any page builder's "custom code" block), not a gap to close.
 
-const LENGTH_RE = /^-?[0-9]+(\.[0-9]+)?(px|rem|em|%|vh|vw)?$/;
+// Plain CSS length, OR one of Designer.tsx's own legacy preset keywords
+// (PAD/SPACE/RADIUS/ICON_SIZE tables use none/sm/md/lg/xl/full, not every
+// table has every keyword — lengthValue() on the render side already falls
+// through to using an unrecognized keyword as a literal, invalid-but-inert
+// CSS value, so accepting the full shared set here rather than replicating
+// each table exactly is safe, not just convenient).
+const LENGTH_RE = /^-?[0-9]+(\.[0-9]+)?(px|rem|em|%|vh|vw)?$|^(none|sm|md|lg|xl|full)$/;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 const FONT_FAMILY_RE = /^[A-Za-z0-9 ]*$/;
 const CSS_CLASS_RE = /^[A-Za-z0-9_\- ]*$/;
@@ -69,6 +75,10 @@ const ENUM_VALUES: Record<string, string[]> = {
   ratio: ["16:9", "4:3", "1:1"],
   style: ["bullet", "numbered", "none"],
   columns: ["2", "3", "4"],
+  // accordion/infobox/slider (see Designer.tsx's ELS registry additions).
+  exclusive: ["false", "true"],
+  iconPosition: ["top", "left"],
+  autoplay: ["0", "3", "5", "8"],
 };
 
 // Free-typed CSS lengths (each ends up as `key:value` in a raw style
@@ -76,7 +86,10 @@ const ENUM_VALUES: Record<string, string[]> = {
 // GAP_PATTERN. Covers every padding/margin/radius side + shorthand, plus
 // borderWidth/opacity/lineHeight/letterSpacing/size/height/gap.
 const LENGTH_KEYS = new Set([
-  "paddingY", "paddingX", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  // "padding" (bare, no Y/X) is Column/Element's own legacy fallback key —
+  // see Designer.tsx's COLUMN_SPACING_KEYS and every sideValue(..., "padding")
+  // call — distinct from Section's paddingY/paddingX split below.
+  "padding", "paddingY", "paddingX", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "marginY", "marginX", "marginTop", "marginBottom", "marginLeft", "marginRight",
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
   "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
@@ -86,11 +99,59 @@ const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color"]);
 // only the URI-scheme check applies — bgImage is handled separately above
 // since it's concatenated into raw CSS instead.
 const ATTR_URL_KEYS = new Set(["href", "url", "src"]);
-// Rendered as escaped text content (or, for `images`, a safe src attribute
-// per line) — never concatenated into CSS/HTML unescaped, so no pattern
-// restriction beyond the per-line URL check `images` gets below.
-const FREE_TEXT_KEYS = new Set(["text", "label", "alt", "items", "name"]);
+// Rendered as escaped text content (or, for `images`/`slides`, a safe URL
+// per line/field) — never concatenated into CSS/HTML unescaped, so no
+// pattern restriction beyond the per-line checks `images`/`slides` get below.
+const FREE_TEXT_KEYS = new Set(["text", "label", "alt", "items", "name", "heading"]);
 const SKIP_KEYS = new Set(["html"]);
+
+// slider's `slides` field: a JSON array (post-Embla-Carousel rewrite, see
+// Designer.tsx's parseSlides/stringifySlides) — one object per slide, each
+// with an image (raw url(...) CSS, like bgImage), free-text heading/subtitle,
+// an enum textPosition, a hex overlayColor + numeric overlayOpacity, and a
+// buttons array (each a safe-attribute href + free-text label + enum
+// variant). Pages saved before that rewrite still have the OLD
+// imageUrl|heading|subtitle|buttonLabel|buttonHref pipe-line format —
+// JSON.parse throws on that, so it falls through to the legacy check below
+// and keeps saving until the author re-opens/re-edits the slider (which
+// rewrites it as JSON) — this must accept both shapes, never just the new one.
+function isSafeSlideButton(b: unknown): boolean {
+  if (typeof b !== "object" || b === null) return false;
+  const o = b as Record<string, unknown>;
+  if (typeof o.label !== "string") return false;
+  if (typeof o.href !== "string" || !isSafeUrl(o.href)) return false;
+  if (o.variant !== undefined && o.variant !== "primary" && o.variant !== "outline") return false;
+  return true;
+}
+function isSafeSlide(s: unknown): boolean {
+  if (typeof s !== "object" || s === null) return false;
+  const o = s as Record<string, unknown>;
+  if (typeof o.imageUrl !== "string" || (o.imageUrl && !isSafeCssUrl(o.imageUrl))) return false;
+  if (typeof o.heading !== "string" || typeof o.subtitle !== "string") return false;
+  if (o.textPosition !== undefined && !["left", "center", "right"].includes(o.textPosition as string)) return false;
+  if (o.overlayColor !== undefined && (typeof o.overlayColor !== "string" || !HEX_COLOR_RE.test(o.overlayColor))) return false;
+  if (o.overlayOpacity !== undefined && (typeof o.overlayOpacity !== "string" || !NUM_RE.test(o.overlayOpacity))) return false;
+  if (o.buttons !== undefined) {
+    if (!Array.isArray(o.buttons)) return false;
+    if (!o.buttons.every(isSafeSlideButton)) return false;
+  }
+  return true;
+}
+function isSafeSlides(value: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.every(isSafeSlide);
+  } catch {
+    // Not JSON — legacy pipe-line format, checked below.
+  }
+  for (const line of value.split("\n")) {
+    if (!line.trim()) continue;
+    const [image, , , , href] = line.split("|");
+    if (image && !isSafeCssUrl(image)) return false;
+    if (href && !isSafeUrl(href)) return false;
+  }
+  return true;
+}
 
 function validateValue(key: string, value: unknown): string | null {
   if (typeof value !== "string") return `${key} must be a string`;
@@ -101,6 +162,7 @@ function validateValue(key: string, value: unknown): string | null {
     }
     return null;
   }
+  if (key === "slides") return isSafeSlides(value) ? null : `${key} contains an unsafe URL`;
   if (FREE_TEXT_KEYS.has(key)) return null;
   if (key === "bgImage") return isSafeCssUrl(value) ? null : `${key} has an unsafe URL`;
   if (ATTR_URL_KEYS.has(key)) return isSafeUrl(value) ? null : `${key} has an unsafe URL scheme`;

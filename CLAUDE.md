@@ -148,7 +148,49 @@ pnpm workspace monorepo with two apps:
   bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
   actually activates), and a design template library. A page's slug is auto-derived from its title on
   create (`PagesPanel`'s quick-create form) and stays editable afterward via a click-to-edit field in
-  Designer's header. `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
+  Designer's header. Element types (`ELS` registry) span the basics (heading/text/image/button/spacer/
+  divider/embed/icon/list/html/gallery) plus 4 richer ones for real-world department-site content:
+  **accordion** and **tabs** (each `items` field is `Question|Answer`/`Label|Content` pairs, one per
+  line — same plain delimited-line convention `list`'s items already uses), **info box** (icon+heading+text
+  "feature card" — pairs naturally with a themeable Column as its card background, per `COLUMN_FIELDS`,
+  rather than having its own bg/border), and **slider/banner**. Accordion/tabs' stored format is still
+  the plain `a|b`-per-line string (`validate-layout.ts`/`SectionBlock.astro` parse it exactly as before) —
+  only the Inspector's editing UI is structured: `FieldKind` grew `"pairs"` (add/remove item cards with two
+  labeled inputs each, labels driven by each field's `subLabels`), so authors never hand-type the
+  `|`-delimited line themselves; `parsePairs` converts between the array the UI edits and the flat string
+  that's actually saved. Interactivity stays proportional to `apps/frontend`'s "no client-side JS"
+  convention below: accordion is native `<details>`/`<summary>` (zero JS, `name`-grouped only when the
+  author opts into "one open at a time"); tabs is the one exception needing a real click handler, a small
+  event-delegated `<script>` Astro bundles once per page regardless of how many instances render.
+  Slider/banner's `slides` field is a **JSON array**, one object per slide (`imageUrl`, `heading`,
+  `subtitle`, `textPosition` — left/center/right —, `overlayColor`+`overlayOpacity` for the darkening
+  scrim, and a `buttons` array — each `{label, href, variant}`, not just one button) — a deliberate
+  schema evolution off the original `imageUrl|heading|subtitle|buttonLabel|buttonHref` pipe-line format,
+  needed once slides gained more fields than a flat line can hold. `parseSlides`/`stringifySlides`
+  (Designer.tsx) and their SectionBlock.astro mirror both accept **either** shape — `JSON.parse` first,
+  falling back to the old pipe-line parse on failure — so a page saved before this change keeps
+  rendering/saving untouched and silently upgrades to JSON the next time its slider is edited; never a
+  hard migration. Rendering uses **Embla Carousel** (`embla-carousel` + `embla-carousel-autoplay`,
+  apps/frontend's only real npm UI dependency beyond Tailwind/daisyUI — headless, ~6kb, vanilla JS, no
+  React) instead of the original hand-rolled `translateX()` script: `.ds-slider-viewport` >
+  `.ds-slider-track` > `.ds-slide` is exactly Embla's expected viewport/container/slide structure, giving
+  real touch/drag/swipe/momentum/loop for free. The `<script>` just wires the existing prev/next/dot
+  buttons + an optional autoplay plugin to Embla's API (`scrollPrev`/`scrollNext`/`scrollTo`/`on("select")`)
+  instead of computing scroll percentages by hand. `apps/api/src/collections/validate-layout.ts` validates
+  every field the same way as every other prop — `slides`' new JSON shape gets its own
+  `isSafeSlide`/`isSafeSlideButton` checks (image through the same `isSafeCssUrl` as `bgImage`, since both
+  land in a raw `url(...)`; button `href` through `isSafeUrl`), with the same JSON-then-legacy-pipe
+  fallback as the parsers above so an unedited old page's layout keeps validating on every save, not just
+  ones already rewritten to the new shape. This slider work also surfaced two real gaps unrelated to
+  itself, worth remembering: `validate-layout.ts`'s `LENGTH_KEYS` was missing the bare `"padding"` key
+  (Column/Element's own legacy fallback — distinct from Section's `paddingY`/`paddingX` split — see
+  `COLUMN_SPACING_KEYS` and every `sideValue(..., "padding")` call), which 400'd on the very first
+  save/publish of any page saved before that validator existed; and `apps/admin/src/lib/api.ts`'s
+  `request()` only read `body.error`, but Fastify's default error handler for a thrown `.statusCode` Error
+  puts the real reason in `body.message` and just the generic HTTP phrase ("Bad Request") in `body.error`
+  — every validation-rejection toast was showing that useless generic phrase instead of the actual
+  problem. Both fixed in the same pass; `request()` now reads `body.message ?? body.error`.
+  `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
   built on the same `oklchToHex` conversion), a 4-role Google Font system (Heading/Header-Title,
