@@ -308,6 +308,43 @@ const FONT_WEIGHT_VALUES = ["400", "500", "600", "700", "800"];
 const TEXT_TRANSFORM_VALUES = ["none", "uppercase", "lowercase", "capitalize"];
 const FONT_STYLE_VALUES = ["normal", "italic"];
 const TEXT_DECORATION_VALUES = ["none", "underline", "line-through"];
+// Designer's drag-resize/Size field store a single author-chosen px value
+// with no upper bound (by request — see CLAUDE.md) and no per-viewport
+// variants, so a literal `font-size:{px}px` stopped adapting to the screen
+// the moment an author set a custom size at all: it's a fixed number,
+// however big, on a phone exactly as on a desktop. Wrapped in `clamp()`
+// instead — the author's own value stays the ceiling (never renders bigger
+// than intended), a floor keeps it legible, and a vw-based middle term
+// (calibrated so it equals the ceiling at a ~1000px "designed at this width"
+// viewport) is what actually shrinks the text on a narrower screen, the same
+// technique `.ds-slide-heading`'s own default `clamp(1.5rem, 4vw, 2.5rem)`
+// already uses below — this just derives one from any px value instead of
+// a single hardcoded rule.
+function fluidClamp(px: number, ceiling: string): string {
+  const floor = Math.max(14, Math.round(px * 0.55));
+  const vw = Math.round((px / 10) * 100) / 100;
+  return `clamp(${floor}px, ${vw}vw, ${ceiling})`;
+}
+function fluidFontSize(pxStr: string): string {
+  const px = parseFloat(pxStr);
+  return fluidClamp(px, `${px}px`);
+}
+// Same fluid treatment, generalized to whatever unit the standalone Text
+// element's own free-form "size" field actually stores (px/rem/em — a
+// preset like TEXT_SIZE.md or any custom value an author typed) rather than
+// the slider's always-bare-px string. rem/em are converted to a px
+// equivalent for the floor/vw math only (assumes the 16px root, same
+// assumption Designer.tsx's pxLabel() already makes) — the ceiling term
+// keeps the author's original unit untouched. `%` (or anything unrecognized)
+// passes through as-is: already relative to its container, not a fixed size
+// that can render "too big" on a narrow screen the way px/rem/em can.
+function fluidTextSize(v: string): string {
+  const m = /^(-?[0-9]+(?:\.[0-9]+)?)(px|rem|em)$/.exec(v);
+  if (!m) return v;
+  const num = parseFloat(m[1]);
+  const px = m[2] === "px" ? num : num * 16;
+  return fluidClamp(px, v);
+}
 // color overrides `background` for both variants — for `ds-btn-outline`
 // (border: 2px solid currentColor; color: inherit) setting textColor also
 // recolors the border for free, since currentColor picks up `color` either way.
@@ -319,7 +356,7 @@ function slideButtonStyle(btn: SlideButton): string | undefined {
       btn.radius && NUM_RE.test(btn.radius) ? `border-radius:${btn.radius}px` : null,
       // Overrides the size class's font-size — .ds-btn's padding is in em, so
       // this scales padding along with it (set by the canvas resize handle).
-      btn.fontSize && NUM_RE.test(btn.fontSize) ? `font-size:${btn.fontSize}px` : null,
+      btn.fontSize && NUM_RE.test(btn.fontSize) ? `font-size:${fluidFontSize(btn.fontSize)}` : null,
     ]
       .filter(Boolean)
       .join(";") || undefined
@@ -329,7 +366,7 @@ function slideTextStyle(txt: SlideText): string | undefined {
   return (
     [
       txt.color && HEX_RE.test(txt.color) ? `color:${txt.color}` : null,
-      txt.fontSize && NUM_RE.test(txt.fontSize) ? `font-size:${txt.fontSize}px` : null,
+      txt.fontSize && NUM_RE.test(txt.fontSize) ? `font-size:${fluidFontSize(txt.fontSize)}` : null,
       `text-align:${txt.align}`,
       txt.fontFamily && FONT_FAMILY_RE.test(txt.fontFamily) ? `font-family:${txt.fontFamily}` : null,
       txt.fontWeight && FONT_WEIGHT_VALUES.includes(txt.fontWeight) ? `font-weight:${txt.fontWeight}` : null,
@@ -674,7 +711,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                     <p
                       class={cls("ds-text", p.cssClass)}
                       style={[
-                        `font-size:${lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md)}`,
+                        `font-size:${fluidTextSize(lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md))}`,
                         p.align ? `text-align:${p.align}` : null,
                         marginStyle(p),
                         paddingStyle(p),
@@ -1037,8 +1074,8 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   }
   .ds-h1 { font-size: clamp(2rem, 5vw, 3rem); }
   .ds-h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); }
-  .ds-h3 { font-size: 1.5rem; }
-  .ds-h4 { font-size: 1.2rem; }
+  .ds-h3 { font-size: clamp(1.3rem, 3.2vw, 1.5rem); }
+  .ds-h4 { font-size: clamp(1.1rem, 2.6vw, 1.2rem); }
   .ds-text {
     margin: 0;
     line-height: 1.7;

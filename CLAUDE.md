@@ -331,6 +331,65 @@ pnpm workspace monorepo with two apps:
   instead of 0. `startResize`'s own drag also dropped its 10-40px clamp right after — asked not to cap how
   big a drag can make text/buttons; only a 1px floor remains (avoids zero/negative). No server-side change
   needed — `validate-layout.ts`'s `fontSize` check was already just a numeric-format regex, no upper bound.
+  Removing that cap surfaced a real responsiveness gap: `slideTextStyle()`/`slideButtonStyle()` emitted a
+  literal `font-size:{px}px`, a fixed number that rendered exactly as large on a phone as on a desktop —
+  reported as text "tak fit" once an author actually used a big custom size. Fixed with a new
+  `fluidFontSize(pxStr)` helper (SectionBlock.astro) that wraps the author's px value in `clamp(floor,
+  vw, ceiling)`: the ceiling is the author's own chosen size (never rendered bigger than they set), the
+  floor is `max(14, size*0.55)` (stays legible), and the vw middle term is calibrated (`size/10` vw) so it
+  equals the ceiling at a ~1000px "designed at this width" viewport and shrinks below that — same fluid-type
+  technique `.ds-slide-heading`'s own default `clamp(1.5rem, 4vw, 2.5rem)` already used, just derived
+  per-value instead of one hardcoded rule. Neither heading/subtitle/button text has `white-space: nowrap` on
+  the real site (only Designer's own canvas approximation does, for its resize-box hugging), so long text
+  already wraps to 2+ lines within its container's `max-width` — the missing piece was purely the font-size
+  itself not shrinking. Verified this reaches Live Edit's actual mobile preview: its iframe container really
+  narrows to `24rem` when the mobile breakpoint is selected (`bp === "mobile"` in Designer.tsx), so the real
+  SectionBlock.astro CSS — now fluid — renders exactly as it would on an actual phone, not just a simulated
+  grid layout.
+  Generalized right after to every element with an author-set font-size, not just the slider — split
+  `fluidFontSize` into a shared `fluidClamp(px, ceiling)` plus two callers: `fluidFontSize(pxStr)` (unchanged,
+  slider's bare-px strings) and `fluidTextSize(v)` (new — the standalone Text element's own free-form `size`
+  field, which allows px/rem/em/% via the "length" field kind). `fluidTextSize` converts rem/em to a
+  px-equivalent for the floor/vw math only (assumes the 16px root, same assumption `pxLabel()` in
+  Designer.tsx already makes) but keeps the ceiling term in the author's original unit; `%` (or anything
+  unrecognized) passes through untouched since it's already relative, not a fixed size that can overflow a
+  narrow screen. Heading elements don't have their own free-form size (they pick a `level` h1-4, sized purely
+  by the `.ds-h1`-`.ds-h4` CSS classes) — h1/h2 already used `clamp()`, but h3/h4 were still a fixed
+  `1.5rem`/`1.2rem`, an inconsistency fixed in the same pass (`clamp(1.3rem, 3.2vw, 1.5rem)` /
+  `clamp(1.1rem, 2.6vw, 1.2rem)`, same proportions as h1/h2's own clamps). Icon's own `size` field (also
+  "length" kind, also free-form) was deliberately left alone — it sets an `<svg>` `width`/`height`
+  *attribute*, not a CSS `font-size` property, and `clamp()` support in SVG presentation attributes is far
+  less consistent across browsers than in CSS; icons are also a much smaller overflow risk than a paragraph
+  of text, so this wasn't worth the same treatment without being asked specifically.
+  Live-testing the mobile breakpoint preview surfaced a real gap the fluid-CSS fix above didn't cover: the
+  Blocks canvas's slider heading/subtitle/buttons stayed at full literal px size regardless of the "bp"
+  toggle, overflowing the (correctly narrowed) simulated mobile box. Root cause: `vw`/`clamp()` — which
+  works perfectly in the real site's actual iframe — can't work here, because the canvas's "bp" preview is
+  just a `max-width` box (Designer.tsx's `style={{ maxWidth: ... }}` on the canvas) sitting inside the
+  admin's own full, actually-wide browser window; `vw` always measures that real window, never the
+  simulated container, so it never visibly shrinks. Fixed with `fluidPreviewPx(px, bp)` — a JS
+  reimplementation of the same floor/scaled/ceiling clamp math, evaluated against a fixed reference width
+  per breakpoint (`BP_REFERENCE_PX`: desktop 1000, tablet 768, mobile 384) instead of a live `vw` unit —
+  gives the canvas an accurate preview of how the real fluid size will look small. `btnChip`/`textChip` now
+  compute both `rawFontPx` (the true stored value) and `fontPx` (the bp-adjusted display value); only
+  `rawFontPx` is ever passed to `startResize`, so resizing while previewing "mobile" can't accidentally
+  persist a shrunk-for-preview size as the real one — drag always continues from the true size regardless
+  of which bp you're looking at.
+  Slider height also got the same free-length upgrade as everything else here: the `height` field was a
+  closed `select` (sm/md/lg/full keywords only) even though `SectionBlock.astro`'s own render
+  (`lengthValue(p.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)`) and `validate-layout.ts` (`height` already in
+  `LENGTH_KEYS`, `LENGTH_RE` already includes `vh`/`vw`) both already fully supported an arbitrary literal
+  length — the UI itself was the only thing that couldn't express one. Changed to `kind: "length"` (that
+  shared control gained `vh`/`vw` alongside its existing px/%/em/rem, benefiting every other field using it
+  too, e.g. icon size) and `defaults.height` from the keyword `"md"` to the literal `"32rem"` it already
+  resolved to, so a freshly-added slider looks identical to before. Legacy pages keep whatever keyword they
+  already have — `lengthValue()` still resolves it the same way, silently upgrades to a literal value the
+  next time anyone edits that field, same non-migration convention as every other schema evolution here.
+  The Blocks canvas's own slide box was a hardcoded `aspect-[21/9]` regardless of this field — never
+  actually reflected the chosen height, even before this change — so it now resolves the same
+  keyword-or-literal value (a small `SLIDER_HEIGHT` table mirror, same duplication convention as every
+  other shared table between the two apps) into an explicit `style.height`, falling back to the aspect
+  ratio only if it somehow resolves empty.
   `SectionBlock.astro` mirrors this: `slideTextStyle()` (color/fontSize/text-align/typography inline
   overrides, same pattern as `slideButtonStyle()`, each new field checked against the same
   `FONT_FAMILY_RE`/`LENGTH_RE`/enum shapes validate-layout.ts already uses for every other element's

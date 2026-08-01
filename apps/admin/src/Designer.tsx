@@ -667,12 +667,23 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
         { imageUrl: "", heading: "Slide two heading", subtitle: "Slide two subtitle", textPosition: "center", overlayColor: "#000000", overlayOpacity: "35", buttons: [] },
       ]),
       autoplay: "0",
-      height: "md",
+      // A literal length now that the field itself accepts one directly
+      // (kind "length", below) — "32rem" is exactly what the old "md" preset
+      // keyword already resolved to (SLIDER_HEIGHT in SectionBlock.astro),
+      // so a freshly-added slider looks identical to before. Pages saved
+      // before this change keep the "sm"/"md"/"lg"/"full" keyword itself,
+      // which SectionBlock.astro's `lengthValue()` still resolves the exact
+      // same way — never a hard migration, upgrades silently on next edit,
+      // same convention as every other schema evolution in this element.
+      height: "32rem",
     },
     fields: [
       { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
       { key: "autoplay", labelKey: "designer-f-slider-autoplay", kind: "select", options: ["0", "3", "5", "8"] },
-      { key: "height", labelKey: "designer-f-slider-height", kind: "select", options: ["sm", "md", "lg", "full"] },
+      // px/%/em/rem/vh/vw via the shared "length" kind — was a closed
+      // sm/md/lg/full select, which could never express a custom px or vh
+      // value at all. 100vh now covers the old "full" preset directly.
+      { key: "height", labelKey: "designer-f-slider-height", kind: "length" },
     ],
   },
 };
@@ -967,6 +978,26 @@ const TEXT_DEFAULTS: SlideText = {
 // heading/subtitle have no explicit fontSize yet (mirrors SIZE_PX for
 // buttons, just no discrete sm/md/lg enum of their own to derive from).
 const TEXT_BASE_PX = { heading: 20, subtitle: 13 };
+// Mirrors SectionBlock.astro's fluidClamp/fluidFontSize math (real site:
+// clamp(floor, vw, ceiling)) but evaluated in JS against a fixed reference
+// width per breakpoint instead of an actual `vw` unit — the Blocks canvas's
+// "bp" preview is just a max-width box inside the admin's own full browser
+// window (Designer.tsx's `style={{ maxWidth: ... }}` on the canvas), so a
+// real `vw`/`clamp()` here would measure the admin's actual (probably wide)
+// window, not this simulated container, and never visibly shrink. This gives
+// the canvas an accurate preview of how the real fluid font-size will look
+// small instead of staying full (and overflowing) size regardless of bp.
+const BP_REFERENCE_PX: Record<"desktop" | "tablet" | "mobile", number> = { desktop: 1000, tablet: 768, mobile: 384 };
+function fluidPreviewPx(px: number, bp: "desktop" | "tablet" | "mobile"): number {
+  const floor = Math.max(14, Math.round(px * 0.55));
+  const scaled = Math.round((px * BP_REFERENCE_PX[bp]) / 1000);
+  return Math.min(px, Math.max(floor, scaled));
+}
+// Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
+// before the height field became free-form ("length" kind, below) still
+// store one of these keywords; resolving it here lets the canvas preview
+// show the real height for those too, not just newly-typed literal values.
+const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
 // Heading/subtitle were plain strings before this upgrade — a string input
 // here means legacy content, wrapped into TEXT_DEFAULTS with that string as
 // `text` (same JSON-then-legacy-shape fallback convention as everywhere else
@@ -2741,7 +2772,12 @@ export default function Designer({
         </div>
       );
     if (field.kind === "length") {
-      const m = value.match(/^(-?\d*\.?\d+)(px|%|em|rem)$/);
+      // vh/vw added alongside the original px/%/em/rem so a field like the
+      // slider's height can express "50% of the viewport height" or "the
+      // full viewport" (100vh) directly, not just a fixed/relative-to-parent
+      // length — every other "length" kind field (padding, radius, etc)
+      // simply never uses those two units, no behavior change for them.
+      const m = value.match(/^(-?\d*\.?\d+)(px|%|em|rem|vh|vw)$/);
       const num = m ? m[1] : "";
       const unit = m ? m[2] : "px";
       return (
@@ -2758,7 +2794,7 @@ export default function Designer({
             value={unit}
             onChange={(e) => onChange(`${num || "0"}${e.target.value}`)}
           >
-            {["px", "%", "em", "rem"].map((u) => (
+            {["px", "%", "em", "rem", "vh", "vw"].map((u) => (
               <option key={u} value={u}>
                 {u}
               </option>
@@ -4419,7 +4455,13 @@ export default function Designer({
           window.addEventListener("pointerup", up);
         };
         const btnChip = (btn: SlideButton, bi: number) => {
-          const fontPx = Number(btn.fontSize) || SIZE_PX[btn.size];
+          // rawFontPx is the true stored value — always what drag-resize
+          // continues from, regardless of which bp is being previewed, so
+          // resizing while looking at the mobile preview can't accidentally
+          // persist a shrunk-for-preview size as the real one. fontPx (what
+          // actually renders) is the bp-adjusted preview size.
+          const rawFontPx = Number(btn.fontSize) || SIZE_PX[btn.size];
+          const fontPx = fluidPreviewPx(rawFontPx, bp);
           const ref: ItemRef = { kind: "button", bi };
           return (
             <span
@@ -4450,7 +4492,7 @@ export default function Designer({
               {btn.label || "Button"}
               <span
                 className="absolute -bottom-1 -right-1 h-2.5 w-2.5 cursor-nwse-resize rounded-full border border-white bg-accent"
-                onPointerDown={(ev) => startResize(ref, fontPx, ev)}
+                onPointerDown={(ev) => startResize(ref, rawFontPx, ev)}
               />
             </span>
           );
@@ -4472,7 +4514,11 @@ export default function Designer({
           { key: "se", pos: "-bottom-1 -right-1", cursor: "cursor-nwse-resize" },
         ] as const;
         const textChip = (kind: "heading" | "subtitle", txt: SlideText, fallback: string, extraClass: string) => {
-          const fontPx = Number(txt.fontSize) || TEXT_BASE_PX[kind];
+          // Same rawFontPx/fontPx split as btnChip above — drag-resize always
+          // continues from the true stored size, the canvas only ever shows
+          // the bp-adjusted preview.
+          const rawFontPx = Number(txt.fontSize) || TEXT_BASE_PX[kind];
+          const fontPx = fluidPreviewPx(rawFontPx, bp);
           const ref: ItemRef = { kind };
           return (
             <span
@@ -4521,7 +4567,7 @@ export default function Designer({
                 <span
                   key={c.key}
                   className={`absolute h-2 w-2 rounded-sm border border-white bg-accent shadow ${c.pos} ${c.cursor}`}
-                  onPointerDown={(ev) => startResize(ref, fontPx, ev)}
+                  onPointerDown={(ev) => startResize(ref, rawFontPx, ev)}
                 />
               ))}
             </span>
@@ -4542,14 +4588,24 @@ export default function Designer({
           center: "justify-center",
           right: "justify-end",
         };
+        // Resolves the same way SectionBlock.astro's SLIDER_HEIGHT/lengthValue
+        // does — a legacy keyword ("sm"/"md"/"lg"/"full") maps through the
+        // table, anything else (a literal px/vh/rem/%/em an author typed via
+        // the field's own "length" kind) passes through as-is. Falls back to
+        // a fixed aspect-ratio only if height somehow resolves empty; in
+        // practice this is always set (defaults to "32rem" for new sliders).
+        const resolvedHeight = p.height ? (SLIDER_HEIGHT[p.height] ?? p.height) : "";
         return (
           <div
             data-slide-box
             ref={(node) => {
               previewRefs.box = node;
             }}
-            className="relative flex aspect-[21/9] items-center justify-center overflow-hidden rounded-lg bg-black/70 text-white"
-            style={first.imageUrl ? { background: `url(${first.imageUrl}) center/cover` } : undefined}
+            className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg bg-black/70 text-white`}
+            style={{
+              height: resolvedHeight || undefined,
+              ...(first.imageUrl ? { background: `url(${first.imageUrl}) center/cover` } : undefined),
+            }}
           >
             <div
               className={`max-w-[80%] ${first.textPosition === "left" ? "self-start ml-6" : first.textPosition === "right" ? "self-end mr-6" : ""}`}
