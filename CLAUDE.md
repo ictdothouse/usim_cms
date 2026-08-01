@@ -322,6 +322,15 @@ pnpm workspace monorepo with two apps:
   carries both `snap` (screen-space target for repositioning, unchanged math) and `line` (the sibling's real
   matched coordinate — its own left/center/right, never offset by the dragged item's size) — `snapCenterX`
   drives the reposition, `alignX` (from `line`) drives only where the pink guide is drawn.
+  Heading/subtitle also gained an explicit numeric Size field in the Inspector (`SLIDE_TEXT_SIZE_FIELD`,
+  reusing the `"stepper"` kind and the standalone text element's own `designer-f-size` label) — the canvas
+  drag handle was the only way to resize before this, fast but imprecise; typing isn't clamped to the
+  drag's 10-40 range, since a specific-number ask shouldn't inherit the drag handle's comfortable bounds.
+  Shown value falls back to `TEXT_BASE_PX.heading`/`.subtitle` when `fontSize` is still `""` (unset), same
+  fallback the canvas chip itself already uses, so the stepper starts from the size actually on screen
+  instead of 0. `startResize`'s own drag also dropped its 10-40px clamp right after — asked not to cap how
+  big a drag can make text/buttons; only a 1px floor remains (avoids zero/negative). No server-side change
+  needed — `validate-layout.ts`'s `fontSize` check was already just a numeric-format regex, no upper bound.
   `SectionBlock.astro` mirrors this: `slideTextStyle()` (color/fontSize/text-align/typography inline
   overrides, same pattern as `slideButtonStyle()`, each new field checked against the same
   `FONT_FAMILY_RE`/`LENGTH_RE`/enum shapes validate-layout.ts already uses for every other element's

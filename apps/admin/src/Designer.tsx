@@ -2999,6 +2999,13 @@ export default function Designer({
       // minus "color" since that already has its own dedicated swatch above.
       // FieldInput is a plain function (no hooks of its own), safe to call
       // directly in a .map() the same way ElPreview is called elsewhere here.
+      // Canvas drag-to-resize is fast but imprecise — this gives an exact
+      // numeric alternative for whoever wants a specific size instead of
+      // eyeballing it. Reuses the standalone text element's own "Size" label
+      // (same field name, no new i18n key) and the stepper kind already
+      // built for lineHeight/letterSpacing above. Neither this nor the
+      // canvas drag (startResize) clamps an upper bound — only a 1px floor.
+      const SLIDE_TEXT_SIZE_FIELD: Field = { key: "fontSize", labelKey: "designer-f-size", kind: "stepper", step: 1 };
       const renderTypographyFields = (txt: SlideText, onChange: (patch: Partial<SlideText>) => void) => (
         <div className="space-y-1.5 rounded border border-line/20 p-2">
           <span className="text-[10px] font-semibold text-sub">{t("designer-group-typography")}</span>
@@ -3072,6 +3079,14 @@ export default function Designer({
                     </button>
                   )}
                 </label>
+                <div className="space-y-0.5">
+                  <span className="text-[9px] text-sub">{t(SLIDE_TEXT_SIZE_FIELD.labelKey)}</span>
+                  {FieldInput({
+                    field: SLIDE_TEXT_SIZE_FIELD,
+                    value: s.heading.fontSize || String(TEXT_BASE_PX.heading),
+                    onChange: (v) => update(i, { heading: { ...s.heading, fontSize: v } }),
+                  })}
+                </div>
                 {renderTextAlign(s.heading, (patch) => update(i, { heading: { ...s.heading, ...patch } }))}
                 {renderTypographyFields(s.heading, (patch) => update(i, { heading: { ...s.heading, ...patch } }))}
               </div>
@@ -3099,6 +3114,14 @@ export default function Designer({
                     </button>
                   )}
                 </label>
+                <div className="space-y-0.5">
+                  <span className="text-[9px] text-sub">{t(SLIDE_TEXT_SIZE_FIELD.labelKey)}</span>
+                  {FieldInput({
+                    field: SLIDE_TEXT_SIZE_FIELD,
+                    value: s.subtitle.fontSize || String(TEXT_BASE_PX.subtitle),
+                    onChange: (v) => update(i, { subtitle: { ...s.subtitle, fontSize: v } }),
+                  })}
+                </div>
                 {renderTextAlign(s.subtitle, (patch) => update(i, { subtitle: { ...s.subtitle, ...patch } }))}
                 {renderTypographyFields(s.subtitle, (patch) => update(i, { subtitle: { ...s.subtitle, ...patch } }))}
               </div>
@@ -4375,15 +4398,17 @@ export default function Designer({
           window.addEventListener("pointerup", up);
         };
         // Drag-to-resize: horizontal drag distance scales fontSize directly
-        // (px, clamped 10-40) off whatever size the item starts at — mirrors
-        // the existing padding/margin edge-drag handles elsewhere in this
-        // file, just driving fontSize instead of a length prop.
+        // (px) off whatever size the item starts at — mirrors the existing
+        // padding/margin edge-drag handles elsewhere in this file, just
+        // driving fontSize instead of a length prop. No upper bound — only a
+        // floor of 1px so it can't go to zero/negative; asked not to cap how
+        // big a drag can make text/buttons.
         const startResize = (ref: ItemRef, startFont: number, ev: React.PointerEvent<HTMLElement>) => {
           ev.stopPropagation();
           ev.preventDefault();
           const startX = ev.clientX;
           const move = (mv: PointerEvent) => {
-            const next = Math.min(40, Math.max(10, Math.round(startFont + (mv.clientX - startX) / 3)));
+            const next = Math.max(1, Math.round(startFont + (mv.clientX - startX) / 3));
             updateItem(ref, { fontSize: String(next) });
           };
           const up = () => {
