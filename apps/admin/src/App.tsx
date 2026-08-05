@@ -2471,6 +2471,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
   const [roles, setRoles] = useState<Array<Record<string, unknown>>>([]);
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
@@ -2579,7 +2580,7 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
   }
 
   async function removeUser(u: Record<string, unknown>) {
-    if (!window.confirm(t("users-delete-confirm"))) return;
+    if (!(await confirm(t("users-delete-confirm")))) return;
     try {
       await api.deletePortalUser(token, u.id as string);
       setEditUserId(null);
@@ -2614,30 +2615,31 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
         />
         <div className="flex flex-col gap-0.5">
           <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-account-type")}</label>
-          <select
-            className="rounded-lg border border-line/30 bg-white px-2 py-2 text-xs outline-none"
-            value={role}
-            onChange={(e) => setRole(e.target.value as "webmaster" | "superadmin")}
-          >
-            <option value="webmaster">{t("role-webmaster-label")}</option>
-            <option value="superadmin">{t("role-superadmin-label")}</option>
-          </select>
+          <Select value={role} onValueChange={(v) => setRole(v as "webmaster" | "superadmin")}>
+            <SelectTrigger className="text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="webmaster">{t("role-webmaster-label")}</SelectItem>
+              <SelectItem value="superadmin">{t("role-superadmin-label")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         {role === "webmaster" && (
           <div className="flex flex-col gap-0.5">
             <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-role")}</label>
-            <select
-              className="rounded-lg border border-line/30 bg-white px-2 py-2 text-xs outline-none"
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
-            >
-              <option value="">{t("users-role-none")}</option>
-              {roles.map((r) => (
-                <option key={r.id as string} value={r.id as string}>
-                  {r.name as string}
-                </option>
-              ))}
-            </select>
+            <Select value={roleId} onValueChange={setRoleId}>
+              <SelectTrigger className="text-xs">
+                <SelectValue placeholder={t("users-role-none")} />
+              </SelectTrigger>
+              <SelectContent>
+                {roles.map((r) => (
+                  <SelectItem key={r.id as string} value={r.id as string}>
+                    {r.name as string}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
         {role === "webmaster" && canMultiSite && (
@@ -2661,19 +2663,21 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
           </div>
         )}
         {role === "webmaster" && !canMultiSite && (
-          <select
-            className={`${inputCls} w-auto`}
+          <Select
             value={tenantHosts[0] ?? ""}
-            onChange={(e) => setTenantHosts(e.target.value ? [e.target.value] : [])}
-            required
+            onValueChange={(v) => setTenantHosts(v ? [v] : [])}
           >
-            <option value="">{t("content-pick")}</option>
-            {tenants.map((tn) => (
-              <option key={tn.id as string} value={tn.host as string}>
-                {tn.departmentName as string} — {tn.host as string}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-auto">
+              <SelectValue placeholder={t("content-pick")} />
+            </SelectTrigger>
+            <SelectContent>
+              {tenants.map((tn) => (
+                <SelectItem key={tn.id as string} value={tn.host as string}>
+                  {tn.departmentName as string} — {tn.host as string}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
         <button type="submit" className={btnPrimary}>
           {t("users-create")}
@@ -2715,18 +2719,18 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                   {u.role === "superadmin" ? (
                     <span className="text-[10px] text-sub">{t("cap-all")}</span>
                   ) : (
-                    <select
-                      className="rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px] outline-none"
-                      value={(u.roleId as string | null) ?? ""}
-                      onChange={(e) => assignRole(u, e.target.value)}
-                    >
-                      <option value="">{t("users-role-none")}</option>
-                      {roles.map((r) => (
-                        <option key={r.id as string} value={r.id as string}>
-                          {r.name as string}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={(u.roleId as string | null) ?? ""} onValueChange={(v) => assignRole(u, v)}>
+                      <SelectTrigger className="text-[11px]">
+                        <SelectValue placeholder={t("users-role-none")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {roles.map((r) => (
+                          <SelectItem key={r.id as string} value={r.id as string}>
+                            {r.name as string}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
                 </td>
                 <td className="px-4 py-3">
@@ -2880,6 +2884,7 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
 // ---------- Roles & Permissions ----------
 function RolesPanel({ token }: { token: string }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [roles, setRoles] = useState<Array<Record<string, unknown>>>([]);
   const [name, setName] = useState("");
   const [permissions, setPermissions] = useState<string[]>([]);
@@ -2929,7 +2934,7 @@ function RolesPanel({ token }: { token: string }) {
   }
 
   async function remove(id: string) {
-    if (!confirm(t("roles-delete-confirm"))) return;
+    if (!(await confirm(t("roles-delete-confirm")))) return;
     try {
       await api.deletePortalRole(token, id);
       await refresh();
