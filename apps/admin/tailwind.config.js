@@ -22,6 +22,7 @@ export default {
   			line: '#d2d2d7',
   			canvas: '#f5f5f7',
   			accent: '#0071e3',
+  			'accent-foreground': '#ffffff',
   			ok: '#34c759',
   			warn: '#ff9500',
   			background: 'hsl(var(--background))',
@@ -46,7 +47,10 @@ export default {
   				DEFAULT: 'hsl(var(--muted))',
   				foreground: 'hsl(var(--muted-foreground))'
   			},
-  			destructive: 'hsl(var(--destructive))',
+  			destructive: {
+  				DEFAULT: 'hsl(var(--destructive))',
+  				foreground: 'hsl(var(--destructive-foreground))'
+  			},
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
