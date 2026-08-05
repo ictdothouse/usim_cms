@@ -1432,6 +1432,7 @@ function ThemeForm({
   previewTenantHost?: string;
 }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [primaryColor, setPrimaryColor] = useState("");
   const [secondaryColor, setSecondaryColor] = useState("");
   const [backgroundColor, setBackgroundColor] = useState("");
@@ -1978,40 +1979,52 @@ function ThemeForm({
       {/* "My collection" — personal favourites, not tied to any one site;
           Test loads a preset into the form/preview without saving, Activate
           loads it and saves immediately. */}
-      <div className={`${card} max-w-3xl space-y-2 p-4`}>
-        <p className="text-xs font-semibold text-ink">{t("theme-collection-title")}</p>
-        {presets.length === 0 && <p className="text-[11px] text-sub">{t("theme-collection-empty")}</p>}
-        <ul className="divide-y divide-line/20">
-          {presets.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 py-2 text-xs">
-              <span
-                className="h-5 w-5 shrink-0 rounded-full border border-line/30"
-                style={{ background: `linear-gradient(135deg, ${p.settings.primaryColor || "#ccc"} 50%, ${p.settings.secondaryColor || "#999"} 50%)` }}
-              />
-              <span className="min-w-0 flex-1 truncate font-semibold text-ink">{p.name}</span>
-              <button onClick={() => testPreset(p)} className="font-semibold text-body hover:underline">
-                {t("theme-preset-test")}
-              </button>
-              <button onClick={() => void activatePreset(p)} className="font-semibold text-accent hover:underline">
-                {t("theme-preset-activate")}
-              </button>
-              <button
-                onClick={() => {
-                  setPresetName(p.name);
-                  loadPreset(p);
-                  downloadDesignMd();
-                }}
-                className="font-semibold text-body hover:underline"
-              >
-                {t("theme-file-download")}
-              </button>
-              <button onClick={() => void deletePreset(p.id)} className="text-red-500 hover:text-red-700" title={t("theme-preset-delete")}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <Card className="max-w-3xl">
+        <CardContent className="space-y-2 p-4">
+          <p className="text-xs font-semibold text-ink">{t("theme-collection-title")}</p>
+          {presets.length === 0 && <p className="text-[11px] text-sub">{t("theme-collection-empty")}</p>}
+          <ul className="divide-y divide-line/20">
+            {presets.map((p) => (
+              <li key={p.id} className="flex items-center gap-3 py-2 text-xs">
+                <span
+                  className="h-5 w-5 shrink-0 rounded-full border border-line/30"
+                  style={{ background: `linear-gradient(135deg, ${p.settings.primaryColor || "#ccc"} 50%, ${p.settings.secondaryColor || "#999"} 50%)` }}
+                />
+                <span className="min-w-0 flex-1 truncate font-semibold text-ink">{p.name}</span>
+                <Button variant="link" size="sm" onClick={() => testPreset(p)}>
+                  {t("theme-preset-test")}
+                </Button>
+                <Button variant="link" size="sm" onClick={() => void activatePreset(p)}>
+                  {t("theme-preset-activate")}
+                </Button>
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => {
+                    setPresetName(p.name);
+                    loadPreset(p);
+                    downloadDesignMd();
+                  }}
+                >
+                  {t("theme-file-download")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-500 hover:text-red-700"
+                  title={t("theme-preset-delete")}
+                  onClick={async () => {
+                    if (!(await confirm(t("theme-preset-delete-confirm")))) return;
+                    void deletePreset(p.id);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
 
       {allowDeactivate && (
         <button
