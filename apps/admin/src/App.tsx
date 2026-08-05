@@ -778,6 +778,7 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
 // ---------- Media library ----------
 function MediaManager({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [folders, setFolders] = useState<Array<Record<string, unknown>>>([]);
   const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = root (all folders + unfiled)
@@ -887,7 +888,7 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   async function remove(id: string) {
-    if (!confirm(t("media-delete-confirm"))) return;
+    if (!(await confirm(t("media-delete-confirm")))) return;
     try {
       await api.deleteMedia(tenantHost, token, id);
       setSelected((prev) => {
@@ -902,7 +903,7 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   async function bulkDelete() {
-    if (!confirm(t("media-bulk-delete-confirm"))) return;
+    if (!(await confirm(t("media-bulk-delete-confirm")))) return;
     try {
       for (const id of selected) await api.deleteMedia(tenantHost, token, id);
       setSelected(new Set());
@@ -936,7 +937,7 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   async function removeFolder(id: string) {
-    if (!confirm(t("media-delete-folder-confirm"))) return;
+    if (!(await confirm(t("media-delete-folder-confirm")))) return;
     try {
       await api.deleteMediaFolder(tenantHost, token, id);
       if (activeFolder === id) setActiveFolder(null);
@@ -1180,18 +1181,18 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
                     value={editForm.description}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                   />
-                  <select
-                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
-                    value={editForm.folderId}
-                    onChange={(e) => setEditForm({ ...editForm, folderId: e.target.value })}
-                  >
-                    <option value="">{t("media-all-files")}</option>
-                    {folders.map((f) => (
-                      <option key={f.id as string} value={f.id as string}>
-                        {f.name as string}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={editForm.folderId} onValueChange={(v) => setEditForm({ ...editForm, folderId: v })}>
+                    <SelectTrigger className="text-[10px]">
+                      <SelectValue placeholder={t("media-all-files")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {folders.map((f) => (
+                        <SelectItem key={f.id as string} value={f.id as string}>
+                          {f.name as string}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <div className="flex justify-end gap-2">
                     <button onClick={() => setEditingId(null)} className="text-[10px] text-sub hover:underline">
                       {t("media-cancel")}
