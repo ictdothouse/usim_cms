@@ -3245,6 +3245,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
 // ---------- Settings (superadmin: backup / restore / static export) ----------
 function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Record<string, unknown>> }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [host, setHost] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -3284,10 +3285,10 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".zip";
-    input.onchange = () => {
+    input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      if (!window.confirm(t("settings-restore-confirm"))) return;
+      if (!(await confirm(t("settings-restore-confirm")))) return;
       void run("restore", async () => {
         await api.restoreTenantBackup(token, host, file);
         setMsg(t("settings-restore-done"));
@@ -3298,14 +3299,18 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
 
   return (
     <div className="max-w-2xl space-y-4">
-      <select className={inputCls} value={host} onChange={(e) => setHost(e.target.value)}>
-        <option value="">{t("settings-tenant")}</option>
-        {tenants.map((tn) => (
-          <option key={tn.host as string} value={tn.host as string}>
-            {(tn.departmentName as string) || (tn.host as string)}
-          </option>
-        ))}
-      </select>
+      <Select value={host} onValueChange={setHost}>
+        <SelectTrigger>
+          <SelectValue placeholder={t("settings-tenant")} />
+        </SelectTrigger>
+        <SelectContent>
+          {tenants.map((tn) => (
+            <SelectItem key={tn.host as string} value={tn.host as string}>
+              {(tn.departmentName as string) || (tn.host as string)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {err && <p className="text-xs text-red-600">{err}</p>}
       {msg && <p className="text-xs text-green-700">{msg}</p>}
       {sections.map((s) => (
