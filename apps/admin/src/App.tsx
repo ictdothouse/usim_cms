@@ -2031,14 +2031,22 @@ function ThemeForm({
 // place that decides "is this a staging preview, not a real site".
 const isStagingTenant = (tn: Record<string, unknown>) => (tn.departmentName as string).endsWith("(Staging)");
 
+const tenantCreateSchema = z.object({
+  host: z.string().trim().min(1),
+  departmentName: z.string().trim().min(1),
+});
+type TenantCreateForm = z.infer<typeof tenantCreateSchema>;
+
 function TenantsPanel({ token }: { token: string }) {
   const { t } = useT();
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
-  const [host, setHost] = useState("");
-  const [departmentName, setDepartmentName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [manageHost, setManageHost] = useState<string | null>(null);
+  const form = useForm<TenantCreateForm>({
+    resolver: zodResolver(tenantCreateSchema),
+    defaultValues: { host: "", departmentName: "" },
+  });
 
   async function refresh() {
     setTenants(await api.listPortalTenants(token));
@@ -2047,12 +2055,10 @@ function TenantsPanel({ token }: { token: string }) {
     void refresh();
   }, []);
 
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
+  async function onCreate(values: TenantCreateForm) {
     try {
-      await api.createPortalTenant(token, host, departmentName);
-      setHost("");
-      setDepartmentName("");
+      await api.createPortalTenant(token, values.host, values.departmentName);
+      form.reset();
       await refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -2115,19 +2121,37 @@ function TenantsPanel({ token }: { token: string }) {
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
       {msg && <p className="text-xs text-green-700">{msg}</p>}
-      <form onSubmit={create} className="flex flex-col gap-2 sm:flex-row">
-        <input className={inputCls} placeholder={t("tenants-host")} value={host} onChange={(e) => setHost(e.target.value)} required />
-        <input
-          className={inputCls}
-          placeholder={t("tenants-name")}
-          value={departmentName}
-          onChange={(e) => setDepartmentName(e.target.value)}
-          required
-        />
-        <button type="submit" className={`${btnPrimary} shrink-0`}>
-          {t("tenants-register")}
-        </button>
-      </form>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onCreate)} className="flex flex-col gap-2 sm:flex-row">
+          <FormField
+            control={form.control}
+            name="host"
+            render={({ field }) => (
+              <FormItem className="flex-1">
+                <FormControl>
+                  <Input placeholder={t("tenants-host")} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="departmentName"
+            render={({ field }) => (
+              <FormItem className="flex-1">
+                <FormControl>
+                  <Input placeholder={t("tenants-name")} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <Button type="submit" disabled={form.formState.isSubmitting} className="shrink-0">
+            {form.formState.isSubmitting ? t("settings-busy") : t("tenants-register")}
+          </Button>
+        </form>
+      </Form>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {liveTenants.map((tn) => (
           <TenantCard key={tn.id as string} tn={tn} staging={false} onManage={() => setManageHost(tn.host as string)} />
@@ -2251,6 +2275,7 @@ function DangerZone({ token, host, onDeleted }: { token: string; host: string; o
 // ---------- Clone box (full / design-only clone, staging, promote) ----------
 function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost: string; onNewSite: () => void }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [clones, setClones] = useState<api.CloneMeta[]>([]);
   const [type, setType] = useState<"full" | "design">("full");
   const [label, setLabel] = useState("");
@@ -2288,7 +2313,7 @@ function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost:
   }
 
   async function replace(stagingHost: string) {
-    if (!window.confirm(t("tenants-clone-replace-confirm"))) return;
+    if (!(await confirm(t("tenants-clone-replace-confirm")))) return;
     await run(stagingHost, async () => {
       await api.replaceFromStaging(token, sourceHost, stagingHost);
       setMsg(t("tenants-clone-replace-done"));
@@ -2313,14 +2338,15 @@ function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost:
       {error && <p className="text-xs text-red-600">{error}</p>}
       {msg && <p className="text-xs text-green-700">{msg}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
-        <select
-          className={`${inputCls} sm:w-64 sm:shrink-0`}
-          value={type}
-          onChange={(e) => setType(e.target.value as "full" | "design")}
-        >
-          <option value="full">{t("tenants-clone-type-full")}</option>
-          <option value="design">{t("tenants-clone-type-design")}</option>
-        </select>
+        <Select value={type} onValueChange={(v) => setType(v as "full" | "design")}>
+          <SelectTrigger className="sm:w-64 sm:shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="full">{t("tenants-clone-type-full")}</SelectItem>
+            <SelectItem value="design">{t("tenants-clone-type-design")}</SelectItem>
+          </SelectContent>
+        </Select>
         <input
           className={inputCls}
           placeholder={t("tenants-clone-label-placeholder")}
