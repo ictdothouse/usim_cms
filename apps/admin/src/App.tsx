@@ -29,6 +29,7 @@ import * as api from "@/lib/api";
 import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
+import { Card, CardContent } from "@/components/ui/card";
 import Designer from "@/Designer";
 import CategoriesPanel from "./CategoriesPanel";
 import PostEditorPage from "./PostEditorPage";
@@ -3014,16 +3015,17 @@ function PortalFeedPanel({ token }: { token: string }) {
 // ---------- Dashboard ----------
 function MetricCard({ label, value, unit, icon }: { label: string; value: number | string; unit: string; icon: React.ReactNode }) {
   return (
-    <div className="rounded-xl bg-canvas p-6 transition-transform duration-150 hover:scale-[1.01]">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-sub">{label}</span>
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white shadow-sm">{icon}</div>
-      </div>
-      <div className="mt-4">
-        <span className="text-3xl font-semibold tracking-tight text-ink">{value}</span>
-        <span className="ml-2 text-xs text-sub">{unit}</span>
-      </div>
-    </div>
+    <Card>
+      <CardContent className="flex items-center gap-3 p-4">
+        {icon}
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-lg font-semibold">
+            {value} <span className="text-xs font-normal text-muted-foreground">{unit}</span>
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
