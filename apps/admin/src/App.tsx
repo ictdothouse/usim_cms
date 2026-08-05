@@ -25,11 +25,20 @@ import {
   Users as UsersIcon,
   X,
 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { toast } from "sonner";
 import * as api from "@/lib/api";
 import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
+import { useConfirm } from "@/hooks/useConfirm";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Designer from "@/Designer";
 import CategoriesPanel from "./CategoriesPanel";
 import PostEditorPage from "./PostEditorPage";
@@ -329,17 +338,18 @@ function BlockBuilder({
         </div>
       ))}
       <div className="flex items-center gap-2">
-        <select
-          className="rounded-lg border border-line/30 bg-white px-2 py-1.5 text-xs outline-none"
-          value={addType}
-          onChange={(e) => setAddType(e.target.value)}
-        >
-          {Object.entries(BLOCK_TYPES).map(([key, bt]) => (
-            <option key={key} value={key}>
-              {bt.label}
-            </option>
-          ))}
-        </select>
+        <Select value={addType} onValueChange={setAddType}>
+          <SelectTrigger className="text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(BLOCK_TYPES).map(([key, bt]) => (
+              <SelectItem key={key} value={key}>
+                {bt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <button onClick={addBlock} className={btnGhost}>
           {t("blocks-add")}
         </button>
@@ -356,14 +366,17 @@ function BlockBuilder({
 }
 
 // ---------- Pages ----------
+const pagesCreateSchema = z.object({ title: z.string().trim().min(1) });
+type PagesCreateForm = z.infer<typeof pagesCreateSchema>;
+
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const form = useForm<PagesCreateForm>({ resolver: zodResolver(pagesCreateSchema), defaultValues: { title: "" } });
 
   async function refresh() {
     try {
@@ -381,24 +394,18 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   // Quick-create: title only, straight into Designer — slug is auto-derived
   // (de-duplicated against existing slugs) and stays editable there
   // afterwards (see Designer.tsx's slug-rename field), not up front here.
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    const base = slugify(trimmed) || "page";
+  async function onCreate(values: PagesCreateForm) {
+    const base = slugify(values.title) || "page";
     const existing = new Set(pages.map((p) => p.slug as string));
     let candidate = base;
     for (let n = 2; existing.has(candidate); n++) candidate = `${base}-${n}`;
-    setCreating(true);
     try {
-      const item = await api.createPage(tenantHost, token, { slug: candidate, title: trimmed });
-      setTitle("");
+      const item = await api.createPage(tenantHost, token, { slug: candidate, title: values.title });
+      form.reset();
       await refresh();
       navigate(item.id as string);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setCreating(false);
     }
   }
 
@@ -420,7 +427,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   async function share(id: string) {
     try {
       await api.sharePage(tenantHost, token, id);
-      alert(t("pages-shared"));
+      toast(t("pages-shared"));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -449,7 +456,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   }
 
   async function remove(id: string) {
-    if (!confirm(t("pages-delete-confirm"))) return;
+    if (!(await confirm(t("pages-delete-confirm")))) return;
     try {
       await api.deletePage(tenantHost, token, id);
       await refresh();
@@ -482,18 +489,29 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         <FileText className="h-4 w-4 text-accent" /> {t("pages-title")}
       </h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
-        <input
-          className={inputCls}
-          placeholder={t("pages-name")}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={creating} className={`${btnPrimary} shrink-0`}>
-          {creating ? t("pages-creating") : t("pages-create")}
-        </button>
-      </form>
+      <Card>
+        <CardContent className="p-4">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onCreate)} className="flex gap-2">
+              <FormField
+                control={form.control}
+                name="title"
+                render={({ field }) => (
+                  <FormItem className="flex-1">
+                    <FormControl>
+                      <Input placeholder={t("pages-name")} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" disabled={form.formState.isSubmitting} className="shrink-0">
+                {form.formState.isSubmitting ? t("pages-creating") : t("pages-create")}
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
       <ul className={`${card} divide-y divide-line/20`}>
         {pages.map((p) => {
           const published = p.status === "published";
@@ -608,13 +626,16 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
 // ---------- Posts (rich-text articles) ----------
 type PostStatus = "draft" | "published" | "private";
 
+const postsCreateSchema = z.object({ title: z.string().trim().min(1) });
+type PostsCreateForm = z.infer<typeof postsCreateSchema>;
+
 function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
-  const [title, setTitle] = useState("");
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const form = useForm<PostsCreateForm>({ resolver: zodResolver(postsCreateSchema), defaultValues: { title: "" } });
   const [categories, setCategories] = useState<api.Category[]>([]);
   useEffect(() => { void api.listCategories(tenantHost, token).then(setCategories); }, [tenantHost]);
   const categoryName = (id: string | null) => categories.find((c) => c.id === id)?.name;
@@ -637,38 +658,32 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
   // PagesPanel's quick-create (slug stays editable later via the same
   // pattern, if ever needed — not exposed yet since posts have no
   // Designer-equivalent slug-rename field today).
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    const base = slugify(trimmed) || "post";
+  async function onCreate(values: PostsCreateForm) {
+    const base = slugify(values.title) || "post";
     const existing = new Set(posts.map((p) => p.slug as string));
     let candidate = base;
     for (let n = 2; existing.has(candidate); n++) candidate = `${base}-${n}`;
-    setCreating(true);
     try {
-      const item = await api.createPost(tenantHost, token, { slug: candidate, title: trimmed });
-      setTitle("");
+      const item = await api.createPost(tenantHost, token, { slug: candidate, title: values.title });
+      form.reset();
       await refresh();
       navigate(item.id as string);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setCreating(false);
     }
   }
 
   async function share(id: string) {
     try {
       await api.sharePost(tenantHost, token, id);
-      alert(t("posts-shared"));
+      toast(t("posts-shared"));
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
   async function remove(id: string) {
-    if (!confirm(t("posts-delete-confirm"))) return;
+    if (!(await confirm(t("posts-delete-confirm")))) return;
     try {
       await api.deletePost(tenantHost, token, id);
       await refresh();
@@ -696,12 +711,29 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
         <Link to="categories" className="text-xs font-semibold text-accent hover:underline">{t("categories-title")}</Link>
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
-        <input className={inputCls} placeholder={t("pages-name")} value={title} onChange={(e) => setTitle(e.target.value)} required />
-        <button type="submit" disabled={creating} className={`${btnPrimary} shrink-0`}>
-          {creating ? t("pages-creating") : t("posts-create")}
-        </button>
-      </form>
+      <Card>
+        <CardContent className="p-4">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onCreate)} className="flex gap-2">
+              <FormField
+                control={form.control}
+                name="title"
+                render={({ field }) => (
+                  <FormItem className="flex-1">
+                    <FormControl>
+                      <Input placeholder={t("pages-name")} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" disabled={form.formState.isSubmitting} className="shrink-0">
+                {form.formState.isSubmitting ? t("pages-creating") : t("posts-create")}
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
       <ul className={`${card} divide-y divide-line/20`}>
         {posts.map((p) => {
           const status = (p.status as PostStatus) || "draft";
@@ -3103,18 +3135,18 @@ function ContentManager({
       {showSitePicker && (
         <div className="max-w-sm space-y-1">
           <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("content-site")}</label>
-          <select
-            className="w-full rounded-lg border border-line/30 bg-white px-3 py-2 text-xs outline-none"
-            value={siteHost}
-            onChange={(e) => setSiteHost(e.target.value)}
-          >
-            <option value="">{t("content-pick")}</option>
-            {tenants.map((tn) => (
-              <option key={tn.id as string} value={tn.host as string}>
-                {tn.departmentName as string} — {tn.host as string}
-              </option>
-            ))}
-          </select>
+          <Select value={siteHost} onValueChange={setSiteHost}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={t("content-pick")} />
+            </SelectTrigger>
+            <SelectContent>
+              {tenants.map((tn) => (
+                <SelectItem key={tn.id as string} value={tn.host as string}>
+                  {tn.departmentName as string} — {tn.host as string}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
       {siteHost && (

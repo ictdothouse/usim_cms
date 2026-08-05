@@ -1,18 +1,29 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import * as api from "@/lib/api";
-import { useT, inputCls, btnPrimary, btnGhost, card } from "./App";
+import { useT, inputCls, card } from "./App";
 import { slugify } from "@/lib/utils";
+import { useConfirm } from "@/hooks/useConfirm";
+import { Button } from "@/components/ui/button";
+import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+
+const createSchema = z.object({ name: z.string().trim().min(1) });
+type CreateForm = z.infer<typeof createSchema>;
 
 export default function CategoriesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [categories, setCategories] = useState<api.Category[]>([]);
-  const [name, setName] = useState("");
-  const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const form = useForm<CreateForm>({ resolver: zodResolver(createSchema), defaultValues: { name: "" } });
 
   async function refresh() {
     try {
@@ -25,19 +36,13 @@ export default function CategoriesPanel({ tenantHost, token }: { tenantHost: str
 
   useEffect(() => { void refresh(); }, [tenantHost]);
 
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setCreating(true);
+  async function onCreate(values: CreateForm) {
     try {
-      await api.createCategory(tenantHost, token, trimmed, slugify(trimmed));
-      setName("");
+      await api.createCategory(tenantHost, token, values.name, slugify(values.name));
+      form.reset();
       await refresh();
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setCreating(false);
     }
   }
 
@@ -54,7 +59,7 @@ export default function CategoriesPanel({ tenantHost, token }: { tenantHost: str
   }
 
   async function remove(id: string) {
-    if (!confirm(t("categories-delete-confirm"))) return;
+    if (!(await confirm(t("categories-delete-confirm")))) return;
     try {
       await api.deleteCategory(tenantHost, token, id);
       await refresh();
@@ -70,12 +75,29 @@ export default function CategoriesPanel({ tenantHost, token }: { tenantHost: str
       </Link>
       <h2 className="font-display text-sm font-semibold text-ink">{t("categories-title")}</h2>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <form onSubmit={create} className={`${card} flex gap-2 p-4`}>
-        <input className={inputCls} placeholder={t("categories-name")} value={name} onChange={(e) => setName(e.target.value)} required />
-        <button type="submit" disabled={creating} className={`${btnPrimary} shrink-0`}>
-          {creating ? t("categories-creating") : t("categories-create")}
-        </button>
-      </form>
+      <Card>
+        <CardContent className="p-4">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onCreate)} className="flex gap-2">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem className="flex-1">
+                    <FormControl>
+                      <Input placeholder={t("categories-name")} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" disabled={form.formState.isSubmitting} className="shrink-0">
+                {form.formState.isSubmitting ? t("categories-creating") : t("categories-create")}
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
       <ul className={`${card} divide-y divide-line/20`}>
         {categories.map((c) => (
           <li key={c.id} className="flex items-center justify-between px-4 py-3 text-xs">
@@ -90,8 +112,8 @@ export default function CategoriesPanel({ tenantHost, token }: { tenantHost: str
             <span className="flex items-center gap-3">
               {editingId === c.id ? (
                 <>
-                  <button onClick={() => void rename(c.id)} className={btnPrimary}>{t("categories-save")}</button>
-                  <button onClick={() => setEditingId(null)} className={btnGhost}>{t("categories-cancel")}</button>
+                  <Button size="sm" onClick={() => void rename(c.id)}>{t("categories-save")}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>{t("categories-cancel")}</Button>
                 </>
               ) : (
                 <button onClick={() => { setEditingId(c.id); setEditName(c.name); }} className="rounded p-1 text-body hover:bg-canvas" title={t("categories-rename")}>
