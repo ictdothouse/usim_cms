@@ -998,6 +998,35 @@ function fluidPreviewPx(px: number, bp: "desktop" | "tablet" | "mobile"): number
 // store one of these keywords; resolving it here lets the canvas preview
 // show the real height for those too, not just newly-typed literal values.
 const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
+// Sizes the dashed resize box to the widest actually-rendered line of
+// (possibly wrapped) text. No CSS value can do this: `width:fit-content`
+// resolves to min(max-content, available), and the moment text wraps,
+// max-content (its unwrapped width) exceeds available — so it collapses to
+// the full container width and the box floats far past the glyphs. That was
+// the real cause behind three failed attempts at this (nowrap, lineHeight,
+// w-fit). Range.getClientRects() returns one rect per rendered line box, so
+// the widest of those is the true ink width. Called from an inline ref
+// callback (a new function identity each render, so React re-runs it every
+// render) rather than a layout effect, since ElPreview is a plain function,
+// not a component that can hold hooks.
+function fitTextBox(node: HTMLElement | null): void {
+  if (!node) return;
+  node.style.width = "";
+  const text = node.firstChild;
+  if (!text || text.nodeType !== Node.TEXT_NODE) return;
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const rects = Array.from(range.getClientRects());
+  if (rects.length === 0) return;
+  const widest = Math.max(...rects.map((r) => r.width));
+  if (widest <= 0) return;
+  // Tailwind sets box-sizing:border-box globally, so `width` has to include
+  // the chip's own border/padding or the last glyph gets clipped.
+  const cs = getComputedStyle(node);
+  const extra =
+    parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+  node.style.width = `${Math.ceil(widest) + extra}px`;
+}
 // Heading/subtitle were plain strings before this upgrade — a string input
 // here means legacy content, wrapped into TEXT_DEFAULTS with that string as
 // `text` (same JSON-then-legacy-shape fallback convention as everywhere else
@@ -1659,6 +1688,14 @@ export default function Designer({
   const sliderPreviewRefs = useRef<Record<string, { box: HTMLElement | null; items: Record<string, HTMLElement | null> }>>(
     {},
   );
+  // Which slide each slider element is previewing on the Blocks canvas, keyed
+  // by element id (same per-element keying as sliderPreviewRefs — a page can
+  // hold several sliders). The canvas used to hard-code slides[0], so adding a
+  // button or editing text on slide 2+ appeared to do nothing at all: the
+  // Inspector edits every slide, the canvas only ever drew the first one. The
+  // dots along the bottom of the preview drive this now instead of being
+  // decorative.
+  const [sliderSlideIdx, setSliderSlideIdx] = useState<Record<string, number>>({});
   const [sliderGuide, setSliderGuide] = useState<{
     elId: string;
     vCenter: boolean;
@@ -2782,15 +2819,21 @@ export default function Designer({
       const unit = m ? m[2] : "px";
       return (
         <div className="flex gap-2">
+          {/* `base` includes `w-full`, which as a flex item's basis (100%)
+              plus the select's own 20-width sibling overflows any narrow
+              sidebar (Inspector panels run ~240-280px) — the number input
+              would refuse to shrink small enough to fit, squeezing/hiding it
+              next to the unit dropdown. `min-w-0 flex-1` instead lets it
+              actually share the row properly. */}
           <BufferedInput
             type="number"
             step={unit === "em" || unit === "rem" ? 0.05 : 1}
-            className={base}
+            className={base.replace("w-full", "min-w-0 flex-1")}
             value={num}
             onCommit={(v) => onChange(v === "" ? "" : `${v}${unit}`)}
           />
           <select
-            className={`${base} w-20 shrink-0`}
+            className={`${base} w-16 shrink-0 px-1`}
             value={unit}
             onChange={(e) => onChange(`${num || "0"}${e.target.value}`)}
           >
@@ -2945,6 +2988,10 @@ export default function Designer({
     }
     if (field.kind === "slides") {
       const items = parseSlides(value);
+      // What an unset button colour actually resolves to, so the swatches can
+      // preview the real default. Mirrors `.ds-btn-primary`'s
+      // `var(--color-primary, #0f62fe)` fallback chain on the real site.
+      const themePrimary = siteTheme?.primaryColor || "#0f62fe";
       const setItems = (next: SlideItem[]) => onChange(stringifySlides(next));
       const update = (i: number, patch: Partial<SlideItem>) =>
         setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -3245,16 +3292,28 @@ export default function Designer({
                           onCommit={(v) => updateBtn({ radius: v })}
                         />
                       </div>
+                      {/* Both swatches preview the value that's ACTUALLY in
+                          effect when nothing is overridden — the site theme's
+                          primary and its computed label colour — rather than an
+                          arbitrary blue/white. Previously the swatch showed
+                          #2563eb for an unset colour, which read as "this
+                          button is blue" when the real default is the theme's
+                          own colour. The reset button (shown only when there IS
+                          something to reset) puts it back to that default. */}
                       <div className="flex items-center gap-3">
                         <label className="flex items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-buttoncolor")}>
                           <input
                             type="color"
-                            value={btn.color || "#2563eb"}
+                            value={btn.color || themePrimary}
                             onChange={(e) => updateBtn({ color: e.target.value })}
                             className="h-6 w-8 cursor-pointer rounded border border-line/30"
                           />
                           {btn.color && (
-                            <button onClick={() => updateBtn({ color: "" })} className="font-semibold text-red-500">
+                            <button
+                              onClick={() => updateBtn({ color: "" })}
+                              title={t("designer-reset-default")}
+                              className="font-semibold text-red-500"
+                            >
                               ×
                             </button>
                           )}
@@ -3262,12 +3321,16 @@ export default function Designer({
                         <label className="flex items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-buttontextcolor")}>
                           <input
                             type="color"
-                            value={btn.textColor || "#ffffff"}
+                            value={btn.textColor || bestTextColor(btn.color || themePrimary)}
                             onChange={(e) => updateBtn({ textColor: e.target.value })}
                             className="h-6 w-8 cursor-pointer rounded border border-line/30"
                           />
                           {btn.textColor && (
-                            <button onClick={() => updateBtn({ textColor: "" })} className="font-semibold text-red-500">
+                            <button
+                              onClick={() => updateBtn({ textColor: "" })}
+                              title={t("designer-reset-default")}
+                              className="font-semibold text-red-500"
+                            >
                               ×
                             </button>
                           )}
@@ -4257,7 +4320,10 @@ export default function Designer({
       case "slider": {
         const slides = parseSlides(p.slides);
         if (slides.length === 0) return <span className="text-xs opacity-40">{t("designer-f-slider-slides")}…</span>;
-        const first = slides[0];
+        // Clamped, not just defaulted: removing a slide can leave a stale
+        // index pointing past the end of the array.
+        const slideIdx = Math.min(sliderSlideIdx[el.id] ?? 0, slides.length - 1);
+        const first = slides[slideIdx];
         if (!sliderPreviewRefs.current[el.id]) sliderPreviewRefs.current[el.id] = { box: null, items: {} };
         const previewRefs = sliderPreviewRefs.current[el.id];
         // One item ref covers all three draggable kinds this slide can have —
@@ -4281,11 +4347,15 @@ export default function Designer({
           mutate((bs) => {
             const elx = section(bs, b).rows[r].columns[c].elements[e];
             const currentSlides = parseSlides(elx.props.slides);
-            const s0 = currentSlides[0];
+            // slideIdx, not a hard-coded 0 — this was latent while the canvas
+            // could only ever preview the first slide, but would silently
+            // write a drag/resize onto slide 1 while you were looking at
+            // slide 2 the moment that limitation was lifted.
+            const s0 = currentSlides[slideIdx];
             if (!s0) return;
-            if (ref.kind === "heading") currentSlides[0] = { ...s0, heading: { ...s0.heading, ...patch } };
-            else if (ref.kind === "subtitle") currentSlides[0] = { ...s0, subtitle: { ...s0.subtitle, ...patch } };
-            else currentSlides[0] = { ...s0, buttons: s0.buttons.map((x, j) => (j === ref.bi ? { ...x, ...patch } : x)) };
+            if (ref.kind === "heading") currentSlides[slideIdx] = { ...s0, heading: { ...s0.heading, ...patch } };
+            else if (ref.kind === "subtitle") currentSlides[slideIdx] = { ...s0, subtitle: { ...s0.subtitle, ...patch } };
+            else currentSlides[slideIdx] = { ...s0, buttons: s0.buttons.map((x, j) => (j === ref.bi ? { ...x, ...patch } : x)) };
             elx.props.slides = stringifySlides(currentSlides);
           });
         };
@@ -4474,8 +4544,18 @@ export default function Designer({
               style={{
                 padding: "0.4em 1em",
                 fontSize: `${fontPx}px`,
-                background: btn.color || (btn.variant === "outline" ? "transparent" : "#fff"),
-                color: btn.textColor || (btn.variant === "outline" ? "#fff" : "#111827"),
+                // An unset color falls back to the SITE THEME's primary, not a
+                // hard-coded white: same `var(--color-primary…)` pair the
+                // standalone button preview already uses (set on the canvas
+                // root from siteTheme), and the same value `.ds-btn-primary`
+                // resolves to on the real site — so an untouched button
+                // previews in the theme's own colour instead of a white pill
+                // that matches nothing. A custom background still gets the
+                // fixed dark label slideButtonStyle() falls back to there.
+                background: btn.variant === "outline" ? "transparent" : btn.color || "var(--color-primary, #0f62fe)",
+                color:
+                  btn.textColor ||
+                  (btn.variant === "outline" ? "#fff" : btn.color ? "#111827" : "var(--color-primary-content, #fff)"),
                 border: btn.variant === "outline" ? `2px solid ${btn.textColor || "#fff"}` : undefined,
                 borderRadius: btn.radius ? `${btn.radius}px` : "9999px",
               }}
@@ -4524,17 +4604,24 @@ export default function Designer({
             <span
               ref={(node) => {
                 previewRefs.items[itemKey(ref)] = node;
+                // Must run after the node is laid out at its natural width —
+                // see fitTextBox: this is what actually keeps the dashed box
+                // tight around wrapped text, since no CSS width value can.
+                fitTextBox(node);
               }}
               tabIndex={0}
-              // whitespace-nowrap keeps the resize box's dashed border/corner
-              // handles tight around the actual rendered text — an
-              // inline-block that DOES wrap (long heading vs. the slide's
-              // max-w-[80%]) shrink-to-fits to the *available* width, not the
-              // widest wrapped line, so the box floated way past the visible
-              // glyphs. The real published page (SectionBlock.astro) still
-              // wraps normally; this only keeps the Blocks-canvas approximation
-              // single-line so its resize box stays meaningful.
-              className={`relative inline-block cursor-move select-none whitespace-nowrap border border-dashed border-white/40 focus:outline-none focus:ring-2 focus:ring-accent ${extraClass}`}
+              // Forcing whitespace-nowrap here used to be how the resize box
+              // stayed tight around the text — but that also meant this canvas
+              // could NEVER show what happens when a heading actually wraps
+              // (font too big / container too narrow), which is exactly what
+              // authors need to see: a screenshot showed a wrapped heading on
+              // the real site colliding with a custom-positioned subtitle
+              // underneath it, something this canvas's forced single-line
+              // rendering hid completely — the editor looked fine while the
+              // real page was broken. Now it wraps exactly like
+              // SectionBlock.astro does, and fitTextBox (above) measures the
+              // widest rendered line so the box stays tight anyway.
+              className={`relative inline-block cursor-move select-none border border-dashed border-white/40 focus:outline-none focus:ring-2 focus:ring-accent ${extraClass}`}
               style={{
                 fontSize: `${fontPx}px`,
                 color: txt.color || undefined,
@@ -4608,7 +4695,19 @@ export default function Designer({
             }}
           >
             <div
-              className={`max-w-[80%] ${first.textPosition === "left" ? "self-start ml-6" : first.textPosition === "right" ? "self-end mr-6" : ""}`}
+              // Mirrors .ds-slide-content (SectionBlock.astro) exactly: w-full
+              // + max-w-[36rem] + p-6 for its 1.5rem padding. The old
+              // max-w-[80%] was both a parity gap (the real column is capped at
+              // an absolute 36rem, not a percentage of the slide) and, more
+              // importantly, had no definite width — leaving this a
+              // shrink-to-fit flex item that hugs its children. That let the
+              // explicit width fitTextBox sets on the heading feed back into
+              // THIS box's width, which then became the heading's available
+              // width on the next measure: a ratchet that shrank the text
+              // column until the heading wrapped on its own, with plenty of
+              // empty slide left over. w-full also gives justify-* room to
+              // actually align within, which a hugging box never had.
+              className={`w-full max-w-[36rem] p-6 ${first.textPosition === "left" ? "self-start" : first.textPosition === "right" ? "self-end" : ""}`}
             >
               {headingFlow && (
                 <div className={`flex ${ALIGN_JUSTIFY[first.heading.align]}`}>
@@ -4625,12 +4724,18 @@ export default function Designer({
               )}
             </div>
             {!headingFlow && (
-              <div className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${first.heading.x}%`, top: `${first.heading.y}%` }}>
+              <div
+                className="absolute max-w-[80%] -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${first.heading.x}%`, top: `${first.heading.y}%` }}
+              >
                 {textChip("heading", first.heading, "Slide heading", "text-sm font-bold")}
               </div>
             )}
             {!subtitleFlow && showSubtitle && (
-              <div className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${first.subtitle.x}%`, top: `${first.subtitle.y}%` }}>
+              <div
+                className="absolute max-w-[80%] -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${first.subtitle.x}%`, top: `${first.subtitle.y}%` }}
+              >
                 {textChip("subtitle", first.subtitle, "", "text-xs opacity-80")}
               </div>
             )}
@@ -4707,10 +4812,31 @@ export default function Designer({
                   </span>
                 </div>
               ))}
-            <div className="absolute bottom-2 flex justify-center gap-1">
-              {slides.map((_, i) => (
-                <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-white" : "bg-white/40"}`} />
-              ))}
+            {/* Real controls, not decoration — see sliderSlideIdx. The counter
+                next to them exists because dots alone never made it obvious
+                that the canvas shows ONE slide out of several, which is what
+                made an added-to-slide-2 button look like it hadn't been added
+                at all. pointerDown is stopped so a dot click can't start an
+                element drag; the click itself still bubbles, so clicking a dot
+                on an unselected slider selects it like any other click. */}
+            <div className="absolute bottom-2 flex items-center justify-center gap-1.5">
+              <div className="flex gap-1">
+                {slides.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    title={`${i + 1}/${slides.length}`}
+                    onPointerDown={(ev) => ev.stopPropagation()}
+                    onClick={() => setSliderSlideIdx((m) => ({ ...m, [el.id]: i }))}
+                    className={`h-1.5 w-1.5 rounded-full ${i === slideIdx ? "bg-white" : "bg-white/40 hover:bg-white/70"}`}
+                  />
+                ))}
+              </div>
+              {slides.length > 1 && (
+                <span className="rounded bg-black/50 px-1 text-[9px] font-semibold leading-tight text-white/80">
+                  {slideIdx + 1}/{slides.length}
+                </span>
+              )}
             </div>
           </div>
         );

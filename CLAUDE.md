@@ -390,6 +390,83 @@ pnpm workspace monorepo with two apps:
   keyword-or-literal value (a small `SLIDER_HEIGHT` table mirror, same duplication convention as every
   other shared table between the two apps) into an explicit `style.height`, falling back to the aspect
   ratio only if it somehow resolves empty.
+  Two more bugs from that same round, confirmed live by the user (not guessed): (1) the heading resize box
+  was STILL floating away from the text despite the earlier `whitespace-nowrap`/`lineHeight:1` fixes (a
+  third attempt, `w-fit`, also failed — see the fitTextBox paragraph below for why every CSS-only attempt
+  at this was doomed). (2) the shared `"length"`
+  FieldInput control (number + unit dropdown) was unusable in a narrow Inspector sidebar — its number input
+  used `base`'s own `w-full` as a flex-basis, which combined with the unit `<select>`'s fixed width simply
+  didn't fit a ~240-280px panel, squeezing the number input to the point of being hard to click/type into.
+  Fixed generically (benefits every `"length"` field, not just slider height): the number input now uses
+  `min-w-0 flex-1` instead of `w-full` so it actually shares the row properly, and the unit select shrank
+  slightly (`w-20`→`w-16`) to leave it more room.
+  A real-browser screenshot then caught the Blocks canvas actively lying about the real site: the editor
+  showed heading/subtitle stacked cleanly, but the actual published page showed the heading wrapping to 2
+  lines and a custom-positioned subtitle overlapping right through it — invisible in the editor purely
+  because `whitespace-nowrap` forced the heading to stay single-line there, something the real site never
+  does. Removed `whitespace-nowrap` from the chip so the canvas wraps exactly like `SectionBlock.astro`.
+  Keeping the dashed resize box tight around *wrapped* text then needed `fitTextBox()` — and this is the
+  part worth remembering, because three separate CSS-only attempts (`whitespace-nowrap`, `lineHeight:1`,
+  `w-fit`) all failed before the actual constraint was understood: **no CSS width value can size a box to
+  the widest rendered line of wrapped text.** `width: fit-content` resolves to
+  `min(max-content, max(min-content, available))`, and the instant text wraps, `max-content` (its full
+  unwrapped width) exceeds `available` — so it collapses to the *container's* width, which is exactly the
+  floating box being reported. The only real answer is measurement: `Range.getClientRects()` over the chip's
+  text node returns one rect per rendered line box, so the widest of those is the true ink width.
+  `fitTextBox` sets that as an explicit px width (plus the chip's own padding/border, since Tailwind's
+  global `box-sizing: border-box` would otherwise clip the last glyph), and is called from an inline `ref`
+  callback rather than a layout effect — a new function identity each render means React re-runs it on
+  every render, which is what `ElPreview` needs since it's a plain function that can't hold hooks. It
+  mutates the DOM directly (never React state), so there's no re-render loop. It does, however, need its
+  containing block to have a **definite** width, which cost one more round to discover: a heading started
+  wrapping to two lines on its own with most of the slide still empty, because `.ds-slide-content` (and the
+  canvas's mirror of it) had `max-width` but no `width`, leaving it a shrink-to-fit flex item that hugs its
+  children. The explicit width `fitTextBox` set on the heading therefore fed straight back into its
+  parent's width, which became the heading's available width on the next measure — a ratchet that shrank
+  the text column until the text wrapped and stabilized there. Fixed by giving that column a definite width
+  on both sides (`width: 100%` on `.ds-slide-content`; `w-full max-w-[36rem] p-6` on the canvas div, which
+  also closed a parity gap — the canvas had been using `max-w-[80%]` against the real site's absolute
+  `36rem`, and had no equivalent of its `1.5rem` padding). This also fixed something quietly broken well
+  before any of it: `text-align`/`justify-*` on the flow heading/subtitle had nothing to align *within*
+  while their container hugged them exactly, so the align control was a no-op in flow mode on both the
+  canvas and the real site. The general rule worth keeping: never set a measured width on an element whose
+  own available width is derived from that element. The custom-position wrapper
+  divs (`!headingFlow`/`!subtitleFlow` branches) also gained `max-w-[80%]`, matching `.ds-slide-text-free`'s
+  real constraint — previously unconstrained in the canvas, another small accuracy gap. This is a genuine
+  author-visible-now, author-fixable-by-repositioning issue, not something auto-resolvable in code short of
+  a full collision-avoidance layout system — the fix here is "let the editor tell the truth," not "prevent
+  the collision."
+  The same screenshot also showed a slider button rendering with invisible (background-colored) text on the
+  real site, correct in the canvas. Root cause: when an author sets a custom `btn.color` (background) but no
+  `textColor`, `.ds-btn-primary`'s CSS default color is `var(--color-primary-content)` — computed for the
+  SITE THEME's own primary color, not this button's overridden one, so it can end up near-invisible against
+  an unrelated custom background. `slideButtonStyle()` now falls back to the exact same dark/light default
+  (`#111827`/`#ffffff` by variant) Designer.tsx's own canvas preview already used for this case, only when a
+  custom background is actually set — a button using the theme's own default color (no override) still
+  correctly inherits the theme-aware contrast variable, unchanged.
+  A report that an added button "tak muncul" (never appears) turned out to be a structural gap, not a
+  rendering bug: `ElPreview`'s slider case did `const first = slides[0]`, so the Blocks canvas only ever
+  drew the **first** slide while the Inspector edits every slide — adding a button to slide 2 genuinely
+  showed nothing anywhere. The dots along the bottom of the canvas preview (previously decorative `<span>`s
+  with the first one always highlighted) are now real buttons driving `sliderSlideIdx` (per-element-id
+  state, same keying as `sliderPreviewRefs`, clamped on read since deleting a slide can strand the index
+  past the end of the array), plus an `N/M` counter that only appears for a multi-slide slider — dots alone
+  never communicated that the canvas was showing one slide out of several, which is what made this read as
+  "the button wasn't added" instead of "you're looking at a different slide". Fixing this also required
+  fixing a latent bug it would otherwise have exposed: `updateItem` wrote to `currentSlides[0]` hard-coded,
+  which was harmless only while the preview could never leave slide 1 — it now writes to `slideIdx`, so a
+  drag/resize while previewing slide 2 no longer silently rewrites slide 1.
+  A slide button with no custom colour previewed as a plain white pill on the canvas while rendering in the
+  site theme's colour on the real page — `btnChip` hard-coded `#fff`/`#111827` as its unset fallback, where
+  the real `.ds-btn-primary` resolves `var(--color-primary, #0f62fe)` / `var(--color-primary-content, #fff)`.
+  It now uses those same two CSS custom properties (already set on the canvas root from `siteTheme`, and
+  already what the standalone button element's own preview uses), so an untouched slide button previews in
+  the theme colour; an explicitly-set `btn.color` still wins, and keeps the fixed dark label
+  `slideButtonStyle()` falls back to for that case. The Inspector's two swatches also stopped showing an
+  arbitrary `#2563eb`/`#ffffff` for an unset value — they now preview what's actually in effect
+  (`themePrimary`, and `bestTextColor()` of it), since a blue swatch on a button that renders pink reads as
+  a real setting rather than "unset". The existing `×` next to each swatch is the reset-to-theme-default
+  control and gained a `designer-reset-default` tooltip; it stays hidden when nothing is overridden.
   `SectionBlock.astro` mirrors this: `slideTextStyle()` (color/fontSize/text-align/typography inline
   overrides, same pattern as `slideButtonStyle()`, each new field checked against the same
   `FONT_FAMILY_RE`/`LENGTH_RE`/enum shapes validate-layout.ts already uses for every other element's

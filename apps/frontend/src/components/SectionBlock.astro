@@ -348,11 +348,23 @@ function fluidTextSize(v: string): string {
 // color overrides `background` for both variants — for `ds-btn-outline`
 // (border: 2px solid currentColor; color: inherit) setting textColor also
 // recolors the border for free, since currentColor picks up `color` either way.
+// When a custom background IS set but textColor isn't, `.ds-btn-primary`'s
+// own CSS color (var(--color-primary-content)) is computed for the SITE
+// THEME's primary color, not this button's overridden one — leaving `color`
+// unset in that case can produce near-invisible text (a screenshot caught a
+// button rendering as a solid color pill with no visible label at all).
+// Falls back to the exact same dark/light default Designer.tsx's own canvas
+// preview already uses for this same case, so the two agree.
 function slideButtonStyle(btn: SlideButton): string | undefined {
+  const hasCustomBg = !!btn.color && HEX_RE.test(btn.color);
   return (
     [
-      btn.color && HEX_RE.test(btn.color) ? `background:${btn.color}` : null,
-      btn.textColor && HEX_RE.test(btn.textColor) ? `color:${btn.textColor}` : null,
+      hasCustomBg ? `background:${btn.color}` : null,
+      btn.textColor && HEX_RE.test(btn.textColor)
+        ? `color:${btn.textColor}`
+        : hasCustomBg
+          ? `color:${btn.variant === "outline" ? "#ffffff" : "#111827"}`
+          : null,
       btn.radius && NUM_RE.test(btn.radius) ? `border-radius:${btn.radius}px` : null,
       // Overrides the size class's font-size — .ds-btn's padding is in em, so
       // this scales padding along with it (set by the canvas resize handle).
@@ -1266,6 +1278,14 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   .ds-slide-content {
     position: relative;
     z-index: 1;
+    /* width matters, it isn't redundant with max-width: as a flex item of
+       .ds-slide this box would otherwise be shrink-to-fit and hug its own
+       text, which (a) leaves text-align nothing to align within — a hugging
+       box is exactly as wide as its content — and (b) makes the box's width
+       depend on its children's, the same circularity that let the Designer
+       canvas ratchet a heading into wrapping on its own. A definite width
+       capped by max-width keeps the text column stable at 36rem. */
+    width: 100%;
     max-width: 36rem;
     padding: 1.5rem;
     color: #fff;
