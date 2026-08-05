@@ -465,6 +465,8 @@ const ms = {
   "feed-empty": "Tiada kandungan diterbit lagi.",
   "feed-from": "dari",
   "managing": "Mengurus",
+  "confirm-cancel": "Batal",
+  "confirm-ok": "Sahkan",
 };
 
 export type Key = keyof typeof ms;
@@ -933,6 +935,8 @@ const en: Record<Key, string> = {
   "feed-empty": "Nothing published yet.",
   "feed-from": "from",
   "managing": "Managing",
+  "confirm-cancel": "Cancel",
+  "confirm-ok": "Confirm",
 };
 
 export const dict: Record<Lang, Record<Key, string>> = { ms, en };

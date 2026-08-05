@@ -13,7 +13,7 @@ import { Form, FormControl, FormField, FormItem, FormMessage } from "@/component
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 
-const createSchema = z.object({ name: z.string().trim().min(1) });
+const createSchema = z.object({ name: z.string().trim().min(1, { message: "Required" }) });
 type CreateForm = z.infer<typeof createSchema>;
 
 export default function CategoriesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
@@ -85,7 +85,7 @@ export default function CategoriesPanel({ tenantHost, token }: { tenantHost: str
                 render={({ field }) => (
                   <FormItem className="flex-1">
                     <FormControl>
-                      <Input placeholder={t("categories-name")} {...field} />
+                      <Input required placeholder={t("categories-name")} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

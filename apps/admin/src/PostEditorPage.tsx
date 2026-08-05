@@ -29,9 +29,12 @@ import {
   Underline,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import * as api from "@/lib/api";
 import type { Key } from "@/i18n";
 import { useT, inputCls, btnPrimary, btnGhost } from "./App";
+import { useConfirm } from "@/hooks/useConfirm";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import MediaPickerModal from "./MediaPickerModal";
 
 // Used by save() when the excerpt field is left blank — strips tags from the
@@ -129,6 +132,7 @@ function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNot
 
 function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: string; token: string; postId: string; onRestored: (restoredPost: Record<string, unknown>) => void }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [revisions, setRevisions] = useState<api.PostRevision[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +140,7 @@ function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: st
     void api.listPostRevisions(tenantHost, token, postId).then(setRevisions).catch((err) => setError((err as Error).message)).finally(() => setLoaded(true));
   }, [postId]);
   async function restore(revisionId: string) {
-    if (!confirm(t("posts-restore-confirm"))) return;
+    if (!(await confirm(t("posts-restore-confirm")))) return;
     try {
       const restoredPost = await api.restorePostRevision(tenantHost, token, postId, revisionId);
       onRestored(restoredPost);
@@ -340,7 +344,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     if (!post) return;
     try {
       await api.sharePost(tenantHost, token, post.id as string);
-      alert(t("posts-shared"));
+      toast(t("posts-shared"));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -430,10 +434,17 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
           <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l border-line/30 bg-canvas/30 p-4">
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-category")}</label>
-              <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                <option value="">{t("posts-category-none")}</option>
-                {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-              </select>
+              <Select value={categoryId || "__none"} onValueChange={(v) => setCategoryId(v === "__none" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">{t("posts-category-none")}</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <div className="flex gap-1.5 pt-1">
                 <input className={inputCls} placeholder={t("posts-new-category")} value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void createCategoryInline()} />
                 <button onClick={() => void createCategoryInline()} className={`${btnGhost} shrink-0`}>{t("categories-create")}</button>

@@ -33,7 +33,7 @@ import * as api from "@/lib/api";
 import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
-import { useConfirm } from "@/hooks/useConfirm";
+import { useConfirm, ConfirmDialogProvider } from "@/hooks/useConfirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -366,7 +366,7 @@ function BlockBuilder({
 }
 
 // ---------- Pages ----------
-const pagesCreateSchema = z.object({ title: z.string().trim().min(1) });
+const pagesCreateSchema = z.object({ title: z.string().trim().min(1, { message: "Required" }) });
 type PagesCreateForm = z.infer<typeof pagesCreateSchema>;
 
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
@@ -499,7 +499,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                 render={({ field }) => (
                   <FormItem className="flex-1">
                     <FormControl>
-                      <Input placeholder={t("pages-name")} {...field} />
+                      <Input required placeholder={t("pages-name")} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -626,7 +626,7 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
 // ---------- Posts (rich-text articles) ----------
 type PostStatus = "draft" | "published" | "private";
 
-const postsCreateSchema = z.object({ title: z.string().trim().min(1) });
+const postsCreateSchema = z.object({ title: z.string().trim().min(1, { message: "Required" }) });
 type PostsCreateForm = z.infer<typeof postsCreateSchema>;
 
 function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
@@ -721,7 +721,7 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                 render={({ field }) => (
                   <FormItem className="flex-1">
                     <FormControl>
-                      <Input placeholder={t("pages-name")} {...field} />
+                      <Input required placeholder={t("pages-name")} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -1181,11 +1181,12 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
                     value={editForm.description}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                   />
-                  <Select value={editForm.folderId} onValueChange={(v) => setEditForm({ ...editForm, folderId: v })}>
+                  <Select value={editForm.folderId || "__none"} onValueChange={(v) => setEditForm({ ...editForm, folderId: v === "__none" ? "" : v })}>
                     <SelectTrigger className="text-[10px]">
-                      <SelectValue placeholder={t("media-all-files")} />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="__none">{t("media-all-files")}</SelectItem>
                       {folders.map((f) => (
                         <SelectItem key={f.id as string} value={f.id as string}>
                           {f.name as string}
@@ -2046,8 +2047,8 @@ function ThemeForm({
 const isStagingTenant = (tn: Record<string, unknown>) => (tn.departmentName as string).endsWith("(Staging)");
 
 const tenantCreateSchema = z.object({
-  host: z.string().trim().min(1),
-  departmentName: z.string().trim().min(1),
+  host: z.string().trim().min(1, { message: "Required" }),
+  departmentName: z.string().trim().min(1, { message: "Required" }),
 });
 type TenantCreateForm = z.infer<typeof tenantCreateSchema>;
 
@@ -2143,7 +2144,7 @@ function TenantsPanel({ token }: { token: string }) {
             render={({ field }) => (
               <FormItem className="flex-1">
                 <FormControl>
-                  <Input placeholder={t("tenants-host")} {...field} />
+                  <Input required placeholder={t("tenants-host")} {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -2155,7 +2156,7 @@ function TenantsPanel({ token }: { token: string }) {
             render={({ field }) => (
               <FormItem className="flex-1">
                 <FormControl>
-                  <Input placeholder={t("tenants-name")} {...field} />
+                  <Input required placeholder={t("tenants-name")} {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -2733,11 +2734,12 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                   {u.role === "superadmin" ? (
                     <span className="text-[10px] text-sub">{t("cap-all")}</span>
                   ) : (
-                    <Select value={(u.roleId as string | null) ?? ""} onValueChange={(v) => assignRole(u, v)}>
+                    <Select value={(u.roleId as string | null) ?? "__none"} onValueChange={(v) => assignRole(u, v === "__none" ? "" : v)}>
                       <SelectTrigger className="text-[11px]">
-                        <SelectValue placeholder={t("users-role-none")} />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="__none">{t("users-role-none")}</SelectItem>
                         {roles.map((r) => (
                           <SelectItem key={r.id as string} value={r.id as string}>
                             {r.name as string}
@@ -3389,6 +3391,11 @@ function Shell({
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
+      {/* Nested here (not at the app root in main.tsx) so its confirm-dialog
+          labels can call useT() and actually see this real lang state —
+          every useConfirm() call site lives inside Shell anyway (nothing
+          pre-login uses it), so nothing upstream needs it. */}
+      <ConfirmDialogProvider>
       <div className="flex h-screen flex-col overflow-hidden bg-canvas font-sans text-ink antialiased">
         {impersonating && (
           <div className="flex shrink-0 items-center justify-center gap-3 bg-warn px-4 py-1.5 text-[11px] font-semibold text-white">
@@ -3488,6 +3495,7 @@ function Shell({
         </div>
         </div>
       </div>
+      </ConfirmDialogProvider>
     </I18nCtx.Provider>
   );
 }
