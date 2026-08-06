@@ -13,6 +13,7 @@ interface Col {
   span?: number;
   elements?: El[];
   props?: Record<string, string>;
+  bp?: Record<string, string>;
 }
 interface Row {
   columns?: Col[];
@@ -23,6 +24,9 @@ interface Row {
   paddingRight?: string;
   paddingBottom?: string;
   paddingLeft?: string;
+  hideDesktop?: string;
+  hideTablet?: string;
+  hideMobile?: string;
 }
 interface Props {
   bg?: string;
@@ -55,6 +59,10 @@ interface Props {
   anchorId?: string;
   cssClass?: string;
   rows?: Row[];
+  bp?: Record<string, string>;
+  hideDesktop?: string;
+  hideTablet?: string;
+  hideMobile?: string;
   // Live-edit bridge (Designer.tsx "live view"): when set, every section/
   // column/element wrapper gets a data-designer-path so the admin iframe's
   // bridge script can map a click back to a [b,r,c,e] selection. blockIndex
@@ -99,9 +107,13 @@ const {
   anchorId,
   cssClass,
   rows = [],
+  bp: sectionBp,
   designerEdit = false,
   blockIndex = 0,
   pageGap,
+  hideDesktop,
+  hideTablet,
+  hideMobile,
 } = Astro.props;
 
 const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
@@ -110,6 +122,76 @@ const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem",
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
 const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
+// Real per-breakpoint visibility (Designer.tsx's VisibilityToggle) AND, for
+// Section/Column, real per-breakpoint style overrides (Designer.tsx's `bp`
+// bag — Row/Element still admin-preview-only there for now, see CLAUDE.md).
+// Both need actual scoped @media rules on the published site, not inline
+// `style=""` (which can't contain @media and, being inline, would outrank
+// any external rule anyway — hence every declaration here gets `!important`
+// too). `responsiveRules` collects one entry per node (Section/Row/Column/
+// Element) that needs either, each scoped to that node's own `data-vis`
+// attribute value — flushed into a single <style> at the end of this
+// section's render. Cutoffs (tablet 641-1024px, mobile ≤640px) are real CSS
+// breakpoints here, independent of Designer.tsx's own BP_REFERENCE_PX (canvas
+// simulation reference widths, a different concern) and of Row's own
+// pre-existing @media (max-width:768px) column-stacking rule below.
+const responsiveRules: string[] = [];
+// bp overrides are keyed "tablet:<fieldKey>"/"mobile:<fieldKey>" (same
+// format as Designer.tsx's El.bp/Col.bp/SectionProps.bp) — merge the
+// matching tier's overrides onto a copy of the node's own base props so
+// `build()` (whatever function normally turns props into that node's style
+// string) can be re-run for that breakpoint exactly as it ran for desktop.
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+// Re-runs `build()` for each tier that actually has an override, appends
+// `!important` to every declaration (needed to beat the node's own inline
+// `style=""`, which otherwise always outranks an external stylesheet rule
+// regardless of media-query specificity), and scopes it to `selector`.
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
+// Assigns a stable `data-vis` id to a node only when it actually needs one
+// (a real hide flag, or a tablet/mobile style override) — cheap common case
+// (no markup added) stays untouched. `bp`/`base`/`build` are omitted for
+// node kinds that don't support real style overrides yet (Row, Element —
+// see the CLAUDE.md note on this feature), leaving visibility as their only
+// responsive concern.
+function respId(
+  id: string,
+  visProps: { hideDesktop?: string; hideTablet?: string; hideMobile?: string },
+  bp?: Record<string, string>,
+  base?: Record<string, string>,
+  build?: (p: Record<string, string>) => string,
+): string | undefined {
+  const hasVis = visProps.hideDesktop === "true" || visProps.hideTablet === "true" || visProps.hideMobile === "true";
+  const hasBp = !!bp && Object.keys(bp).length > 0 && !!base && !!build;
+  if (!hasVis && !hasBp) return undefined;
+  const selector = `[data-vis="${id}"]`;
+  if (visProps.hideDesktop === "true") responsiveRules.push(`@media (min-width:1025px){${selector}{display:none!important}}`);
+  if (visProps.hideTablet === "true") responsiveRules.push(`@media (min-width:641px) and (max-width:1024px){${selector}{display:none!important}}`);
+  if (visProps.hideMobile === "true") responsiveRules.push(`@media (max-width:640px){${selector}{display:none!important}}`);
+  if (hasBp) responsiveRules.push(...bpStyleRules(selector, bp!, base!, build!));
+  return id;
+}
 // Shared "one item per line, first `|` splits it in two" parser for
 // accordion (question|answer) and tabs (label|content) — mirrors
 // apps/admin/src/Designer.tsx's parsePairs(), kept in sync by hand like
@@ -147,6 +229,7 @@ interface SlideText {
   text: string;
   color: string;
   fontSize: string;
+  width: string; // px, "" = default block width (100% of .ds-slide-content, capped at 36rem) — set by Designer's mid-edge drag handle so a line can go wider (up to the slide's own edge) before it wraps
   align: "left" | "center" | "right";
   fontFamily: string;
   fontWeight: string;
@@ -158,9 +241,14 @@ interface SlideText {
   position: "flow" | "custom";
   x: string;
   y: string;
+  // Real per-breakpoint override (Designer.tsx's BpToggle next to Text
+  // size/Align) — unlike Section/Col/El's own `bp` bag, this one only ever
+  // stores "tablet:fontSize"/"mobile:fontSize"/"tablet:align"/"mobile:align".
+  bp?: Record<string, string>;
 }
 interface Slide {
   imageUrl: string;
+  bgColor: string; // hex fallback fill behind the image (or the whole slide when there's no image) — "" = transparent, matches the pre-existing look of a slide with nothing set
   heading: SlideText;
   subtitle: SlideText;
   textPosition: "left" | "center" | "right";
@@ -172,6 +260,7 @@ const TEXT_DEFAULTS: SlideText = {
   text: "",
   color: "",
   fontSize: "",
+  width: "",
   align: "left",
   fontFamily: "",
   fontWeight: "",
@@ -196,6 +285,7 @@ function parseSlideText(raw: unknown): SlideText {
       text: typeof o.text === "string" ? o.text : "",
       color: str("color"),
       fontSize: str("fontSize"),
+      width: str("width"),
       align: o.align === "center" || o.align === "right" ? o.align : "left",
       fontFamily: str("fontFamily"),
       fontWeight: str("fontWeight"),
@@ -207,6 +297,7 @@ function parseSlideText(raw: unknown): SlideText {
       position: o.position === "custom" ? "custom" : "flow",
       x: typeof o.x === "string" ? o.x : TEXT_DEFAULTS.x,
       y: typeof o.y === "string" ? o.y : TEXT_DEFAULTS.y,
+      bp: o.bp && typeof o.bp === "object" && !Array.isArray(o.bp) ? (o.bp as Record<string, string>) : undefined,
     };
   }
   return { ...TEXT_DEFAULTS };
@@ -252,6 +343,7 @@ function parseSlides(raw: string | undefined): Slide[] {
         const s = (item ?? {}) as Record<string, unknown>;
         return {
           imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+          bgColor: typeof s.bgColor === "string" ? s.bgColor : "",
           heading: parseSlideText(s.heading),
           subtitle: parseSlideText(s.subtitle),
           textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
@@ -272,6 +364,7 @@ function parseSlides(raw: string | undefined): Slide[] {
       const [imageUrl = "", heading = "", subtitle = "", buttonLabel = "", buttonHref = ""] = line.split("|");
       return {
         imageUrl,
+        bgColor: "",
         heading: parseSlideText(heading),
         subtitle: parseSlideText(subtitle),
         textPosition: "center" as const,
@@ -379,6 +472,22 @@ function slideTextStyle(txt: SlideText): string | undefined {
     [
       txt.color && HEX_RE.test(txt.color) ? `color:${txt.color}` : null,
       txt.fontSize && NUM_RE.test(txt.fontSize) ? `font-size:${fluidFontSize(txt.fontSize)}` : null,
+      // A flow heading/subtitle is a block <p> with no width of its own — it
+      // defaults to 100% of .ds-slide-content, which is capped at 36rem, so
+      // it wraps as soon as a line doesn't fit that column (normal wrap,
+      // same as any other paragraph — a narrower dragged width is the
+      // intentional, on-purpose way to force a second line; the only OTHER
+      // way is a literal newline, Enter, typed via the Designer canvas or
+      // Inspector textarea). An explicit width overrides that 100% default,
+      // letting the line go wider than the 36rem column — right up to the
+      // slide's own edge (`.ds-slide`'s overflow boundary is the real
+      // "wall"). overflow-wrap is a safety net, not the primary mechanism:
+      // if a later fontSize increase makes a single unbreakable word wider
+      // than a width dragged at a smaller size, this breaks the word instead
+      // of silently overflowing past the box's own border. max-width:none
+      // lifts .ds-slide-text-free's own 80% cap for the custom-positioned
+      // case, same reasoning.
+      txt.width && NUM_RE.test(txt.width) ? `width:${txt.width}px;max-width:none;overflow-wrap:break-word` : null,
       `text-align:${txt.align}`,
       txt.fontFamily && FONT_FAMILY_RE.test(txt.fontFamily) ? `font-family:${txt.fontFamily}` : null,
       txt.fontWeight && FONT_WEIGHT_VALUES.includes(txt.fontWeight) ? `font-weight:${txt.fontWeight}` : null,
@@ -391,6 +500,20 @@ function slideTextStyle(txt: SlideText): string | undefined {
       .filter(Boolean)
       .join(";") || undefined
   );
+}
+// Real per-breakpoint override for slide heading/subtitle (Designer.tsx's
+// BpToggle next to Text size/Align) — reuses the same responsiveRules/
+// bpStyleRules infrastructure Section/Column use for their own `bp` bags.
+// Returns a `data-vis` id (pushing the @media rules as a side effect) only
+// when this text actually has an override; undefined otherwise, so no
+// markup is added to the common case.
+function slideTextVisId(txt: SlideText, id: string): string | undefined {
+  if (!txt.bp || Object.keys(txt.bp).length === 0) return undefined;
+  const selector = `[data-vis="${id}"]`;
+  responsiveRules.push(
+    ...bpStyleRules(selector, txt.bp, txt as unknown as Record<string, string>, (p) => slideTextStyle(p as unknown as SlideText) ?? ""),
+  );
+  return id;
 }
 function hexToRgba(hex: string, alpha: number): string {
   const h = (hex || "#000000").replace("#", "");
@@ -636,44 +759,79 @@ function elRadius(p: Record<string, string>): string {
 }
 const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
 
-// Per-side padding / per-corner radius — freedom to set Top/Right/Bottom/
-// Left (or each corner) independently from the admin's FourSideControl;
-// unset falls back to the shared axis (paddingY/paddingX) or single radius
-// preset, same fallback-chain convention Designer.tsx's fourSideValue() uses.
-const padTop = lengthValue(paddingTop || paddingY, PAD, PAD.md);
-const padRight = lengthValue(paddingRight || paddingX, PAD, "1.5rem");
-const padBottom = lengthValue(paddingBottom || paddingY, PAD, PAD.md);
-const padLeft = lengthValue(paddingLeft || paddingX, PAD, "1.5rem");
-// Margin has no X axis (block-flow spacing only) — top/bottom, each falling
-// back to the shared marginY value, same convention as padding above.
-const marginTopVal = lengthValue(marginTop || marginY, PAD, "0");
-const marginRightVal = lengthValue(marginRight || marginX, PAD, "0");
-const marginBottomVal = lengthValue(marginBottom || marginY, PAD, "0");
-const marginLeftVal = lengthValue(marginLeft || marginX, PAD, "0");
-const radTopLeft = lengthValue(radiusTopLeft || radius, RADIUS, RADIUS.none);
-const radTopRight = lengthValue(radiusTopRight || radius, RADIUS, RADIUS.none);
-const radBottomRight = lengthValue(radiusBottomRight || radius, RADIUS, RADIUS.none);
-const radBottomLeft = lengthValue(radiusBottomLeft || radius, RADIUS, RADIUS.none);
-
-const sectionStyle = [
-  bgImage && safeCssUrl(bgImage) ? `background:url('${safeCssUrl(bgImage)}') center/cover no-repeat` : bg ? `background:${bg}` : null,
-  textColor ? `color:${textColor}` : null,
-  `padding:${padTop} ${padRight} ${padBottom} ${padLeft}`,
-  `margin:${marginTopVal} ${marginRightVal} ${marginBottomVal} ${marginLeftVal}`,
-  // Only override border/shadow when the author actually picked a value —
-  // otherwise every existing section would flatten to square/shadowless
-  // corners instead of its current default look. Radius always applies
-  // (falls back to RADIUS.none = 0, same visual result as unset).
-  // borderWidth set = real stroke fields win, mirrors Designer.tsx's
-  // sectionBpStyle(); otherwise fall back to the legacy preset so old pages
-  // saved before this field existed don't move.
-  borderWidth ? `border:${borderWidth}px ${borderStyle || "solid"} ${borderColor || "currentColor"}` : border ? `border:${BORDER[border]}` : null,
-  shadowToCss(shadow) ? `box-shadow:${shadowToCss(shadow)}` : null,
-  `border-radius:${radTopLeft} ${radTopRight} ${radBottomRight} ${radBottomLeft}`,
-  opacity ? `opacity:${Math.max(0, Math.min(100, Number(opacity))) / 100}` : null,
-]
-  .filter(Boolean)
-  .join(";");
+// Extracted to a plain function of `p` (rather than reading the
+// destructured Props consts directly) so bp-override rendering (below) can
+// re-run the exact same logic against a tablet/mobile-merged props copy —
+// `sectionStyle` itself is just this called once against the real desktop
+// props.
+function buildSectionStyle(p: Record<string, string>): string {
+  // Per-side padding / per-corner radius — freedom to set Top/Right/Bottom/
+  // Left (or each corner) independently from the admin's FourSideControl;
+  // unset falls back to the shared axis (paddingY/paddingX) or single radius
+  // preset, same fallback-chain convention Designer.tsx's fourSideValue() uses.
+  const padTop = lengthValue(p.paddingTop || p.paddingY, PAD, PAD.md);
+  const padRight = lengthValue(p.paddingRight || p.paddingX, PAD, "1.5rem");
+  const padBottom = lengthValue(p.paddingBottom || p.paddingY, PAD, PAD.md);
+  const padLeft = lengthValue(p.paddingLeft || p.paddingX, PAD, "1.5rem");
+  // Margin has no X axis (block-flow spacing only) — top/bottom, each falling
+  // back to the shared marginY value, same convention as padding above.
+  const marginTopVal = lengthValue(p.marginTop || p.marginY, PAD, "0");
+  const marginRightVal = lengthValue(p.marginRight || p.marginX, PAD, "0");
+  const marginBottomVal = lengthValue(p.marginBottom || p.marginY, PAD, "0");
+  const marginLeftVal = lengthValue(p.marginLeft || p.marginX, PAD, "0");
+  const radTopLeft = lengthValue(p.radiusTopLeft || p.radius, RADIUS, RADIUS.none);
+  const radTopRight = lengthValue(p.radiusTopRight || p.radius, RADIUS, RADIUS.none);
+  const radBottomRight = lengthValue(p.radiusBottomRight || p.radius, RADIUS, RADIUS.none);
+  const radBottomLeft = lengthValue(p.radiusBottomLeft || p.radius, RADIUS, RADIUS.none);
+  return [
+    p.bgImage && safeCssUrl(p.bgImage) ? `background:url('${safeCssUrl(p.bgImage)}') center/cover no-repeat` : p.bg ? `background:${p.bg}` : null,
+    p.textColor ? `color:${p.textColor}` : null,
+    `padding:${padTop} ${padRight} ${padBottom} ${padLeft}`,
+    `margin:${marginTopVal} ${marginRightVal} ${marginBottomVal} ${marginLeftVal}`,
+    // Only override border/shadow when the author actually picked a value —
+    // otherwise every existing section would flatten to square/shadowless
+    // corners instead of its current default look. Radius always applies
+    // (falls back to RADIUS.none = 0, same visual result as unset).
+    // borderWidth set = real stroke fields win, mirrors Designer.tsx's
+    // sectionBpStyle(); otherwise fall back to the legacy preset so old pages
+    // saved before this field existed don't move.
+    p.borderWidth ? `border:${p.borderWidth}px ${p.borderStyle || "solid"} ${p.borderColor || "currentColor"}` : p.border ? `border:${BORDER[p.border]}` : null,
+    shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
+    `border-radius:${radTopLeft} ${radTopRight} ${radBottomRight} ${radBottomLeft}`,
+    p.opacity ? `opacity:${Math.max(0, Math.min(100, Number(p.opacity))) / 100}` : null,
+  ]
+    .filter(Boolean)
+    .join(";");
+}
+const baseSectionProps: Record<string, string> = {
+  bg: bg ?? "",
+  bgImage: bgImage ?? "",
+  textColor: textColor ?? "",
+  paddingY: paddingY ?? "",
+  paddingX: paddingX ?? "",
+  paddingTop: paddingTop ?? "",
+  paddingRight: paddingRight ?? "",
+  paddingBottom: paddingBottom ?? "",
+  paddingLeft: paddingLeft ?? "",
+  marginY: marginY ?? "",
+  marginX: marginX ?? "",
+  marginTop: marginTop ?? "",
+  marginRight: marginRight ?? "",
+  marginBottom: marginBottom ?? "",
+  marginLeft: marginLeft ?? "",
+  border: border ?? "",
+  borderWidth: borderWidth ?? "",
+  borderColor: borderColor ?? "",
+  borderStyle: borderStyle ?? "",
+  opacity: opacity ?? "",
+  shadow: shadow ?? "",
+  radius: radius ?? "",
+  radiusTopLeft: radiusTopLeft ?? "",
+  radiusTopRight: radiusTopRight ?? "",
+  radiusBottomRight: radiusBottomRight ?? "",
+  radiusBottomLeft: radiusBottomLeft ?? "",
+};
+const sectionStyle = buildSectionStyle(baseSectionProps);
 
 // marginTop's default (2.5rem, matching the old fixed .ds-inner flex gap)
 // is skipped for the first row — that layout never had a leading gap either.
@@ -692,15 +850,21 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   id={anchorId || undefined}
   style={sectionStyle}
   data-designer-path={designerEdit ? String(blockIndex) : undefined}
+  data-vis={respId(`s${blockIndex}`, { hideDesktop, hideTablet, hideMobile }, sectionBp, baseSectionProps, buildSectionStyle)}
 >
   <div class={width === "full" ? "ds-inner ds-full" : "ds-inner"}>
     {rows.map((row, r) => (
-      <div class="ds-row" style={rowStyle(row, r === 0)}>
+      <div
+        class="ds-row"
+        style={rowStyle(row, r === 0)}
+        data-vis={respId(`r${blockIndex}-${r}`, row)}
+      >
         {(row.columns ?? []).map((col, c) => (
           <div
             class={cls("ds-col", col.props?.cssClass)}
             style={colStyle(col.props)}
             data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}` : undefined}
+            data-vis={respId(`c${blockIndex}-${r}-${c}`, col.props ?? {}, col.bp, col.props ?? {}, (p) => colStyle(p) ?? "")}
           >
             {(col.elements ?? []).map((el, e) => {
               const p = el.props ?? {};
@@ -942,6 +1106,9 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   const slides = parseSlides(p.slides);
                   if (slides.length === 0) return null;
                   const autoplayMs = Math.round(Number(p.autoplay || "0") * 1000);
+                  const navStyle = p.navStyle || "arrows";
+                  const dotsStyle = p.dotsStyle || "dots";
+                  const transition = p.transition || "slide";
                   return (
                     <div
                       class={cls("ds-slider", p.cssClass)}
@@ -949,10 +1116,13 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         .filter(Boolean)
                         .join(";")}
                       data-autoplay={autoplayMs > 0 ? autoplayMs : undefined}
+                      data-nav={navStyle}
+                      data-pagination={dotsStyle}
+                      data-transition={transition}
                     >
                       <div class="ds-slider-viewport">
                         <div class="ds-slider-track">
-                          {slides.map((s) => {
+                          {slides.map((s, si) => {
                             const bgUrl = s.imageUrl ? safeCssUrl(s.imageUrl) : undefined;
                             const overlayOpacity = Math.min(100, Math.max(0, Number(s.overlayOpacity) || 0)) / 100;
                             const flowButtons = s.buttons.filter((btn) => btn.position !== "custom");
@@ -960,17 +1130,39 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                             const headingFlow = s.heading.position !== "custom";
                             const subtitleFlow = s.subtitle.position !== "custom";
                             const showSubtitle = s.subtitle.text.length > 0;
+                            // bgColor is a flat fill BEHIND the image (visible
+                            // in any transparent margin, or as the whole
+                            // background when there's no image at all) — the
+                            // only previous way to get a solid-color slide was
+                            // an accidental side effect of the overlay sitting
+                            // over the page's own backdrop, not a real choice.
+                            const slideStyle = [
+                              bgUrl ? `background-image:url('${bgUrl}')` : null,
+                              s.bgColor && HEX_RE.test(s.bgColor) ? `background-color:${s.bgColor}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(";");
                             return (
-                              <div class="ds-slide" style={bgUrl ? `background-image:url('${bgUrl}')` : undefined}>
+                              <div class="ds-slide" style={slideStyle || undefined}>
                                 {overlayOpacity > 0 && (
                                   <div class="ds-slide-overlay" style={`background:${hexToRgba(s.overlayColor, overlayOpacity)}`} />
                                 )}
                                 <div class={cls("ds-slide-content", `ds-slide-${s.textPosition}`)}>
                                   {s.heading.text && headingFlow && (
-                                    <p class="ds-slide-heading" style={slideTextStyle(s.heading)} set:html={renderInline(s.heading.text)} />
+                                    <p
+                                      class="ds-slide-heading"
+                                      style={slideTextStyle(s.heading)}
+                                      data-vis={slideTextVisId(s.heading, `sth-${blockIndex}-${si}`)}
+                                      set:html={renderInline(s.heading.text)}
+                                    />
                                   )}
                                   {showSubtitle && subtitleFlow && (
-                                    <p class="ds-slide-subtitle" style={slideTextStyle(s.subtitle)} set:html={renderInline(s.subtitle.text)} />
+                                    <p
+                                      class="ds-slide-subtitle"
+                                      style={slideTextStyle(s.subtitle)}
+                                      data-vis={slideTextVisId(s.subtitle, `sts-${blockIndex}-${si}`)}
+                                      set:html={renderInline(s.subtitle.text)}
+                                    />
                                   )}
                                   {flowButtons.length > 0 && (
                                     <div class="ds-slide-buttons">
@@ -994,6 +1186,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                                   <p
                                     class="ds-slide-heading ds-slide-text-free"
                                     style={[`left:${Math.min(100, Math.max(0, Number(s.heading.x) || 50))}%`, `top:${Math.min(100, Math.max(0, Number(s.heading.y) || 50))}%`, slideTextStyle(s.heading)].filter(Boolean).join(";")}
+                                    data-vis={slideTextVisId(s.heading, `sth-${blockIndex}-${si}`)}
                                     set:html={renderInline(s.heading.text)}
                                   />
                                 )}
@@ -1001,6 +1194,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                                   <p
                                     class="ds-slide-subtitle ds-slide-text-free"
                                     style={[`left:${Math.min(100, Math.max(0, Number(s.subtitle.x) || 50))}%`, `top:${Math.min(100, Math.max(0, Number(s.subtitle.y) || 50))}%`, slideTextStyle(s.subtitle)].filter(Boolean).join(";")}
+                                    data-vis={slideTextVisId(s.subtitle, `sts-${blockIndex}-${si}`)}
                                     set:html={renderInline(s.subtitle.text)}
                                   />
                                 )}
@@ -1029,13 +1223,21 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       </div>
                       {slides.length > 1 && (
                         <>
-                          <button type="button" class="ds-slider-prev" aria-label="Previous slide">‹</button>
-                          <button type="button" class="ds-slider-next" aria-label="Next slide">›</button>
-                          <div class="ds-slider-dots">
-                            {slides.map((_, i) => (
-                              <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i} />
-                            ))}
-                          </div>
+                          {navStyle !== "none" && (
+                            <>
+                              <button type="button" class="ds-slider-prev" aria-label="Previous slide">‹</button>
+                              <button type="button" class="ds-slider-next" aria-label="Next slide">›</button>
+                            </>
+                          )}
+                          {dotsStyle !== "none" && (
+                            <div class="ds-slider-dots">
+                              {slides.map((_, i) => (
+                                <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i}>
+                                  {dotsStyle === "numbers" ? i + 1 : ""}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -1045,8 +1247,13 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return null;
               }
               })();
-              return designerEdit ? (
-                <div data-designer-path={`${blockIndex}.${r}.${c}.${e}`} style="display:contents">
+              const elVisId = respId(`e${blockIndex}-${r}-${c}-${e}`, p);
+              return designerEdit || elVisId ? (
+                <div
+                  data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}
+                  data-vis={elVisId}
+                  style="display:contents"
+                >
                   {node}
                 </div>
               ) : (
@@ -1058,6 +1265,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
       </div>
     ))}
   </div>
+  {responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 </section>
 
 <style>
@@ -1265,6 +1473,15 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     min-width: 0;
     width: 100%;
     height: 100%;
+    /* A custom-positioned (`ds-slide-text-free`) heading/subtitle is a
+       sibling of .ds-slide-content, not a descendant — so it never picked
+       up .ds-slide-content's own `color: #fff` below and instead inherited
+       the page's own theme text color straight from body, rendering dark
+       text on what looks like a dark/image slide. Setting the default here
+       (the real common ancestor of both) covers flow and custom text alike;
+       .ds-slide-content's own color stays as an explicit, doubly-safe
+       default for its subtree. */
+    color: #fff;
     background-size: cover;
     background-position: center;
     display: flex;
@@ -1380,6 +1597,48 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   .ds-slider-dot.is-active {
     background: #fff;
   }
+  /* navStyle "minimal": plain chevron, no pill background. */
+  .ds-slider[data-nav="minimal"] .ds-slider-prev,
+  .ds-slider[data-nav="minimal"] .ds-slider-next {
+    background: transparent;
+    color: #fff;
+    font-size: 2rem;
+  }
+  /* dotsStyle "lines": short bars instead of round dots. */
+  .ds-slider[data-pagination="lines"] .ds-slider-dot {
+    width: 1.5rem;
+    height: 0.25rem;
+    border-radius: 0.125rem;
+  }
+  /* dotsStyle "numbers": show the slide number inside the pill. */
+  .ds-slider[data-pagination="numbers"] .ds-slider-dot {
+    width: auto;
+    height: auto;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    color: #111827;
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+  /* transition "fade": slides stack absolutely and crossfade via opacity
+     instead of Embla's horizontal scroll track — see the <script> below,
+     which skips Embla entirely for this mode and hand-rolls index/opacity. */
+  .ds-slider[data-transition="fade"] .ds-slider-track {
+    display: block;
+    position: relative;
+    height: 100%;
+  }
+  .ds-slider[data-transition="fade"] .ds-slide {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+  }
+  .ds-slider[data-transition="fade"] .ds-slide.is-active-fade {
+    opacity: 1;
+    pointer-events: auto;
+  }
   @media (max-width: 768px) {
     .ds-row {
       grid-template-columns: 1fr !important;
@@ -1424,6 +1683,27 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
     if (!viewport) return;
     const autoplayMs = Number(slider.dataset.autoplay || "0");
+
+    // transition="fade": Embla's own scroll track assumes a horizontal
+    // strip of slides, which can't crossfade — hand-roll index/opacity
+    // instead of pulling in a separate fade plugin (CSS above stacks every
+    // .ds-slide absolutely; this just toggles which one is opaque).
+    if (slider.dataset.transition === "fade") {
+      const slides = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slide"));
+      let idx = 0;
+      const show = (next: number) => {
+        idx = ((next % slides.length) + slides.length) % slides.length;
+        slides.forEach((s, si) => s.classList.toggle("is-active-fade", si === idx));
+        dots.forEach((d, di) => d.classList.toggle("is-active", di === idx));
+      };
+      slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => show(idx - 1));
+      slider.querySelector(".ds-slider-next")?.addEventListener("click", () => show(idx + 1));
+      dots.forEach((d, di) => d.addEventListener("click", () => show(di)));
+      show(0);
+      if (autoplayMs > 0) setInterval(() => show(idx + 1), autoplayMs);
+      return;
+    }
+
     const plugins = autoplayMs > 0 ? [Autoplay({ delay: autoplayMs, stopOnInteraction: false })] : [];
     const embla = EmblaCarousel(viewport, { loop: true }, plugins);
     const updateDots = () => {

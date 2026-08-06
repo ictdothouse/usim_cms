@@ -27,11 +27,120 @@ a silent no-op under a superuser connection. That role also needs `CREATEDB` (se
 ## Multi-tenancy: database-per-tenant
 
 - `DATABASE_URL` holds only the **control plane** — the `tenants`/`users`/`roles`/`site_theme`/
-  `shared_content`/`theme_presets` registry tables (`apps/api/src/db/tenant-pool.ts`'s fixed `pool`).
-  Tenant content (`pages`, etc.) never lives there. `theme_presets` is a personal, per-user favourites
-  list in the admin's Theme panel (save/test/activate/delete a named color+font combo, or export/import
-  it as a small `.md` file) — owned by `owner_user_id`, never tenant-scoped, never read by
-  `getMergedTheme`/apps/frontend.
+  `shared_content`/`theme_presets`/`languages` registry tables (`apps/api/src/db/tenant-pool.ts`'s fixed
+  `pool`). Tenant content (`pages`, etc.) never lives there. `theme_presets` is a personal, per-user
+  favourites list in the admin's Theme panel (save/test/activate/delete a named color+font combo, or
+  export/import it as a small `.md` file) — owned by `owner_user_id`, never tenant-scoped, never read by
+  `getMergedTheme`/apps/frontend. `languages` is a superadmin-curated master list of language codes the
+  whole instance may use (seeded `ms`/`en`, both `enabled` — see `apps/api/src/db/bootstrap-public.sql`),
+  managed via `/api/portal/languages` (`listLanguages`/`createLanguage`/`updateLanguage`/`deleteLanguage`
+  in `tenant-pool.ts`) and the admin's superadmin-only Settings tab (`SettingsPanel`'s "System Languages"
+  card, `apps/admin/src/App.tsx`). `code` is immutable once created — both PATCH's body shape and the
+  admin UI never offer to edit it — since later phases (per-tenant enabled subset; a post-level
+  language/translation field) will reference `code` values directly, and letting it change would silently
+  break those references. Disabling or deleting the last `enabled: true` row is rejected (400) by both
+  `updateLanguage`/`deleteLanguage`'s shared `guardLastEnabled` check, so the instance can never end up
+  with zero usable languages. Phase 1 of 3 for the broader i18n effort — see
+  `docs/superpowers/specs/2026-08-06-global-language-registry-design.md`; nothing else in the codebase
+  reads this table yet, it's purely a management screen until the next two phases (per-tenant subset,
+  post-level translation) land.
+- i18n Phase 2: per-tenant enabled-language subset. `tenant_languages` (control-plane, keyed by
+  `tenant_host`, `enabled_codes text[]`) has no row for a tenant by default — absence means "inherit
+  every currently globally-enabled language," re-resolved live on each read
+  (`getTenantLanguageSelection` in `tenant-pool.ts` re-intersects any stored `enabled_codes` against the
+  live `languages.enabled` set, so disabling a language globally instantly drops it from a tenant's
+  selection too, even one that had explicitly picked it). Gated by a new `languages.write` permission
+  (`PERMISSIONS` in `index.ts`) on `PUT /api/tenant-languages`; `GET /api/tenant-languages` has no
+  permission check (any authenticated user of that tenant can view the current selection) — the same
+  read-open/write-gated asymmetry `theme.write`/`PUT /api/theme` already uses. The admin UI
+  (`TenantLanguagesForm`, `apps/admin/src/App.tsx`) is a checkbox list of the tenant's globally-enabled
+  languages; checking every box sends an empty `codes` array (explicit "inherit all, including languages
+  added later"), unchecking any box sends the exact remaining subset. Following the same convention as
+  `theme.write` — this codebase has no client-side notion of "permissions granted to the current
+  session" (`Session` only carries `role`/`tenantHost`/`tenantHosts`), so a webmaster without
+  `languages.write` still sees this form; Save simply surfaces the server's 403 rather than the UI being
+  hidden. Mounted twice, mirroring `theme`'s own placement: inside `ContentManager` as a
+  superadmin-only sub-tab (`languages`, alongside `theme`, superadmin picks the site first) and as a
+  webmaster's own top-level `Tab` (`contentTabs` gains `"languages"` for non-super sessions, a sibling of
+  their own top-level `theme` tab) since a webmaster has no site picker to reach the `ContentManager`
+  variant. Real bug hit right after shipping: `languages.write` was added to `PERMISSIONS` in
+  `index.ts` but never to the admin's own Roles-editor checkbox list (a SEPARATE client-side `PERMISSIONS`
+  const in `App.tsx`, `perm-*` i18n keys) — no role could actually grant it, so every webmaster save
+  403'd with no way to fix it from the UI. Fixed by adding it there too; the lesson (worth remembering
+  for any future permission string) is that a permission only really exists once it's in BOTH lists, not
+  just the server-side enum.
+- i18n Phase 3: per-post language + a real, separate translation post per language, plus an optional
+  public header switcher. `posts` gained `language` (a code from this tenant's enabled set, validated in
+  `postsBeforeChange`, `null` until an author picks one) and `translationGroupId` (uuid,
+  `migrations/0013_posts_i18n.sql`) — a translation is a full independent post row, not a per-language
+  field on one row: it gets its own slug/status/history/publish lifecycle for free, fitting the existing
+  one-post-one-body schema instead of fighting it. `translationGroupId` is system-managed only (absent
+  from `postsCollection`'s `createSchema`, so a client PATCH/POST can never set it) — set lazily, the
+  first time a translation is actually created: `POST /api/posts/:id/translations` (hand-written in
+  `index.ts`, same "generic CRUD doesn't cover this" convention as the revisions/preview-token routes)
+  copies title/body/excerpt/banner/category/tags/show* from the source into a new `status: "draft"` post,
+  slugged `<source-slug>-<language>` (de-duplicated with a `-2`/`-3` suffix loop if that collides), and —
+  if the source had no `translationGroupId` yet — stamps the source's own `id` onto both rows as the
+  shared group id. Content is copied verbatim for now ("Auto-translate" is a stub, per this session's own
+  earlier decision to defer picking a real translation API/budget — see
+  `docs/superpowers/specs/2026-08-06-global-language-registry-design.md`); the new post is a normal,
+  independently-editable draft afterward, satisfying "auto translate can be edited manually by the
+  editor" from the original ask without needing any real translation call yet. `GET
+  /api/posts/:id/translations` is registered TWICE off one shared `fetchTranslationSiblings` helper:
+  public (published-only, `apps/frontend`'s switcher) and protected (every status, `PostEditorPage`'s
+  Translations panel — a translator needs to reach a draft sibling). `PostEditorPage` gained a Language
+  `<select>` (options = this tenant's enabled languages, i.e. Phase 2's `getTenantLanguages`) next to
+  Category, and a Translations panel listing siblings + an "Auto-translate to..." picker restricted to
+  languages neither the current post nor any existing sibling already uses — picking one navigates
+  straight into the new draft's own editor. The header switcher is the tenant-level `showHeaderSwitcher`
+  boolean added to `tenant_languages` (Phase 2's table, `ALTER ... ADD COLUMN IF NOT EXISTS` in
+  `bootstrap-public.sql`) via the same checkbox-list form (`TenantLanguagesForm`) — but it only actually
+  renders anything on a given page when that page's post genuinely HAS published translation siblings;
+  turning the setting on for a site with no translated posts yet changes nothing visible, by design (this
+  repo's "let the editor tell the truth, don't fake a control for something that doesn't exist yet"
+  convention, same reasoning as the slider's collision-avoidance non-fix earlier in this file). Public
+  `GET /api/languages` (no auth) exposes just `{enabled: {code,label}[], showHeaderSwitcher}` for
+  `apps/frontend` to decide whether to even bother fetching translations. `BaseLayout.astro` gained an
+  optional `langSwitcher` prop (`{current, options: {code,label,href}[]} | null`, default `null` — every
+  other caller of `BaseLayout` is unaffected); `posts/[slug].astro` is the only page that ever populates
+  it, rendering a small flex header row (logo left, language pills right) only when there are 2+ options
+  — plain pages (`[...slug].astro`) have no per-language field at all yet, so they never get a switcher,
+  an intentional scope limit, not an oversight: extending this to pages would need the same
+  language/translationGroupId treatment `posts` just got, not yet asked for.
+- **Real crash hit shipping Phase 3, worth remembering for any future public+protected route pair**:
+  `GET /api/posts/:id/translations` was registered on BOTH `publicScope` and `protectedScope` with the
+  identical path — Fastify's route table is global across the whole app regardless of `.register()`
+  encapsulation (encapsulation scopes decorators/hooks, not route uniqueness), so this is a fatal
+  `FST_ERR_DUPLICATED_ROUTE` on every boot, and the entire API (not just this one endpoint) was down
+  until fixed. There is exactly one such route now, in `publicScope`, elevated inline (a valid Bearer
+  session for this tenant, or superadmin, sees every status; anyone else — including a real visitor —
+  only sees published siblings) — the same shape `elevateIfAuthenticated` (generic-crud.ts) already uses
+  for every other draft-visibility check, just inlined here since this route isn't generic-crud's list
+  route. `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes` never hit this because they
+  deliberately only ever put GET in public and POST/PATCH/DELETE in protected for the same collection —
+  never the same method+path in both. Any future hand-written route that wants "public read, richer for
+  an authenticated caller" must follow this one-route-elevated-inline shape, never a public+protected pair.
+- i18n Phase 4: pages get the exact same treatment posts got in Phase 3 — `pages.language`/
+  `pages.translationGroupId` (`migrations/0014_pages_i18n.sql`, same rules: system-managed only, absent
+  from `pagesCollection`'s `createSchema`), `pagesBeforeChange` validates `language` against the tenant's
+  enabled set (made `async` for this, same as `postsBeforeChange`), a single elevated `GET
+  /api/pages/:id/translations` (`fetchPageTranslationSiblings` — not generalized into one shared function
+  across two different tables for two call sites, same practical-duplication convention as other small
+  shared shapes between posts/pages elsewhere in this file) and `POST /api/pages/:id/translations`
+  (`pages.create`-gated, copies title/layout/settings/bannerImageUrl into a new draft, lazy
+  `translationGroupId`, slug `<source>-<language>` de-duplicated — same stub-auto-translate approach as
+  posts). The admin side differs from posts' UI only because pages have no separate "editor page" wrapper
+  the way `PostEditorPage` is — Designer.tsx IS the page editor, so the Language `<select>` +
+  Translations list live in the Inspector's "nothing selected" (page-level) panel, right below the
+  existing default-column-gap field, using plain `<select>` elements (Designer.tsx doesn't import shadcn
+  Select at all, unlike App.tsx/PostEditorPage) to match this file's own established Inspector control
+  style. `Designer` gained a required `onOpenTranslation: (pageId: string) => void` prop (its one caller,
+  `PageDesignerRoute` in App.tsx, passes `(newId) => navigate(\`/content/pages/${newId}\`)`) since Designer
+  itself has no router access — picking "Auto-translate to..." navigates straight into the new draft's
+  own Designer session, same as PostEditorPage's translation picker does for posts.
+  `apps/frontend/[...slug].astro` (plain pages) gained the identical `langSwitcher` wiring
+  `posts/[slug].astro` already had — same `getLanguages`/`get*Translations` shape, same "only renders
+  when there are 2+ options" rule.
 - Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
   the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
   `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is
@@ -654,6 +763,146 @@ pnpm workspace monorepo with two apps:
   `only?: "content" | "style"` prop for this — its 3 existing call sites (Section/Column/Element field
   lists) are unaffected when the prop is omitted. Copy/paste/duplicate/delete stay outside the tabs
   (always visible), since they're actions, not settings to browse.
+  Slider heading/subtitle text boxes got a Canva-style resize model on the canvas: 4 corner dots
+  (`startCornerScale`, `RESIZE_CORNERS`' `sign` per corner) scale `fontSize` and an explicit `width` (px)
+  together, proportional to horizontal drag distance over the box's own current width; 2 side dots
+  (`startWidthResize`) resize `width` only, font unchanged, and dragging narrower lets normal CSS wrapping
+  push text to a second line (no forced `white-space:pre`) — `SlideText.width` mirrors this in
+  `slideTextStyle()` (`SectionBlock.astro`) as a hard `width` + `overflow-wrap:break-word` safety net for a
+  since-enlarged single word. Double-clicking a heading/subtitle on the canvas edits it in place
+  (`contentEditable`, `sliderEditingItem`/`editingSliderText` — same stable-snapshot-ref pattern the
+  standalone heading/text elements' own `editingText`/`commit()` already used, so React re-renders from the
+  onInput round-trip don't reset the caret) instead of only through the Inspector's `BufferedTextarea`;
+  Enter inserts a literal `\n` via `execCommand("insertText", false, "\n")` rather than the browser's
+  default block-splitting behavior. A slide also gained a real `bgColor` (hex, optional flat fill behind
+  `imageUrl` — the only previous way to get a solid-color slide was an accidental side effect of the
+  overlay sitting over the page's own backdrop) and `.ds-slide` picked up a default `color:#fff`: a
+  custom-positioned (`ds-slide-text-free`) heading/subtitle is a CSS **sibling** of `.ds-slide-content`, not
+  a descendant, so it never inherited that div's own `color:#fff` and instead inherited the page's global
+  theme text color from `body` — confirmed live via computed-style inspection before the fix, re-verified
+  after. `ElPreview`'s Blocks-canvas slide box also stopped hardcoding a fake `bg-black/70` placeholder —
+  it now renders the slide's real `bgColor`/`imageUrl` background plus an actual overlay div at the real
+  `overlayColor`/`overlayOpacity`, so the canvas preview matches what publishes instead of a decorative
+  approximation.
+  The slider element also grew 3 more top-level fields (element props, not per-slide): `navStyle`
+  ("arrows"/"minimal"/"none" — the prev/next button look, or hidden entirely), `dotsStyle`
+  ("dots"/"lines"/"numbers"/"none" — the pagination indicator shape, or hidden), and `transition`
+  ("slide"/"fade"). All 3 are plain `"select"`-kind `SLIDER_FIELDS` entries validated the same generic way
+  as `autoplay`/`textPosition` (`validate-layout.ts`'s `ENUM_VALUES` map — closed allowlist, no pattern
+  needed for a closed enum) and rendered onto the real `.ds-slider` as `data-nav`/`data-pagination`/
+  `data-transition` attributes, styled purely via CSS attribute selectors (no new classes to keep in sync).
+  `transition:"fade"` is a real branch in the `<script>`, not an Embla plugin — Embla's own
+  `.ds-slider-track` assumes a horizontal scroll strip, which can't crossfade, so fade mode skips
+  `EmblaCarousel(...)` entirely for that slider and hand-rolls index/opacity state instead (prev/next/dot
+  clicks and an optional `setInterval` autoplay all just call the same `show(next)`, toggling each
+  `.ds-slide`'s `is-active-fade` class): rung-5-lazy, no new dependency, since CSS `position:absolute` +
+  `opacity` transition covers it. This is Blocks-canvas-cosmetic-only for now — `ElPreview`'s slider case
+  doesn't reflect `navStyle`/`dotsStyle`/`transition` (the canvas preview isn't a live carousel to begin
+  with), so those 3 only visibly change anything on the real published/Live-Edit render.
+  Section/Row/Column/Element already had a per-breakpoint STYLE-override system (the `bp` toggle —
+  `Monitor`/`Tablet`/`Smartphone` icons — routes Inspector field edits into each node's own `bp: Record
+  <string,string>` bag, keyed `"tablet:<fieldKey>"`/`"mobile:<fieldKey>"`, resolved by `bpGetValue`/
+  `sideValue`/`sectionBpStyle`/`bpColStyle`/`bpPaddingStyle`/`bpMarginStyle`), but it started
+  **admin-preview-only** — apps/frontend didn't read `bp` at all, it only narrowed the Designer canvas
+  itself to simulate how the page would look. Real per-screen VISIBILITY was added first, as a separate,
+  simpler feature: `VisibilityToggle` (3 icon buttons, same Monitor/Tablet/Smartphone icons, "active"/
+  highlighted = hidden on that screen) sits at the top of all 4 Inspector levels (Section/Row/Column/
+  Element) and writes plain `hideDesktop`/`hideTablet`/`hideMobile` ("true" | unset) keys directly onto
+  that node's own props (Row's are typed fields on the `Row` interface itself, like its existing
+  `marginTop`; Section's are flat `SectionProps` fields; Column/Element read/write through their existing
+  generic `props` bag — no new bag shape, no `bp:` prefix, since a visibility flag has no desktop-value
+  fallback chain to speak of, it's just 3 independent boolean-shaped keys). Validated generically via
+  `ENUM_VALUES` (`["true"]` — `""` is already skipped by `validateValue`'s own `value === ""` early return)
+  plus `ROW_OWN_KEYS` picking up the 3 keys for Row's non-bagged fields.
+  The STYLE-override bag was then wired into `SectionBlock.astro` for real too, for Section and Column
+  (Row/Element style-override stays admin-preview-only — see below for why): `sectionStyle`'s build logic
+  was extracted from a one-shot inline array reading the destructured Props consts directly into a real
+  function, `buildSectionStyle(p: Record<string,string>)`, called once against `baseSectionProps` (those
+  same consts collected back into a plain bag) for the normal desktop render — `colStyle(cp)` already
+  had this shape, no extraction needed. `bpMerge(base, bp, tier)` copies `base` and overlays whichever
+  `"tablet:"`/`"mobile:"`-prefixed keys exist in the node's `bp` bag for that tier; `bpStyleRules(selector,
+  bp, base, build)` re-runs `build()` against each tier's merged copy (only for a tier that actually has
+  at least one override — skips the other entirely) and appends ` !important` to every resulting
+  declaration, because an inline `style=""` attribute (which is how the desktop value always renders)
+  outranks any external stylesheet rule regardless of media-query specificity — without `!important` the
+  override would be dead code that validates and saves fine but never visibly does anything. `respId(id,
+  visProps, bp?, base?, build?)` is the single per-node entry point both features now share: it decides
+  whether a node needs a `data-vis` id at all (a real hide flag, OR — only when `bp`/`base`/`build` are
+  passed — at least one style override present), and if so pushes every applicable rule (visibility
+  first, then style) into one page-render-scoped `responsiveRules` array, scoped to `[data-vis="id"]`.
+  Row and Element omit the `bp`/`base`/`build` arguments (2-arg `respId` calls) — Row still has no `bp`
+  bag on the real data model at all (`Row` interface literally has no `bp` field, unlike Section/Col/El,
+  a pre-existing gap this round didn't need to close since Row's own margin/padding/gap fields are already
+  desktop-only); Element's style is built inline, differently per element `type`'s own switch case (no
+  single reusable `build(p)` function the way Section/Column have), so giving it the same real-render
+  treatment would mean extracting a per-type style-builder out of every one of ~14 switch branches — a
+  separate, much bigger task, intentionally deferred rather than done half-way. Cutoffs: desktop
+  `min-width:1025px`, tablet `641px`-`1024px`, mobile `max-width:640px` — independent of Row's own
+  pre-existing `@media (max-width:768px)` column-stacking rule, which is untouched, and of Designer.tsx's
+  own `BP_REFERENCE_PX` (canvas-simulation reference widths, a different concern from either of these real
+  breakpoints). Only nodes that actually need a rule get a `data-vis` attribute at all (cheap — no markup
+  added to the common no-override case). Section/Row/Column already have a real wrapper element to hang
+  the attribute on directly; Element did not (each element type renders its own root tag with no common
+  wrapper) — reused the SAME `display:contents` wrapper `designerEdit` mode already uses for its
+  `data-designer-path` bridge attribute, so adding visibility (and, if ever extended, style overrides)
+  didn't need touching every element type's own render branch. The `<style set:html={responsiveRules
+  .join("")}/>` is emitted once, as the last child inside `<section>` — safe because Astro/JSX evaluates
+  children in source order, so every row/column/element beneath it has already run (and pushed into the
+  array) by the time it's read.
+  A node hidden at the currently-previewed bp is never actually hidden in the Blocks canvas itself
+  (Elementor/Webflow convention) — it renders faded (`opacity:0.35`) with a small red "Hidden" badge
+  (`HiddenAtBpBadge`) instead, at all 4 levels (Section/Row/Column/Element), so an author can still reach
+  and edit it while it's hidden on the breakpoint they're looking at. Every bp-aware field (every
+  `FieldGroups` field, every `FourSideControl` padding/radius/margin group) also grew a `BpToggle`: a
+  small clickable Tablet/Smartphone icon next to the field's own label (only rendered once `bp` leaves
+  desktop) — accent-colored when that field (or, for a `FourSideControl`, any of its side keys) actually
+  has a real override at the current bp, muted when it's just inheriting the desktop value. Clicking
+  toggles it: enabling seeds the override at `""` (falls through the field's own default-preset
+  resolution until typed over) rather than copying the resolved desktop value, disabling removes it —
+  `bpKeysOverridden`/`toggleBpKeys` are the two small pure helpers both behaviors share. This mirrors (and
+  visually reuses the same 3 icons as) the Visibility toggle, but is a distinct concern: Visibility is a
+  real per-screen boolean rendered on the published site; the `bp` style-override bag it sits next to is
+  still admin-preview-only for most fields — **except** slide heading/subtitle's own Text size and Align
+  controls, which got the exact same BpToggle treatment but wired for real: `SlideText` grew its own `bp`
+  bag (only ever storing `fontSize`/`align`, not a general escape hatch), validated in
+  `validate-layout.ts`'s `isSafeSlideText` (rejects any other key in the bag), and rendered for real by
+  `SectionBlock.astro`'s `slideTextVisId(txt, id)` — a thin adapter over the same `bpStyleRules`/
+  `responsiveRules` machinery Section/Column already use for their own real bp overrides, just reusing
+  `slideTextStyle(txt)` itself as the `build()` function (a merged-bp copy of a `SlideText` object is
+  still structurally a valid `SlideText`, so no separate style-builder was needed here the way Section's
+  own `buildSectionStyle` extraction was). Making that real also required moving the Blocks canvas's own
+  reads and writes in the same pass, which is the part that bit first: `ElPreview`'s `textChip` read
+  `txt.fontSize`/`txt.align` directly and the flow wrappers read `first.heading.align` directly, so a
+  mobile-only size or alignment saved correctly and rendered correctly on the real site while the canvas
+  kept showing the desktop value — indistinguishable from the control being broken. Both now go through
+  `bpGetValue` (`slideAlign()` for the align case, used by `textChip`'s `textAlign` AND the
+  `ALIGN_JUSTIFY` flow wrapper, since in flow mode it's the wrapper's `justify-content` that actually
+  positions the shrink-wrapped chip). `updateItem` had to follow: with reads bp-aware, a canvas
+  drag-resize while previewing mobile would otherwise write the base `fontSize` that the mobile override
+  then out-ranks on screen, so the handle would visibly do nothing — it now routes a `fontSize` patch
+  into the same `bp` bag the Inspector's stepper writes to whenever `bp !== "desktop"`, leaving
+  width/position/x/y (which have no bp override) on the base object.
+  That still didn't make a tablet/mobile-only Alignment/Text size click visibly do anything — confirmed
+  live (Playwright against the running admin + a direct `GET /api/pages/:id`, not guessed): the real bug
+  was one level up. The Element Inspector's shared `fieldGroupsProps` (used by the generic `<FieldGroups>`
+  for EVERY field on a slider element, "slides" included) treated `slides` as just another bp-overridable
+  value — so editing anything inside the slides editor while `bp !== "desktop"` wrote a whole SECOND
+  stringified copy of the entire slide array into `el.bp["mobile:slides"]`/`el.bp["tablet:slides"]`
+  instead of the real `el.props.slides`. The Inspector's own `getValue` reads through `bpGetValue` too, so
+  it happily read that duplicate back and looked correct (align showed "center", the button turned blue)
+  — but `ElPreview`'s canvas reads `el.props.slides` directly, never `el.bp`, so it kept rendering the
+  untouched original every time. Fixed by excluding `f.kind === "slides"` from the generic bp routing
+  entirely in `fieldGroupsProps` (`getValue`/`setValue` always read/write `el.props.slides`, `hasOverride`
+  always false, `onToggleOverride` a no-op for it) and from `FieldGroups`' own `BpToggle` rendering — the
+  slides field manages its own per-breakpoint overrides internally (each `SlideText.bp`), it was never
+  meant to have a whole-field bp variant of its own. Verified live afterward: Desktop still resolves the
+  base heading (`align:left`, `41px`), Mobile now genuinely resolves its own override (`align:center`,
+  `23px`), independently. This asymmetry (slide text real, everything else preview-only)
+  exists because slide text's `bp` bag only ever holds 2 known keys — genuinely cheap to make real — while
+  Section/Column/Element's `bp` bag covers dozens of arbitrary style keys, where doing the same for real
+  would mean the same kind of per-node-type style-builder work `navStyle`/`dotsStyle`/`transition` above
+  already opted out of for Element specifically; extending realness further is a distinct, larger,
+  not-yet-scoped task if ever asked for.
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on

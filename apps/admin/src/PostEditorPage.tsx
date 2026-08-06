@@ -218,6 +218,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
   const [categories, setCategories] = useState<api.Category[]>([]);
+  const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
+  const [translations, setTranslations] = useState<api.PostTranslation[]>([]);
+  const [addTranslationLang, setAddTranslationLang] = useState("");
+  const [translating, setTranslating] = useState(false);
   // Only for computing each MetaSwitch's default on/off position when a
   // field is still "inherit" — this page never edits the theme itself.
   const [theme, setTheme] = useState<Record<string, string> | null>(null);
@@ -237,6 +241,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [tagDraft, setTagDraft] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<PostStatus>("draft");
+  const [language, setLanguage] = useState("");
   const [showTags, setShowTags] = useState<DisplayOverride>("inherit");
   const [showCategory, setShowCategory] = useState<DisplayOverride>("inherit");
   const [showAuthor, setShowAuthor] = useState<DisplayOverride>("inherit");
@@ -260,6 +265,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     void api.getPosts(tenantHost, token).then(setPosts);
     void api.listCategories(tenantHost, token).then(setCategories);
     void api.getTheme(tenantHost, token).then(setTheme);
+    void api.getTenantLanguages(tenantHost, token).then((d) => setSiteLanguages(d.allEnabled));
   }, [tenantHost, id]);
 
   useEffect(() => {
@@ -271,11 +277,33 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     setTagDraft("");
     setBannerImageUrl((post.bannerImageUrl as string | null) ?? null);
     setStatus((post.status as PostStatus) || "draft");
+    setLanguage((post.language as string | null) ?? "");
     setShowTags(toDisplayOverride(post.showTags as boolean | null | undefined));
     setShowCategory(toDisplayOverride(post.showCategory as boolean | null | undefined));
     setShowAuthor(toDisplayOverride(post.showAuthor as boolean | null | undefined));
     setShowPublishedDate(toDisplayOverride(post.showPublishedDate as boolean | null | undefined));
   }, [post]);
+
+  // i18n Phase 3 — reloaded whenever the post identity changes, and again
+  // after createTranslation() below adds a new sibling.
+  useEffect(() => {
+    if (!post) return;
+    void api.getPostTranslations(tenantHost, token, post.id as string).then(setTranslations);
+  }, [post?.id, tenantHost, token]);
+
+  async function createTranslation() {
+    if (!post || !addTranslationLang) return;
+    setTranslating(true);
+    setError(null);
+    try {
+      const item = await api.createPostTranslation(tenantHost, token, post.id as string, addTranslationLang);
+      navigate(`/content/posts/${item.id as string}`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTranslating(false);
+    }
+  }
 
   const editor = useCreateBlockNote({
     schema: bookmarkCardSchema,
@@ -312,6 +340,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
       await api.updatePost(tenantHost, token, post.id as string, {
         title, excerpt: excerpt.trim() || autoExcerpt(body), categoryId: categoryId || null, tags, bannerImageUrl,
         body,
+        language: language || null,
         showTags: fromDisplayOverride(showTags),
         showCategory: fromDisplayOverride(showCategory),
         showAuthor: fromDisplayOverride(showAuthor),
@@ -451,6 +480,20 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
               </div>
             </div>
             <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-language")}</label>
+              <Select value={language || "__none"} onValueChange={(v) => setLanguage(v === "__none" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">{t("posts-language-none")}</SelectItem>
+                  {siteLanguages.map((l) => (
+                    <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-excerpt")}</label>
               <textarea rows={3} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} placeholder={t("posts-excerpt-auto")} className={`${inputCls} resize-none`} />
             </div>
@@ -518,6 +561,49 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 checked={effectiveDisplay(showPublishedDate, theme ? theme.showPostDate !== "false" : true)}
                 onChange={(v) => setShowPublishedDate(v ? "show" : "hide")}
               />
+            </div>
+            <div className="space-y-1.5 rounded-lg border border-line/30 bg-canvas/40 p-3">
+              <p className="text-xs font-semibold text-ink">{t("posts-translations")}</p>
+              {translations.length > 0 && (
+                <ul className="divide-y divide-line/20">
+                  {translations.map((tr) => (
+                    <li key={tr.id} className="flex items-center gap-2 py-1 text-xs">
+                      <span className="font-mono text-[10px] text-sub">{tr.language ?? "?"}</span>
+                      <button
+                        onClick={() => navigate(`/content/posts/${tr.id}`)}
+                        className="min-w-0 flex-1 truncate text-left text-body hover:text-accent hover:underline"
+                      >
+                        {tr.title}
+                      </button>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[tr.status as PostStatus] ?? ""}`}>
+                        {t(`posts-${tr.status}` as Key)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {(() => {
+                const used = new Set([language, ...translations.map((tr) => tr.language)].filter(Boolean));
+                const available = siteLanguages.filter((l) => !used.has(l.code));
+                if (available.length === 0) return null;
+                return (
+                  <div className="flex gap-1.5 pt-1">
+                    <Select value={addTranslationLang} onValueChange={setAddTranslationLang}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t("posts-translate-to")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {available.map((l) => (
+                          <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button onClick={() => void createTranslation()} disabled={!addTranslationLang || translating} className={`${btnGhost} shrink-0`}>
+                      {translating ? t("blocks-saving") : t("posts-translate-btn")}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
             {status === "published" && (<button onClick={() => void share()} className={`${btnGhost} w-full`}>{t("posts-share")}</button>)}
             {(post.authorEmail as string | null) && (<p className="text-[11px] text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}

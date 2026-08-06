@@ -205,6 +205,55 @@ export const getTheme = (tenantHost: string, token: string) =>
 export const putTheme = (tenantHost: string, token: string, settings: Record<string, string>) =>
   request("/api/theme", tenantHost, token, { method: "PUT", body: JSON.stringify(settings) });
 
+// i18n Phase 2 — per-tenant enabled-language subset.
+export interface TenantLanguageSelection {
+  allEnabled: SiteLanguage[];
+  selectedCodes: string[] | null; // null = inherit all of allEnabled
+  showHeaderSwitcher: boolean;
+}
+
+export const getTenantLanguages = (tenantHost: string, token: string) =>
+  request("/api/tenant-languages", tenantHost, token) as Promise<TenantLanguageSelection>;
+
+export const putTenantLanguages = (tenantHost: string, token: string, codes: string[], showHeaderSwitcher: boolean) =>
+  request("/api/tenant-languages", tenantHost, token, { method: "PUT", body: JSON.stringify({ codes, showHeaderSwitcher }) });
+
+// i18n Phase 4 — per-page translation siblings, same shape as posts' own below.
+export interface PageTranslation {
+  id: string;
+  slug: string;
+  title: string;
+  language: string | null;
+  status: string;
+}
+
+export const getPageTranslations = (tenantHost: string, token: string, pageId: string) =>
+  request(`/api/pages/${pageId}/translations`, tenantHost, token).then((b) => b.translations as PageTranslation[]);
+
+export const createPageTranslation = (tenantHost: string, token: string, pageId: string, language: string) =>
+  request(`/api/pages/${pageId}/translations`, tenantHost, token, {
+    method: "POST",
+    body: JSON.stringify({ language }),
+  }).then((b) => b.item as Record<string, unknown>);
+
+// i18n Phase 3 — per-post translation siblings.
+export interface PostTranslation {
+  id: string;
+  slug: string;
+  title: string;
+  language: string | null;
+  status: string;
+}
+
+export const getPostTranslations = (tenantHost: string, token: string, postId: string) =>
+  request(`/api/posts/${postId}/translations`, tenantHost, token).then((b) => b.translations as PostTranslation[]);
+
+export const createPostTranslation = (tenantHost: string, token: string, postId: string, language: string) =>
+  request(`/api/posts/${postId}/translations`, tenantHost, token, {
+    method: "POST",
+    body: JSON.stringify({ language }),
+  }).then((b) => b.item as Record<string, unknown>);
+
 export async function uploadMedia(tenantHost: string, token: string, file: File, folderId?: string | null): Promise<string> {
   const form = new FormData();
   // folderId MUST be appended before "file": the API reads it off busboy's
@@ -391,6 +440,30 @@ export const updatePortalRole = (token: string, id: string, permissions: string[
 
 export const deletePortalRole = (token: string, id: string) =>
   request(`/api/portal/roles/${id}`, null, token, { method: "DELETE" });
+
+// Superadmin-curated master language list (i18n Phase 1).
+export interface SiteLanguage {
+  id: string;
+  code: string;
+  label: string;
+  enabled: boolean;
+  sortOrder: number;
+}
+
+export const listPortalLanguages = (token: string) =>
+  request("/api/portal/languages", null, token).then((b) => b.languages as SiteLanguage[]);
+
+export const createPortalLanguage = (token: string, code: string, label: string) =>
+  request("/api/portal/languages", null, token, { method: "POST", body: JSON.stringify({ code, label }) });
+
+export const updatePortalLanguage = (
+  token: string,
+  id: string,
+  patch: { label?: string; enabled?: boolean },
+) => request(`/api/portal/languages/${id}`, null, token, { method: "PATCH", body: JSON.stringify(patch) });
+
+export const deletePortalLanguage = (token: string, id: string) =>
+  request(`/api/portal/languages/${id}`, null, token, { method: "DELETE" });
 
 export const getGlobalTheme = (token: string) =>
   request("/api/portal/theme", null, token).then((b) => b.theme as Record<string, string>);

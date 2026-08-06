@@ -1,6 +1,6 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { getPostBySlug, getTheme } from "../../lib/api";
+import { getPostBySlug, getTheme, getLanguages, getPostTranslations } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro: Host header, with the
 // DEV_TENANT_HOST fallback (or a `?__tenant=` override, used by the admin's
@@ -21,6 +21,23 @@ if (!post) {
 }
 const theme = await getTheme(tenantHost);
 
+// i18n Phase 3 — only fetch translation siblings when the switcher is even
+// turned on; a post with no siblings gets no switcher regardless (see
+// BaseLayout.astro's langSwitcher comment).
+const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
+const translations = showHeaderSwitcher ? await getPostTranslations(tenantHost, post.id) : [];
+const langLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
+const langSwitcher =
+  translations.length > 0
+    ? {
+        current: post.language,
+        options: [
+          { code: post.language ?? "", label: langLabel(post.language), href: `/posts/${post.slug}` },
+          ...translations.map((tr) => ({ code: tr.language ?? "", label: langLabel(tr.language), href: `/posts/${tr.slug}` })),
+        ],
+      }
+    : null;
+
 // post.showX is a real per-post override (null = inherit); theme.showPostX
 // is a "true"/"false" string default (absent/"" also means "show") — see
 // apps/api's validateThemeSettings and this repo's design spec
@@ -30,7 +47,7 @@ const showCategory = post.showCategory ?? (theme.showPostCategory !== "false");
 const showAuthor = post.showAuthor ?? (theme.showPostAuthor !== "false");
 const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
 ---
-<BaseLayout title={post.title} ogImage={post.bannerImageUrl} theme={theme}>
+<BaseLayout title={post.title} ogImage={post.bannerImageUrl} theme={theme} langSwitcher={langSwitcher}>
   {post.status !== "published" && (
     <span style="position:fixed;top:0.6rem;right:0.6rem;z-index:50;padding:0.2rem 0.55rem;border-radius:999px;background:#fff3cd;color:#7a5c00;font-size:0.65rem;font-weight:700;letter-spacing:0.02em;box-shadow:0 1px 3px rgba(0,0,0,0.15);">
       {post.status === "private" ? "PRIVATE" : "DRAFT"}

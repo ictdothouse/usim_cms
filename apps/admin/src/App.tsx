@@ -620,7 +620,16 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
   }, [tenantHost, id]);
   if (page === undefined) return null;
   if (page === null) return <p className="text-xs text-sub">{t("pages-empty")}</p>;
-  return <Designer page={page} tenantHost={tenantHost} token={token} t={t} onClose={() => navigate("/content/pages")} />;
+  return (
+    <Designer
+      page={page}
+      tenantHost={tenantHost}
+      token={token}
+      t={t}
+      onClose={() => navigate("/content/pages")}
+      onOpenTranslation={(newId) => navigate(`/content/pages/${newId}`)}
+    />
+  );
 }
 
 // ---------- Posts (rich-text articles) ----------
@@ -2469,6 +2478,7 @@ const PERMISSIONS = [
   "theme.write",
   "users.manage",
   "sites.multi",
+  "languages.write",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -2482,6 +2492,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "theme.write": "perm-theme-write",
   "users.manage": "perm-users-manage",
   "sites.multi": "perm-sites-multi",
+  "languages.write": "perm-languages-write",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
@@ -3149,7 +3160,88 @@ function Dashboard({ session }: { session: Session }) {
 }
 
 // ---------- Content Manager (Pages/Posts/Media/Theme sub-tabs) ----------
-type ContentSubTab = "pages" | "posts" | "media" | "theme";
+// i18n Phase 2 — per-tenant enabled-language subset. Checking every box
+// stores an empty override (inherit all globally-enabled languages
+// dynamically); unchecking any box stores that explicit subset. Read-only
+// for anyone without languages.write — Save just surfaces the server's 403
+// rather than hiding the form (this codebase never hides UI based on a
+// granted permission, only based on role — see theme.write's identical
+// asymmetry above).
+function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token: string }) {
+  const { t } = useT();
+  const [allEnabled, setAllEnabled] = useState<api.SiteLanguage[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showSwitcher, setShowSwitcher] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setErr(null);
+    void api
+      .getTenantLanguages(tenantHost, token)
+      .then((d) => {
+        setAllEnabled(d.allEnabled);
+        setSelected(new Set(d.selectedCodes ?? d.allEnabled.map((l) => l.code)));
+        setShowSwitcher(d.showHeaderSwitcher);
+      })
+      .catch((e) => setErr((e as Error).message));
+  }, [tenantHost, token]);
+
+  function toggle(code: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  async function save() {
+    if (selected.size === 0) {
+      setErr(t("tenant-languages-need-one"));
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const codes = selected.size === allEnabled.length ? [] : Array.from(selected);
+      await api.putTenantLanguages(tenantHost, token, codes, showSwitcher);
+      setMsg(t("tenant-languages-saved"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={`${card} max-w-md space-y-3 p-5`}>
+      <h3 className="text-xs font-bold text-ink">{t("tenant-languages-title")}</h3>
+      <p className="text-xs text-sub">{t("tenant-languages-desc")}</p>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {msg && <p className="text-xs text-green-700">{msg}</p>}
+      <div className="space-y-1.5">
+        {allEnabled.map((l) => (
+          <label key={l.code} className="flex items-center gap-2 text-xs text-ink">
+            <input type="checkbox" checked={selected.has(l.code)} onChange={() => toggle(l.code)} />
+            {l.label} <span className="font-mono text-[10px] text-sub">{l.code}</span>
+          </label>
+        ))}
+      </div>
+      <label className="flex items-center gap-2 text-xs text-ink">
+        <input type="checkbox" checked={showSwitcher} onChange={(e) => setShowSwitcher(e.target.checked)} />
+        {t("tenant-languages-show-switcher")}
+      </label>
+      <button onClick={() => void save()} disabled={busy} className={btnPrimary}>
+        {busy ? t("settings-busy") : t("tenant-languages-save-btn")}
+      </button>
+    </div>
+  );
+}
+
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages";
 
 function ContentManager({
   isSuper,
@@ -3174,7 +3266,12 @@ function ContentManager({
     { id: "pages", labelKey: "pages-title", icon: FileText },
     { id: "posts", labelKey: "posts-title", icon: Newspaper },
     { id: "media", labelKey: "media-title", icon: ImageIcon },
-    ...(isSuper ? [{ id: "theme" as const, labelKey: "theme-title" as const, icon: Palette }] : []),
+    ...(isSuper
+      ? [
+          { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
+          { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
+        ]
+      : []),
   ];
 
   return (
@@ -3222,6 +3319,9 @@ function ContentManager({
             {isSuper && (
               <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
             )}
+            {isSuper && (
+              <Route path="languages" element={<TenantLanguagesForm key={siteHost} tenantHost={siteHost} token={token} />} />
+            )}
           </Routes>
         </>
       )}
@@ -3230,7 +3330,7 @@ function ContentManager({
 }
 
 // ---------- Shell (sidebar + header, prototype layout) ----------
-type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "global-theme" | "feed" | "settings";
+type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "languages" | "global-theme" | "feed" | "settings";
 
 const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = {
   dashboard: { labelKey: "tab-dashboard", icon: LayoutDashboard },
@@ -3239,10 +3339,46 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   roles: { labelKey: "tab-roles", icon: ShieldCheck },
   content: { labelKey: "tab-content", icon: FileText },
   theme: { labelKey: "tab-theme", icon: Palette },
+  languages: { labelKey: "tab-languages", icon: Globe },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
 };
+
+// Common languages for the "add language" typeahead below — picking a
+// suggestion fills both code and label at once so an author never has to
+// hand-type an ISO code. Freeform code/label still works for anything not
+// in this list (mirrors Designer.tsx's FontPickerInput: a curated list is a
+// narrowing filter, not a closed enum).
+const COMMON_LANGUAGES: Array<{ code: string; label: string }> = [
+  { code: "ar", label: "Arabic" },
+  { code: "bn", label: "Bengali" },
+  { code: "zh", label: "Chinese" },
+  { code: "nl", label: "Dutch" },
+  { code: "en", label: "English" },
+  { code: "fil", label: "Filipino" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "hi", label: "Hindi" },
+  { code: "id", label: "Indonesian" },
+  { code: "it", label: "Italian" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+  { code: "ms", label: "Malay" },
+  { code: "fa", label: "Persian" },
+  { code: "pl", label: "Polish" },
+  { code: "pt", label: "Portuguese" },
+  { code: "pa", label: "Punjabi" },
+  { code: "ru", label: "Russian" },
+  { code: "es", label: "Spanish" },
+  { code: "sv", label: "Swedish" },
+  { code: "ta", label: "Tamil" },
+  { code: "te", label: "Telugu" },
+  { code: "th", label: "Thai" },
+  { code: "tr", label: "Turkish" },
+  { code: "ur", label: "Urdu" },
+  { code: "vi", label: "Vietnamese" },
+];
 
 // ---------- Settings (superadmin: backup / restore / static export) ----------
 function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Record<string, unknown>> }) {
@@ -3252,6 +3388,72 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  const [langs, setLangs] = useState<api.SiteLanguage[]>([]);
+  const [langErr, setLangErr] = useState<string | null>(null);
+  const [newCode, setNewCode] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [langSuggestOpen, setLangSuggestOpen] = useState(false);
+  const existingCodes = new Set(langs.map((l) => l.code));
+  const langSuggestions = newLabel.trim()
+    ? COMMON_LANGUAGES.filter(
+        (l) => l.label.toLowerCase().includes(newLabel.trim().toLowerCase()) && !existingCodes.has(l.code),
+      ).slice(0, 8)
+    : [];
+
+  function pickLanguageSuggestion(l: { code: string; label: string }) {
+    setNewLabel(l.label);
+    setNewCode(l.code);
+    setLangSuggestOpen(false);
+  }
+
+  function reloadLanguages() {
+    void api.listPortalLanguages(token).then(setLangs).catch((e) => setLangErr((e as Error).message));
+  }
+  useEffect(reloadLanguages, [token]);
+
+  async function addLanguage() {
+    setLangErr(null);
+    try {
+      await api.createPortalLanguage(token, newCode.trim(), newLabel.trim());
+      setNewCode("");
+      setNewLabel("");
+      reloadLanguages();
+    } catch (e) {
+      setLangErr((e as Error).message);
+    }
+  }
+
+  async function saveLanguageLabel(id: string, label: string) {
+    if (!label.trim()) return;
+    try {
+      await api.updatePortalLanguage(token, id, { label: label.trim() });
+    } catch (e) {
+      setLangErr((e as Error).message);
+      reloadLanguages();
+    }
+  }
+
+  async function toggleLanguageEnabled(id: string, enabled: boolean) {
+    setLangErr(null);
+    try {
+      await api.updatePortalLanguage(token, id, { enabled });
+      reloadLanguages();
+    } catch (e) {
+      setLangErr((e as Error).message);
+    }
+  }
+
+  async function removeLanguage(id: string) {
+    if (!(await confirm(t("settings-languages-delete-confirm")))) return;
+    setLangErr(null);
+    try {
+      await api.deletePortalLanguage(token, id);
+      reloadLanguages();
+    } catch (e) {
+      setLangErr((e as Error).message);
+    }
+  }
 
   async function run(action: string, fn: () => Promise<void>) {
     setBusy(action);
@@ -3331,6 +3533,88 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
           {busy === "restore" ? t("settings-busy") : t("settings-restore-btn")}
         </button>
       </div>
+      <div className={`${card} space-y-3 p-5`}>
+        <h3 className="text-xs font-bold text-ink">{t("settings-languages-title")}</h3>
+        <p className="text-xs text-sub">{t("settings-languages-desc")}</p>
+        {langErr && <p className="text-xs text-red-600">{langErr}</p>}
+        <div className="space-y-1.5">
+          {langs.map((l) => {
+            const isLastEnabled = l.enabled && langs.filter((x) => x.enabled).length === 1;
+            return (
+              <div key={l.id} className="flex items-center gap-2">
+                <span className="w-12 shrink-0 font-mono text-[11px] text-sub">{l.code}</span>
+                <input
+                  className={inputCls}
+                  defaultValue={l.label}
+                  onBlur={(e) => void saveLanguageLabel(l.id, e.target.value)}
+                />
+                <label className="flex shrink-0 items-center gap-1 text-[11px] text-sub">
+                  <input
+                    type="checkbox"
+                    checked={l.enabled}
+                    onChange={(e) => void toggleLanguageEnabled(l.id, e.target.checked)}
+                  />
+                  {t("settings-languages-enabled")}
+                </label>
+                <button
+                  onClick={() => void removeLanguage(l.id)}
+                  disabled={isLastEnabled}
+                  title={isLastEnabled ? t("settings-languages-last-enabled") : undefined}
+                  className="shrink-0 text-sub hover:text-red-600 disabled:opacity-40"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-start gap-2 pt-1">
+          <div className="relative flex-1">
+            <input
+              className={inputCls}
+              placeholder={t("settings-languages-label-placeholder")}
+              value={newLabel}
+              onChange={(e) => {
+                setNewLabel(e.target.value);
+                setLangSuggestOpen(true);
+              }}
+              onFocus={() => setLangSuggestOpen(true)}
+              onBlur={() => setTimeout(() => setLangSuggestOpen(false), 150)}
+            />
+            {langSuggestOpen && langSuggestions.length > 0 && (
+              <div className={`${card} absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-auto shadow-lg`}>
+                {langSuggestions.map((l) => (
+                  <button
+                    key={l.code}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickLanguageSuggestion(l);
+                    }}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-ink hover:bg-canvas"
+                  >
+                    <span>{l.label}</span>
+                    <span className="font-mono text-[10px] text-sub">{l.code}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <input
+            className={`${inputCls} w-20 shrink-0`}
+            placeholder={t("settings-languages-code-placeholder")}
+            value={newCode}
+            onChange={(e) => setNewCode(e.target.value)}
+          />
+          <button
+            onClick={() => void addLanguage()}
+            disabled={!newCode.trim() || !newLabel.trim()}
+            className={`${btnGhost} shrink-0`}
+          >
+            {t("settings-languages-add-btn")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3387,7 +3671,7 @@ function Shell({
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings"] : ["dashboard"];
-  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme"];
+  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -3486,6 +3770,7 @@ function Shell({
                 <Route path="roles" element={isSuper ? <RolesPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="content/*" element={<ContentManager isSuper={isSuper} showSitePicker={showSitePicker} siteHost={siteHost} setSiteHost={setSiteHost} tenants={siteOptions} token={session.token} />} />
                 <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />

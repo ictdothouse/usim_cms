@@ -79,6 +79,16 @@ const ENUM_VALUES: Record<string, string[]> = {
   exclusive: ["false", "true"],
   iconPosition: ["top", "left"],
   autoplay: ["0", "3", "5", "8"],
+  navStyle: ["arrows", "minimal", "none"],
+  dotsStyle: ["dots", "lines", "numbers", "none"],
+  transition: ["slide", "fade"],
+  // Per-breakpoint visibility toggles — Section/Row/Column/Element all use
+  // the same 3 keys (see Designer.tsx's VisibilityToggle); "" (not hidden)
+  // is skipped by validateValue's own value === "" check above, so only
+  // the "hide" state itself needs an allowlist.
+  hideDesktop: ["true"],
+  hideTablet: ["true"],
+  hideMobile: ["true"],
 };
 
 // Free-typed CSS lengths (each ends up as `key:value` in a raw style
@@ -147,6 +157,7 @@ function isSafeSlideText(v: unknown): boolean {
   if (typeof o.text !== "string") return false;
   if (o.color !== undefined && o.color !== "" && (typeof o.color !== "string" || !HEX_COLOR_RE.test(o.color))) return false;
   if (o.fontSize !== undefined && o.fontSize !== "" && (typeof o.fontSize !== "string" || !NUM_RE.test(o.fontSize))) return false;
+  if (o.width !== undefined && o.width !== "" && (typeof o.width !== "string" || !NUM_RE.test(o.width))) return false;
   if (o.align !== undefined && !["left", "center", "right"].includes(o.align as string)) return false;
   // Same shapes/enums every other element's Typography fields already use
   // (FONT_FAMILY_RE, LENGTH_RE via LENGTH_KEYS' lineHeight/letterSpacing,
@@ -163,12 +174,32 @@ function isSafeSlideText(v: unknown): boolean {
   if (o.position !== undefined && o.position !== "flow" && o.position !== "custom") return false;
   if (o.x !== undefined && (typeof o.x !== "string" || !NUM_RE.test(o.x))) return false;
   if (o.y !== undefined && (typeof o.y !== "string" || !NUM_RE.test(o.y))) return false;
+  // Per-breakpoint override bag (Designer.tsx's VisibilityToggle-adjacent
+  // BpToggle) — keyed "tablet:fontSize"/"mobile:align" etc, same prefix
+  // convention as Section/Col/El's own `bp`. Only fontSize/align are ever
+  // written here today, so only those two get validated; anything else is
+  // rejected rather than silently accepted through an unvalidated bag.
+  if (o.bp !== undefined) {
+    if (typeof o.bp !== "object" || o.bp === null || Array.isArray(o.bp)) return false;
+    for (const [rawKey, value] of Object.entries(o.bp as Record<string, unknown>)) {
+      const key = rawKey.includes(":") ? rawKey.slice(rawKey.indexOf(":") + 1) : rawKey;
+      if (typeof value !== "string") return false;
+      if (key === "fontSize") {
+        if (value !== "" && !NUM_RE.test(value)) return false;
+      } else if (key === "align") {
+        if (value !== "" && !["left", "center", "right"].includes(value)) return false;
+      } else {
+        return false;
+      }
+    }
+  }
   return true;
 }
 function isSafeSlide(s: unknown): boolean {
   if (typeof s !== "object" || s === null) return false;
   const o = s as Record<string, unknown>;
   if (typeof o.imageUrl !== "string" || (o.imageUrl && !isSafeCssUrl(o.imageUrl))) return false;
+  if (o.bgColor !== undefined && o.bgColor !== "" && (typeof o.bgColor !== "string" || !HEX_COLOR_RE.test(o.bgColor))) return false;
   if (!isSafeSlideText(o.heading) || !isSafeSlideText(o.subtitle)) return false;
   if (o.textPosition !== undefined && !["left", "center", "right"].includes(o.textPosition as string)) return false;
   if (o.overlayColor !== undefined && (typeof o.overlayColor !== "string" || !HEX_COLOR_RE.test(o.overlayColor))) return false;
@@ -264,7 +295,18 @@ function validateColumn(col: unknown, path: string): string | null {
 // Row's own fields (gap/margin*/padding*) live directly on the row object,
 // not inside a nested `props` bag — Row has no style "escape hatch" the way
 // Section/Column/Element do (see Row interface in Designer.tsx).
-const ROW_OWN_KEYS = ["gap", "marginTop", "marginBottom", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft"];
+const ROW_OWN_KEYS = [
+  "gap",
+  "marginTop",
+  "marginBottom",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "hideDesktop",
+  "hideTablet",
+  "hideMobile",
+];
 
 function validateRow(row: unknown, path: string): string | null {
   if (typeof row !== "object" || row === null) return `${path} must be an object`;

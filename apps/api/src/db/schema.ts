@@ -13,6 +13,11 @@ export const pages = pgTable("pages", {
   bannerImageUrl: text("banner_image_url"),
   status: text("status").notNull().default("draft"), // "draft" | "published"
   publishedAt: timestamp("published_at"),
+  // i18n Phase 4: same shape and same rules as posts.language/
+  // translationGroupId above — system-managed only, never accepted from a
+  // client PATCH/POST (absent from pagesCollection's createSchema).
+  language: text("language"),
+  translationGroupId: uuid("translation_group_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -63,6 +68,15 @@ export const posts = pgTable("posts", {
   showCategory: boolean("show_category"),
   showAuthor: boolean("show_author"),
   showPublishedDate: boolean("show_published_date"),
+  // i18n Phase 3: null = tenant's language not yet chosen for this post.
+  // translationGroupId links this post to its sibling translations — null
+  // until the first "Auto-translate" creates a sibling, at which point the
+  // source post's own id becomes the shared group id for every member
+  // (see the POST /api/posts/:id/translations handler in index.ts).
+  // System-managed only — never accepted from a client PATCH/POST body
+  // (absent from postsCollection's createSchema).
+  language: text("language"),
+  translationGroupId: uuid("translation_group_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -195,6 +209,39 @@ export const themePresets = pgTable("theme_presets", {
   name: text("name").notNull(),
   settings: jsonb("settings").notNull().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Superadmin-curated master list of languages the whole instance may use —
+// "public" schema, like roles/tenants. `code` is immutable after creation:
+// phase 2 (per-tenant enabled subset) and phase 3 (post-level language
+// field) will reference it, so letting it change later would silently break
+// those references. Seeded with ms/en by bootstrap-public.sql.
+export const languages = pgTable("languages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: text("code").notNull().unique(),
+  label: text("label").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Per-tenant enabled-language subset (i18n Phase 2) — "public" schema, like
+// site_theme. No row for a tenant = "inherit all globally-enabled languages"
+// (the default every tenant starts in); a row's `enabledCodes` is an
+// explicit opt-in subset the webmaster picked, always re-intersected with
+// the currently globally-enabled set at read time (see
+// getTenantLanguageSelection in tenant-pool.ts) so disabling a language
+// globally instantly removes it from every tenant's selection too, even one
+// that had explicitly picked it.
+export const tenantLanguages = pgTable("tenant_languages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantHost: text("tenant_host").notNull().unique(),
+  enabledCodes: text("enabled_codes").array().notNull().default([]),
+  // i18n Phase 3: whether apps/frontend renders a language switcher in the
+  // site header. Only meaningful when a page/post actually has translation
+  // siblings to switch between — see posts/[slug].astro.
+  showHeaderSwitcher: boolean("show_header_switcher").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Named permission sets a superadmin defines and assigns to webmaster users

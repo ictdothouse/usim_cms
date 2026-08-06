@@ -68,3 +68,31 @@ CREATE TABLE IF NOT EXISTS "public"."theme_presets" (
 	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
+
+-- Superadmin-curated master language list (i18n Phase 1). Seeded ms/en.
+CREATE TABLE IF NOT EXISTS "public"."languages" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"code" text NOT NULL UNIQUE,
+	"label" text NOT NULL,
+	"enabled" boolean DEFAULT true NOT NULL,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
+
+INSERT INTO "public"."languages" ("code", "label", "sort_order") VALUES
+	('ms', 'Bahasa Melayu', 0),
+	('en', 'English', 1)
+ON CONFLICT ("code") DO NOTHING;
+
+-- Per-tenant enabled-language subset (i18n Phase 2). No row = inherit all
+-- globally-enabled languages.
+CREATE TABLE IF NOT EXISTS "public"."tenant_languages" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"tenant_host" text NOT NULL UNIQUE,
+	"enabled_codes" text[] DEFAULT '{}' NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+-- Upgrade path for control-plane DBs bootstrapped before show_header_switcher
+-- existed (i18n Phase 3).
+ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "show_header_switcher" boolean DEFAULT false NOT NULL;

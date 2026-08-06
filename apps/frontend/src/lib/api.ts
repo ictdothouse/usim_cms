@@ -20,6 +20,21 @@ export interface Page {
   // Page-wide Designer defaults — currently just the default column gap for
   // rows that don't set their own (see SectionBlock.astro's pageGap prop).
   settings?: { gap?: string };
+  // i18n Phase 4 — null until an author picks a language for this page.
+  language: string | null;
+}
+
+export interface PageTranslation {
+  id: string;
+  slug: string;
+  title: string;
+  language: string | null;
+}
+
+// Published siblings only, same shape as getPostTranslations below.
+export async function getPageTranslations(tenantHost: string, pageId: string): Promise<PageTranslation[]> {
+  const { translations } = await apiGet<{ translations: PageTranslation[] }>(`/api/pages/${pageId}/translations`, tenantHost);
+  return translations;
 }
 
 // token, when present, is forwarded as a Bearer header so apps/api's
@@ -79,6 +94,8 @@ export interface Post {
   showCategory: boolean | null;
   showAuthor: boolean | null;
   showPublishedDate: boolean | null;
+  // i18n Phase 3 — null until an author picks a language for this post.
+  language: string | null;
 }
 
 // Public scope only returns status='published' rows (RLS policy in
@@ -115,6 +132,33 @@ export interface Category {
 export async function listCategories(tenantHost: string): Promise<Category[]> {
   const { items } = await apiGet<{ items: Category[] }>("/api/categories", tenantHost);
   return items;
+}
+
+// i18n Phase 3 — whether/what the site's header language switcher offers.
+// Not cached through apiGet's stale-while-revalidate path (deliberately
+// simple): this is a small, rarely-changing settings fetch, not core page
+// content whose absence would break the page.
+export interface SiteLanguageInfo {
+  code: string;
+  label: string;
+}
+
+export async function getLanguages(tenantHost: string): Promise<{ enabled: SiteLanguageInfo[]; showHeaderSwitcher: boolean }> {
+  return apiGet("/api/languages", tenantHost);
+}
+
+export interface PostTranslation {
+  id: string;
+  slug: string;
+  title: string;
+  language: string | null;
+}
+
+// Published siblings only (apps/api's public route filters status
+// server-side) — safe to show a visitor.
+export async function getPostTranslations(tenantHost: string, postId: string): Promise<PostTranslation[]> {
+  const { translations } = await apiGet<{ translations: PostTranslation[] }>(`/api/posts/${postId}/translations`, tenantHost);
+  return translations;
 }
 
 // token here is a theme-preview token (see apps/admin's getThemePreviewToken)

@@ -216,6 +216,13 @@ export interface Row {
   paddingRight?: string;
   paddingBottom?: string;
   paddingLeft?: string;
+  // Per-breakpoint visibility — "true" hides this row on that screen size,
+  // unset/"" always shows. Real @media rules on the published site, not an
+  // admin-preview-only simulation like the `bp` style-override bag (that one
+  // never reaches apps/frontend) — see SectionBlock.astro's hideCss().
+  hideDesktop?: string;
+  hideTablet?: string;
+  hideMobile?: string;
 }
 export interface SectionProps {
   bg?: string;
@@ -264,6 +271,9 @@ export interface SectionProps {
   cssClass?: string;
   rows: Row[];
   bp?: Record<string, string>;
+  hideDesktop?: string;
+  hideTablet?: string;
+  hideMobile?: string;
 }
 export interface Block {
   type: string;
@@ -676,6 +686,9 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       // same way — never a hard migration, upgrades silently on next edit,
       // same convention as every other schema evolution in this element.
       height: "32rem",
+      navStyle: "arrows",
+      dotsStyle: "dots",
+      transition: "slide",
     },
     fields: [
       { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
@@ -684,6 +697,9 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       // sm/md/lg/full select, which could never express a custom px or vh
       // value at all. 100vh now covers the old "full" preset directly.
       { key: "height", labelKey: "designer-f-slider-height", kind: "length" },
+      { key: "navStyle", labelKey: "designer-f-slider-nav", kind: "select", options: ["arrows", "minimal", "none"] },
+      { key: "dotsStyle", labelKey: "designer-f-slider-pagination", kind: "select", options: ["dots", "lines", "numbers", "none"] },
+      { key: "transition", labelKey: "designer-f-slider-transition", kind: "select", options: ["slide", "fade"] },
     ],
   },
 };
@@ -912,6 +928,7 @@ interface SlideButton {
 const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
 interface SlideItem {
   imageUrl: string;
+  bgColor: string; // hex fallback fill behind the image (or the whole slide when there's no image) — "" = transparent
   heading: SlideText;
   subtitle: SlideText;
   textPosition: "left" | "center" | "right";
@@ -949,6 +966,7 @@ interface SlideText extends Positionable {
   text: string;
   color: string; // hex text-color override, "" = inherit the slide's default
   fontSize: string; // px, "" = derive from TEXT_BASE_PX below — set by canvas resize handle
+  width: string; // px, "" = auto (shrink-to-fit the widest rendered line, see fitTextBox) — set by the mid-edge drag handle so a line can be dragged wider before it wraps
   align: "left" | "center" | "right";
   fontFamily: string;
   fontWeight: string;
@@ -957,11 +975,18 @@ interface SlideText extends Positionable {
   textTransform: string;
   fontStyle: string;
   textDecoration: string;
+  // Same "tablet:<key>"/"mobile:<key>" bag shape as Section/Col/El's own
+  // `bp` — but unlike those (admin-preview only), this one IS real on the
+  // published site (SectionBlock.astro's slideTextStyleBp), same convention
+  // as the Visibility toggle above it. Only fontSize/align expose a BpToggle
+  // right now; the bag itself isn't restricted to just those two keys.
+  bp?: Record<string, string>;
 }
 const TEXT_DEFAULTS: SlideText = {
   text: "",
   color: "",
   fontSize: "",
+  width: "",
   align: "left",
   fontFamily: "",
   fontWeight: "",
@@ -1036,11 +1061,12 @@ function parseSlideText(raw: unknown): SlideText {
   if (typeof raw === "string") return { ...TEXT_DEFAULTS, text: raw };
   if (raw && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
-    const str = (key: keyof SlideText) => (typeof o[key] === "string" ? (o[key] as string) : TEXT_DEFAULTS[key]);
+    const str = (key: keyof SlideText): string => (typeof o[key] === "string" ? (o[key] as string) : (TEXT_DEFAULTS[key] as string));
     return {
       text: typeof o.text === "string" ? o.text : "",
       color: str("color"),
       fontSize: str("fontSize"),
+      width: str("width"),
       align: o.align === "center" || o.align === "right" ? o.align : "left",
       fontFamily: str("fontFamily"),
       fontWeight: str("fontWeight"),
@@ -1052,11 +1078,12 @@ function parseSlideText(raw: unknown): SlideText {
       position: o.position === "custom" ? "custom" : "flow",
       x: typeof o.x === "string" ? o.x : TEXT_DEFAULTS.x,
       y: typeof o.y === "string" ? o.y : TEXT_DEFAULTS.y,
+      bp: o.bp && typeof o.bp === "object" && !Array.isArray(o.bp) ? (o.bp as Record<string, string>) : undefined,
     };
   }
   return { ...TEXT_DEFAULTS };
 }
-const SLIDE_DEFAULTS = { textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
+const SLIDE_DEFAULTS = { bgColor: "", textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
 const BUTTON_DEFAULTS: SlideButton = {
   label: "",
   href: "",
@@ -1181,6 +1208,7 @@ function parseSlides(raw: string | undefined): SlideItem[] {
         const s = (item ?? {}) as Record<string, unknown>;
         return {
           imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+          bgColor: typeof s.bgColor === "string" ? s.bgColor : SLIDE_DEFAULTS.bgColor,
           heading: parseSlideText(s.heading),
           subtitle: parseSlideText(s.subtitle),
           textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
@@ -1357,12 +1385,14 @@ export default function Designer({
   token,
   t,
   onClose,
+  onOpenTranslation,
 }: {
   page: Record<string, unknown>;
   tenantHost: string;
   token: string;
   t: (k: Key) => string;
   onClose: (saved: boolean) => void;
+  onOpenTranslation: (pageId: string) => void;
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
@@ -1412,6 +1442,49 @@ export default function Designer({
   const [bp, setBp] = useState<"desktop" | "tablet" | "mobile">("desktop");
   function bpKey(key: string) {
     return `${bp}:${key}`;
+  }
+  // Whether ANY of `keys` has an override at the CURRENT bp — a FourSideControl
+  // covers several side keys (paddingTop/Right/Bottom/Left) at once, so its own
+  // toggle icon represents the group, not one key.
+  function bpKeysOverridden(bag: Record<string, string> | undefined, keys: string[]): boolean {
+    return !!bag && keys.some((k) => bag[bpKey(k)] !== undefined);
+  }
+  // Enabling an override seeds it at "" (falls through lengthValue's own
+  // default-preset resolution until the author actually types a value) rather
+  // than copying the resolved desktop value — simpler, and "no override yet
+  // but the icon is now active" is itself a real, distinct state worth
+  // showing. Disabling removes every one of `keys`' override entries.
+  function toggleBpKeys(bag: Record<string, string> | undefined, keys: string[]): Record<string, string> {
+    const has = bpKeysOverridden(bag, keys);
+    const next = { ...(bag ?? {}) };
+    for (const k of keys) {
+      if (has) delete next[bpKey(k)];
+      else next[bpKey(k)] = "";
+    }
+    return next;
+  }
+  // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
+  // — this is real (SectionBlock.astro renders the matching @media rule on
+  // the published site), so the Blocks canvas ghosting it here isn't just
+  // cosmetic, it's telling the truth about what a visitor at this breakpoint
+  // would see. Never actually removed from the canvas though (best practice,
+  // matches Elementor/Webflow): still fully visible-enough-to-click/edit,
+  // just faded + labeled, since hiding it outright would make an author
+  // unable to ever reach an element hidden on the bp they're currently
+  // previewing.
+  function hiddenAtBp(props: { hideDesktop?: string; hideTablet?: string; hideMobile?: string } | undefined): boolean {
+    if (!props) return false;
+    const key = bp === "desktop" ? "hideDesktop" : bp === "tablet" ? "hideTablet" : "hideMobile";
+    return props[key] === "true";
+  }
+  function HiddenAtBpBadge({ hidden }: { hidden: boolean }) {
+    if (!hidden) return null;
+    const Icon = bp === "tablet" ? Tablet : Smartphone;
+    return (
+      <span className="absolute -top-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-red-300 bg-red-50 px-1.5 py-0.5 text-[9px] font-semibold text-red-500 shadow-sm">
+        <Icon className="h-2.5 w-2.5" /> {t("designer-hidden-at-bp")}
+      </span>
+    );
   }
   function bpGetValue(base: string | undefined, overrides: Record<string, string> | undefined, key: string) {
     if (bp !== "desktop") {
@@ -1646,6 +1719,30 @@ export default function Designer({
   // separate from `blocks`/history since it's not part of the undo stack,
   // same convention as slugDraft above. Persisted via save()'s `settings`.
   const [pageSettings, setPageSettings] = useState<{ gap?: string }>(() => (page.settings as { gap?: string }) ?? {});
+  // i18n Phase 4 — same page-level, not-part-of-the-undo-stack treatment as
+  // pageSettings above; persisted via save()'s `language` field.
+  const [pageLanguage, setPageLanguage] = useState<string>((page.language as string | null) ?? "");
+  const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
+  const [pageTranslations, setPageTranslations] = useState<api.PageTranslation[]>([]);
+  const [addTranslationLang, setAddTranslationLang] = useState("");
+  const [translating, setTranslating] = useState(false);
+  useEffect(() => {
+    void api.getTenantLanguages(tenantHost, token).then((d) => setSiteLanguages(d.allEnabled));
+    void api.getPageTranslations(tenantHost, token, page.id as string).then(setPageTranslations);
+  }, [tenantHost, token, page.id]);
+  async function createPageTranslation() {
+    if (!addTranslationLang) return;
+    setTranslating(true);
+    setError(null);
+    try {
+      const item = await api.createPageTranslation(tenantHost, token, page.id as string, addTranslationLang);
+      onOpenTranslation(item.id as string);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTranslating(false);
+    }
+  }
   // Figma-style spacing overlay: the hatched fill band only shows while the
   // matching handle is hovered or actively dragged, not for the whole
   // selected box's perimeter at once — a persistent 4-sided hatch on every
@@ -1675,6 +1772,14 @@ export default function Designer({
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
+  // Same stable-snapshot-while-typing pattern as editingText above, but for
+  // slider heading/subtitle canvas-direct editing: keyed by `${el.id}:${itemKey}`
+  // since a slider has two independently-editable text items, not one.
+  const editingSliderText = useRef<Record<string, string>>({});
+  // Which slider item (per element id) is currently in canvas-direct edit
+  // mode — entered via double-click (single click/drag is already bound to
+  // move), exited on blur.
+  const [sliderEditingItem, setSliderEditingItem] = useState<Record<string, string | null>>({});
   // Slider button canvas drag: DOM refs for each slider element's own preview
   // box + text block (keyed by el.id, same convention as editingText above —
   // a flat single ref would get overwritten by whichever slider block
@@ -2451,6 +2556,7 @@ export default function Designer({
       await api.updatePage(tenantHost, token, page.id as string, {
         layout: blocks,
         settings: pageSettings,
+        language: pageLanguage || null,
         ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
       });
       if (status) page.status = status;
@@ -2833,7 +2939,7 @@ export default function Designer({
             onCommit={(v) => onChange(v === "" ? "" : `${v}${unit}`)}
           />
           <select
-            className={`${base} w-16 shrink-0 px-1`}
+            className={`${base.replace("w-full", "w-16")} shrink-0 px-1`}
             value={unit}
             onChange={(e) => onChange(`${num || "0"}${e.target.value}`)}
           >
@@ -2992,6 +3098,18 @@ export default function Designer({
       // preview the real default. Mirrors `.ds-btn-primary`'s
       // `var(--color-primary, #0f62fe)` fallback chain on the real site.
       const themePrimary = siteTheme?.primaryColor || "#0f62fe";
+      // A slide's own card here is edited regardless of which slide the
+      // Blocks canvas is currently previewing (sliderSlideIdx) — size/align/
+      // color changes on an off-screen slide's card are real (same `update`
+      // below every other field here uses) but invisible until you switch
+      // the canvas to that slide, which reads as "setting has no effect".
+      // Focusing any field inside a slide's card auto-switches the canvas
+      // preview to that same slide, so what you're editing is always what
+      // you're looking at.
+      const activeSliderElId =
+        sel && sel.length === 4
+          ? (blocks[sel[0]]?.props as unknown as SectionProps)?.rows?.[sel[1]]?.columns?.[sel[2]]?.elements?.[sel[3]]?.id
+          : undefined;
       const setItems = (next: SlideItem[]) => onChange(stringifySlides(next));
       const update = (i: number, patch: Partial<SlideItem>) =>
         setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -3055,26 +3173,45 @@ export default function Designer({
       // No minimap here and no manual fontSize input: position/resize for
       // heading/subtitle are canvas-drag-only, exactly like buttons.
       const ALIGN_ICONS: Record<SlideText["align"], typeof AlignLeft> = { left: AlignLeft, center: AlignCenter, right: AlignRight };
-      const renderTextAlign = (txt: SlideText, onChange: (patch: Partial<SlideText>) => void) => (
-        <div className="flex gap-1">
-          {(["left", "center", "right"] as const).map((o) => {
-            const Icon = ALIGN_ICONS[o];
-            return (
-              <button
-                key={o}
-                type="button"
-                onClick={() => onChange({ align: o })}
-                title={o}
-                className={`flex-1 rounded-lg border p-1.5 ${
-                  txt.align === o ? "border-accent bg-accent/10 text-accent" : "border-line/30 text-sub hover:border-accent/40"
-                }`}
-              >
-                <Icon className="mx-auto h-3.5 w-3.5" />
-              </button>
-            );
-          })}
-        </div>
-      );
+      // bp-aware like every other field in this file now: on desktop, writes
+      // `align` directly; on tablet/mobile, writes into `txt.bp` instead
+      // (same "tablet:<key>"/"mobile:<key>" bag Section/Col/El use) — real on
+      // the published site via SectionBlock.astro's slideTextStyleBp, not
+      // just an admin-preview simulation.
+      const renderTextAlign = (txt: SlideText, onChange: (patch: Partial<SlideText>) => void) => {
+        const resolvedAlign = (bpGetValue(txt.align, txt.bp, "align") || "left") as SlideText["align"];
+        return (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-sub">{t("designer-f-align")}</span>
+              <BpToggle
+                active={bpKeysOverridden(txt.bp, ["align"])}
+                onToggle={() => onChange({ bp: toggleBpKeys(txt.bp, ["align"]) })}
+              />
+            </div>
+            <div className="flex gap-1">
+              {(["left", "center", "right"] as const).map((o) => {
+                const Icon = ALIGN_ICONS[o];
+                return (
+                  <button
+                    key={o}
+                    type="button"
+                    onClick={() =>
+                      onChange(bp === "desktop" ? { align: o } : { bp: { ...(txt.bp ?? {}), [bpKey("align")]: o } })
+                    }
+                    title={o}
+                    className={`flex-1 rounded-lg border p-1.5 ${
+                      resolvedAlign === o ? "border-accent bg-accent/10 text-accent" : "border-line/30 text-sub hover:border-accent/40"
+                    }`}
+                  >
+                    <Icon className="mx-auto h-3.5 w-3.5" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      };
       // Heading/subtitle's font-family/weight/line-height/letter-spacing/
       // text-transform/italic/decoration controls — literally reuses
       // TYPOGRAPHY_FIELDS + FieldInput (the same field list/renderer the
@@ -3107,9 +3244,27 @@ export default function Designer({
       return (
         <div className="space-y-2">
           {items.map((s, i) => (
-            <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
+            <div
+              key={i}
+              className={`space-y-1.5 rounded-lg border p-2 ${
+                activeSliderElId && (sliderSlideIdx[activeSliderElId] ?? 0) === i ? "border-accent" : "border-line/30"
+              }`}
+              onFocus={() => {
+                // Skip the state write entirely when this card is already
+                // the previewed slide (the common case — most field edits
+                // happen on the slide already showing) so focusing/clicking
+                // a control here never fires a react-state update+re-render
+                // interleaved with that same click's own onChange, which is
+                // exactly the kind of thing that can make a click silently
+                // never land (focus fires before click in the browser's own
+                // event order).
+                if (activeSliderElId && (sliderSlideIdx[activeSliderElId] ?? 0) !== i) {
+                  setSliderSlideIdx((m) => ({ ...m, [activeSliderElId]: i }));
+                }
+              }}
+            >
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+                <span className="text-[10px] font-semibold text-sub">#{i + 1} {activeSliderElId && (sliderSlideIdx[activeSliderElId] ?? 0) === i ? `· ${t("designer-slide-previewing")}` : ""}</span>
                 <button
                   onClick={() => setItems(items.filter((_, j) => j !== i))}
                   className="text-[10px] font-semibold text-red-500"
@@ -3138,9 +3293,29 @@ export default function Designer({
                   />
                 </label>
               </div>
+              <label className="flex w-fit items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-bgcolor")}>
+                <input
+                  type="color"
+                  value={s.bgColor || "#000000"}
+                  onChange={(e) => update(i, { bgColor: e.target.value })}
+                  className="h-6 w-8 cursor-pointer rounded border border-line/30"
+                />
+                {t("designer-f-slider-bgcolor")}
+                {s.bgColor && (
+                  <button type="button" className="text-sub/70 hover:text-sub" onClick={() => update(i, { bgColor: "" })}>
+                    ×
+                  </button>
+                )}
+              </label>
               <div className="space-y-1.5 rounded border border-line/20 p-2">
                 <span className="text-[10px] font-semibold text-sub">{t("designer-f-slider-heading")}</span>
-                <BufferedInput
+                {/* Textarea, not a single-line input: heading/subtitle never
+                    auto-wrap on the canvas or the real site anymore (see
+                    textChip/slideTextStyle's white-space:pre) — the ONLY way
+                    to get a second line is a literal newline, so Enter has to
+                    actually insert one instead of just committing/blurring. */}
+                <BufferedTextarea
+                  rows={2}
                   className={base}
                   value={s.heading.text}
                   placeholder={t("designer-f-slider-heading")}
@@ -3163,11 +3338,23 @@ export default function Designer({
                   )}
                 </label>
                 <div className="space-y-0.5">
-                  <span className="text-[9px] text-sub">{t(SLIDE_TEXT_SIZE_FIELD.labelKey)}</span>
+                  <span className="inline-flex items-center gap-1 text-[9px] text-sub">
+                    {t(SLIDE_TEXT_SIZE_FIELD.labelKey)}
+                    <BpToggle
+                      active={bpKeysOverridden(s.heading.bp, ["fontSize"])}
+                      onToggle={() => update(i, { heading: { ...s.heading, bp: toggleBpKeys(s.heading.bp, ["fontSize"]) } })}
+                    />
+                  </span>
                   {FieldInput({
                     field: SLIDE_TEXT_SIZE_FIELD,
-                    value: s.heading.fontSize || String(TEXT_BASE_PX.heading),
-                    onChange: (v) => update(i, { heading: { ...s.heading, fontSize: v } }),
+                    value: bpGetValue(s.heading.fontSize, s.heading.bp, "fontSize") || String(TEXT_BASE_PX.heading),
+                    onChange: (v) =>
+                      update(i, {
+                        heading:
+                          bp === "desktop"
+                            ? { ...s.heading, fontSize: v }
+                            : { ...s.heading, bp: { ...(s.heading.bp ?? {}), [bpKey("fontSize")]: v } },
+                      }),
                   })}
                 </div>
                 {renderTextAlign(s.heading, (patch) => update(i, { heading: { ...s.heading, ...patch } }))}
@@ -3175,7 +3362,8 @@ export default function Designer({
               </div>
               <div className="space-y-1.5 rounded border border-line/20 p-2">
                 <span className="text-[10px] font-semibold text-sub">{t("designer-f-slider-subtitle")}</span>
-                <BufferedInput
+                <BufferedTextarea
+                  rows={2}
                   className={base}
                   value={s.subtitle.text}
                   placeholder={t("designer-f-slider-subtitle")}
@@ -3198,11 +3386,23 @@ export default function Designer({
                   )}
                 </label>
                 <div className="space-y-0.5">
-                  <span className="text-[9px] text-sub">{t(SLIDE_TEXT_SIZE_FIELD.labelKey)}</span>
+                  <span className="inline-flex items-center gap-1 text-[9px] text-sub">
+                    {t(SLIDE_TEXT_SIZE_FIELD.labelKey)}
+                    <BpToggle
+                      active={bpKeysOverridden(s.subtitle.bp, ["fontSize"])}
+                      onToggle={() => update(i, { subtitle: { ...s.subtitle, bp: toggleBpKeys(s.subtitle.bp, ["fontSize"]) } })}
+                    />
+                  </span>
                   {FieldInput({
                     field: SLIDE_TEXT_SIZE_FIELD,
-                    value: s.subtitle.fontSize || String(TEXT_BASE_PX.subtitle),
-                    onChange: (v) => update(i, { subtitle: { ...s.subtitle, fontSize: v } }),
+                    value: bpGetValue(s.subtitle.fontSize, s.subtitle.bp, "fontSize") || String(TEXT_BASE_PX.subtitle),
+                    onChange: (v) =>
+                      update(i, {
+                        subtitle:
+                          bp === "desktop"
+                            ? { ...s.subtitle, fontSize: v }
+                            : { ...s.subtitle, bp: { ...(s.subtitle.bp ?? {}), [bpKey("fontSize")]: v } },
+                      }),
                   })}
                 </div>
                 {renderTextAlign(s.subtitle, (patch) => update(i, { subtitle: { ...s.subtitle, ...patch } }))}
@@ -3605,6 +3805,39 @@ export default function Designer({
   // sets all 4 sides/corners equal; unlinked shows independent Top/Right/
   // Bottom/Left inputs. Values are whatever fourSideValue() resolves —
   // either a per-side override or the shared axis/preset fallback.
+  // Small Tablet/Smartphone tag next to a setting's own label — reminds you
+  // which screen the value you're looking at/editing actually belongs to,
+  // since every bp-aware field already silently shows/writes a per-
+  // breakpoint override the moment the global bp toggle (bar Monitor/Tablet/
+  // Smartphone icons, see `bp` state) leaves "desktop", with no other visual
+  // cue on the field itself. Renders nothing on desktop — that's the
+  // implicit default, no tag needed for it.
+  // Elementor/Webflow-style per-field responsive toggle: a small Tablet/
+  // Smartphone icon next to a setting's own label, filled/accent when THIS
+  // field (or, for FourSideControl, any of its side keys) actually has an
+  // override at the current bp, muted/outline when it's just inheriting the
+  // desktop value. Clicking toggles between the two — enabling seeds the
+  // override at "" (falls through to the normal default-preset resolution
+  // until typed over), disabling removes it. Renders nothing on desktop —
+  // there's nothing to override against on the base breakpoint itself.
+  function BpToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+    if (bp === "desktop") return null;
+    const Icon = bp === "tablet" ? Tablet : Smartphone;
+    return (
+      <button
+        type="button"
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onToggle();
+        }}
+        title={t(active ? "designer-bp-override-clear" : "designer-bp-override-set")}
+        className={`inline-flex rounded p-0.5 ${active ? "text-accent" : "text-sub/40 hover:text-sub"}`}
+      >
+        <Icon className="h-3 w-3" />
+      </button>
+    );
+  }
+
   function FourSideControl({
     labelKey,
     icon: Icon,
@@ -3613,6 +3846,8 @@ export default function Designer({
     getSide,
     setSide,
     sides = ["top", "right", "bottom", "left"],
+    hasOverride,
+    onToggleOverride,
   }: {
     labelKey: Key;
     icon: typeof Frame;
@@ -3623,12 +3858,17 @@ export default function Designer({
     // Defaults to all 4 (padding/radius); margin has no left/right concept
     // (block-flow spacing only), so it passes just ["top", "bottom"].
     sides?: readonly ("top" | "right" | "bottom" | "left")[];
+    // Omitted entirely for a node with no `bp` bag at all (Row) — the toggle
+    // then simply never renders, same as being on desktop.
+    hasOverride?: boolean;
+    onToggleOverride?: () => void;
   }) {
     return (
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[11px] font-medium text-body">
           <span className="flex items-center gap-1.5">
             <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
+            {hasOverride !== undefined && onToggleOverride && <BpToggle active={hasOverride} onToggle={onToggleOverride} />}
           </span>
           <button
             type="button"
@@ -3671,6 +3911,8 @@ export default function Designer({
     getValue,
     setValue,
     only,
+    hasOverride,
+    onToggleOverride,
   }: {
     fields: Field[];
     getValue: (f: Field) => string;
@@ -3679,6 +3921,10 @@ export default function Designer({
     // reuse this same bucketing instead of a separate content-vs-style
     // split — "content" is its own tab, every other bucket is "style".
     only?: "content" | "style";
+    // Per-field bp-override toggle (BpToggle) — omitted for a node with no
+    // `bp` bag (none currently omit it; Row doesn't use FieldGroups at all).
+    hasOverride?: (f: Field) => boolean;
+    onToggleOverride?: (f: Field) => void;
   }) {
     const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
     for (const f of fields) {
@@ -3707,7 +3953,12 @@ export default function Designer({
                 <div className="space-y-3 pb-1">
                   {groupFields.map((f) => (
                     <label key={f.key} className="block text-[11px] font-medium text-body">
-                      {FieldLabel(f.labelKey, t)}
+                      <span className="inline-flex items-center gap-1">
+                        {FieldLabel(f.labelKey, t)}
+                        {hasOverride && onToggleOverride && f.kind !== "slides" && (
+                          <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} />
+                        )}
+                      </span>
                       <div className="mt-1">{FieldInput({ field: f, value: getValue(f), onChange: (v) => setValue(f, v) })}</div>
                     </label>
                   ))}
@@ -3717,6 +3968,44 @@ export default function Designer({
           );
         })}
       </>
+    );
+  }
+
+  type VisKey = "hideDesktop" | "hideTablet" | "hideMobile";
+  const VIS_ITEMS: { key: VisKey; icon: typeof Monitor }[] = [
+    { key: "hideDesktop", icon: Monitor },
+    { key: "hideTablet", icon: Tablet },
+    { key: "hideMobile", icon: Smartphone },
+  ];
+  // Shared Section/Row/Column/Element visibility control — a real per-
+  // breakpoint hide, unlike the `bp` style-override bag above (admin-preview
+  // only): SectionBlock.astro renders these as actual @media display:none
+  // rules on the published site (see hideCss() there). "Active" (highlighted)
+  // means hidden on that screen, not shown — same on/off semantics as any
+  // other toggle button in this file, just inverted from "visible".
+  function VisibilityToggle({ get, set }: { get: (k: VisKey) => boolean; set: (k: VisKey, v: boolean) => void }) {
+    return (
+      <label className="block text-[11px] font-medium text-body">
+        {t("designer-visibility")}
+        <div className="mt-1 flex gap-1">
+          {VIS_ITEMS.map(({ key, icon: Icon }) => {
+            const hidden = get(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => set(key, !hidden)}
+                title={t(hidden ? "designer-vis-hidden" : "designer-vis-visible")}
+                className={`flex-1 rounded-lg border p-1.5 ${
+                  hidden ? "border-red-300 bg-red-50 text-red-500" : "border-line/30 text-sub hover:border-accent/40"
+                }`}
+              >
+                <Icon className="mx-auto h-3.5 w-3.5" />
+              </button>
+            );
+          })}
+        </div>
+      </label>
     );
   }
 
@@ -3779,6 +4068,68 @@ export default function Designer({
               className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
             />
           </label>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-language")}
+            <select
+              value={pageLanguage || "__none"}
+              onChange={(e) => {
+                setPageLanguage(e.target.value === "__none" ? "" : e.target.value);
+                setDirty(true);
+              }}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            >
+              <option value="__none">{t("designer-page-language-none")}</option>
+              {siteLanguages.map((l) => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="space-y-1.5 rounded-lg border border-line/30 bg-canvas/40 p-2">
+            <p className="text-[11px] font-semibold text-ink">{t("designer-page-translations")}</p>
+            {pageTranslations.length > 0 && (
+              <ul className="divide-y divide-line/20">
+                {pageTranslations.map((tr) => (
+                  <li key={tr.id} className="flex items-center gap-2 py-1 text-[11px]">
+                    <span className="font-mono text-[9px] text-sub">{tr.language ?? "?"}</span>
+                    <button
+                      type="button"
+                      onClick={() => onOpenTranslation(tr.id)}
+                      className="min-w-0 flex-1 truncate text-left text-body hover:text-accent hover:underline"
+                    >
+                      {tr.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(() => {
+              const used = new Set([pageLanguage, ...pageTranslations.map((tr) => tr.language)].filter(Boolean));
+              const available = siteLanguages.filter((l) => !used.has(l.code));
+              if (available.length === 0) return null;
+              return (
+                <div className="flex gap-1 pt-1">
+                  <select
+                    value={addTranslationLang}
+                    onChange={(e) => setAddTranslationLang(e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border border-line/30 px-1.5 py-1 text-[11px]"
+                  >
+                    <option value="">{t("posts-translate-to")}</option>
+                    {available.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void createPageTranslation()}
+                    disabled={!addTranslationLang || translating}
+                    className="shrink-0 rounded-md bg-canvas px-2 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+                  >
+                    {translating ? t("blocks-saving") : t("posts-translate-btn")}
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
           <p className="text-[10px] text-sub">{t("designer-none-selected")}</p>
         </div>
       );
@@ -3793,6 +4144,14 @@ export default function Designer({
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t("designer-section")}</p>
+          <VisibilityToggle
+            get={(k) => (sp as unknown as Record<string, string>)[k] === "true"}
+            set={(k, v) =>
+              mutate((bs) => {
+                (bs[b].props as Record<string, string>)[k] = v ? "true" : "";
+              })
+            }
+          />
           <FourSideControl
             labelKey="designer-s-padding"
             icon={Frame}
@@ -3800,6 +4159,13 @@ export default function Designer({
             onToggleLink={() => setLinkedPadding((v) => !v)}
             getSide={(side) => fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side])}
             setSide={(side, v) => setFourSideValue(b, PADDING_SIDE_KEYS[side], v)}
+            hasOverride={bpKeysOverridden(sp.bp, Object.values(PADDING_SIDE_KEYS))}
+            onToggleOverride={() =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, Object.values(PADDING_SIDE_KEYS));
+              })
+            }
           />
           <FourSideControl
             labelKey="designer-f-radius"
@@ -3808,6 +4174,13 @@ export default function Designer({
             onToggleLink={() => setLinkedRadius((v) => !v)}
             getSide={(side) => fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius")}
             setSide={(side, v) => setFourSideValue(b, RADIUS_CORNER_KEYS[side], v)}
+            hasOverride={bpKeysOverridden(sp.bp, Object.values(RADIUS_CORNER_KEYS))}
+            onToggleOverride={() =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, Object.values(RADIUS_CORNER_KEYS));
+              })
+            }
           />
           <FourSideControl
             labelKey="designer-f-marginy"
@@ -3816,6 +4189,13 @@ export default function Designer({
             onToggleLink={() => setLinkedMargin((v) => !v)}
             getSide={(side) => fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
             setSide={(side, v) => setFourSideValue(b, MARGIN_SIDE_KEYS[side], v)}
+            hasOverride={bpKeysOverridden(sp.bp, Object.values(MARGIN_SIDE_KEYS))}
+            onToggleOverride={() =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, Object.values(MARGIN_SIDE_KEYS));
+              })
+            }
           />
           <FieldGroups
             fields={SECTION_FIELDS}
@@ -3828,6 +4208,13 @@ export default function Designer({
                   const props = bs[b].props as unknown as SectionProps;
                   props.bp = { ...(props.bp ?? {}), [bpKey(f.key)]: v };
                 }
+              })
+            }
+            hasOverride={(f) => bpKeysOverridden(sp.bp, [f.key])}
+            onToggleOverride={(f) =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, [f.key]);
               })
             }
           />
@@ -3844,6 +4231,10 @@ export default function Designer({
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t("designer-row")}</p>
+          <VisibilityToggle
+            get={(k) => (row as unknown as Record<string, string>)[k] === "true"}
+            set={(k, v) => setRowSide(k, v ? "true" : "")}
+          />
           <label className="block text-[11px] font-medium text-body">
             {t("designer-row-gap")}
             <BufferedInput
@@ -3910,6 +4301,15 @@ export default function Designer({
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t("designer-column")}</p>
+          <VisibilityToggle
+            get={(k) => col.props?.[k] === "true"}
+            set={(k, v) =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.props = { ...(target.props ?? {}), [k]: v ? "true" : "" };
+              })
+            }
+          />
           <label className="block text-[11px] font-medium text-body">
             {FieldLabel("designer-col-span", t)}: {col.span}
             <input
@@ -3928,6 +4328,13 @@ export default function Designer({
             onToggleLink={() => setLinkedPadding((v) => !v)}
             getSide={(side) => sideValue(col.props, col.bp, PADDING_SIDE_KEYS[side], "padding")}
             setSide={(side, v) => setColSideValue(b, r, c, PADDING_SIDE_KEYS[side], v)}
+            hasOverride={bpKeysOverridden(col.bp, Object.values(PADDING_SIDE_KEYS))}
+            onToggleOverride={() =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
+              })
+            }
           />
           <FourSideControl
             labelKey="designer-f-radius"
@@ -3936,6 +4343,13 @@ export default function Designer({
             onToggleLink={() => setLinkedRadius((v) => !v)}
             getSide={(side) => sideValue(col.props, col.bp, RADIUS_CORNER_KEYS[side], "radius")}
             setSide={(side, v) => setColSideValue(b, r, c, RADIUS_CORNER_KEYS[side], v)}
+            hasOverride={bpKeysOverridden(col.bp, Object.values(RADIUS_CORNER_KEYS))}
+            onToggleOverride={() =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
+              })
+            }
           />
           <FourSideControl
             labelKey="designer-f-marginy"
@@ -3944,6 +4358,13 @@ export default function Designer({
             onToggleLink={() => setLinkedMargin((v) => !v)}
             getSide={(side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
             setSide={(side, v) => setColSideValue(b, r, c, MARGIN_SIDE_KEYS[side], v)}
+            hasOverride={bpKeysOverridden(col.bp, Object.values(MARGIN_SIDE_KEYS))}
+            onToggleOverride={() =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
+              })
+            }
           />
           <FieldGroups
             fields={COLUMN_FIELDS}
@@ -3956,6 +4377,13 @@ export default function Designer({
                 } else {
                   target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
                 }
+              })
+            }
+            hasOverride={(f) => bpKeysOverridden(col.bp, [f.key])}
+            onToggleOverride={(f) =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, [f.key]);
               })
             }
           />
@@ -4001,20 +4429,48 @@ export default function Designer({
       const hasContentFields = elFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
       const fieldGroupsProps = {
         fields: elFields,
-        getValue: (f: Field) => bpGetValue(el.props[f.key], el.bp, f.key),
+        // "slides" is a structured JSON blob, not a simple style value — it
+        // manages its own per-breakpoint overrides internally (each slide's
+        // heading/subtitle has its own `SlideText.bp`, written by the
+        // Text size/Alignment BpToggle inside the slides editor itself).
+        // Routing it through the SAME generic bp mechanism as every other
+        // field wrote a second, whole-array copy into `target.bp["mobile:
+        // slides"]` on any edit made while previewing tablet/mobile — the
+        // Inspector read that copy back (so it looked live), but the canvas
+        // (ElPreview) reads `el.props.slides` directly and never checked
+        // `el.bp`, so nothing ever appeared to change there. Bypassing bp
+        // entirely for this one field/kind fixes both the data (edits land
+        // in the one real `slides` string) and the ghost-toggle UI.
+        getValue: (f: Field) => (f.kind === "slides" ? el.props[f.key] ?? "" : bpGetValue(el.props[f.key], el.bp, f.key)),
         setValue: (f: Field, v: string) =>
           mutate((bs) => {
             const target = section(bs, b).rows[r].columns[c].elements[e];
-            if (bp === "desktop") {
+            if (bp === "desktop" || f.kind === "slides") {
               target.props[f.key] = v;
             } else {
               target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
             }
           }),
+        hasOverride: (f: Field) => f.kind !== "slides" && bpKeysOverridden(el.bp, [f.key]),
+        onToggleOverride: (f: Field) => {
+          if (f.kind === "slides") return;
+          mutate((bs) => {
+            const target = section(bs, b).rows[r].columns[c].elements[e];
+            target.bp = toggleBpKeys(target.bp, [f.key]);
+          });
+        },
       };
       return (
         <div className="space-y-3">
           <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
+          <VisibilityToggle
+            get={(k) => el.props[k] === "true"}
+            set={(k, v) =>
+              mutate((bs) => {
+                section(bs, b).rows[r].columns[c].elements[e].props[k] = v ? "true" : "";
+              })
+            }
+          />
           {hasContentFields && (
             <div className="flex gap-1 rounded-full bg-canvas p-0.5">
               {(["content", "style"] as const).map((tab) => (
@@ -4039,6 +4495,13 @@ export default function Designer({
                 onToggleLink={() => setLinkedPadding((v) => !v)}
                 getSide={(side) => sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding")}
                 setSide={(side, v) => setElSideValue(b, r, c, e, PADDING_SIDE_KEYS[side], v)}
+                hasOverride={bpKeysOverridden(el.bp, Object.values(PADDING_SIDE_KEYS))}
+                onToggleOverride={() =>
+                  mutate((bs) => {
+                    const target = section(bs, b).rows[r].columns[c].elements[e];
+                    target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
+                  })
+                }
               />
               {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
                 <FourSideControl
@@ -4048,6 +4511,13 @@ export default function Designer({
                   onToggleLink={() => setLinkedRadius((v) => !v)}
                   getSide={(side) => sideValue(el.props, el.bp, RADIUS_CORNER_KEYS[side], "radius")}
                   setSide={(side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v)}
+                  hasOverride={bpKeysOverridden(el.bp, Object.values(RADIUS_CORNER_KEYS))}
+                  onToggleOverride={() =>
+                    mutate((bs) => {
+                      const target = section(bs, b).rows[r].columns[c].elements[e];
+                      target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
+                    })
+                  }
                 />
               )}
               <FourSideControl
@@ -4057,6 +4527,13 @@ export default function Designer({
                 onToggleLink={() => setLinkedMargin((v) => !v)}
                 getSide={(side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
                 setSide={(side, v) => setElSideValue(b, r, c, e, MARGIN_SIDE_KEYS[side], v)}
+                hasOverride={bpKeysOverridden(el.bp, Object.values(MARGIN_SIDE_KEYS))}
+                onToggleOverride={() =>
+                  mutate((bs) => {
+                    const target = section(bs, b).rows[r].columns[c].elements[e];
+                    target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
+                  })
+                }
               />
               <FieldGroups {...fieldGroupsProps} only={hasContentFields ? "style" : undefined} />
             </>
@@ -4353,8 +4830,21 @@ export default function Designer({
             // slide 2 the moment that limitation was lifted.
             const s0 = currentSlides[slideIdx];
             if (!s0) return;
-            if (ref.kind === "heading") currentSlides[slideIdx] = { ...s0, heading: { ...s0.heading, ...patch } };
-            else if (ref.kind === "subtitle") currentSlides[slideIdx] = { ...s0, subtitle: { ...s0.subtitle, ...patch } };
+            // fontSize is the one dragged key that heading/subtitle also
+            // expose a per-breakpoint override for (SlideText.bp, written by
+            // the Inspector's BpToggle and honored by the real site). While
+            // previewing tablet/mobile the drag has to land in that same bag,
+            // matching where the Inspector's own stepper writes — otherwise a
+            // drag edits the desktop size while the bp override keeps winning
+            // on screen, so the handle would visibly do nothing. Everything
+            // else (width/position/x/y) has no bp override and stays on base.
+            const textPatch = (txt: SlideText): SlideText => {
+              if (bp === "desktop" || patch.fontSize === undefined) return { ...txt, ...patch };
+              const { fontSize, ...rest } = patch;
+              return { ...txt, ...rest, bp: { ...(txt.bp ?? {}), [bpKey("fontSize")]: String(fontSize) } };
+            };
+            if (ref.kind === "heading") currentSlides[slideIdx] = { ...s0, heading: textPatch(s0.heading) };
+            else if (ref.kind === "subtitle") currentSlides[slideIdx] = { ...s0, subtitle: textPatch(s0.subtitle) };
             else currentSlides[slideIdx] = { ...s0, buttons: s0.buttons.map((x, j) => (j === ref.bi ? { ...x, ...patch } : x)) };
             elx.props.slides = stringifySlides(currentSlides);
           });
@@ -4524,6 +5014,67 @@ export default function Designer({
           window.addEventListener("pointermove", move);
           window.addEventListener("pointerup", up);
         };
+        // Drag-to-resize width ONLY (heading/subtitle only — no button use
+        // case asked for): matches Canva's own text-box side handles — width
+        // changes, font size doesn't, text reflows to the new width. `sign`
+        // is which direction growing this particular handle moves in
+        // (right-side handle: dragging right grows; left-side handle:
+        // dragging left grows) so both edge handles can share one function.
+        // No upper bound — same "asked not to cap it" precedent as
+        // startResize's fontSize drag above. Dragging narrower is the
+        // intentional, on-purpose way to force a wrap back to 2 lines —
+        // textChip's normal (not forced-nowrap) white-space means a
+        // narrower explicit width wraps exactly like the real site's <p>
+        // would. Only a 1px floor remains, to keep the value sane.
+        const startWidthResize = (ref: ItemRef, sign: 1 | -1, ev: React.PointerEvent<HTMLElement>) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          const node = previewRefs.items[itemKey(ref)];
+          if (!node) return;
+          const startWidth = node.getBoundingClientRect().width;
+          const startX = ev.clientX;
+          const move = (mv: PointerEvent) => {
+            const next = Math.max(1, Math.round(startWidth + sign * (mv.clientX - startX)));
+            updateItem(ref, { width: String(next) });
+          };
+          const up = () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up);
+        };
+        // Drag-to-resize a CORNER: Canva's uniform scale — font size AND
+        // width grow/shrink together, proportionally, unlike the side
+        // handles above which touch width only. `sign` per corner (below)
+        // makes "pull the corner outward" always mean grow regardless of
+        // which of the 4 corners is being dragged (nw/sw: dragging further
+        // LEFT grows; ne/se: dragging further RIGHT grows). Scale factor is
+        // relative to the box's own current width, so the same pixel drag
+        // feels proportional whether the box starts small or already huge —
+        // matches the "no upper/lower bound, only sane floors" precedent
+        // used by every other drag handle in this file.
+        const startCornerScale = (ref: ItemRef, startFont: number, sign: 1 | -1, ev: React.PointerEvent<HTMLElement>) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          const node = previewRefs.items[itemKey(ref)];
+          if (!node) return;
+          const startWidth = node.getBoundingClientRect().width;
+          const startX = ev.clientX;
+          const move = (mv: PointerEvent) => {
+            const scale = Math.max(0.1, 1 + (sign * (mv.clientX - startX)) / startWidth);
+            updateItem(ref, {
+              fontSize: String(Math.max(1, Math.round(startFont * scale))),
+              width: String(Math.max(1, Math.round(startWidth * scale))),
+            });
+          };
+          const up = () => {
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+          };
+          window.addEventListener("pointermove", move);
+          window.addEventListener("pointerup", up);
+        };
         const btnChip = (btn: SlideButton, bi: number) => {
           // rawFontPx is the true stored value — always what drag-resize
           // continues from, regardless of which bp is being previewed, so
@@ -4581,65 +5132,116 @@ export default function Designer({
         // subtitle — kind picks the TEXT_BASE_PX fallback and default class
         // (bold/larger for heading, lighter/smaller for subtitle). `align`
         // applies as text-align regardless of flow/custom.
-        // Corner handles for a Figma/PowerPoint-style "shape resize" box —
-        // replaces the earlier single bottom-right dot, which read as
-        // disconnected from the text's actual (possibly multi-line) bounding
-        // box. All 4 corners drive the exact same startResize() (there's
-        // only one dimension to scale, fontSize), this is purely about the
-        // box reading as a real resizable object, not a floating dot.
+        // Corner handles, Canva-style: dragging a corner scales font size AND
+        // width together (startCornerScale), not just fontSize — `sign`
+        // makes pulling the corner outward always mean "grow" regardless of
+        // which corner (nw/sw grow when dragged further left; ne/se grow
+        // when dragged further right).
         const RESIZE_CORNERS = [
-          { key: "nw", pos: "-top-1 -left-1", cursor: "cursor-nwse-resize" },
-          { key: "ne", pos: "-top-1 -right-1", cursor: "cursor-nesw-resize" },
-          { key: "sw", pos: "-bottom-1 -left-1", cursor: "cursor-nesw-resize" },
-          { key: "se", pos: "-bottom-1 -right-1", cursor: "cursor-nwse-resize" },
-        ] as const;
+          { key: "nw", pos: "-top-1 -left-1", cursor: "cursor-nwse-resize", sign: -1 as const },
+          { key: "ne", pos: "-top-1 -right-1", cursor: "cursor-nesw-resize", sign: 1 as const },
+          { key: "sw", pos: "-bottom-1 -left-1", cursor: "cursor-nesw-resize", sign: -1 as const },
+          { key: "se", pos: "-bottom-1 -right-1", cursor: "cursor-nwse-resize", sign: 1 as const },
+        ];
+        // bp-aware reads for a SlideText. The Inspector's BpToggle (next to
+        // Text size / Alignment) stores a tablet/mobile-only value in
+        // txt.bp, and the real site honors it (slideTextVisId's @media
+        // rules) — so the canvas has to resolve the same way, or previewing
+        // mobile shows the desktop value and the setting reads as dead.
+        const slideAlign = (txt: SlideText): SlideText["align"] =>
+          (bpGetValue(txt.align, txt.bp, "align") || "left") as SlideText["align"];
         const textChip = (kind: "heading" | "subtitle", txt: SlideText, fallback: string, extraClass: string) => {
           // Same rawFontPx/fontPx split as btnChip above — drag-resize always
           // continues from the true stored size, the canvas only ever shows
           // the bp-adjusted preview.
-          const rawFontPx = Number(txt.fontSize) || TEXT_BASE_PX[kind];
+          const rawFontPx = Number(bpGetValue(txt.fontSize, txt.bp, "fontSize")) || TEXT_BASE_PX[kind];
           const fontPx = fluidPreviewPx(rawFontPx, bp);
           const ref: ItemRef = { kind };
+          const editKey = itemKey(ref);
+          const editCompositeKey = `${el.id}:${editKey}`;
+          const sharedTextStyle: React.CSSProperties = {
+            fontSize: `${fontPx}px`,
+            color: txt.color || undefined,
+            textAlign: slideAlign(txt),
+            fontFamily: txt.fontFamily || undefined,
+            fontWeight: txt.fontWeight || undefined,
+            lineHeight: txt.lineHeight || "1",
+            letterSpacing: txt.letterSpacing || undefined,
+            textTransform: (txt.textTransform || undefined) as React.CSSProperties["textTransform"],
+            fontStyle: txt.fontStyle || undefined,
+            textDecoration: txt.textDecoration || undefined,
+          };
+          // Canvas-direct editing (double-click, since single click/drag is
+          // already startMove): same stable-ref-snapshot pattern ElPreview's
+          // own heading/text contentEditable branch uses above — the
+          // rendered children come from editingSliderText's captured-once
+          // value, never from `txt.text` directly, so a re-render mid-typing
+          // (triggered by the onInput→updateItem→mutate round-trip) doesn't
+          // feed new children back into the DOM and reset the caret.
+          if (sliderEditingItem[el.id] === editKey) {
+            if (editingSliderText.current[editCompositeKey] === undefined) editingSliderText.current[editCompositeKey] = txt.text;
+            return (
+              <span
+                ref={(node) => {
+                  previewRefs.items[editKey] = node;
+                  if (node && document.activeElement !== node) node.focus();
+                }}
+                contentEditable
+                suppressContentEditableWarning
+                className={`relative inline-block whitespace-pre-wrap break-words border border-dashed border-accent outline-none ${extraClass}`}
+                style={sharedTextStyle}
+                onInput={(ev) => updateItem(ref, { text: ev.currentTarget.textContent ?? "" })}
+                onKeyDown={(ev) => {
+                  ev.stopPropagation();
+                  // Enter must insert a literal "\n" character, not the
+                  // browser's default (a new <div>/<br> node) — reading
+                  // .textContent afterward would otherwise glue the lines
+                  // back together with no separator between them.
+                  if (ev.key === "Enter") {
+                    ev.preventDefault();
+                    document.execCommand("insertText", false, "\n");
+                  }
+                }}
+                onPointerDown={(ev) => ev.stopPropagation()}
+                onBlur={() => {
+                  delete editingSliderText.current[editCompositeKey];
+                  setSliderEditingItem((prev) => ({ ...prev, [el.id]: null }));
+                }}
+              >
+                {editingSliderText.current[editCompositeKey]}
+              </span>
+            );
+          }
           return (
             <span
               ref={(node) => {
-                previewRefs.items[itemKey(ref)] = node;
-                // Must run after the node is laid out at its natural width —
-                // see fitTextBox: this is what actually keeps the dashed box
-                // tight around wrapped text, since no CSS width value can.
-                fitTextBox(node);
+                previewRefs.items[editKey] = node;
+                // An explicit `width` (set by the mid-edge drag handle below)
+                // is a hard width, not just a floor: dragging left has to be
+                // able to force a wrap back to 2 lines on purpose (the only
+                // OTHER way to get a second line is a literal newline typed
+                // via double-click-to-edit above, or the Inspector's
+                // textarea) — same normal wrapping SectionBlock.astro's real
+                // <p> already does. wordBreak is a safety net, not the
+                // primary mechanism: if a later fontSize increase makes a
+                // single unbreakable word wider than a width dragged at a
+                // smaller size, this breaks the word instead of silently
+                // overflowing past the box's own border. Must run after the
+                // node is laid out at its natural width — see fitTextBox:
+                // this is what actually keeps the dashed box tight around
+                // wrapped text, since no CSS width value can.
+                if (node) node.style.width = txt.width ? `${txt.width}px` : "";
+                if (!txt.width) fitTextBox(node);
               }}
               tabIndex={0}
-              // Forcing whitespace-nowrap here used to be how the resize box
-              // stayed tight around the text — but that also meant this canvas
-              // could NEVER show what happens when a heading actually wraps
-              // (font too big / container too narrow), which is exactly what
-              // authors need to see: a screenshot showed a wrapped heading on
-              // the real site colliding with a custom-positioned subtitle
-              // underneath it, something this canvas's forced single-line
-              // rendering hid completely — the editor looked fine while the
-              // real page was broken. Now it wraps exactly like
-              // SectionBlock.astro does, and fitTextBox (above) measures the
-              // widest rendered line so the box stays tight anyway.
               className={`relative inline-block cursor-move select-none border border-dashed border-white/40 focus:outline-none focus:ring-2 focus:ring-accent ${extraClass}`}
-              style={{
-                fontSize: `${fontPx}px`,
-                color: txt.color || undefined,
-                fontFamily: txt.fontFamily || undefined,
-                fontWeight: txt.fontWeight || undefined,
-                // Defaults to 1 (not the browser's ~1.2 normal) so the dashed
-                // resize box hugs the glyphs — at normal line-height the box's
-                // own top/bottom (line-box) sits visibly above/below the actual
-                // ink, worse the larger fontSize gets, reading as a box that
-                // doesn't fit its text. An explicit lineHeight from Typography
-                // still wins; this is only the un-set default.
-                lineHeight: txt.lineHeight || "1",
-                letterSpacing: txt.letterSpacing || undefined,
-                textTransform: (txt.textTransform || undefined) as React.CSSProperties["textTransform"],
-                fontStyle: txt.fontStyle || undefined,
-                textDecoration: txt.textDecoration || undefined,
-              }}
+              style={{ ...sharedTextStyle, wordBreak: "break-word" }}
               onPointerDown={(ev) => startMove(ref, ev)}
+              onDoubleClick={(ev) => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                setSliderEditingItem((prev) => ({ ...prev, [el.id]: editKey }));
+              }}
               onKeyDown={(ev) => {
                 const patch = nudgePosition(txt, ev.key);
                 if (patch) {
@@ -4654,9 +5256,20 @@ export default function Designer({
                 <span
                   key={c.key}
                   className={`absolute h-2 w-2 rounded-sm border border-white bg-accent shadow ${c.pos} ${c.cursor}`}
-                  onPointerDown={(ev) => startResize(ref, rawFontPx, ev)}
+                  onPointerDown={(ev) => startCornerScale(ref, rawFontPx, c.sign, ev)}
                 />
               ))}
+              {/* Side handles (left/right mid): width only, no font change —
+                  the 4 corner dots above are the only ones that scale font
+                  size, matching Canva's own text-box handle split. */}
+              <span
+                className="absolute -left-1 top-1/2 h-3 w-2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-white bg-accent shadow"
+                onPointerDown={(ev) => startWidthResize(ref, -1, ev)}
+              />
+              <span
+                className="absolute -right-1 top-1/2 h-3 w-2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-white bg-accent shadow"
+                onPointerDown={(ev) => startWidthResize(ref, 1, ev)}
+              />
             </span>
           );
         };
@@ -4682,18 +5295,34 @@ export default function Designer({
         // a fixed aspect-ratio only if height somehow resolves empty; in
         // practice this is always set (defaults to "32rem" for new sliders).
         const resolvedHeight = p.height ? (SLIDER_HEIGHT[p.height] ?? p.height) : "";
+        // Real background + overlay, not the flat bg-black/70 placeholder
+        // this box used to hardcode regardless of the slide's actual
+        // settings — that made every slide look identically dark in the
+        // canvas no matter what bgColor/overlayColor/opacity was actually
+        // saved, a real mismatch against the published site (confirmed live:
+        // a slide with no image is fully transparent there, its only tint
+        // coming from whatever overlayColor/opacity is actually set). text-
+        // white stays as the default because SectionBlock.astro's `.ds-slide`
+        // now defaults to white too (see that file's own fix).
+        const overlayOpacityFrac = Math.min(100, Math.max(0, Number(first.overlayOpacity) || 0)) / 100;
         return (
           <div
             data-slide-box
             ref={(node) => {
               previewRefs.box = node;
             }}
-            className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg bg-black/70 text-white`}
+            className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg text-white`}
             style={{
               height: resolvedHeight || undefined,
-              ...(first.imageUrl ? { background: `url(${first.imageUrl}) center/cover` } : undefined),
+              backgroundColor: first.bgColor || undefined,
+              backgroundImage: first.imageUrl ? `url(${first.imageUrl})` : undefined,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
             }}
           >
+            {overlayOpacityFrac > 0 && (
+              <div className="pointer-events-none absolute inset-0" style={{ background: hexToRgba(first.overlayColor, overlayOpacityFrac) }} />
+            )}
             <div
               // Mirrors .ds-slide-content (SectionBlock.astro) exactly: w-full
               // + max-w-[36rem] + p-6 for its 1.5rem padding. The old
@@ -4710,12 +5339,12 @@ export default function Designer({
               className={`w-full max-w-[36rem] p-6 ${first.textPosition === "left" ? "self-start" : first.textPosition === "right" ? "self-end" : ""}`}
             >
               {headingFlow && (
-                <div className={`flex ${ALIGN_JUSTIFY[first.heading.align]}`}>
+                <div className={`flex ${ALIGN_JUSTIFY[slideAlign(first.heading)]}`}>
                   {textChip("heading", first.heading, "Slide heading", "text-sm font-bold")}
                 </div>
               )}
               {subtitleFlow && showSubtitle && (
-                <div className={`mt-1 flex ${ALIGN_JUSTIFY[first.subtitle.align]}`}>
+                <div className={`mt-1 flex ${ALIGN_JUSTIFY[slideAlign(first.subtitle)]}`}>
                   {textChip("subtitle", first.subtitle, "", "text-xs opacity-80")}
                 </div>
               )}
@@ -5219,11 +5848,12 @@ export default function Designer({
               // tint below is only a structural guide for an unset border,
               // so it must never paint over a color the author actually chose.
               const hasRealBorder = Boolean(sp.borderWidth || sp.border);
+              const sectionHiddenAtBp = hiddenAtBp(sp as unknown as Record<string, string>);
               return (
                 <div
                   key={b}
                   className={`group relative ${mode === "live" ? "" : "rounded-xl"} ${selCls([b])}`}
-                  style={{ opacity: sectionOpacity }}
+                  style={{ opacity: sectionHiddenAtBp ? 0.35 : sectionOpacity }}
                   onClick={(ev) => pick(ev, [b])}
                   onContextMenu={(ev) => {
                     ev.preventDefault();
@@ -5232,6 +5862,7 @@ export default function Designer({
                     setCtxMenu({ path: [b], x: ev.clientX, y: ev.clientY });
                   }}
                 >
+                  <HiddenAtBpBadge hidden={sectionHiddenAtBp} />
                   <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
                     {t("designer-section")} {BlockControls({ b })}
                   </div>
@@ -5436,8 +6067,15 @@ export default function Designer({
                       </>
                     )}
                     <div className={mode === "live" ? (contained ? "mx-auto max-w-[68rem]" : "") : contained ? "mx-auto max-w-3xl" : ""}>
-                      {(sp.rows ?? []).map((row, r) => (
-                        <div key={r} className="group/row relative" style={rowMarginStyle(row, r === 0)}>
+                      {(sp.rows ?? []).map((row, r) => {
+                        const rowHiddenAtBp = hiddenAtBp(row as unknown as Record<string, string>);
+                        return (
+                        <div
+                          key={r}
+                          className="group/row relative"
+                          style={{ ...rowMarginStyle(row, r === 0), opacity: rowHiddenAtBp ? 0.35 : undefined }}
+                        >
+                          <HiddenAtBpBadge hidden={rowHiddenAtBp} />
                           {mode !== "live" && (
                             <>
                               <button
@@ -5478,13 +6116,14 @@ export default function Designer({
                             {row.columns.map((col, c) => {
                             const colBg = col.props?.bg || sectionEffectiveBg;
                             const colOverlay = overlayColors(colBg);
+                            const colHiddenAtBp = hiddenAtBp(col.props);
                             return (
                             <div
                               key={c}
                               className={`relative min-h-[3rem] transition-colors ${
                                 mode === "live" ? "" : "rounded-lg border border-dashed p-1.5"
                               } ${selCls([b, r, c])} ${dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""}`}
-                              style={{ ...bpColStyle(col), borderColor: mode === "live" ? undefined : colOverlay.line }}
+                              style={{ ...bpColStyle(col), borderColor: mode === "live" ? undefined : colOverlay.line, opacity: colHiddenAtBp ? 0.35 : undefined }}
                               onClick={(ev) => pick(ev, [b, r, c])}
                               onContextMenu={(ev) => {
                                 ev.preventDefault();
@@ -5503,6 +6142,7 @@ export default function Designer({
                                 dropIntoColumn([b, r, c]);
                               }}
                             >
+                              <HiddenAtBpBadge hidden={colHiddenAtBp} />
                               {selEq([b, r, c]) && mode !== "live" && (
                                 <button
                                   onClick={(ev) => {
@@ -5705,8 +6345,9 @@ export default function Designer({
                                     setCtxMenu({ path: [b, r, c, e], x: ev.clientX, y: ev.clientY });
                                   }}
                                   className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
-                                  style={{ ...bpMarginStyle(el), ...bpPaddingStyle(el) }}
+                                  style={{ ...bpMarginStyle(el), ...bpPaddingStyle(el), opacity: hiddenAtBp(el.props) ? 0.35 : undefined }}
                                 >
+                                  <HiddenAtBpBadge hidden={hiddenAtBp(el.props)} />
                                   {selEq([b, r, c, e]) && (
                                     <div className="absolute -left-2 -top-2 z-30 rounded-full bg-white p-1 text-accent shadow-sm ring-1 ring-line/30">
                                       <GripVertical className="h-3 w-3" />
@@ -5873,7 +6514,8 @@ export default function Designer({
                           })}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                       {/* add-row presets */}
                       <div className="hidden items-center gap-1.5 pt-1 group-hover:flex" onClick={(ev) => ev.stopPropagation()}>
                         <span className="text-[10px] font-semibold text-sub">{t("designer-add-row")}:</span>

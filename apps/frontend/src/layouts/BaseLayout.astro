@@ -14,8 +14,14 @@ interface Props {
   // ever true alongside a valid preview token (gated in [...slug].astro),
   // so this script never ships to a real visitor.
   designerEdit?: boolean;
+  // i18n Phase 3 — set only by posts/[slug].astro, only when the tenant has
+  // turned the switcher on AND the current post actually has published
+  // translation siblings to switch to (a page with nothing to switch to
+  // gets no switcher, regardless of the site setting — see this repo's
+  // "let the editor tell the truth" convention elsewhere in Designer.tsx).
+  langSwitcher?: { current: string | null; options: Array<{ code: string; label: string; href: string }> } | null;
 }
-const { title, ogImage, theme, fonts = [], designerEdit = false } = Astro.props;
+const { title, ogImage, theme, fonts = [], designerEdit = false, langSwitcher = null } = Astro.props;
 
 // Same WCAG relative-luminance math as apps/admin's lib/utils.ts
 // (contrastRatio/bestTextColor) — duplicated, not imported, since this is a
@@ -79,7 +85,26 @@ const fontsHref = allFonts.length
   <body
     style={`font-family:var(--font-family, system-ui, sans-serif);background:var(--color-bg, inherit);color:var(--color-text, inherit)`}
   >
-    {logoUrl && <img src={logoUrl} alt="" height="40" />}
+    {logoUrl && !langSwitcher && <img src={logoUrl} alt="" height="40" />}
+    {langSwitcher && langSwitcher.options.length > 1 && (
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1rem;">
+        {logoUrl ? <img src={logoUrl} alt="" height="40" /> : <span />}
+        <nav style="display:flex;gap:0.4rem;">
+          {langSwitcher.options.map((o) => (
+            <a
+              href={o.href}
+              style={`font-size:0.75rem;text-decoration:none;padding:0.2rem 0.6rem;border-radius:999px;${
+                o.code === langSwitcher.current
+                  ? "background:var(--color-primary,#0f62fe);color:var(--color-primary-content,#fff);"
+                  : "color:#555;background:#f2f2f2;"
+              }`}
+            >
+              {o.label}
+            </a>
+          ))}
+        </nav>
+      </div>
+    )}
     <slot />
     {designerEdit && (
       <script is:inline>

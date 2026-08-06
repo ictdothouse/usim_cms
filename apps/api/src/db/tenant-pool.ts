@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { Pool, type PoolClient } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema.js";
@@ -398,6 +398,117 @@ export async function deleteRole(id: string) {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
     await db.delete(schema.roles).where(eq(schema.roles.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+export async function listLanguages() {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    return db.select().from(schema.languages).orderBy(asc(schema.languages.sortOrder), asc(schema.languages.label));
+  } finally {
+    client.release();
+  }
+}
+
+export async function createLanguage(code: string, label: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.insert(schema.languages).values({ code, label });
+  } finally {
+    client.release();
+  }
+}
+
+// Blocks disabling/deleting the last enabled row — leaving zero enabled
+// languages would mean neither content author nor visitor has a usable one.
+async function guardLastEnabled(db: NodePgDatabase<typeof schema>, id: string, willDisable: boolean) {
+  if (!willDisable) return null;
+  const enabledRows = await db.select({ id: schema.languages.id }).from(schema.languages).where(eq(schema.languages.enabled, true));
+  if (enabledRows.length === 1 && enabledRows[0].id === id) {
+    return "at least one language must stay enabled";
+  }
+  return null;
+}
+
+export async function updateLanguage(id: string, patch: { label?: string; enabled?: boolean; sortOrder?: number }) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    if (patch.enabled === false) {
+      const guardError = await guardLastEnabled(db, id, true);
+      if (guardError) return { error: guardError };
+    }
+    await db.update(schema.languages).set(patch).where(eq(schema.languages.id, id));
+    return { error: null };
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteLanguage(id: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.select({ enabled: schema.languages.enabled }).from(schema.languages).where(eq(schema.languages.id, id));
+    if (row) {
+      const guardError = await guardLastEnabled(db, id, row.enabled);
+      if (guardError) return { error: guardError };
+    }
+    await db.delete(schema.languages).where(eq(schema.languages.id, id));
+    return { error: null };
+  } finally {
+    client.release();
+  }
+}
+
+// i18n Phase 2 — per-tenant enabled-language subset, re-intersected with the
+// currently globally-enabled set on every read (see schema.ts's
+// tenantLanguages comment for why).
+export async function getTenantLanguageSelection(tenantHost: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const allEnabled = await db
+      .select()
+      .from(schema.languages)
+      .where(eq(schema.languages.enabled, true))
+      .orderBy(asc(schema.languages.sortOrder), asc(schema.languages.label));
+    const [row] = await db
+      .select({ enabledCodes: schema.tenantLanguages.enabledCodes, showHeaderSwitcher: schema.tenantLanguages.showHeaderSwitcher })
+      .from(schema.tenantLanguages)
+      .where(eq(schema.tenantLanguages.tenantHost, tenantHost));
+    const selectedCodes = row && row.enabledCodes.length > 0 ? row.enabledCodes : null;
+    return { allEnabled, selectedCodes, showHeaderSwitcher: row?.showHeaderSwitcher ?? false };
+  } finally {
+    client.release();
+  }
+}
+
+// codes=[] stores an explicit empty override, which getTenantLanguageSelection
+// already treats the same as "no row" (selectedCodes: null, inherit all) —
+// so this always upserts rather than deleting, keeping showHeaderSwitcher
+// intact even when the language subset itself is cleared back to "inherit".
+export async function setTenantLanguageSelection(tenantHost: string, codes: string[], showHeaderSwitcher: boolean) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .insert(schema.tenantLanguages)
+      .values({ tenantHost, enabledCodes: codes, showHeaderSwitcher })
+      .onConflictDoUpdate({
+        target: schema.tenantLanguages.tenantHost,
+        set: { enabledCodes: codes, showHeaderSwitcher, updatedAt: new Date() },
+      });
   } finally {
     client.release();
   }

@@ -5,7 +5,7 @@ import TextBlock from "../components/TextBlock.astro";
 import ImageBlock from "../components/ImageBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
-import { getPageBySlug, getTheme } from "../lib/api";
+import { getPageBySlug, getTheme, getLanguages, getPageTranslations } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Single instance, ~50 real department domains: tenant identity is always
@@ -45,8 +45,23 @@ const fonts = collectFonts(page.layout);
 // a real visitor, regardless of URL tampering (a public request has no
 // previewToken at all).
 const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boolean(previewToken);
+
+// i18n Phase 4 — same shape as posts/[slug].astro's own langSwitcher.
+const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
+const pageTranslations = showHeaderSwitcher ? await getPageTranslations(tenantHost, page.id) : [];
+const pageLangLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
+const langSwitcher =
+  pageTranslations.length > 0
+    ? {
+        current: page.language,
+        options: [
+          { code: page.language ?? "", label: pageLangLabel(page.language), href: `/${page.slug}` },
+          ...pageTranslations.map((tr) => ({ code: tr.language ?? "", label: pageLangLabel(tr.language), href: `/${tr.slug}` })),
+        ],
+      }
+    : null;
 ---
-<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts} designerEdit={designerEdit}>
+<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts} designerEdit={designerEdit} langSwitcher={langSwitcher}>
   {page.layout.map((block, b) => {
     switch (block.type) {
       case "section":
