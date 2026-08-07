@@ -69,78 +69,104 @@ a silent no-op under a superuser connection. That role also needs `CREATEDB` (se
   403'd with no way to fix it from the UI. Fixed by adding it there too; the lesson (worth remembering
   for any future permission string) is that a permission only really exists once it's in BOTH lists, not
   just the server-side enum.
-- i18n Phase 3: per-post language + a real, separate translation post per language, plus an optional
-  public header switcher. `posts` gained `language` (a code from this tenant's enabled set, validated in
-  `postsBeforeChange`, `null` until an author picks one) and `translationGroupId` (uuid,
-  `migrations/0013_posts_i18n.sql`) — a translation is a full independent post row, not a per-language
-  field on one row: it gets its own slug/status/history/publish lifecycle for free, fitting the existing
-  one-post-one-body schema instead of fighting it. `translationGroupId` is system-managed only (absent
-  from `postsCollection`'s `createSchema`, so a client PATCH/POST can never set it) — set lazily, the
-  first time a translation is actually created: `POST /api/posts/:id/translations` (hand-written in
-  `index.ts`, same "generic CRUD doesn't cover this" convention as the revisions/preview-token routes)
-  copies title/body/excerpt/banner/category/tags/show* from the source into a new `status: "draft"` post,
-  slugged `<source-slug>-<language>` (de-duplicated with a `-2`/`-3` suffix loop if that collides), and —
-  if the source had no `translationGroupId` yet — stamps the source's own `id` onto both rows as the
-  shared group id. Content is copied verbatim for now ("Auto-translate" is a stub, per this session's own
-  earlier decision to defer picking a real translation API/budget — see
-  `docs/superpowers/specs/2026-08-06-global-language-registry-design.md`); the new post is a normal,
-  independently-editable draft afterward, satisfying "auto translate can be edited manually by the
-  editor" from the original ask without needing any real translation call yet. `GET
-  /api/posts/:id/translations` is registered TWICE off one shared `fetchTranslationSiblings` helper:
-  public (published-only, `apps/frontend`'s switcher) and protected (every status, `PostEditorPage`'s
-  Translations panel — a translator needs to reach a draft sibling). `PostEditorPage` gained a Language
-  `<select>` (options = this tenant's enabled languages, i.e. Phase 2's `getTenantLanguages`) next to
-  Category, and a Translations panel listing siblings + an "Auto-translate to..." picker restricted to
-  languages neither the current post nor any existing sibling already uses — picking one navigates
-  straight into the new draft's own editor. The header switcher is the tenant-level `showHeaderSwitcher`
-  boolean added to `tenant_languages` (Phase 2's table, `ALTER ... ADD COLUMN IF NOT EXISTS` in
-  `bootstrap-public.sql`) via the same checkbox-list form (`TenantLanguagesForm`) — but it only actually
-  renders anything on a given page when that page's post genuinely HAS published translation siblings;
-  turning the setting on for a site with no translated posts yet changes nothing visible, by design (this
-  repo's "let the editor tell the truth, don't fake a control for something that doesn't exist yet"
-  convention, same reasoning as the slider's collision-avoidance non-fix earlier in this file). Public
-  `GET /api/languages` (no auth) exposes just `{enabled: {code,label}[], showHeaderSwitcher}` for
-  `apps/frontend` to decide whether to even bother fetching translations. `BaseLayout.astro` gained an
-  optional `langSwitcher` prop (`{current, options: {code,label,href}[]} | null`, default `null` — every
-  other caller of `BaseLayout` is unaffected); `posts/[slug].astro` is the only page that ever populates
-  it, rendering a small flex header row (logo left, language pills right) only when there are 2+ options
-  — plain pages (`[...slug].astro`) have no per-language field at all yet, so they never get a switcher,
-  an intentional scope limit, not an oversight: extending this to pages would need the same
-  language/translationGroupId treatment `posts` just got, not yet asked for.
-- **Real crash hit shipping Phase 3, worth remembering for any future public+protected route pair**:
-  `GET /api/posts/:id/translations` was registered on BOTH `publicScope` and `protectedScope` with the
-  identical path — Fastify's route table is global across the whole app regardless of `.register()`
-  encapsulation (encapsulation scopes decorators/hooks, not route uniqueness), so this is a fatal
-  `FST_ERR_DUPLICATED_ROUTE` on every boot, and the entire API (not just this one endpoint) was down
-  until fixed. There is exactly one such route now, in `publicScope`, elevated inline (a valid Bearer
-  session for this tenant, or superadmin, sees every status; anyone else — including a real visitor —
-  only sees published siblings) — the same shape `elevateIfAuthenticated` (generic-crud.ts) already uses
-  for every other draft-visibility check, just inlined here since this route isn't generic-crud's list
-  route. `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes` never hit this because they
-  deliberately only ever put GET in public and POST/PATCH/DELETE in protected for the same collection —
-  never the same method+path in both. Any future hand-written route that wants "public read, richer for
-  an authenticated caller" must follow this one-route-elevated-inline shape, never a public+protected pair.
-- i18n Phase 4: pages get the exact same treatment posts got in Phase 3 — `pages.language`/
-  `pages.translationGroupId` (`migrations/0014_pages_i18n.sql`, same rules: system-managed only, absent
-  from `pagesCollection`'s `createSchema`), `pagesBeforeChange` validates `language` against the tenant's
-  enabled set (made `async` for this, same as `postsBeforeChange`), a single elevated `GET
-  /api/pages/:id/translations` (`fetchPageTranslationSiblings` — not generalized into one shared function
-  across two different tables for two call sites, same practical-duplication convention as other small
-  shared shapes between posts/pages elsewhere in this file) and `POST /api/pages/:id/translations`
-  (`pages.create`-gated, copies title/layout/settings/bannerImageUrl into a new draft, lazy
-  `translationGroupId`, slug `<source>-<language>` de-duplicated — same stub-auto-translate approach as
-  posts). The admin side differs from posts' UI only because pages have no separate "editor page" wrapper
-  the way `PostEditorPage` is — Designer.tsx IS the page editor, so the Language `<select>` +
-  Translations list live in the Inspector's "nothing selected" (page-level) panel, right below the
-  existing default-column-gap field, using plain `<select>` elements (Designer.tsx doesn't import shadcn
-  Select at all, unlike App.tsx/PostEditorPage) to match this file's own established Inspector control
-  style. `Designer` gained a required `onOpenTranslation: (pageId: string) => void` prop (its one caller,
-  `PageDesignerRoute` in App.tsx, passes `(newId) => navigate(\`/content/pages/${newId}\`)`) since Designer
-  itself has no router access — picking "Auto-translate to..." navigates straight into the new draft's
-  own Designer session, same as PostEditorPage's translation picker does for posts.
-  `apps/frontend/[...slug].astro` (plain pages) gained the identical `langSwitcher` wiring
-  `posts/[slug].astro` already had — same `getLanguages`/`get*Translations` shape, same "only renders
-  when there are 2+ options" rule.
+- i18n Phase 3/4 (posts/pages get a language + translations) went through two real designs — the first
+  was built, shipped, then explicitly rejected by live feedback and replaced same-session. Documented
+  here as the CURRENT (corrected) design only; the rejected first cut (a separate post/page row per
+  language, linked by `translationGroupId`) is gone from the code and is not described below except where
+  its retired DB columns/lessons still matter.
+  **Current design — one row holds every language.** `posts`/`pages` each have `language` (a code from
+  this tenant's enabled set, validated in `postsBeforeChange`/`pagesBeforeChange`, `null` until an author
+  picks one — this is the row's own "base" language) and `translations` (jsonb, default `{}`,
+  `migrations/0016_content_translations.sql`) — every OTHER language's content, keyed by code, living on
+  this SAME row. For posts, a `translations[code]` entry is `{ title, excerpt, body }`; for pages it's
+  `{ layout }` (pages have no per-language title — Designer has no title-editing control at all, title is
+  set once at creation and shared across every language). `translations` is a normal client-writable
+  field (in both collections' `createSchema`, `{ type: "object" }` — the real shape isn't ajv-validated,
+  only checked in `beforeChange`) saved through the ordinary `PATCH /api/posts/:id`/`PATCH /api/pages/:id`
+  generic-crud routes — there is no dedicated translation-create endpoint, because there is nothing to
+  create: adding a language just adds a key to this row's own jsonb column. `postsBeforeChange` sanitizes
+  `translations[code].body` through the exact same `sanitizePostBodyHtml` helper (extracted from the old
+  inline call) as the top-level `body` — a translation's HTML is exactly as much of a trust boundary as
+  the base one. `pagesBeforeChange` likewise runs `validateLayout` on every `translations[code].layout`,
+  not just the top-level `layout`.
+  **Admin editor — one editor, a language pill switcher, never a new row.** `PostEditorPage` holds a
+  `content: Record<string, {title,excerpt,body}>` map plus `activeLang` state; `BASE_LANG` (a sentinel
+  string, never a real language code) is the key for the row's own base content. The visible title/
+  excerpt/BlockNote-editor fields always reflect `content[activeLang]`. Clicking a language pill
+  (`clickLanguagePill` → `switchLanguage`) snapshots the currently-visible fields into
+  `content[activeLang]` (so nothing typed is lost), then loads `content[target]` into those same fields —
+  stub-copying the just-left slot verbatim into `target` first if `target` has no content yet (this is
+  "Auto-translate": a real translation API is still a follow-up, per
+  `docs/superpowers/specs/2026-08-06-global-language-registry-design.md`). `save()` commits whatever slot
+  is on screen into `content`, then splits it: `content[BASE_LANG]` becomes the top-level `title`/
+  `excerpt`/`body` PATCH fields, everything else becomes the `translations` PATCH field — one
+  `updatePost` call, one row, always. Designer's `PageDesignerRoute` mirrors this exactly with
+  `content: Record<string, Block[]>` (no title/excerpt, `blocks` IS the currently-active language's
+  layout) and `switchPageLanguage`/`clickPageLanguagePill`; switching also resets the undo stack
+  (`history.current`/`future.current` refs) since undo is scoped to whichever language's layout is
+  currently open. The post-load effect that resyncs `title`/`excerpt`/`content`/etc from the fetched post
+  is keyed on `post?.id`, not the `post` object itself — `save()` always refreshes the whole posts list
+  afterward, which gives `post` a new object identity for the SAME row; keying on the object would have
+  re-fired this effect after every save and snapped `activeLang` back to `BASE_LANG` mid-edit.
+  **Why this replaced the separate-row design**: the first cut spawned a whole new post/page per
+  language (own slug/status/id), which visibly multiplied the content list (a screenshot showed a dozen
+  near-duplicate rows from testing) and required navigating away to a different editor session just to
+  add or review a translation. Live feedback ("taknak mcm ni, dia jd duplicate post... tapi kat post
+  editor boleh switch") asked for exactly one row per post/page with an in-editor switch instead — this
+  is that correction. The retired `posts.translationGroupId`/`pages.translationGroupId` columns
+  (`migrations/0013_posts_i18n.sql`/`0014_pages_i18n.sql`) are left in the DB, unused by any code, rather
+  than dropped — a harmless nullable leftover, matching this codebase's general non-destructive-migration
+  convention.
+  **Public frontend**: `apps/frontend`'s `Post`/`Page` types gained `translations`; `resolvePostContent(post,
+  code)`/`resolvePageLayout(page, code)` (`lib/api.ts`) pick the base fields/layout when `code` is
+  null/matches the row's own `language`/has no matching key, otherwise that language's stored entry.
+  `posts/[slug].astro`/`[...slug].astro` read a `?lang=` query param and resolve through these — the SAME
+  slug/row serves every language now, so the header switcher's option hrefs are `?lang=<code>` on that one
+  URL (base language omits the param), never a link to a different post/page. `BaseLayout.astro`'s
+  `langSwitcher` prop shape (`{current, options: {code,label,href}[]} | null`) is unchanged from the
+  original design; it still only renders when there are 2+ options and `showHeaderSwitcher` is on.
+- **Fastify route-table lesson (from the retired design, still worth keeping)**: registering the same
+  GET path on both `publicScope` and `protectedScope` is a fatal `FST_ERR_DUPLICATED_ROUTE` at boot —
+  Fastify's route table is global across the whole app regardless of `.register()` encapsulation
+  (encapsulation scopes decorators/hooks, not route uniqueness). This bit the original
+  `GET /api/posts/:id/translations` (now removed along with the rest of that design). Any future
+  hand-written route that wants "public read, richer for an authenticated caller" must be ONE route with
+  inline elevation (see `elevateIfAuthenticated` in generic-crud.ts for the pattern), never a
+  public+protected pair on the same path.
+- i18n Phase 5 (WPML-style opt-in, requested before the design correction above and still current): a
+  tick-first master switch at two levels, gating the language pill switcher that would otherwise be
+  offered any time a tenant had 2+ languages. `tenant_languages.multilangEnabled` (migration: `ALTER` in
+  `bootstrap-public.sql`, boolean, default `false`) is the site-wide switch a webmaster/superadmin flips
+  in `TenantLanguagesForm` (`apps/admin/src/App.tsx`) before anything else in that form becomes usable —
+  the language-subset checkboxes and the header-switcher checkbox are `disabled`+dimmed while it's off,
+  though the codes/showHeaderSwitcher values themselves are untouched so re-enabling restores the prior
+  selection. `posts.multilangEnabled`/`pages.multilangEnabled` (`migrations/0015_multilang_toggle.sql`,
+  same boolean-default-false shape) are the per-row switch: a checkbox next to that row's own Language
+  field in `PostEditorPage`/Designer's Inspector, only rendered at all once the site switch is on. The
+  pill switcher is only rendered when BOTH switches are true — `siteMultilangEnabled && multilangEnabled`
+  in `PostEditorPage`, `siteMultilangEnabled && pageMultilangEnabled` in Designer's Inspector — so a
+  post/page with its own switch off falls back to a plain single-language `<select>`/`<select>`, matching
+  the ask ("tick dulu nak multilanguage ke tak" before any translate action appears). `getTenantLanguageSelection`/
+  `setTenantLanguageSelection` (`tenant-pool.ts`) both gained a `multilangEnabled` field/param alongside the
+  existing `showHeaderSwitcher` one, read/written together in the same upsert so toggling one never clobbers
+  the other. Public `GET /api/languages` deliberately does NOT expose `multilangEnabled` (it's an authoring-
+  side gate, not something the public frontend's language-switcher decision needs) — only the protected
+  `GET/PUT /api/tenant-languages` carries it.
+- i18n Phase 5 follow-up (same session, requested right after shipping): `tenant_languages.defaultLanguage`
+  (nullable text, `ALTER` in `bootstrap-public.sql`) — the language a post/page's own Language field
+  defaults to when never explicitly set, so new content follows the site's main language automatically
+  while still being freely overridable per-item. Picked from a `<select>` in `TenantLanguagesForm` scoped
+  to the currently-*selected* subset (`allEnabled.filter(l => selected.has(l.code))`, not the full
+  globally-enabled list — a default outside what this tenant actually offers would be meaningless);
+  `save()` additionally drops it to `null` if the chosen code got deselected from the subset in the same
+  edit, rather than sending a now-invalid value the server would reject. `getTenantLanguageSelection`
+  re-validates it against `allEnabled` on every read the same way `selectedCodes` already does (a global
+  disable of that code silently clears the default, never a dangling reference). `PUT /api/tenant-languages`
+  validates a submitted `defaultLanguage` is a member of the request's own `codes` (or of `allEnabled` when
+  `codes` is empty/"inherit all"). Applied in `PostEditorPage`/Designer via a small effect keyed on
+  `siteDefaultLanguage`/`page.id` that ONLY fires `setLanguage`/`setPageLanguage` when that post/page's own
+  `language` is still null — once a row has ever been saved with an explicit language (including
+  explicitly "None"), a later-changed or newly-set site default never silently overwrites it.
 - Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
   the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
   `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is

@@ -627,7 +627,6 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
       token={token}
       t={t}
       onClose={() => navigate("/content/pages")}
-      onOpenTranslation={(newId) => navigate(`/content/pages/${newId}`)}
     />
   );
 }
@@ -3172,6 +3171,12 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   const [allEnabled, setAllEnabled] = useState<api.SiteLanguage[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showSwitcher, setShowSwitcher] = useState(false);
+  // i18n Phase 5 — site-wide master switch, ticked first before any post/page
+  // on this tenant may turn on its own multilangEnabled.
+  const [multilangEnabled, setMultilangEnabled] = useState(false);
+  // The language new posts/pages fall back to when their own Language field
+  // is unset — "" = no default, matches the old "None" behavior.
+  const [defaultLanguage, setDefaultLanguage] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -3184,6 +3189,8 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
         setAllEnabled(d.allEnabled);
         setSelected(new Set(d.selectedCodes ?? d.allEnabled.map((l) => l.code)));
         setShowSwitcher(d.showHeaderSwitcher);
+        setMultilangEnabled(d.multilangEnabled);
+        setDefaultLanguage(d.defaultLanguage ?? "");
       })
       .catch((e) => setErr((e as Error).message));
   }, [tenantHost, token]);
@@ -3207,7 +3214,10 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
     setMsg(null);
     try {
       const codes = selected.size === allEnabled.length ? [] : Array.from(selected);
-      await api.putTenantLanguages(tenantHost, token, codes, showSwitcher);
+      // A default outside the persisted subset is dropped rather than sent —
+      // avoids the server rejecting an otherwise-valid save over a stale pick.
+      const effectiveDefault = defaultLanguage && selected.has(defaultLanguage) ? defaultLanguage : null;
+      await api.putTenantLanguages(tenantHost, token, codes, showSwitcher, multilangEnabled, effectiveDefault);
       setMsg(t("tenant-languages-saved"));
     } catch (e) {
       setErr((e as Error).message);
@@ -3222,18 +3232,36 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
       <p className="text-xs text-sub">{t("tenant-languages-desc")}</p>
       {err && <p className="text-xs text-red-600">{err}</p>}
       {msg && <p className="text-xs text-green-700">{msg}</p>}
-      <div className="space-y-1.5">
+      <label className="flex items-center gap-2 rounded-md border border-line/30 bg-canvas/40 p-2 text-xs font-semibold text-ink">
+        <input type="checkbox" checked={multilangEnabled} onChange={(e) => setMultilangEnabled(e.target.checked)} />
+        {t("tenant-languages-multilang-enable")}
+      </label>
+      <div className={`space-y-1.5 ${multilangEnabled ? "" : "pointer-events-none opacity-40"}`}>
         {allEnabled.map((l) => (
           <label key={l.code} className="flex items-center gap-2 text-xs text-ink">
-            <input type="checkbox" checked={selected.has(l.code)} onChange={() => toggle(l.code)} />
+            <input type="checkbox" checked={selected.has(l.code)} onChange={() => toggle(l.code)} disabled={!multilangEnabled} />
             {l.label} <span className="font-mono text-[10px] text-sub">{l.code}</span>
           </label>
         ))}
+        <label className="flex items-center gap-2 text-xs text-ink">
+          <input type="checkbox" checked={showSwitcher} onChange={(e) => setShowSwitcher(e.target.checked)} disabled={!multilangEnabled} />
+          {t("tenant-languages-show-switcher")}
+        </label>
+        <label className="block pt-1 text-xs text-ink">
+          <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-languages-default-language")}</span>
+          <select
+            value={defaultLanguage}
+            onChange={(e) => setDefaultLanguage(e.target.value)}
+            disabled={!multilangEnabled}
+            className="w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+          >
+            <option value="">{t("posts-language-none")}</option>
+            {allEnabled.filter((l) => selected.has(l.code)).map((l) => (
+              <option key={l.code} value={l.code}>{l.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
-      <label className="flex items-center gap-2 text-xs text-ink">
-        <input type="checkbox" checked={showSwitcher} onChange={(e) => setShowSwitcher(e.target.checked)} />
-        {t("tenant-languages-show-switcher")}
-      </label>
       <button onClick={() => void save()} disabled={busy} className={btnPrimary}>
         {busy ? t("settings-busy") : t("tenant-languages-save-btn")}
       </button>

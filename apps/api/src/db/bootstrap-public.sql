@@ -96,3 +96,10 @@ CREATE TABLE IF NOT EXISTS "public"."tenant_languages" (
 -- Upgrade path for control-plane DBs bootstrapped before show_header_switcher
 -- existed (i18n Phase 3).
 ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "show_header_switcher" boolean DEFAULT false NOT NULL;
+
+-- i18n Phase 5: site-wide multi-language master switch, off by default.
+ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "multilang_enabled" boolean DEFAULT false NOT NULL;
+
+-- i18n Phase 5 follow-up: default language new posts/pages fall back to
+-- when their own Language field is unset. Nullable — no default set yet.
+ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "default_language" text;

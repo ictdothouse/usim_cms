@@ -42,7 +42,6 @@ import {
   deleteLanguage,
   getTenantLanguageSelection,
   setTenantLanguageSelection,
-  type TenantDb,
   getMergedTheme,
   setTenantTheme,
 } from "./db/tenant-pool.js";
@@ -60,6 +59,7 @@ import {
   looksLikeDomain,
 } from "./backup.js";
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storage.js";
+import { translatePlainText, translateHtmlBody } from "./translate.js";
 
 // Fixed permission matrix (resource.action) a superadmin composes into named
 // roles (schema.ts's roles.permissions) and assigns per webmaster user — see
@@ -797,6 +797,16 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
     // instead of the 500 an unannotated throw would produce.
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
   }
+  // i18n Phase 5 — each translations[code].layout is just as much a raw
+  // layout tree as the top-level one above, and gets the exact same check.
+  if (record.translations && typeof record.translations === "object") {
+    for (const entry of Object.values(record.translations as Record<string, unknown>)) {
+      const layout = (entry as Record<string, unknown> | null)?.layout;
+      if (layout === undefined) continue;
+      const err = validateLayout(layout);
+      if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+    }
+  }
   // i18n Phase 4 — same validation/thrown-.statusCode convention as
   // postsBeforeChange's own language check.
   if (typeof record.language === "string") {
@@ -829,6 +839,8 @@ const pagesCollection: CollectionConfig = {
         properties: { gap: { type: "string", pattern: GAP_PATTERN } },
       },
       language: { type: ["string", "null"] },
+      multilangEnabled: { type: "boolean" },
+      translations: { type: "object" },
     },
   },
   shareable: {
@@ -850,6 +862,63 @@ const pagesCollection: CollectionConfig = {
 // this trust boundary on every write, whatever the client sent. Author is
 // stamped once, on create only (req.method — PATCH never overwrites it), so
 // editing someone else's post never reassigns authorship.
+//
+// bookmarkCard's toExternalHTML (blocknote/bookmarkCard.tsx) encodes the
+// block as data-bookmark-* attrs + a fixed, hardcoded inline style on the
+// a/img/div/span it renders — both are needed for parse() to reconstitute
+// the block on reopen and for the public frontend to render the card's
+// layout, so they must survive this trust-boundary sanitize on every save.
+// `style` isn't allowed unrestricted (that would let arbitrary saved HTML
+// carry CSS-injection payloads, e.g. url()-based exfiltration) —
+// allowedStyles below whitelists only the exact property/value shapes
+// BOOKMARK_CARD_STYLE ever emits. Shared by the top-level `body` and every
+// i18n Phase 5 `translations[code].body` — a translation's body is exactly
+// as much of a trust boundary as the base one.
+function sanitizePostBodyHtml(html: string): string {
+  const bookmarkCardStyleValue = [/^inherit$|^none$|^flex$|^inline-block$|^cover$|^uppercase$/, /^-?\d+(\.\d+)?(px|%)?$/, /^#[0-9a-fA-F]{3,8}$/, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
+  return sanitizeHtml(html, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
+    allowedAttributes: {
+      ...sanitizeHtml.defaults.allowedAttributes,
+      a: [
+        ...sanitizeHtml.defaults.allowedAttributes.a,
+        "style",
+        "data-bookmark-type",
+        "data-bookmark-id",
+        "data-bookmark-title",
+        "data-bookmark-excerpt",
+        "data-bookmark-image",
+        "data-bookmark-url",
+      ],
+      img: ["src", "alt", "style"],
+      div: ["style"],
+      span: ["style"],
+    },
+    allowedStyles: {
+      "*": {
+        display: bookmarkCardStyleValue,
+        gap: bookmarkCardStyleValue,
+        border: bookmarkCardStyleValue,
+        "border-radius": bookmarkCardStyleValue,
+        padding: bookmarkCardStyleValue,
+        "text-decoration": bookmarkCardStyleValue,
+        color: bookmarkCardStyleValue,
+        width: bookmarkCardStyleValue,
+        height: bookmarkCardStyleValue,
+        "object-fit": bookmarkCardStyleValue,
+        "flex-shrink": bookmarkCardStyleValue,
+        "min-width": bookmarkCardStyleValue,
+        flex: bookmarkCardStyleValue,
+        "font-size": bookmarkCardStyleValue,
+        "font-weight": bookmarkCardStyleValue,
+        "text-transform": bookmarkCardStyleValue,
+        "margin-bottom": bookmarkCardStyleValue,
+        "margin-top": bookmarkCardStyleValue,
+      },
+    },
+  });
+}
+
 const postsBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
   // i18n Phase 3 — same thrown-.statusCode convention as pagesBeforeChange's
@@ -864,58 +933,11 @@ const postsBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
   // JSON gives an ISO string; Drizzle timestamp columns need a Date.
   if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
   record.updatedAt = new Date();
-  if (typeof record.body === "string") {
-    // bookmarkCard's toExternalHTML (blocknote/bookmarkCard.tsx) encodes the
-    // block as data-bookmark-* attrs + a fixed, hardcoded inline style on the
-    // a/img/div/span it renders — both are needed for parse() to reconstitute
-    // the block on reopen and for the public frontend to render the card's
-    // layout, so they must survive this trust-boundary sanitize on every
-    // save. `style` isn't allowed unrestricted (that would let arbitrary
-    // saved HTML carry CSS-injection payloads, e.g. url()-based
-    // exfiltration) — allowedStyles below whitelists only the exact
-    // property/value shapes BOOKMARK_CARD_STYLE ever emits.
-    const bookmarkCardStyleValue = [/^inherit$|^none$|^flex$|^inline-block$|^cover$|^uppercase$/, /^-?\d+(\.\d+)?(px|%)?$/, /^#[0-9a-fA-F]{3,8}$/, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
-    record.body = sanitizeHtml(record.body, {
-      allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
-      allowedAttributes: {
-        ...sanitizeHtml.defaults.allowedAttributes,
-        a: [
-          ...sanitizeHtml.defaults.allowedAttributes.a,
-          "style",
-          "data-bookmark-type",
-          "data-bookmark-id",
-          "data-bookmark-title",
-          "data-bookmark-excerpt",
-          "data-bookmark-image",
-          "data-bookmark-url",
-        ],
-        img: ["src", "alt", "style"],
-        div: ["style"],
-        span: ["style"],
-      },
-      allowedStyles: {
-        "*": {
-          display: bookmarkCardStyleValue,
-          gap: bookmarkCardStyleValue,
-          border: bookmarkCardStyleValue,
-          "border-radius": bookmarkCardStyleValue,
-          padding: bookmarkCardStyleValue,
-          "text-decoration": bookmarkCardStyleValue,
-          color: bookmarkCardStyleValue,
-          width: bookmarkCardStyleValue,
-          height: bookmarkCardStyleValue,
-          "object-fit": bookmarkCardStyleValue,
-          "flex-shrink": bookmarkCardStyleValue,
-          "min-width": bookmarkCardStyleValue,
-          flex: bookmarkCardStyleValue,
-          "font-size": bookmarkCardStyleValue,
-          "font-weight": bookmarkCardStyleValue,
-          "text-transform": bookmarkCardStyleValue,
-          "margin-bottom": bookmarkCardStyleValue,
-          "margin-top": bookmarkCardStyleValue,
-        },
-      },
-    });
+  if (typeof record.body === "string") record.body = sanitizePostBodyHtml(record.body);
+  if (record.translations && typeof record.translations === "object") {
+    for (const entry of Object.values(record.translations as Record<string, Record<string, unknown>>)) {
+      if (entry && typeof entry.body === "string") entry.body = sanitizePostBodyHtml(entry.body);
+    }
   }
   if (req.method === "POST" && req.user) {
     record.authorId = req.user.userId;
@@ -988,6 +1010,8 @@ const postsCollection: CollectionConfig = {
       categoryId: { type: ["string", "null"] },
       tags: { type: "array", items: { type: "string" } },
       language: { type: ["string", "null"] },
+      multilangEnabled: { type: "boolean" },
+      translations: { type: "object" },
     },
   },
   shareable: {
@@ -1007,36 +1031,6 @@ const postsCollection: CollectionConfig = {
     afterRead: postsAfterRead,
   },
 };
-
-// i18n Phase 3 — used by the single GET /api/posts/:id/translations route
-// (elevated public, see below — Fastify's route table is global, so this
-// path can't also exist as a separate protected route) with publishedOnly
-// toggled by that route's own auth check, and by the POST below when
-// checking for an already-existing sibling. A post with no
-// translationGroupId has no siblings by definition.
-async function fetchTranslationSiblings(db: TenantDb, groupId: string | null, excludeId: string, publishedOnly: boolean) {
-  if (!groupId) return [];
-  const conditions = [eq(schema.posts.translationGroupId, groupId), sql`${schema.posts.id} != ${excludeId}`];
-  if (publishedOnly) conditions.push(eq(schema.posts.status, "published"));
-  return db
-    .select({ id: schema.posts.id, slug: schema.posts.slug, title: schema.posts.title, language: schema.posts.language, status: schema.posts.status })
-    .from(schema.posts)
-    .where(and(...conditions));
-}
-
-// i18n Phase 4 — pages' own version of fetchTranslationSiblings above. Not
-// generalized into one shared function across two different tables for two
-// call sites — same practical-duplication convention this codebase already
-// uses for other small shared shapes between posts/pages.
-async function fetchPageTranslationSiblings(db: TenantDb, groupId: string | null, excludeId: string, publishedOnly: boolean) {
-  if (!groupId) return [];
-  const conditions = [eq(schema.pages.translationGroupId, groupId), sql`${schema.pages.id} != ${excludeId}`];
-  if (publishedOnly) conditions.push(eq(schema.pages.status, "published"));
-  return db
-    .select({ id: schema.pages.id, slug: schema.pages.slug, title: schema.pages.title, language: schema.pages.language, status: schema.pages.status })
-    .from(schema.pages)
-    .where(and(...conditions));
-}
 
 const categoriesBeforeChange = (data: unknown) => {
   const record = data as Record<string, unknown>;
@@ -1127,46 +1121,6 @@ await app.register(async (publicScope) => {
     return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher };
   });
 
-  // Fastify's route table is global regardless of encapsulation — a GET on
-  // this exact path can only be registered once across the whole app, so
-  // there's one route here (not a public + protected pair like the
-  // POST /api/posts/:id/translations below), elevated the same way
-  // elevateIfAuthenticated (generic-crud.ts) does for every other
-  // draft-visibility check: a valid Bearer session for THIS tenant sees
-  // every status (PostEditorPage's Translations panel); anyone else,
-  // including a real website visitor, only ever sees published siblings.
-  publicScope.get("/api/posts/:id/translations", async (req) => {
-    const { id } = req.params as { id: string };
-    const auth = req.headers.authorization;
-    let publishedOnly = true;
-    if (auth?.startsWith("Bearer ")) {
-      const session = verifySession(auth.slice("Bearer ".length));
-      if (session && (session.role === "superadmin" || session.tenantHost === req.tenantHost)) {
-        publishedOnly = false;
-      }
-    }
-    const [row] = await req.db.select({ translationGroupId: schema.posts.translationGroupId }).from(schema.posts).where(sql`id = ${id}`);
-    const siblings = await fetchTranslationSiblings(req.db, row?.translationGroupId ?? null, id, publishedOnly);
-    return { translations: siblings };
-  });
-
-  // i18n Phase 4 — same single-route-elevated shape as posts' own
-  // translations route above (never a public+protected pair, see that
-  // route's comment for why).
-  publicScope.get("/api/pages/:id/translations", async (req) => {
-    const { id } = req.params as { id: string };
-    const auth = req.headers.authorization;
-    let publishedOnly = true;
-    if (auth?.startsWith("Bearer ")) {
-      const session = verifySession(auth.slice("Bearer ".length));
-      if (session && (session.role === "superadmin" || session.tenantHost === req.tenantHost)) {
-        publishedOnly = false;
-      }
-    }
-    const [row] = await req.db.select({ translationGroupId: schema.pages.translationGroupId }).from(schema.pages).where(sql`id = ${id}`);
-    const siblings = await fetchPageTranslationSiblings(req.db, row?.translationGroupId ?? null, id, publishedOnly);
-    return { translations: siblings };
-  });
 });
 
 // Protected scope: tenant resolution + login required — this is what the
@@ -1192,64 +1146,6 @@ await app.register(async (protectedScope) => {
       exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
     });
     return { token };
-  });
-
-  // i18n Phase 4 — pages' own "Auto-translate", same stub/copy-verbatim
-  // approach and same lazy translationGroupId-on-first-use as posts' own
-  // POST /api/posts/:id/translations below.
-  protectedScope.post("/api/pages/:id/translations", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.create")) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    const { id } = req.params as { id: string };
-    const { language } = req.body as { language?: string };
-    if (!language) {
-      reply.code(400);
-      return { error: "language required" };
-    }
-    const { allEnabled } = await getTenantLanguageSelection(req.tenantHost);
-    if (!allEnabled.some((l) => l.code === language)) {
-      reply.code(400);
-      return { error: "language must be one of this site's enabled languages" };
-    }
-    const [source] = await req.db.select().from(schema.pages).where(sql`id = ${id}`);
-    if (!source) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    if (source.language === language) {
-      reply.code(400);
-      return { error: "source page is already in this language" };
-    }
-    const siblings = await fetchPageTranslationSiblings(req.db, source.translationGroupId, id, false);
-    if (siblings.some((s) => s.language === language)) {
-      reply.code(400);
-      return { error: "a translation into this language already exists" };
-    }
-    const groupId = source.translationGroupId ?? source.id;
-    if (!source.translationGroupId) {
-      await req.db.update(schema.pages).set({ translationGroupId: groupId }).where(eq(schema.pages.id, source.id));
-    }
-    let slug = `${source.slug}-${language}`;
-    for (let n = 2; (await req.db.select({ id: schema.pages.id }).from(schema.pages).where(eq(schema.pages.slug, slug))).length > 0; n++) {
-      slug = `${source.slug}-${language}-${n}`;
-    }
-    const [item] = await req.db
-      .insert(schema.pages)
-      .values({
-        slug,
-        title: source.title,
-        layout: source.layout,
-        settings: source.settings,
-        bannerImageUrl: source.bannerImageUrl,
-        status: "draft",
-        language,
-        translationGroupId: groupId,
-      })
-      .returning();
-    reply.code(201);
-    return { item };
   });
 
   // Same shape as the pages preview-token route above — posts had none,
@@ -1330,77 +1226,6 @@ await app.register(async (protectedScope) => {
     return { item };
   });
 
-  // "Auto-translate" — stub for now (copies the source content verbatim into
-  // a new draft the editor then hand-edits; a real translation API is a
-  // follow-up once a provider/budget is picked, see
-  // docs/superpowers/specs/2026-08-06-global-language-registry-design.md).
-  // Always creates a real, independently-editable post row rather than a
-  // per-language field on the same row — fits this schema's existing
-  // one-post-one-body shape, and gives every translation its own history/
-  // revisions/publish lifecycle for free.
-  protectedScope.post("/api/posts/:id/translations", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "posts.create")) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    const { id } = req.params as { id: string };
-    const { language } = req.body as { language?: string };
-    if (!language) {
-      reply.code(400);
-      return { error: "language required" };
-    }
-    const { allEnabled } = await getTenantLanguageSelection(req.tenantHost);
-    if (!allEnabled.some((l) => l.code === language)) {
-      reply.code(400);
-      return { error: "language must be one of this site's enabled languages" };
-    }
-    const [source] = await req.db.select().from(schema.posts).where(sql`id = ${id}`);
-    if (!source) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    if (source.language === language) {
-      reply.code(400);
-      return { error: "source post is already in this language" };
-    }
-    const siblings = await fetchTranslationSiblings(req.db, source.translationGroupId, id, false);
-    if (siblings.some((s) => s.language === language)) {
-      reply.code(400);
-      return { error: "a translation into this language already exists" };
-    }
-    const groupId = source.translationGroupId ?? source.id;
-    if (!source.translationGroupId) {
-      await req.db.update(schema.posts).set({ translationGroupId: groupId }).where(eq(schema.posts.id, source.id));
-    }
-    let slug = `${source.slug}-${language}`;
-    for (let n = 2; (await req.db.select({ id: schema.posts.id }).from(schema.posts).where(eq(schema.posts.slug, slug))).length > 0; n++) {
-      slug = `${source.slug}-${language}-${n}`;
-    }
-    const [item] = await req.db
-      .insert(schema.posts)
-      .values({
-        slug,
-        title: source.title,
-        body: source.body,
-        excerpt: source.excerpt,
-        bannerImageUrl: source.bannerImageUrl,
-        categoryId: source.categoryId,
-        tags: source.tags,
-        showTags: source.showTags,
-        showCategory: source.showCategory,
-        showAuthor: source.showAuthor,
-        showPublishedDate: source.showPublishedDate,
-        status: "draft",
-        language,
-        translationGroupId: groupId,
-        authorId: req.user.userId,
-        authorEmail: req.user.email,
-      })
-      .returning();
-    reply.code(201);
-    return { item };
-  });
-
   // Cross-collection search for the admin's @-mention bookmark-card feature —
   // spans posts+pages, which generic-crud's per-table routes can't do. Own
   // tenant only, no shared_content.
@@ -1416,6 +1241,27 @@ await app.register(async (protectedScope) => {
       ...matchedPages.map((p) => ({ type: "page" as const, id: p.id, title: p.title, excerpt: null, bannerImageUrl: p.bannerImageUrl, url: `https://${req.tenantHost}/${p.slug}` })),
     ];
     return { items };
+  });
+
+  // i18n Phase 5 — real auto-translate for a post's own text fields
+  // (PostEditorPage's switchLanguage). No permission gate beyond a valid
+  // tenant session — this is a stateless utility call, it never reads/
+  // writes any row. `html: true` runs the body through translateHtmlBody
+  // (strips tags to plain text first, MyMemory has no HTML mode); anything
+  // else is treated as a plain string (title/excerpt).
+  protectedScope.post("/api/translate", async (req, reply) => {
+    const { text, target, source, html } = req.body as { text?: string; target?: string; source?: string; html?: boolean };
+    if (!text || !target) {
+      reply.code(400);
+      return { error: "text and target required" };
+    }
+    try {
+      const translated = html ? await translateHtmlBody(text, target, source || "auto") : await translatePlainText(text, target, source || "auto");
+      return { translated };
+    } catch (err) {
+      reply.code(502);
+      return { error: (err as Error).message };
+    }
   });
 
   // Hand-rolled GET, not registerPublicCollectionRoutes — templates have no
@@ -1634,8 +1480,8 @@ await app.register(async (protectedScope) => {
   // current selection; only languages.write can change it (superadmin
   // always bypasses, per hasPermission).
   protectedScope.get("/api/tenant-languages", async (req) => {
-    const { allEnabled, selectedCodes, showHeaderSwitcher } = await getTenantLanguageSelection(req.tenantHost);
-    return { allEnabled, selectedCodes, showHeaderSwitcher };
+    const { allEnabled, selectedCodes, showHeaderSwitcher, multilangEnabled, defaultLanguage } = await getTenantLanguageSelection(req.tenantHost);
+    return { allEnabled, selectedCodes, showHeaderSwitcher, multilangEnabled, defaultLanguage };
   });
 
   protectedScope.put("/api/tenant-languages", async (req, reply) => {
@@ -1643,20 +1489,32 @@ await app.register(async (protectedScope) => {
       reply.code(403);
       return { error: "missing languages.write permission" };
     }
-    const { codes, showHeaderSwitcher } = req.body as { codes?: string[]; showHeaderSwitcher?: boolean };
+    const { codes, showHeaderSwitcher, multilangEnabled, defaultLanguage } = req.body as {
+      codes?: string[];
+      showHeaderSwitcher?: boolean;
+      multilangEnabled?: boolean;
+      defaultLanguage?: string | null;
+    };
     if (!Array.isArray(codes)) {
       reply.code(400);
       return { error: "codes must be an array" };
     }
+    const { allEnabled } = await getTenantLanguageSelection(req.tenantHost);
     if (codes.length > 0) {
-      const { allEnabled } = await getTenantLanguageSelection(req.tenantHost);
       const validCodes = new Set(allEnabled.map((l) => l.code));
       if (codes.some((c) => !validCodes.has(c))) {
         reply.code(400);
         return { error: "codes must be a subset of the globally-enabled languages" };
       }
     }
-    await setTenantLanguageSelection(req.tenantHost, codes, Boolean(showHeaderSwitcher));
+    if (defaultLanguage != null) {
+      const selectable = codes.length > 0 ? codes : allEnabled.map((l) => l.code);
+      if (!selectable.includes(defaultLanguage)) {
+        reply.code(400);
+        return { error: "defaultLanguage must be one of this site's selected languages" };
+      }
+    }
+    await setTenantLanguageSelection(req.tenantHost, codes, Boolean(showHeaderSwitcher), Boolean(multilangEnabled), defaultLanguage ?? null);
     return { saved: true };
   });
 });

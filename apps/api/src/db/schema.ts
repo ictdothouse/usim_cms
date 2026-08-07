@@ -13,11 +13,19 @@ export const pages = pgTable("pages", {
   bannerImageUrl: text("banner_image_url"),
   status: text("status").notNull().default("draft"), // "draft" | "published"
   publishedAt: timestamp("published_at"),
-  // i18n Phase 4: same shape and same rules as posts.language/
-  // translationGroupId above — system-managed only, never accepted from a
-  // client PATCH/POST (absent from pagesCollection's createSchema).
+  // i18n Phase 5 (corrected design — see CLAUDE.md): one row per page, not
+  // one row per language. `language` is the language THIS row's own
+  // `layout`/`title` are written in (the "base"/default version); every
+  // OTHER language is a `{ layout }` entry in `translations`, keyed by
+  // language code, living on this SAME row — never a separate page.
+  // `title` and `settings` are shared across every language (Designer has
+  // no per-language title editor), only `layout` varies. `multilangEnabled`
+  // is the per-page opt-in gate (on top of tenant_languages' own site-wide
+  // switch) that decides whether the language-pill switcher is offered at
+  // all in Designer's Inspector.
   language: text("language"),
-  translationGroupId: uuid("translation_group_id"),
+  translations: jsonb("translations").notNull().default({}),
+  multilangEnabled: boolean("multilang_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -68,15 +76,23 @@ export const posts = pgTable("posts", {
   showCategory: boolean("show_category"),
   showAuthor: boolean("show_author"),
   showPublishedDate: boolean("show_published_date"),
-  // i18n Phase 3: null = tenant's language not yet chosen for this post.
-  // translationGroupId links this post to its sibling translations — null
-  // until the first "Auto-translate" creates a sibling, at which point the
-  // source post's own id becomes the shared group id for every member
-  // (see the POST /api/posts/:id/translations handler in index.ts).
-  // System-managed only — never accepted from a client PATCH/POST body
-  // (absent from postsCollection's createSchema).
+  // i18n Phase 5 (corrected design — see CLAUDE.md): one row per post, not
+  // one row per language — an earlier cut of this feature spawned a
+  // separate post per translation (`translationGroupId`), which visibly
+  // multiplied the post list and was rejected after live feedback.
+  // `language` is the language THIS row's own `title`/`excerpt`/`body` are
+  // written in (the "base"/default version, shown whenever the language
+  // pill switcher is on that language); every OTHER language the author
+  // adds is a `{ title, excerpt, body }` entry in `translations`, keyed by
+  // language code, living on this SAME row. `categoryId`/`tags`/`showTags`
+  // etc. are NOT per-language — those are shared across every language
+  // version, only the actual text content varies. `multilangEnabled` is
+  // the per-post opt-in gate (on top of tenant_languages' own site-wide
+  // switch) that decides whether the pill switcher is offered at all in
+  // PostEditorPage.
   language: text("language"),
-  translationGroupId: uuid("translation_group_id"),
+  translations: jsonb("translations").notNull().default({}),
+  multilangEnabled: boolean("multilang_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -241,6 +257,19 @@ export const tenantLanguages = pgTable("tenant_languages", {
   // site header. Only meaningful when a page/post actually has translation
   // siblings to switch between — see posts/[slug].astro.
   showHeaderSwitcher: boolean("show_header_switcher").notNull().default(false),
+  // i18n Phase 5: site-wide master switch, off by default — the tick-first
+  // gate the webmaster/superadmin flips before ANY post/page on this tenant
+  // may enable its own multilangEnabled. A post/page-level toggle with this
+  // off is inert (see index.ts's translation-create routes, which check both).
+  multilangEnabled: boolean("multilang_enabled").notNull().default(false),
+  // i18n Phase 5 follow-up: the language a post/page's own Language field
+  // defaults to when unset (see PostEditorPage/Designer's language-init
+  // effect) — null = no default, falls back to the old "None" behavior.
+  // Always one of `enabledCodes`/the globally-enabled set (validated in
+  // PUT /api/tenant-languages), never enforced at the DB level since a
+  // later global-disable of that code must NOT retroactively invalidate it
+  // (same "re-intersect at read time" tolerance as enabledCodes itself).
+  defaultLanguage: text("default_language"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

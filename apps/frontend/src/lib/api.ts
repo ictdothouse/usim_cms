@@ -11,30 +11,31 @@ const FETCH_TIMEOUT_MS = 5000;
 // slightly stale page.
 const cache = new Map<string, unknown>();
 
+type PageLayout = Array<{ type: string; props?: Record<string, unknown> }>;
+
 export interface Page {
   id: string;
   slug: string;
   title: string;
-  layout: Array<{ type: string; props?: Record<string, unknown> }>;
+  layout: PageLayout;
   bannerImageUrl: string | null;
   // Page-wide Designer defaults — currently just the default column gap for
   // rows that don't set their own (see SectionBlock.astro's pageGap prop).
   settings?: { gap?: string };
-  // i18n Phase 4 — null until an author picks a language for this page.
+  // i18n Phase 5 — language is null until an author picks one for this
+  // page's own base content; translations holds every OTHER language's
+  // layout on this SAME row, keyed by code (no separate page per language —
+  // see CLAUDE.md's i18n Phase 5 correction).
   language: string | null;
+  translations: Record<string, { layout: PageLayout }>;
 }
 
-export interface PageTranslation {
-  id: string;
-  slug: string;
-  title: string;
-  language: string | null;
-}
-
-// Published siblings only, same shape as getPostTranslations below.
-export async function getPageTranslations(tenantHost: string, pageId: string): Promise<PageTranslation[]> {
-  const { translations } = await apiGet<{ translations: PageTranslation[] }>(`/api/pages/${pageId}/translations`, tenantHost);
-  return translations;
+// Resolves which layout to render for a requested language code: the base
+// layout when code is null/matches the page's own language/has no
+// translation entry, otherwise that language's stored layout.
+export function resolvePageLayout(page: Page, code: string | null): PageLayout {
+  if (!code || code === page.language) return page.layout;
+  return page.translations[code]?.layout ?? page.layout;
 }
 
 // token, when present, is forwarded as a Bearer header so apps/api's
@@ -94,8 +95,21 @@ export interface Post {
   showCategory: boolean | null;
   showAuthor: boolean | null;
   showPublishedDate: boolean | null;
-  // i18n Phase 3 — null until an author picks a language for this post.
+  // i18n Phase 5 — language is null until an author picks one for this
+  // post's own base content; translations holds every OTHER language's
+  // {title, excerpt, body} on this SAME row, keyed by code (no separate
+  // post per language — see CLAUDE.md's i18n Phase 5 correction).
   language: string | null;
+  translations: Record<string, { title: string; excerpt: string; body: string }>;
+}
+
+// Resolves which title/excerpt/body to render for a requested language
+// code: the base fields when code is null/matches the post's own
+// language/has no translation entry, otherwise that language's stored copy.
+export function resolvePostContent(post: Post, code: string | null): { title: string; excerpt: string | null; body: string } {
+  if (!code || code === post.language) return { title: post.title, excerpt: post.excerpt, body: post.body };
+  const tr = post.translations[code];
+  return tr ? { title: tr.title, excerpt: tr.excerpt, body: tr.body } : { title: post.title, excerpt: post.excerpt, body: post.body };
 }
 
 // Public scope only returns status='published' rows (RLS policy in
@@ -145,20 +159,6 @@ export interface SiteLanguageInfo {
 
 export async function getLanguages(tenantHost: string): Promise<{ enabled: SiteLanguageInfo[]; showHeaderSwitcher: boolean }> {
   return apiGet("/api/languages", tenantHost);
-}
-
-export interface PostTranslation {
-  id: string;
-  slug: string;
-  title: string;
-  language: string | null;
-}
-
-// Published siblings only (apps/api's public route filters status
-// server-side) — safe to show a visitor.
-export async function getPostTranslations(tenantHost: string, postId: string): Promise<PostTranslation[]> {
-  const { translations } = await apiGet<{ translations: PostTranslation[] }>(`/api/posts/${postId}/translations`, tenantHost);
-  return translations;
 }
 
 // token here is a theme-preview token (see apps/admin's getThemePreviewToken)

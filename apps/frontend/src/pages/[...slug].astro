@@ -5,7 +5,7 @@ import TextBlock from "../components/TextBlock.astro";
 import ImageBlock from "../components/ImageBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
-import { getPageBySlug, getTheme, getLanguages, getPageTranslations } from "../lib/api";
+import { getPageBySlug, getTheme, getLanguages, resolvePageLayout } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Single instance, ~50 real department domains: tenant identity is always
@@ -38,7 +38,6 @@ if (!page) {
   return new Response("Not found", { status: 404 });
 }
 const theme = await getTheme(tenantHost, themeToken);
-const fonts = collectFonts(page.layout);
 // Designer.tsx's "live view" mode: an admin iframe requesting this same
 // preview URL with an extra flag, so the bridge script + data-designer-path
 // attributes only ever activate alongside a valid preview token — never for
@@ -46,23 +45,29 @@ const fonts = collectFonts(page.layout);
 // previewToken at all).
 const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boolean(previewToken);
 
-// i18n Phase 4 — same shape as posts/[slug].astro's own langSwitcher.
+// i18n Phase 5 — every language's layout now lives on this SAME page row
+// (page.translations), so switching language re-renders this same row
+// under a `?lang=` query param, not a link to a different slug/row.
 const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
-const pageTranslations = showHeaderSwitcher ? await getPageTranslations(tenantHost, page.id) : [];
+const requestedLang = Astro.url.searchParams.get("lang");
+const layout = resolvePageLayout(page, requestedLang);
+const fonts = collectFonts(layout);
 const pageLangLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
+const availableCodes = [page.language, ...Object.keys(page.translations)].filter((c): c is string => Boolean(c));
 const langSwitcher =
-  pageTranslations.length > 0
+  showHeaderSwitcher && availableCodes.length > 1
     ? {
-        current: page.language,
-        options: [
-          { code: page.language ?? "", label: pageLangLabel(page.language), href: `/${page.slug}` },
-          ...pageTranslations.map((tr) => ({ code: tr.language ?? "", label: pageLangLabel(tr.language), href: `/${tr.slug}` })),
-        ],
+        current: requestedLang ?? page.language,
+        options: availableCodes.map((code) => ({
+          code,
+          label: pageLangLabel(code),
+          href: code === page.language ? `/${page.slug}` : `/${page.slug}?lang=${encodeURIComponent(code)}`,
+        })),
       }
     : null;
 ---
 <BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts} designerEdit={designerEdit} langSwitcher={langSwitcher}>
-  {page.layout.map((block, b) => {
+  {layout.map((block, b) => {
     switch (block.type) {
       case "section":
         return (

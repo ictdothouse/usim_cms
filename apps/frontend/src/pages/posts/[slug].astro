@@ -1,6 +1,6 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { getPostBySlug, getTheme, getLanguages, getPostTranslations } from "../../lib/api";
+import { getPostBySlug, getTheme, getLanguages, resolvePostContent } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro: Host header, with the
 // DEV_TENANT_HOST fallback (or a `?__tenant=` override, used by the admin's
@@ -21,20 +21,27 @@ if (!post) {
 }
 const theme = await getTheme(tenantHost);
 
-// i18n Phase 3 — only fetch translation siblings when the switcher is even
-// turned on; a post with no siblings gets no switcher regardless (see
-// BaseLayout.astro's langSwitcher comment).
+// i18n Phase 5 — every language's content now lives on this SAME post row
+// (post.translations), so switching language means re-rendering this same
+// row under a `?lang=` query param, not linking to a different slug/row.
 const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
-const translations = showHeaderSwitcher ? await getPostTranslations(tenantHost, post.id) : [];
+const requestedLang = Astro.url.searchParams.get("lang");
+const content = resolvePostContent(post, requestedLang);
+// Bare language codes (e.g. "ar", "zh") work fine as Intl locales — no need
+// for a code->region mapping table just to format a date in the currently
+// viewed language.
+const dateLocale = requestedLang ?? post.language ?? "ms";
 const langLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
+const availableCodes = [post.language, ...Object.keys(post.translations)].filter((c): c is string => Boolean(c));
 const langSwitcher =
-  translations.length > 0
+  showHeaderSwitcher && availableCodes.length > 1
     ? {
-        current: post.language,
-        options: [
-          { code: post.language ?? "", label: langLabel(post.language), href: `/posts/${post.slug}` },
-          ...translations.map((tr) => ({ code: tr.language ?? "", label: langLabel(tr.language), href: `/posts/${tr.slug}` })),
-        ],
+        current: requestedLang ?? post.language,
+        options: availableCodes.map((code) => ({
+          code,
+          label: langLabel(code),
+          href: code === post.language ? `/posts/${post.slug}` : `/posts/${post.slug}?lang=${encodeURIComponent(code)}`,
+        })),
       }
     : null;
 
@@ -47,7 +54,7 @@ const showCategory = post.showCategory ?? (theme.showPostCategory !== "false");
 const showAuthor = post.showAuthor ?? (theme.showPostAuthor !== "false");
 const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
 ---
-<BaseLayout title={post.title} ogImage={post.bannerImageUrl} theme={theme} langSwitcher={langSwitcher}>
+<BaseLayout title={content.title} ogImage={post.bannerImageUrl} theme={theme} langSwitcher={langSwitcher}>
   {post.status !== "published" && (
     <span style="position:fixed;top:0.6rem;right:0.6rem;z-index:50;padding:0.2rem 0.55rem;border-radius:999px;background:#fff3cd;color:#7a5c00;font-size:0.65rem;font-weight:700;letter-spacing:0.02em;box-shadow:0 1px 3px rgba(0,0,0,0.15);">
       {post.status === "private" ? "PRIVATE" : "DRAFT"}
@@ -57,10 +64,10 @@ const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
     {post.bannerImageUrl && (
       <img src={post.bannerImageUrl} alt="" style="width:100%;border-radius:0.75rem;margin-bottom:1.5rem;" />
     )}
-    <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));font-size:var(--font-post-title-size,2rem);">{post.title}</h1>
+    <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));font-size:var(--font-post-title-size,2rem);">{content.title}</h1>
     <p style="color:#86868b;font-size:0.85rem;">
       {showDate && post.publishedAt &&
-        new Date(post.publishedAt).toLocaleDateString("ms-MY", { day: "numeric", month: "long", year: "numeric" })}
+        new Date(post.publishedAt).toLocaleDateString(dateLocale, { day: "numeric", month: "long", year: "numeric" })}
       {showCategory && post.category && post.categorySlug && (
         <span> · <a href={`/category/${encodeURIComponent(post.categorySlug)}`} style="color:inherit;">{post.category}</a></span>
       )}
@@ -81,6 +88,6 @@ const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
       </p>
     )}
     {/* body is sanitized server-side on every write (apps/api posts beforeChange) */}
-    <div set:html={post.body} />
+    <div set:html={content.body} />
   </article>
 </BaseLayout>

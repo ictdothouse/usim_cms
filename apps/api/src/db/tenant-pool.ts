@@ -483,11 +483,20 @@ export async function getTenantLanguageSelection(tenantHost: string) {
       .where(eq(schema.languages.enabled, true))
       .orderBy(asc(schema.languages.sortOrder), asc(schema.languages.label));
     const [row] = await db
-      .select({ enabledCodes: schema.tenantLanguages.enabledCodes, showHeaderSwitcher: schema.tenantLanguages.showHeaderSwitcher })
+      .select({
+        enabledCodes: schema.tenantLanguages.enabledCodes,
+        showHeaderSwitcher: schema.tenantLanguages.showHeaderSwitcher,
+        multilangEnabled: schema.tenantLanguages.multilangEnabled,
+        defaultLanguage: schema.tenantLanguages.defaultLanguage,
+      })
       .from(schema.tenantLanguages)
       .where(eq(schema.tenantLanguages.tenantHost, tenantHost));
+    // A default language whose code has since been globally disabled is
+    // dropped here rather than stored — same re-intersect-at-read-time
+    // tolerance as selectedCodes, so callers never see a dangling default.
+    const defaultLanguage = row?.defaultLanguage && allEnabled.some((l) => l.code === row.defaultLanguage) ? row.defaultLanguage : null;
     const selectedCodes = row && row.enabledCodes.length > 0 ? row.enabledCodes : null;
-    return { allEnabled, selectedCodes, showHeaderSwitcher: row?.showHeaderSwitcher ?? false };
+    return { allEnabled, selectedCodes, showHeaderSwitcher: row?.showHeaderSwitcher ?? false, multilangEnabled: row?.multilangEnabled ?? false, defaultLanguage };
   } finally {
     client.release();
   }
@@ -495,19 +504,20 @@ export async function getTenantLanguageSelection(tenantHost: string) {
 
 // codes=[] stores an explicit empty override, which getTenantLanguageSelection
 // already treats the same as "no row" (selectedCodes: null, inherit all) —
-// so this always upserts rather than deleting, keeping showHeaderSwitcher
-// intact even when the language subset itself is cleared back to "inherit".
-export async function setTenantLanguageSelection(tenantHost: string, codes: string[], showHeaderSwitcher: boolean) {
+// so this always upserts rather than deleting, keeping showHeaderSwitcher/
+// multilangEnabled/defaultLanguage intact even when the language subset
+// itself is cleared back to "inherit".
+export async function setTenantLanguageSelection(tenantHost: string, codes: string[], showHeaderSwitcher: boolean, multilangEnabled: boolean, defaultLanguage: string | null) {
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
     await db
       .insert(schema.tenantLanguages)
-      .values({ tenantHost, enabledCodes: codes, showHeaderSwitcher })
+      .values({ tenantHost, enabledCodes: codes, showHeaderSwitcher, multilangEnabled, defaultLanguage })
       .onConflictDoUpdate({
         target: schema.tenantLanguages.tenantHost,
-        set: { enabledCodes: codes, showHeaderSwitcher, updatedAt: new Date() },
+        set: { enabledCodes: codes, showHeaderSwitcher, multilangEnabled, defaultLanguage, updatedAt: new Date() },
       });
   } finally {
     client.release();

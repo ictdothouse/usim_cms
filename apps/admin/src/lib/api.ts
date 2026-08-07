@@ -210,49 +210,39 @@ export interface TenantLanguageSelection {
   allEnabled: SiteLanguage[];
   selectedCodes: string[] | null; // null = inherit all of allEnabled
   showHeaderSwitcher: boolean;
+  // i18n Phase 5 — site-wide master switch; a post/page's own multilangEnabled
+  // is inert while this is false (see index.ts's translation-create routes).
+  multilangEnabled: boolean;
+  // The language a post/page's own Language field defaults to when unset —
+  // null = no default (falls back to the old "None" behavior).
+  defaultLanguage: string | null;
 }
 
 export const getTenantLanguages = (tenantHost: string, token: string) =>
   request("/api/tenant-languages", tenantHost, token) as Promise<TenantLanguageSelection>;
 
-export const putTenantLanguages = (tenantHost: string, token: string, codes: string[], showHeaderSwitcher: boolean) =>
-  request("/api/tenant-languages", tenantHost, token, { method: "PUT", body: JSON.stringify({ codes, showHeaderSwitcher }) });
+export const putTenantLanguages = (tenantHost: string, token: string, codes: string[], showHeaderSwitcher: boolean, multilangEnabled: boolean, defaultLanguage: string | null) =>
+  request("/api/tenant-languages", tenantHost, token, { method: "PUT", body: JSON.stringify({ codes, showHeaderSwitcher, multilangEnabled, defaultLanguage }) });
 
-// i18n Phase 4 — per-page translation siblings, same shape as posts' own below.
-export interface PageTranslation {
-  id: string;
-  slug: string;
-  title: string;
-  language: string | null;
-  status: string;
+// i18n Phase 5 — a translation is content living on the SAME post/page row
+// (see PostTranslations below), not a separate row — so there is no
+// per-language fetch/create route to call here anymore.
+export interface PostTranslations {
+  [languageCode: string]: { title: string; excerpt: string; body: string };
 }
 
-export const getPageTranslations = (tenantHost: string, token: string, pageId: string) =>
-  request(`/api/pages/${pageId}/translations`, tenantHost, token).then((b) => b.translations as PageTranslation[]);
-
-export const createPageTranslation = (tenantHost: string, token: string, pageId: string, language: string) =>
-  request(`/api/pages/${pageId}/translations`, tenantHost, token, {
-    method: "POST",
-    body: JSON.stringify({ language }),
-  }).then((b) => b.item as Record<string, unknown>);
-
-// i18n Phase 3 — per-post translation siblings.
-export interface PostTranslation {
-  id: string;
-  slug: string;
-  title: string;
-  language: string | null;
-  status: string;
+export interface PageTranslations {
+  [languageCode: string]: { layout: Array<{ type: string; props?: Record<string, unknown> }> };
 }
 
-export const getPostTranslations = (tenantHost: string, token: string, postId: string) =>
-  request(`/api/posts/${postId}/translations`, tenantHost, token).then((b) => b.translations as PostTranslation[]);
-
-export const createPostTranslation = (tenantHost: string, token: string, postId: string, language: string) =>
-  request(`/api/posts/${postId}/translations`, tenantHost, token, {
+// Real auto-translate (i18n Phase 5) — see apps/api/src/translate.ts.
+// html:true runs the text through the HTML-stripping body translator;
+// otherwise it's treated as a plain string (title/excerpt).
+export const translateText = (tenantHost: string, token: string, text: string, target: string, opts?: { source?: string; html?: boolean }) =>
+  request("/api/translate", tenantHost, token, {
     method: "POST",
-    body: JSON.stringify({ language }),
-  }).then((b) => b.item as Record<string, unknown>);
+    body: JSON.stringify({ text, target, source: opts?.source, html: opts?.html }),
+  }).then((b) => b.translated as string);
 
 export async function uploadMedia(tenantHost: string, token: string, file: File, folderId?: string | null): Promise<string> {
   const form = new FormData();

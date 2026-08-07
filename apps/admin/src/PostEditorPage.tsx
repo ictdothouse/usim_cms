@@ -37,6 +37,17 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import MediaPickerModal from "./MediaPickerModal";
 
+// i18n Phase 5 — sentinel key for the post's own base-language content
+// inside the `content` map (PostEditorPage below). Never a real language
+// code, so it can't collide with one; the base slot's actual language is
+// whatever the `language` state/field says.
+const BASE_LANG = "__base__";
+interface LangContent {
+  title: string;
+  excerpt: string;
+  body: string;
+}
+
 // Used by save() when the excerpt field is left blank — strips tags from the
 // sanitized body HTML and takes the first ~160 chars, so a post never ships
 // with no excerpt just because the author didn't fill it in.
@@ -219,9 +230,30 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
   const [categories, setCategories] = useState<api.Category[]>([]);
   const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
-  const [translations, setTranslations] = useState<api.PostTranslation[]>([]);
-  const [addTranslationLang, setAddTranslationLang] = useState("");
+  // i18n Phase 5 — site-wide master switch (Settings ▸ Languages); the
+  // Translations panel below is only offered when this AND the post's own
+  // multilangEnabled are both true.
+  const [siteMultilangEnabled, setSiteMultilangEnabled] = useState(false);
+  const [siteDefaultLanguage, setSiteDefaultLanguage] = useState<string | null>(null);
+  const [multilangEnabled, setMultilangEnabled] = useState(false);
+  // i18n Phase 5 — every language's content lives on this one post row.
+  // `content[BASE_LANG]` mirrors the top-level title/excerpt/body columns;
+  // `content[code]` for any real code mirrors `post.translations[code]`.
+  // `activeLang` is whichever slot the editor is currently showing/editing.
+  const [content, setContent] = useState<Record<string, LangContent>>({});
+  const [activeLang, setActiveLang] = useState(BASE_LANG);
   const [translating, setTranslating] = useState(false);
+  // Per-language resync-on-save prompt (save() below) — a small promise-based
+  // modal, same shape as useConfirm but returning which of several languages
+  // were picked instead of a single yes/no, since re-translating is opt-in
+  // PER LANGUAGE (protects a language someone just hand-edited from being
+  // silently overwritten just because the base content also changed).
+  const [resyncPrompt, setResyncPrompt] = useState<{ langs: string[]; resolve: (picked: string[]) => void } | null>(null);
+  const [resyncChecked, setResyncChecked] = useState<Set<string>>(new Set());
+  function askResyncLangs(langs: string[]): Promise<string[]> {
+    setResyncChecked(new Set());
+    return new Promise((resolve) => setResyncPrompt({ langs, resolve }));
+  }
   // Only for computing each MetaSwitch's default on/off position when a
   // field is still "inherit" — this page never edits the theme itself.
   const [theme, setTheme] = useState<Record<string, string> | null>(null);
@@ -265,44 +297,100 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     void api.getPosts(tenantHost, token).then(setPosts);
     void api.listCategories(tenantHost, token).then(setCategories);
     void api.getTheme(tenantHost, token).then(setTheme);
-    void api.getTenantLanguages(tenantHost, token).then((d) => setSiteLanguages(d.allEnabled));
+    void api.getTenantLanguages(tenantHost, token).then((d) => {
+      setSiteLanguages(d.allEnabled);
+      setSiteMultilangEnabled(d.multilangEnabled);
+      setSiteDefaultLanguage(d.defaultLanguage);
+    });
   }, [tenantHost, id]);
 
+  // Applied once the site default arrives — only for a post that has never
+  // had its own language explicitly chosen (post.language still null). A
+  // post already saved with an explicit language (including "None") is
+  // never overridden by a later-arriving default.
   useEffect(() => {
     if (!post) return;
-    setTitle(post.title as string);
-    setExcerpt((post.excerpt as string | null) ?? "");
+    if (!post.language && siteDefaultLanguage) setLanguage(siteDefaultLanguage);
+  }, [post?.id, siteDefaultLanguage]);
+
+  // Keyed on post?.id (not the `post` object itself) — save() below always
+  // calls setPosts() to refresh from the server afterward, which gives
+  // `post` a new object/array identity for the SAME row; keying on the
+  // whole object would re-fire this effect after every save and snap
+  // activeLang back to BASE_LANG mid-edit. Only a genuine navigation to a
+  // different post (id changes) should reset the editor's local state.
+  useEffect(() => {
+    if (!post) return;
+    const base: LangContent = { title: post.title as string, excerpt: (post.excerpt as string | null) ?? "", body: (post.body as string) || "" };
+    setContent({ [BASE_LANG]: base, ...((post.translations as Record<string, LangContent> | null) ?? {}) });
+    setActiveLang(BASE_LANG);
+    setTitle(base.title);
+    setExcerpt(base.excerpt);
     setCategoryId((post.categoryId as string | null) ?? "");
     setTags((post.tags as string[] | null) ?? []);
     setTagDraft("");
     setBannerImageUrl((post.bannerImageUrl as string | null) ?? null);
     setStatus((post.status as PostStatus) || "draft");
     setLanguage((post.language as string | null) ?? "");
+    setMultilangEnabled(Boolean(post.multilangEnabled));
     setShowTags(toDisplayOverride(post.showTags as boolean | null | undefined));
     setShowCategory(toDisplayOverride(post.showCategory as boolean | null | undefined));
     setShowAuthor(toDisplayOverride(post.showAuthor as boolean | null | undefined));
     setShowPublishedDate(toDisplayOverride(post.showPublishedDate as boolean | null | undefined));
-  }, [post]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post?.id]);
 
-  // i18n Phase 3 — reloaded whenever the post identity changes, and again
-  // after createTranslation() below adds a new sibling.
-  useEffect(() => {
-    if (!post) return;
-    void api.getPostTranslations(tenantHost, token, post.id as string).then(setTranslations);
-  }, [post?.id, tenantHost, token]);
-
-  async function createTranslation() {
-    if (!post || !addTranslationLang) return;
-    setTranslating(true);
-    setError(null);
-    try {
-      const item = await api.createPostTranslation(tenantHost, token, post.id as string, addTranslationLang);
-      navigate(`/content/posts/${item.id as string}`);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTranslating(false);
+  // The Language control doubles as the translation switcher once multilang
+  // is on: picking a language other than the currently-active one swaps
+  // which slot of `content` the title/excerpt/editor fields show — always
+  // the SAME post row, never a separate one. Leaving a slot snapshots its
+  // current (possibly just-edited) values into `content` first, so nothing
+  // is lost; entering a slot with no content yet runs it through the real
+  // auto-translate API (apps/api/src/translate.ts) — falling back to a
+  // verbatim copy if that call fails, so a provider hiccup never blocks the
+  // switch. Picking a language before this post has one of its own yet
+  // (activeLang still BASE_LANG's default "") just labels the base row
+  // instead — nothing meaningful to translate from/to.
+  async function switchLanguage(target: string) {
+    if (target === activeLang) return;
+    const html = await editor.blocksToHTMLLossy(editor.document);
+    const leaving: LangContent = { title, excerpt, body: html };
+    let targetEntry = content[target];
+    if (!targetEntry) {
+      const sourceCode = activeLang === BASE_LANG ? (language || undefined) : activeLang;
+      setTranslating(true);
+      setError(null);
+      try {
+        // Sequential, not Promise.all: three requests hitting an
+        // unmigrated tenant DB at once race on the migration DDL and can
+        // deadlock in Postgres (each request independently tries to
+        // ensure/migrate the tenant DB — see tenant-pool.ts's
+        // ensureTenantDatabase). Only the FIRST request in a cold process
+        // actually pays that cost; sequencing avoids the race entirely.
+        const tTitle = leaving.title ? await api.translateText(tenantHost, token, leaving.title, target, { source: sourceCode }) : "";
+        const tExcerpt = leaving.excerpt ? await api.translateText(tenantHost, token, leaving.excerpt, target, { source: sourceCode }) : "";
+        const tBody = leaving.body ? await api.translateText(tenantHost, token, leaving.body, target, { source: sourceCode, html: true }) : "";
+        targetEntry = { title: tTitle, excerpt: tExcerpt, body: tBody };
+      } catch (err) {
+        setError((err as Error).message);
+        targetEntry = leaving;
+      } finally {
+        setTranslating(false);
+      }
     }
+    setContent((prev) => ({ ...prev, [activeLang]: leaving, [target]: targetEntry! }));
+    setTitle(targetEntry.title);
+    setExcerpt(targetEntry.excerpt);
+    editor.replaceBlocks(editor.document, editor.tryParseHTMLToBlocks(targetEntry.body || ""));
+    setActiveLang(target);
+  }
+
+  function clickLanguagePill(code: string) {
+    if (!language) {
+      setLanguage(code);
+      return;
+    }
+    void switchLanguage(code === language ? BASE_LANG : code);
   }
 
   const editor = useCreateBlockNote({
@@ -336,11 +424,56 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     if (!post) return;
     setSaving(true);
     try {
-      const body = await editor.blocksToHTMLLossy(editor.document);
+      const html = await editor.blocksToHTMLLossy(editor.document);
+      // Commit whatever slot is currently on screen before splitting into
+      // base fields (top-level columns) + translations (everything else) —
+      // the live editor/title/excerpt state is always the freshest copy of
+      // `activeLang`'s content, `content` itself only gets updated on switch.
+      let merged: Record<string, LangContent> = { ...content, [activeLang]: { title, excerpt, body: html } };
+      const base = merged[BASE_LANG];
+      const otherLangs = Object.keys(merged).filter((c) => c !== BASE_LANG);
+      // Base content only really "changed" if it differs from what was
+      // loaded from the server — comparing against the post's own
+      // currently-saved fields (not some tracked snapshot) is enough to
+      // avoid nagging on every Save when nothing in the base slot moved.
+      const baseChanged =
+        base.title !== (post.title as string) ||
+        base.excerpt !== ((post.excerpt as string | null) ?? "") ||
+        base.body !== ((post.body as string) || "");
+      if (baseChanged && otherLangs.length > 0) {
+        // Per-language opt-in, not all-or-nothing — a language someone just
+        // hand-edited (e.g. fixed a bad auto-translation) can be left
+        // unchecked so this save never overwrites that work; only the
+        // checked ones get re-translated from the updated base.
+        const picked = await askResyncLangs(otherLangs);
+        if (picked.length > 0) {
+          setTranslating(true);
+          for (const code of picked) {
+            try {
+              const tTitle = base.title ? await api.translateText(tenantHost, token, base.title, code, { source: language || undefined }) : "";
+              const tExcerpt = base.excerpt ? await api.translateText(tenantHost, token, base.excerpt, code, { source: language || undefined }) : "";
+              const tBody = base.body ? await api.translateText(tenantHost, token, base.body, code, { source: language || undefined, html: true }) : "";
+              merged = { ...merged, [code]: { title: tTitle, excerpt: tExcerpt, body: tBody } };
+            } catch {
+              // Leave that language's existing content untouched if its
+              // re-translate call fails — a provider hiccup on one language
+              // shouldn't block saving the rest.
+            }
+          }
+          setTranslating(false);
+        }
+      }
+      setContent(merged);
+      const translations: Record<string, LangContent> = {};
+      for (const [code, entry] of Object.entries(merged)) {
+        if (code !== BASE_LANG) translations[code] = entry;
+      }
       await api.updatePost(tenantHost, token, post.id as string, {
-        title, excerpt: excerpt.trim() || autoExcerpt(body), categoryId: categoryId || null, tags, bannerImageUrl,
-        body,
+        title: base.title, excerpt: base.excerpt.trim() || autoExcerpt(base.body), categoryId: categoryId || null, tags, bannerImageUrl,
+        body: base.body,
+        translations,
         language: language || null,
+        multilangEnabled,
         showTags: fromDisplayOverride(showTags),
         showCategory: fromDisplayOverride(showCategory),
         showAuthor: fromDisplayOverride(showAuthor),
@@ -479,20 +612,57 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 <button onClick={() => void createCategoryInline()} className={`${btnGhost} shrink-0`}>{t("categories-create")}</button>
               </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-language")}</label>
-              <Select value={language || "__none"} onValueChange={(v) => setLanguage(v === "__none" ? "" : v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">{t("posts-language-none")}</SelectItem>
-                  {siteLanguages.map((l) => (
-                    <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {siteMultilangEnabled && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-language")}</label>
+                <label className="flex items-center gap-2 text-xs text-ink">
+                  <input type="checkbox" checked={multilangEnabled} onChange={(e) => setMultilangEnabled(e.target.checked)} />
+                  {t("posts-multilang-enable")}
+                </label>
+                {multilangEnabled ? (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {siteLanguages.map((l) => {
+                      const slotKey = l.code === language ? BASE_LANG : l.code;
+                      const isCurrent = activeLang === slotKey;
+                      const hasContent = Boolean(content[slotKey]);
+                      const isBase = l.code === language;
+                      return (
+                        <button
+                          key={l.code}
+                          type="button"
+                          disabled={isCurrent || translating}
+                          onClick={() => clickLanguagePill(l.code)}
+                          title={isBase ? t("posts-language-default-badge") : !language || hasContent ? undefined : t("posts-translate-btn")}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+                            isBase ? "ring-2 ring-amber-400 ring-offset-1" : ""
+                          } ${
+                            isCurrent
+                              ? "bg-accent text-white"
+                              : hasContent
+                                ? "bg-canvas text-ink hover:bg-[#e8e8ed]"
+                                : "border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
+                          }`}
+                        >
+                          {isBase && "★ "}{l.label}{!isCurrent && !hasContent && (translating ? "…" : " +")}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <Select value={language || "__none"} onValueChange={(v) => setLanguage(v === "__none" ? "" : v)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">{t("posts-language-none")}</SelectItem>
+                      {siteLanguages.map((l) => (
+                        <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-excerpt")}</label>
               <textarea rows={3} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} placeholder={t("posts-excerpt-auto")} className={`${inputCls} resize-none`} />
@@ -562,49 +732,6 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 onChange={(v) => setShowPublishedDate(v ? "show" : "hide")}
               />
             </div>
-            <div className="space-y-1.5 rounded-lg border border-line/30 bg-canvas/40 p-3">
-              <p className="text-xs font-semibold text-ink">{t("posts-translations")}</p>
-              {translations.length > 0 && (
-                <ul className="divide-y divide-line/20">
-                  {translations.map((tr) => (
-                    <li key={tr.id} className="flex items-center gap-2 py-1 text-xs">
-                      <span className="font-mono text-[10px] text-sub">{tr.language ?? "?"}</span>
-                      <button
-                        onClick={() => navigate(`/content/posts/${tr.id}`)}
-                        className="min-w-0 flex-1 truncate text-left text-body hover:text-accent hover:underline"
-                      >
-                        {tr.title}
-                      </button>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[tr.status as PostStatus] ?? ""}`}>
-                        {t(`posts-${tr.status}` as Key)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {(() => {
-                const used = new Set([language, ...translations.map((tr) => tr.language)].filter(Boolean));
-                const available = siteLanguages.filter((l) => !used.has(l.code));
-                if (available.length === 0) return null;
-                return (
-                  <div className="flex gap-1.5 pt-1">
-                    <Select value={addTranslationLang} onValueChange={setAddTranslationLang}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={t("posts-translate-to")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {available.map((l) => (
-                          <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <button onClick={() => void createTranslation()} disabled={!addTranslationLang || translating} className={`${btnGhost} shrink-0`}>
-                      {translating ? t("blocks-saving") : t("posts-translate-btn")}
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
             {status === "published" && (<button onClick={() => void share()} className={`${btnGhost} w-full`}>{t("posts-share")}</button>)}
             {(post.authorEmail as string | null) && (<p className="text-[11px] text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}
             <button type="button" onClick={() => setShowHistory((v) => !v)} className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-sub hover:bg-canvas">
@@ -625,6 +752,34 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
         )}
       </div>
       {showMediaPicker && (<MediaPickerModal tenantHost={tenantHost} token={token} onSelect={(url) => { setBannerImageUrl(url); setShowMediaPicker(false); }} onClose={() => setShowMediaPicker(false)} />)}
+      {resyncPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { resyncPrompt.resolve([]); setResyncPrompt(null); }}>
+          <div className="w-80 space-y-3 rounded-lg bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <p className="text-sm font-semibold text-ink">{t("posts-resync-title")}</p>
+            <p className="text-xs text-sub">{t("posts-resync-desc")}</p>
+            <div className="space-y-1.5">
+              {resyncPrompt.langs.map((code) => (
+                <label key={code} className="flex items-center gap-2 text-xs text-ink">
+                  <input
+                    type="checkbox"
+                    checked={resyncChecked.has(code)}
+                    onChange={(e) => setResyncChecked((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(code); else next.delete(code);
+                      return next;
+                    })}
+                  />
+                  {siteLanguages.find((l) => l.code === code)?.label ?? code}
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={() => { resyncPrompt.resolve([]); setResyncPrompt(null); }} className={btnGhost}>{t("posts-resync-skip-btn")}</button>
+              <button type="button" onClick={() => { resyncPrompt.resolve(Array.from(resyncChecked)); setResyncPrompt(null); }} className={btnPrimary}>{t("posts-resync-save-btn")}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

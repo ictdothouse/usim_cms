@@ -160,6 +160,11 @@ import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
 
+// i18n Phase 5 — sentinel key for the page's own base-language layout
+// inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
+// BASE_LANG. Never a real language code, so it can't collide with one.
+const BASE_LANG = "__base__";
+
 // ---------- data model (stored in pages.layout JSONB) ----------
 // A designer page is a list of blocks; the designer emits `section` blocks:
 //   { type: "section", props: { bg?, bgImage?, textColor?, paddingY?, width?, rows: Row[] } }
@@ -1385,14 +1390,12 @@ export default function Designer({
   token,
   t,
   onClose,
-  onOpenTranslation,
 }: {
   page: Record<string, unknown>;
   tenantHost: string;
   token: string;
   t: (k: Key) => string;
   onClose: (saved: boolean) => void;
-  onOpenTranslation: (pageId: string) => void;
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
@@ -1723,25 +1726,59 @@ export default function Designer({
   // pageSettings above; persisted via save()'s `language` field.
   const [pageLanguage, setPageLanguage] = useState<string>((page.language as string | null) ?? "");
   const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
-  const [pageTranslations, setPageTranslations] = useState<api.PageTranslation[]>([]);
-  const [addTranslationLang, setAddTranslationLang] = useState("");
-  const [translating, setTranslating] = useState(false);
+  // i18n Phase 5 — site-wide master switch, plus this page's own opt-in;
+  // the Translations block below is only offered when both are true.
+  const [siteMultilangEnabled, setSiteMultilangEnabled] = useState(false);
+  const [pageMultilangEnabled, setPageMultilangEnabled] = useState<boolean>(Boolean(page.multilangEnabled));
+  // i18n Phase 5 — every language's layout lives on this one page row (see
+  // PostEditorPage's matching `content` map for the same idea applied to
+  // posts' title/excerpt/body). `content[BASE_LANG]` mirrors the top-level
+  // `layout` column (== `blocks`, the canvas's own driving state);
+  // `content[code]` mirrors `page.translations[code].layout`. Pages have no
+  // per-language title (Designer has no title editor at all), so only
+  // `layout` varies.
+  const [content, setContent] = useState<Record<string, Block[]>>(() => ({
+    [BASE_LANG]: clone((page.layout as Block[] | undefined) ?? []),
+    ...Object.fromEntries(
+      Object.entries((page.translations as Record<string, { layout: Block[] }> | null) ?? {}).map(([code, v]) => [code, v.layout]),
+    ),
+  }));
+  const [activeLang, setActiveLang] = useState(BASE_LANG);
   useEffect(() => {
-    void api.getTenantLanguages(tenantHost, token).then((d) => setSiteLanguages(d.allEnabled));
-    void api.getPageTranslations(tenantHost, token, page.id as string).then(setPageTranslations);
+    void api.getTenantLanguages(tenantHost, token).then((d) => {
+      setSiteLanguages(d.allEnabled);
+      setSiteMultilangEnabled(d.multilangEnabled);
+      // Only for a page that has never had its own language explicitly
+      // chosen — same "never override an explicit pick" rule as posts'.
+      if (!(page.language as string | null) && d.defaultLanguage) {
+        setPageLanguage(d.defaultLanguage);
+      }
+    });
   }, [tenantHost, token, page.id]);
-  async function createPageTranslation() {
-    if (!addTranslationLang) return;
-    setTranslating(true);
-    setError(null);
-    try {
-      const item = await api.createPageTranslation(tenantHost, token, page.id as string, addTranslationLang);
-      onOpenTranslation(item.id as string);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTranslating(false);
+  // Same "Language field doubles as the translation switcher, always the
+  // SAME row" behavior as PostEditorPage's switchLanguage/clickLanguagePill
+  // — see those for the full rule. Undo history is reset on switch: it's
+  // scoped to whichever language's layout is currently open, not shared
+  // across languages (undoing across two different languages' content
+  // wouldn't mean anything).
+  function switchPageLanguage(target: string) {
+    if (target === activeLang) return;
+    const leaving = clone(blocks);
+    const targetLayout = content[target] ?? leaving;
+    setContent((prev) => ({ ...prev, [activeLang]: leaving, [target]: targetLayout }));
+    setBlocks(clone(targetLayout));
+    setSel(null);
+    history.current = [];
+    future.current = [];
+    setActiveLang(target);
+  }
+  function clickPageLanguagePill(code: string) {
+    if (!pageLanguage) {
+      setPageLanguage(code);
+      setDirty(true);
+      return;
     }
+    switchPageLanguage(code === pageLanguage ? BASE_LANG : code);
   }
   // Figma-style spacing overlay: the hatched fill band only shows while the
   // matching handle is hovered or actively dragged, not for the whole
@@ -2553,10 +2590,21 @@ export default function Designer({
     setBusy(true);
     setError(null);
     try {
+      // Commit whatever language is currently on the canvas before splitting
+      // into the base `layout` column + `translations` (everything else) —
+      // same pattern as PostEditorPage's save().
+      const merged: Record<string, Block[]> = { ...content, [activeLang]: clone(blocks) };
+      setContent(merged);
+      const translations: Record<string, { layout: Block[] }> = {};
+      for (const [code, layout] of Object.entries(merged)) {
+        if (code !== BASE_LANG) translations[code] = { layout };
+      }
       await api.updatePage(tenantHost, token, page.id as string, {
-        layout: blocks,
+        layout: merged[BASE_LANG],
+        translations,
         settings: pageSettings,
         language: pageLanguage || null,
+        multilangEnabled: pageMultilangEnabled,
         ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
       });
       if (status) page.status = status;
@@ -4068,68 +4116,66 @@ export default function Designer({
               className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
             />
           </label>
-          <label className="block text-[11px] font-medium text-body">
-            {t("designer-page-language")}
-            <select
-              value={pageLanguage || "__none"}
-              onChange={(e) => {
-                setPageLanguage(e.target.value === "__none" ? "" : e.target.value);
-                setDirty(true);
-              }}
-              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-            >
-              <option value="__none">{t("designer-page-language-none")}</option>
-              {siteLanguages.map((l) => (
-                <option key={l.code} value={l.code}>{l.label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="space-y-1.5 rounded-lg border border-line/30 bg-canvas/40 p-2">
-            <p className="text-[11px] font-semibold text-ink">{t("designer-page-translations")}</p>
-            {pageTranslations.length > 0 && (
-              <ul className="divide-y divide-line/20">
-                {pageTranslations.map((tr) => (
-                  <li key={tr.id} className="flex items-center gap-2 py-1 text-[11px]">
-                    <span className="font-mono text-[9px] text-sub">{tr.language ?? "?"}</span>
+          {siteMultilangEnabled && (
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-medium text-body">{t("designer-page-language")}</label>
+            <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+              <input
+                type="checkbox"
+                checked={pageMultilangEnabled}
+                onChange={(e) => {
+                  setPageMultilangEnabled(e.target.checked);
+                  setDirty(true);
+                }}
+              />
+              {t("designer-page-multilang-enable")}
+            </label>
+            {pageMultilangEnabled ? (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {siteLanguages.map((l) => {
+                  const slotKey = l.code === pageLanguage ? BASE_LANG : l.code;
+                  const isCurrent = activeLang === slotKey;
+                  const hasContent = Boolean(content[slotKey]);
+                  const isBase = l.code === pageLanguage;
+                  return (
                     <button
+                      key={l.code}
                       type="button"
-                      onClick={() => onOpenTranslation(tr.id)}
-                      className="min-w-0 flex-1 truncate text-left text-body hover:text-accent hover:underline"
+                      disabled={isCurrent}
+                      onClick={() => clickPageLanguagePill(l.code)}
+                      title={isBase ? t("posts-language-default-badge") : !pageLanguage || hasContent ? undefined : t("posts-translate-btn")}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                        isBase ? "ring-2 ring-amber-400 ring-offset-1" : ""
+                      } ${
+                        isCurrent
+                          ? "bg-accent text-white"
+                          : hasContent
+                            ? "bg-canvas text-ink hover:bg-[#e8e8ed]"
+                            : "border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
+                      }`}
                     >
-                      {tr.title}
+                      {isBase && "★ "}{l.label}{!isCurrent && !hasContent && " +"}
                     </button>
-                  </li>
+                  );
+                })}
+              </div>
+            ) : (
+              <select
+                value={pageLanguage || "__none"}
+                onChange={(e) => {
+                  setPageLanguage(e.target.value === "__none" ? "" : e.target.value);
+                  setDirty(true);
+                }}
+                className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+              >
+                <option value="__none">{t("designer-page-language-none")}</option>
+                {siteLanguages.map((l) => (
+                  <option key={l.code} value={l.code}>{l.label}</option>
                 ))}
-              </ul>
+              </select>
             )}
-            {(() => {
-              const used = new Set([pageLanguage, ...pageTranslations.map((tr) => tr.language)].filter(Boolean));
-              const available = siteLanguages.filter((l) => !used.has(l.code));
-              if (available.length === 0) return null;
-              return (
-                <div className="flex gap-1 pt-1">
-                  <select
-                    value={addTranslationLang}
-                    onChange={(e) => setAddTranslationLang(e.target.value)}
-                    className="min-w-0 flex-1 rounded-md border border-line/30 px-1.5 py-1 text-[11px]"
-                  >
-                    <option value="">{t("posts-translate-to")}</option>
-                    {available.map((l) => (
-                      <option key={l.code} value={l.code}>{l.label}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void createPageTranslation()}
-                    disabled={!addTranslationLang || translating}
-                    className="shrink-0 rounded-md bg-canvas px-2 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
-                  >
-                    {translating ? t("blocks-saving") : t("posts-translate-btn")}
-                  </button>
-                </div>
-              );
-            })()}
           </div>
+          )}
           <p className="text-[10px] text-sub">{t("designer-none-selected")}</p>
         </div>
       );
