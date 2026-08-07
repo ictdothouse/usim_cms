@@ -32,7 +32,12 @@ services:
       # Static export renders pages through the frontend container.
       FRONTEND_INTERNAL_URL: http://frontend:4321
     ports:
-      - "3000:3000"
+      # Host port overridable via .env's API_PORT (install.sh writes this
+      # when the default 3000 is already taken on the host) — a separate
+      # docker-compose.override.yml is NOT used for this: Compose
+      # concatenates list-valued keys like `ports` across files instead of
+      # replacing them, so an override here would bind BOTH ports at once.
+      - "${API_PORT:-3000}:3000"
     volumes:
       - api-uploads:/app/uploads
     healthcheck:
@@ -55,7 +60,7 @@ services:
       API_URL: http://api:3000
       PORT: 4321
     ports:
-      - "4321:4321"
+      - "${FRONTEND_PORT:-4321}:4321"
 
   admin:
     build:
@@ -68,7 +73,7 @@ services:
     depends_on:
       - api
     ports:
-      - "5173:80"
+      - "${ADMIN_PORT:-5173}:80"
 
   # Public-facing reverse proxy + TLS. Auto-issues/renews Let's Encrypt certs
   # for ADMIN_DOMAIN/API_DOMAIN/TENANT_DOMAINS (see .env.example) by default —
