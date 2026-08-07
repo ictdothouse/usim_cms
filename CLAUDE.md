@@ -125,6 +125,45 @@ a silent no-op under a superuser connection. That role also needs `CREATEDB` (se
   URL (base language omits the param), never a link to a different post/page. `BaseLayout.astro`'s
   `langSwitcher` prop shape (`{current, options: {code,label,href}[]} | null`) is unchanged from the
   original design; it still only renders when there are 2+ options and `showHeaderSwitcher` is on.
+  **Real auto-translate**: `switchLanguage`'s (PostEditorPage)/`ensureTranslation`'s (CategoryTranslations,
+  below) translate calls go through `apps/api/src/translate.ts` → MyMemory's free `/get` endpoint (no API
+  key). MyMemory's own top-ranked `responseData.translatedText` can be a noisy crowd-sourced
+  translation-memory hit; `translatePlainText` prefers a `matches[]` entry tagged `"created-by":"MT!"`
+  (real machine translation) when one exists. `translateHtmlBody` strips tags to plain text, translates,
+  then re-wraps each line as `<p>${escapeHtml(line)}</p>` — the `escapeHtml` matters because this
+  endpoint's own output must be safe HTML on its own merits (it's general-purpose, not guaranteed to flow
+  through the posts/pages sanitize-on-save hooks). Calls to `/api/translate` from the SAME editor action
+  (e.g. translating title+excerpt+body together) must be sequential `await`s, never `Promise.all` — firing
+  them concurrently against a cold/unmigrated tenant DB connection raced `ensureTenantDatabase`'s own DDL
+  and produced a real Postgres `40P01` deadlock.
+  **Per-language resync-on-save**: when a post/page's base content changes on Save and other language
+  slots already exist, `askResyncLangs(langs): Promise<string[]>` (a small promise-based modal, same shape
+  as `useConfirm` but returning which languages were picked rather than a yes/no) asks per-language which
+  slots to re-translate — protects a hand-edited translation from being silently overwritten just because
+  the base changed. Skipping the prompt (or unchecking everything) leaves every existing translation as-is.
+  **Default-language pill**: the language pill matching the item's own base `language` gets an amber ring
+  + a leading "★" (PostEditorPage/Designer) so it reads as visually distinct from a plain translated slot.
+  **Locale-aware date**: `posts/[slug].astro`'s published-date formatting uses
+  `new Date(...).toLocaleDateString(dateLocale, ...)` where `dateLocale = requestedLang ?? post.language ??
+  "ms"` — bare language codes (`"ar"`, `"zh"`, etc.) work directly as `Intl` locales, no code→region
+  mapping table needed.
+  **Category i18n follow-up**: `categories` gained the same `translations`/`multilangEnabled` pair as
+  posts/pages (`migrations/0017_category_translations.sql`) but no `language` column — a category has no
+  separate "base" slot, `name` itself always is the base, so there's nothing to switch away from. Off
+  (default) means `name` is shown for every language, unchanged ("keep the original name"); on, a
+  category's own `PATCH` accepts `translations: {code: {name}}`, validated in `categoriesBeforeChange`
+  (each entry's `name` must be a string, 400 otherwise). `CategoriesPanel.tsx`'s `CategoryTranslations`
+  renders one language pill per site language for a `multilangEnabled` category — an empty pill
+  auto-translates `name` via `/api/translate` then opens for inline edit, a filled pill just opens for
+  edit — gated behind the SAME `siteMultilangEnabled` global switch (`getTenantLanguages`) posts/pages
+  already gate their own translation UI behind. `postsAfterRead` (index.ts) now also returns
+  `categoryTranslations` (the joined category's `translations`, or `{}` when that category's own
+  `multilangEnabled` is off) alongside the existing `category`/`categorySlug`; the frontend's
+  `resolveCategoryName(post, code)` (`lib/api.ts`) picks `categoryTranslations[code].name` when present,
+  else falls back to `category` — the fallback IS the "keep original name" behavior, not a separate flag.
+  `posts/[slug].astro`'s category link uses this instead of `post.category` directly. The category
+  archive page (`category/[slug].astro`) is unchanged/not language-aware — this follow-up only reached the
+  post metadata line that triggered the request, not the archive listing.
 - **Fastify route-table lesson (from the retired design, still worth keeping)**: registering the same
   GET path on both `publicScope` and `protectedScope` is a fatal `FST_ERR_DUPLICATED_ROUTE` at boot —
   Fastify's route table is global across the whole app regardless of `.register()` encapsulation

@@ -1,6 +1,6 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { getPostBySlug, getTheme, getLanguages, resolvePostContent } from "../../lib/api";
+import { getPostBySlug, getTheme, getLanguages, resolvePostContent, resolveCategoryName } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro: Host header, with the
 // DEV_TENANT_HOST fallback (or a `?__tenant=` override, used by the admin's
@@ -31,6 +31,7 @@ const content = resolvePostContent(post, requestedLang);
 // for a code->region mapping table just to format a date in the currently
 // viewed language.
 const dateLocale = requestedLang ?? post.language ?? "ms";
+const categoryName = resolveCategoryName(post, requestedLang);
 const langLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
 const availableCodes = [post.language, ...Object.keys(post.translations)].filter((c): c is string => Boolean(c));
 const langSwitcher =
@@ -68,8 +69,8 @@ const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
     <p style="color:#86868b;font-size:0.85rem;">
       {showDate && post.publishedAt &&
         new Date(post.publishedAt).toLocaleDateString(dateLocale, { day: "numeric", month: "long", year: "numeric" })}
-      {showCategory && post.category && post.categorySlug && (
-        <span> · <a href={`/category/${encodeURIComponent(post.categorySlug)}`} style="color:inherit;">{post.category}</a></span>
+      {showCategory && categoryName && post.categorySlug && (
+        <span> · <a href={`/category/${encodeURIComponent(post.categorySlug)}`} style="color:inherit;">{categoryName}</a></span>
       )}
       {showAuthor && post.authorEmail && (
         <span> · <a href={`/author/${encodeURIComponent(post.authorEmail)}`} style="color:inherit;">{post.authorEmail}</a></span>

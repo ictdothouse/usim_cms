@@ -167,6 +167,11 @@ export interface Category {
   id: string;
   name: string;
   slug: string;
+  // i18n follow-up — off (default): `name` shown everywhere, unchanged.
+  // On: translations[code].name is auto-translated from `name` then
+  // freely editable per language (CategoriesPanel's language pills).
+  translations: Record<string, { name: string }>;
+  multilangEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -177,8 +182,12 @@ export const listCategories = (tenantHost: string, token: string) =>
 export const createCategory = (tenantHost: string, token: string, name: string, slug: string) =>
   request("/api/categories", tenantHost, token, { method: "POST", body: JSON.stringify({ name, slug }) }).then((b) => b.item as Category);
 
-export const updateCategory = (tenantHost: string, token: string, id: string, name: string) =>
-  request(`/api/categories/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify({ name }) });
+export const updateCategory = (
+  tenantHost: string,
+  token: string,
+  id: string,
+  patch: Partial<Pick<Category, "name" | "translations" | "multilangEnabled">>,
+) => request(`/api/categories/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) });
 
 export const deleteCategory = (tenantHost: string, token: string, id: string) =>
   request(`/api/categories/${id}`, tenantHost, token, { method: "DELETE" });

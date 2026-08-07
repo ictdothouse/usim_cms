@@ -86,6 +86,11 @@ export interface Post {
   publishedAt: string | null;
   category: string | null;
   categorySlug: string | null;
+  // Category i18n follow-up — {} unless the category itself opted into
+  // multilangEnabled (see apps/api's postsAfterRead); "keep original name"
+  // is just this staying empty, so resolveCategoryName falls through to
+  // `category` above for every language.
+  categoryTranslations: Record<string, { name: string }>;
   tags: string[];
   authorEmail: string | null;
   status: "draft" | "published" | "private";
@@ -110,6 +115,14 @@ export function resolvePostContent(post: Post, code: string | null): { title: st
   if (!code || code === post.language) return { title: post.title, excerpt: post.excerpt, body: post.body };
   const tr = post.translations[code];
   return tr ? { title: tr.title, excerpt: tr.excerpt, body: tr.body } : { title: post.title, excerpt: post.excerpt, body: post.body };
+}
+
+// Category name for the requested language — falls back to the category's
+// own name when it never opted into per-language names (multilangEnabled
+// off) or has no entry for this code yet.
+export function resolveCategoryName(post: Post, code: string | null): string | null {
+  if (!code) return post.category;
+  return post.categoryTranslations[code]?.name ?? post.category;
 }
 
 // Public scope only returns status='published' rows (RLS policy in

@@ -38,6 +38,14 @@ export const categories = pgTable("categories", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),
   slug: text("slug").notNull().unique(),
+  // i18n follow-up — same "keep original vs translate" choice as
+  // posts/pages: multilangEnabled off (default) means `name` alone is
+  // shown everywhere, unchanged from before this column existed;
+  // switched on, translations[code].name is auto-translated from `name`
+  // then freely editable, resolved per-request by the public frontend's
+  // resolveCategoryName the same way resolvePostContent resolves post text.
+  translations: jsonb("translations").notNull().default({}),
+  multilangEnabled: boolean("multilang_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -113,6 +113,7 @@ import {
   RectangleHorizontal,
   Recycle,
   Redo2,
+  RefreshCw,
   Rocket,
   Ruler,
   Search,
@@ -729,6 +730,20 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   infobox: ["name", "heading", "text"],
   tabs: ["items"],
   slider: ["slides"],
+};
+// i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
+// a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through
+// /api/translate as a plain string. Everything else (accordion/tabs' `items`,
+// slider's `slides` JSON, `html`) is intentionally NOT auto-translated here —
+// translating delimited/structured data risks corrupting it — a switch to an
+// empty language slot just verbatim-copies those fields, same as before this
+// feature, and an author can hand-translate them.
+const TRANSLATABLE_TEXT_KEYS: Partial<Record<ElType, string[]>> = {
+  heading: ["text"],
+  text: ["text"],
+  button: ["label"],
+  image: ["alt"],
+  infobox: ["heading", "text"],
 };
 type ClipLevel = "section" | "row" | "column" | "element";
 const CLIP_KEYS: Record<ClipLevel, string> = {
@@ -1744,6 +1759,7 @@ export default function Designer({
     ),
   }));
   const [activeLang, setActiveLang] = useState(BASE_LANG);
+  const [translating, setTranslating] = useState(false);
   useEffect(() => {
     void api.getTenantLanguages(tenantHost, token).then((d) => {
       setSiteLanguages(d.allEnabled);
@@ -1761,11 +1777,53 @@ export default function Designer({
   // scoped to whichever language's layout is currently open, not shared
   // across languages (undoing across two different languages' content
   // wouldn't mean anything).
-  function switchPageLanguage(target: string) {
+  // Real auto-translate (i18n follow-up — see CLAUDE.md): walks the layout
+  // tree translating only TRANSLATABLE_TEXT_KEYS' plain-prose fields, one
+  // /api/translate call at a time (sequential await, never Promise.all — see
+  // CLAUDE.md's deadlock note). A field that fails to translate keeps its
+  // original (base-language) value rather than blocking the whole switch.
+  async function translateLayoutBlocks(src: Block[], target: string, source: string | undefined): Promise<Block[]> {
+    const out = clone(src);
+    for (const block of out) {
+      if (block.type !== "section") continue;
+      const sp = block.props as unknown as SectionProps;
+      for (const row of sp.rows ?? []) {
+        for (const col of row.columns ?? []) {
+          for (const el of col.elements ?? []) {
+            const keys = TRANSLATABLE_TEXT_KEYS[el.type as ElType];
+            if (!keys) continue;
+            for (const key of keys) {
+              const val = el.props[key];
+              if (typeof val === "string" && val.trim()) {
+                try {
+                  el.props[key] = await api.translateText(tenantHost, token, val, target, { source });
+                } catch {
+                  // keep original value on failure — don't block the switch
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return out;
+  }
+  async function switchPageLanguage(target: string) {
     if (target === activeLang) return;
     const leaving = clone(blocks);
-    const targetLayout = content[target] ?? leaving;
-    setContent((prev) => ({ ...prev, [activeLang]: leaving, [target]: targetLayout }));
+    let targetLayout = content[target];
+    if (!targetLayout) {
+      const sourceCode = activeLang === BASE_LANG ? (pageLanguage || undefined) : activeLang;
+      setTranslating(true);
+      try {
+        targetLayout = await translateLayoutBlocks(leaving, target, sourceCode);
+      } catch {
+        targetLayout = leaving;
+      } finally {
+        setTranslating(false);
+      }
+    }
+    setContent((prev) => ({ ...prev, [activeLang]: leaving, [target]: targetLayout! }));
     setBlocks(clone(targetLayout));
     setSel(null);
     history.current = [];
@@ -1778,7 +1836,24 @@ export default function Designer({
       setDirty(true);
       return;
     }
-    switchPageLanguage(code === pageLanguage ? BASE_LANG : code);
+    void switchPageLanguage(code === pageLanguage ? BASE_LANG : code);
+  }
+  // Force-regenerate an already-filled language slot — switchPageLanguage
+  // above only translates an EMPTY slot, so a page whose translations were
+  // saved before this real-translate fix existed (verbatim stub copies from
+  // the old behavior) would otherwise stay stale forever, since clicking
+  // that pill just switches to the existing (untranslated) content.
+  async function retranslatePageLanguage(code: string) {
+    const base = activeLang === BASE_LANG ? blocks : (content[BASE_LANG] ?? blocks);
+    setTranslating(true);
+    try {
+      const fresh = await translateLayoutBlocks(base, code, pageLanguage || undefined);
+      setContent((prev) => ({ ...prev, [code]: fresh }));
+      if (activeLang === code) setBlocks(clone(fresh));
+      setDirty(true);
+    } finally {
+      setTranslating(false);
+    }
   }
   // Figma-style spacing overlay: the hatched fill band only shows while the
   // matching handle is hovered or actively dragged, not for the whole
@@ -4138,24 +4213,36 @@ export default function Designer({
                   const hasContent = Boolean(content[slotKey]);
                   const isBase = l.code === pageLanguage;
                   return (
-                    <button
-                      key={l.code}
-                      type="button"
-                      disabled={isCurrent}
-                      onClick={() => clickPageLanguagePill(l.code)}
-                      title={isBase ? t("posts-language-default-badge") : !pageLanguage || hasContent ? undefined : t("posts-translate-btn")}
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                        isBase ? "ring-2 ring-amber-400 ring-offset-1" : ""
-                      } ${
-                        isCurrent
-                          ? "bg-accent text-white"
-                          : hasContent
-                            ? "bg-canvas text-ink hover:bg-[#e8e8ed]"
-                            : "border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
-                      }`}
-                    >
-                      {isBase && "★ "}{l.label}{!isCurrent && !hasContent && " +"}
-                    </button>
+                    <span key={l.code} className="inline-flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        disabled={isCurrent || translating}
+                        onClick={() => clickPageLanguagePill(l.code)}
+                        title={isBase ? t("posts-language-default-badge") : !pageLanguage || hasContent ? undefined : t("posts-translate-btn")}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+                          isBase ? "ring-2 ring-amber-400 ring-offset-1" : ""
+                        } ${
+                          isCurrent
+                            ? "bg-accent text-white"
+                            : hasContent
+                              ? "bg-canvas text-ink hover:bg-[#e8e8ed]"
+                              : "border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
+                        }`}
+                      >
+                        {isBase && "★ "}{l.label}{!isCurrent && !hasContent && (translating ? "…" : " +")}
+                      </button>
+                      {!isBase && hasContent && (
+                        <button
+                          type="button"
+                          disabled={translating}
+                          onClick={() => void retranslatePageLanguage(l.code)}
+                          title={t("designer-page-retranslate")}
+                          className="rounded p-1 text-sub hover:bg-canvas hover:text-accent disabled:opacity-50"
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                        </button>
+                      )}
+                    </span>
                   );
                 })}
               </div>

@@ -982,14 +982,23 @@ const postsAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRe
 const postsAfterRead = async (items: unknown[], req: FastifyRequest) => {
   const rows = items as Record<string, unknown>[];
   const categoryIds = [...new Set(rows.map((r) => r.categoryId as string | null).filter((v): v is string => Boolean(v)))];
-  const byId = new Map<string, { name: string; slug: string }>();
+  const byId = new Map<string, { name: string; slug: string; translations: unknown; multilangEnabled: boolean }>();
   if (categoryIds.length > 0) {
     const cats = await req.db.select().from(schema.categories).where(inArray(schema.categories.id, categoryIds));
-    for (const cat of cats) byId.set(cat.id, { name: cat.name, slug: cat.slug });
+    for (const cat of cats) byId.set(cat.id, { name: cat.name, slug: cat.slug, translations: cat.translations, multilangEnabled: cat.multilangEnabled });
   }
   return rows.map((r) => {
     const cat = r.categoryId ? byId.get(r.categoryId as string) : undefined;
-    return { ...r, category: cat?.name ?? null, categorySlug: cat?.slug ?? null };
+    return {
+      ...r,
+      category: cat?.name ?? null,
+      categorySlug: cat?.slug ?? null,
+      // i18n follow-up — resolvePostContent's sibling for the category name:
+      // the frontend picks translations[lang].name when the category opted
+      // into multilangEnabled, otherwise `category` (above) is always shown
+      // as-is regardless of viewed language ("keep original name").
+      categoryTranslations: cat?.multilangEnabled ? cat.translations : {},
+    };
   });
 };
 
@@ -1035,6 +1044,16 @@ const postsCollection: CollectionConfig = {
 const categoriesBeforeChange = (data: unknown) => {
   const record = data as Record<string, unknown>;
   record.updatedAt = new Date();
+  if (record.translations && typeof record.translations === "object") {
+    for (const [code, entry] of Object.entries(record.translations as Record<string, unknown>)) {
+      const name = (entry as Record<string, unknown> | null)?.name;
+      if (typeof name !== "string") {
+        const err = new Error(`translations.${code}.name must be a string`) as Error & { statusCode?: number };
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+  }
   return record;
 };
 
@@ -1050,6 +1069,8 @@ const categoriesCollection: CollectionConfig = {
     properties: {
       name: { type: "string", minLength: 1 },
       slug: { type: "string", minLength: 1 },
+      translations: { type: "object" },
+      multilangEnabled: { type: "boolean" },
     },
   },
   access: {
