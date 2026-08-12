@@ -1005,9 +1005,9 @@ pnpm workspace monorepo with two apps:
 - `apps/api/scripts/backup.sh` is the instance-level counterpart: `pg_dump` (whole
   control-plane + tenant DBs, or a specific tenant's schema by host), meant to run on a
   cron job (`RETENTION_DAYS` prunes old dumps, defaults 14).
-- `install.sh` (one-shot VPS installer, docker or bare-metal mode) also prompts for a
-  superadmin email/password up front and, once its mode's stack reports healthy, POSTs
-  them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
+- `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
+  superadmin email/password up front and, once its mode's stack is verified reachable,
+  POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
   self-disabling first-run route — refuses once any user row exists) via a `create_superadmin`
   helper — so the very first login works without depending on the admin UI ever reaching
   the API from a browser first. `--admin-only` skips the whole install and just re-runs
@@ -1017,6 +1017,43 @@ pnpm workspace monorepo with two apps:
   `SUPERADMIN_PASSWORD` env vars) supply these non-interactively; a non-interactive run
   with neither set is a hard error, same as an unset `SESSION_SECRET` elsewhere in the
   script.
+  **Multi-distro + reachability hardening** (see
+  `docs/superpowers/specs/2026-08-12-installer-hardening-design.md`): `detect_os_family()`
+  reads `/etc/os-release` and sets `PKG_MGR`/`FIREWALL_TOOL` (`apt`/`ufw` for Debian-family,
+  `dnf`/`firewalld` for RHEL-family — AlmaLinux/Rocky/RHEL/CentOS Stream — hard error on
+  anything else rather than silently guessing `apt`), used by `pkg_install()` and
+  `open_firewall_ports()` (renamed from `open_ufw_ports`); `ensure_postgres` installs
+  `postgresql-server` + runs `postgresql-setup --initdb` on RHEL-family, since unlike
+  Debian's `postgresql` package it doesn't auto-initialize its data directory. Both modes
+  now call `ensure_reachable_or_selfheal` right after starting the stack instead of a bare
+  "poll /health, assume done" loop: `verify_external_reachability` hits the API/admin/
+  frontend published ports the same way a real browser would (`wait_for_api_health` for
+  the API's own 200, `curl_reachable`'s any-HTTP-response-means-reachable check for the
+  other two) — this is the fix for two real bugs hit in the same live session that a purely
+  in-container/in-process healthcheck can't see: an app bound to Fastify's default
+  `127.0.0.1` (unreachable from the host's `docker-proxy`/NAT even though its own
+  healthcheck, run from the same network namespace, looked fine) and Docker's own iptables
+  chains resetting forwarded connections after `docker-proxy` already accepted them. On
+  failure it runs `diagnose_reachability` (dumps `docker compose ps`/`ss -ltnp`/`iptables -L
+  FORWARD` or the systemd unit status), tries exactly one self-heal (`systemctl restart
+  docker` in docker mode, a service restart in bare-metal mode), re-verifies once, and on a
+  second failure aborts **without** printing the "Done" success banner — the previous loop
+  printed it unconditionally regardless of whether anything actually answered. `--diagnose`
+  reruns just `verify_external_reachability`/`diagnose_reachability` (no self-heal, no
+  credential prompt) against an already-running stack via the same `resolve_running_ports`
+  helper `--admin-only` uses (extended to also resolve `ADMIN_PORT`/`FRONTEND_PORT`, from
+  `.env` for docker mode or `/etc/usim-cms-monitor.env` for bare-metal) — meant to replace a
+  manual `curl`/`ss`/`iptables` debugging session with one command.
+- `install-dev.mjs` is the LOCAL-DEV counterpart — `node install-dev.mjs`, same command on
+  Mac/Windows/Linux, Docker-only (no bare-metal path: Docker Desktop is assumed, so there's
+  no 3-different-OS systemd-equivalent to maintain). Mirrors `install.sh`'s docker mode
+  (same `.env` keys, same `/api/setup` flow, same `--admin-only`/`--diagnose` flags, same
+  "verify reachability before declaring success" philosophy via Node's global `fetch`
+  instead of `curl`) but drops everything VPS-only: no public-IP detection (always
+  `localhost`), no systemd/monitor/firewall/proxy/cert work, and no iptables diagnostics in
+  `--diagnose` (Docker Desktop's own networking backend doesn't hit the iptables-FORWARD
+  class of bug `install.sh` diagnoses — only `docker compose ps` output). Uses
+  `execFileSync` with argv arrays (never a shell string) for every Docker CLI call.
 - Monitoring/alerting is not implemented — known gap. `restart: unless-stopped` +
   compose healthchecks only cover crash-restart, not metrics or alerting; revisit if/when
   the instance carries enough tenants that a silent outage would go unnoticed.
