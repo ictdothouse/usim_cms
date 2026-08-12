@@ -3422,6 +3422,14 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [langSuggestOpen, setLangSuggestOpen] = useState(false);
+  const [proxyEnabled, setProxyEnabled] = useState(false);
+  const [proxyConnected, setProxyConnected] = useState(false);
+  const [proxyErr, setProxyErr] = useState<string | null>(null);
+  const [proxyBusy, setProxyBusy] = useState(false);
+  const [proxyTenants, setProxyTenants] = useState<Array<Record<string, unknown>>>(tenants);
+  const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [keyFile, setKeyFile] = useState<File | null>(null);
   const existingCodes = new Set(langs.map((l) => l.code));
   const langSuggestions = newLabel.trim()
     ? COMMON_LANGUAGES.filter(
@@ -3439,6 +3447,76 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
     void api.listPortalLanguages(token).then(setLangs).catch((e) => setLangErr((e as Error).message));
   }
   useEffect(reloadLanguages, [token]);
+
+  function reloadProxySettings() {
+    void api.getProxySettings(token).then((s) => {
+      setProxyEnabled(s.enabled);
+      setProxyConnected(s.connected);
+    }).catch((e) => setProxyErr((e as Error).message));
+  }
+  useEffect(reloadProxySettings, [token]);
+  useEffect(() => setProxyTenants(tenants), [tenants]);
+
+  function reloadProxyTenants() {
+    void api.listPortalTenants(token).then(setProxyTenants);
+  }
+
+  async function toggleProxyEnabled(enabled: boolean) {
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      await api.setProxyAutomationEnabled(token, enabled);
+      reloadProxySettings();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
+
+  async function resyncProxy() {
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      const res = await api.resyncProxy(token);
+      if (!res.synced) setProxyErr(res.error ?? "Resync failed");
+      reloadProxySettings();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
+
+  async function submitCertUpload() {
+    if (!certUploadHost || !certFile || !keyFile) return;
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      await api.uploadTenantCert(token, certUploadHost, certFile, keyFile);
+      setCertUploadHost(null);
+      setCertFile(null);
+      setKeyFile(null);
+      reloadProxyTenants();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
+
+  async function revertCert(host: string) {
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      await api.revertTenantCert(token, host);
+      reloadProxyTenants();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
 
   async function addLanguage() {
     setLangErr(null);
@@ -3642,6 +3720,105 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
             {t("settings-languages-add-btn")}
           </button>
         </div>
+      </div>
+      <div className={`${card} space-y-3 p-5`}>
+        <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+          <ShieldCheck className="h-3.5 w-3.5 text-accent" /> {t("settings-proxy-title")}
+        </h3>
+        <p className="text-xs text-sub">{t("settings-proxy-desc")}</p>
+        {proxyErr && <p className="text-xs text-red-600">{proxyErr}</p>}
+        <label className="flex items-center gap-2 text-xs font-medium text-ink">
+          <input
+            type="checkbox"
+            checked={proxyEnabled}
+            disabled={proxyBusy}
+            onChange={(e) => void toggleProxyEnabled(e.target.checked)}
+          />
+          {t("settings-proxy-enable")}
+        </label>
+        <p className="text-xs text-sub">{t("settings-proxy-dns-reminder")}</p>
+        {!proxyEnabled && <p className="text-xs text-sub">{t("settings-proxy-manual-hint")}</p>}
+        {proxyEnabled && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span className={proxyConnected ? "text-ok" : "text-red-600"}>
+                {proxyConnected ? t("settings-proxy-status-connected") : t("settings-proxy-status-disconnected")}
+              </span>
+              <button onClick={() => void resyncProxy()} disabled={proxyBusy} className={btnGhost}>
+                {proxyBusy ? t("settings-busy") : t("settings-proxy-resync-btn")}
+              </button>
+            </div>
+            <div className="space-y-2">
+              {proxyTenants.map((tn) => {
+                const tHost = tn.host as string;
+                const hasCustomCert = Boolean(tn.hasCustomCert);
+                const certExpiresAt = tn.certExpiresAt as string | null;
+                const expiringSoon =
+                  hasCustomCert && certExpiresAt !== null &&
+                  new Date(certExpiresAt).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000;
+                return (
+                  <div
+                    key={tHost}
+                    className="flex items-center justify-between gap-2 border-t border-line pt-2 text-xs first:border-0 first:pt-0"
+                  >
+                    <div>
+                      <p className="font-mono text-ink">{tHost}</p>
+                      <p className={expiringSoon ? "font-semibold text-amber-700" : "text-sub"}>
+                        {hasCustomCert && certExpiresAt
+                          ? `${t("settings-proxy-cert-custom")} — ${new Date(certExpiresAt).toLocaleDateString()}`
+                          : t("settings-proxy-cert-auto")}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {hasCustomCert && (
+                        <button onClick={() => void revertCert(tHost)} disabled={proxyBusy} className={btnGhost}>
+                          {t("settings-proxy-revert-btn")}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setCertUploadHost(certUploadHost === tHost ? null : tHost)}
+                        disabled={proxyBusy}
+                        className={btnGhost}
+                      >
+                        {t("settings-proxy-upload-btn")}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {certUploadHost && (
+              <div className={`${card} space-y-2 border border-line p-3`}>
+                <p className="text-xs font-semibold text-ink">{certUploadHost}</p>
+                <label className="block text-xs text-sub">
+                  {t("settings-proxy-upload-cert-file")}
+                  <input
+                    type="file"
+                    accept=".crt,.pem,.cer"
+                    onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
+                    className="mt-1 block text-xs"
+                  />
+                </label>
+                <label className="block text-xs text-sub">
+                  {t("settings-proxy-upload-key-file")}
+                  <input
+                    type="file"
+                    accept=".key,.pem"
+                    onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
+                    className="mt-1 block text-xs"
+                  />
+                </label>
+                <button
+                  onClick={() => void submitCertUpload()}
+                  disabled={proxyBusy || !certFile || !keyFile}
+                  className={btnPrimary}
+                >
+                  {proxyBusy ? t("settings-busy") : t("settings-proxy-upload-submit")}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
