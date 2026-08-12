@@ -44,8 +44,11 @@ import {
   setTenantLanguageSelection,
   getMergedTheme,
   setTenantTheme,
+  getProxyAutomationEnabled,
+  setProxyAutomationEnabled,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
+import { syncCaddy, pingCaddy } from "./proxy-sync.js";
 import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
 import {
   exportTenantBackup,
@@ -368,6 +371,19 @@ app.post("/api/theme-preview-token", async (req, reply) => {
   return { token };
 });
 
+// Fires the Caddy resync after any tenant-table change, but only when the
+// superadmin has opted in (getProxyAutomationEnabled) — and never lets a
+// sync failure fail the request that triggered it; a tenant create/delete
+// must always succeed at the DB level regardless of proxy state.
+async function maybeSyncCaddy(): Promise<void> {
+  try {
+    if (!(await getProxyAutomationEnabled())) return;
+    await syncCaddy(await listTenants());
+  } catch (err) {
+    app.log.warn({ err }, "Caddy proxy sync failed");
+  }
+}
+
 app.get("/api/portal/tenants", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   return { tenants: await listTenants() };
@@ -385,6 +401,7 @@ app.post("/api/portal/tenants", async (req, reply) => {
     return { error: "host and departmentName required" };
   }
   await createTenant(host, departmentName, dbUrl || null);
+  await maybeSyncCaddy();
   return { created: true };
 });
 
@@ -404,7 +421,42 @@ app.delete("/api/portal/tenants/:host", async (req, reply) => {
     const tenantFolder = host.toLowerCase().replace(/[^a-z0-9]/g, "_");
     await rm(path.join(localUploadsDir, tenantFolder), { recursive: true, force: true });
   }
+  await maybeSyncCaddy();
   return { deleted: true };
+});
+
+app.get("/api/portal/proxy-settings", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const enabled = await getProxyAutomationEnabled();
+  const connected = enabled ? await pingCaddy() : false;
+  return { enabled, connected };
+});
+
+app.put("/api/portal/proxy-settings", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { enabled } = req.body as { enabled?: boolean };
+  if (typeof enabled !== "boolean") {
+    reply.code(400);
+    return { error: "enabled must be a boolean" };
+  }
+  await setProxyAutomationEnabled(enabled);
+  if (enabled) await maybeSyncCaddy();
+  return { enabled };
+});
+
+app.post("/api/portal/proxy-settings/resync", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  if (!(await getProxyAutomationEnabled())) {
+    reply.code(400);
+    return { error: "proxy automation is not enabled" };
+  }
+  try {
+    await syncCaddy(await listTenants());
+    return { synced: true };
+  } catch (err) {
+    reply.code(502);
+    return { synced: false, error: (err as Error).message };
+  }
 });
 
 app.get("/api/portal/users", async (req, reply) => {
@@ -1557,4 +1609,9 @@ app.listen({ port, host: "0.0.0.0" }, (err) => {
     app.log.error(err);
     process.exit(1);
   }
+  // Self-heal: if the proxy container was recreated or lost its volume
+  // since this process last ran, resync it from the tenants table now
+  // rather than waiting for the next tenant create/delete. No-op when the
+  // switch is off (maybeSyncCaddy checks getProxyAutomationEnabled itself).
+  void maybeSyncCaddy();
 });
