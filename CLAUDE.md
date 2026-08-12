@@ -1001,11 +1001,20 @@ pnpm workspace monorepo with two apps:
 - `proxy` (`caddy:2-alpine`, config in `./Caddyfile`) is the public-facing reverse proxy
   and TLS terminator. Default behavior: automatic Let's Encrypt issuance/renewal for
   every domain in `ADMIN_DOMAIN`/`API_DOMAIN`/`TENANT_DOMAINS` (`.env.example`) — no
-  manual cert steps. To use a certificate USIM's ICT centre issues instead (the
-  cPanel-style flow), swap the matching `Caddyfile` site block to a `tls <cert> <key>`
-  directive and mount the cert files in via the commented `./certs` volume on `proxy`.
-  `TENANT_DOMAINS` needs a live tenant's host added to it before that department's site
-  is reachable through the proxy.
+  manual cert steps. `TENANT_DOMAINS` needs a live tenant's host added to it (and the
+  container restarted) before that department's site is reachable through the proxy —
+  **unless** the superadmin has turned on the "Domain & SSL Automation" switch in the
+  admin's Settings tab (off by default, see
+  `docs/superpowers/specs/2026-08-12-tenant-domain-ssl-automation-design.md`), in which
+  case every tenant create/delete automatically wires (or unwires) that host into Caddy's
+  live config via its Admin API (`apps/api/src/proxy-sync.ts`) — no `.env` edit, no
+  restart. That switch also accepts a paid/custom certificate per domain (USIM's ICT
+  centre's own cert, uploaded through the same card) in place of Caddy's automatic Let's
+  Encrypt for that host — the old manual "swap the `Caddyfile` site block to `tls <cert>
+  <key>` and mount `./certs`" flow remains the documented path for anyone who leaves the
+  switch off. This automation only ever applies to the docker-mode Caddy setup — bare-
+  metal install mode has no reverse-proxy/TLS layer at all, and local dev has no proxy
+  either; both are untouched by this switch.
 - Tenant backup/restore/migration is `apps/api/src/backup.ts`, not `pg_dump`: JSON dump
   of a tenant's rows + its local uploads, zipped — restores across Postgres versions and
   onto a different server/host (rewrites `/uploads/<host>/` references on cross-host
