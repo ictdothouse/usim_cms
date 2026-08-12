@@ -1005,6 +1005,18 @@ pnpm workspace monorepo with two apps:
 - `apps/api/scripts/backup.sh` is the instance-level counterpart: `pg_dump` (whole
   control-plane + tenant DBs, or a specific tenant's schema by host), meant to run on a
   cron job (`RETENTION_DAYS` prunes old dumps, defaults 14).
+- `install.sh` (one-shot VPS installer, docker or bare-metal mode) also prompts for a
+  superadmin email/password up front and, once its mode's stack reports healthy, POSTs
+  them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
+  self-disabling first-run route — refuses once any user row exists) via a `create_superadmin`
+  helper — so the very first login works without depending on the admin UI ever reaching
+  the API from a browser first. `--admin-only` skips the whole install and just re-runs
+  this step against an already-installed stack (reads the API port back out of `.env`'s
+  `API_PORT` for docker mode or `apps/api/.env`'s `PORT` for bare-metal, rather than
+  re-picking a free one). `--admin-email=`/`--admin-password=` (or `SUPERADMIN_EMAIL`/
+  `SUPERADMIN_PASSWORD` env vars) supply these non-interactively; a non-interactive run
+  with neither set is a hard error, same as an unset `SESSION_SECRET` elsewhere in the
+  script.
 - Monitoring/alerting is not implemented — known gap. `restart: unless-stopped` +
   compose healthchecks only cover crash-restart, not metrics or alerting; revisit if/when
   the instance carries enough tenants that a silent outage would go unnoticed.

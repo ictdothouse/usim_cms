@@ -20,9 +20,19 @@
 #
 # Both modes: auto-pick free host ports, detect the public IP so the admin
 # build's baked-in API URL is actually reachable from a browser, and install
-# the ops monitor (monitor/server.js) as a systemd service.
+# the ops monitor (monitor/server.js) as a systemd service. Both also ask for
+# a superadmin email/password up front and create that account directly
+# against the running API's own /api/setup route (the same self-disabling
+# first-run endpoint the admin's Setup Wizard uses) once the stack is
+# healthy — so login works without ever depending on the admin UI reaching
+# the API from a browser first.
 #
 # Run: sudo ./install.sh [--mode=docker|bare-metal]
+#      [--admin-email=<email>] [--admin-password=<password>]
+#      [--admin-only]   Skip the install entirely — just (re)run the
+#                        superadmin-creation step against an already-running
+#                        stack (e.g. everything's installed, you only need
+#                        the first account created).
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_DIR="$(pwd)"
@@ -36,10 +46,16 @@ fi
 # Mode selection
 # ---------------------------------------------------------------------------
 MODE="${INSTALL_MODE:-}"
+ADMIN_ONLY="false"
+SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-}"
+SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-}"
 for arg in "$@"; do
   case "$arg" in
     --mode=docker) MODE="docker" ;;
     --mode=bare-metal|--mode=baremetal) MODE="bare-metal" ;;
+    --admin-only) ADMIN_ONLY="true" ;;
+    --admin-email=*) SUPERADMIN_EMAIL="${arg#--admin-email=}" ;;
+    --admin-password=*) SUPERADMIN_PASSWORD="${arg#--admin-password=}" ;;
   esac
 done
 if [ -z "$MODE" ]; then
@@ -60,6 +76,26 @@ if [ -z "$MODE" ]; then
 fi
 echo "== usim_cms installer — mode: $MODE =="
 echo "Repo: $REPO_DIR"
+echo ""
+
+# Ask for the superadmin login up front (before any install work starts) —
+# used later, once the stack is healthy, to create that account directly via
+# the API's own /api/setup route. Skipped only if both are already supplied
+# (flags or SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD env vars) and it's not an
+# interactive terminal — a non-interactive run with neither is a hard error,
+# same as an unset SESSION_SECRET would be further down.
+if [ -z "$SUPERADMIN_EMAIL" ] && [ -t 0 ]; then
+  read -r -p "Superadmin email: " SUPERADMIN_EMAIL
+fi
+if [ -z "$SUPERADMIN_PASSWORD" ] && [ -t 0 ]; then
+  read -r -s -p "Superadmin password: " SUPERADMIN_PASSWORD
+  echo ""
+fi
+if [ -z "$SUPERADMIN_EMAIL" ] || [ -z "$SUPERADMIN_PASSWORD" ]; then
+  echo "Superadmin email/password required — pass --admin-email=/--admin-password=," >&2
+  echo "set SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD env vars, or run this interactively." >&2
+  exit 1
+fi
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -196,6 +232,36 @@ open_ufw_ports() {
   fi
 }
 
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+# Creates the first superadmin against a healthy API's own /api/setup route
+# (see index.ts: self-disabling once any user row exists). Safe to re-run —
+# if setup was already completed (by this call or the admin's Setup Wizard),
+# it just skips instead of erroring.
+create_superadmin() {
+  local api_port="$1" status
+  echo ""
+  echo "Creating superadmin account..."
+  status=$(curl -fs "http://localhost:${api_port}/api/setup/status" 2>/dev/null || true)
+  if ! echo "$status" | grep -q '"needsSetup":true'; then
+    echo "Setup already completed — skipping (log in with the existing account)."
+    return
+  fi
+  local resp
+  resp=$(curl -fs -X POST "http://localhost:${api_port}/api/setup" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$(json_escape "$SUPERADMIN_EMAIL")\",\"password\":\"$(json_escape "$SUPERADMIN_PASSWORD")\"}" \
+    2>/dev/null || true)
+  if echo "$resp" | grep -q '"token"'; then
+    echo "Superadmin created: ${SUPERADMIN_EMAIL}"
+  else
+    echo "Warning: superadmin creation failed — create one later from the admin's Setup Wizard." >&2
+    echo "  Response: ${resp:-<no response>}" >&2
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Docker mode
 # ---------------------------------------------------------------------------
@@ -261,6 +327,8 @@ install_docker_mode() {
     curl -fs "http://localhost:${api_port}/health" >/dev/null 2>&1 && break
     sleep 2
   done
+
+  create_superadmin "$api_port"
 
   local node_bin
   node_bin=$(ensure_private_node)
@@ -439,6 +507,8 @@ EOF
     sleep 2
   done
 
+  create_superadmin "$api_port"
+
   install_monitor "$node_bin" "systemd" "$monitor_port"
   # Record whether we own Postgres (so the monitor only offers to restart it
   # when it's not something another app on this VPS also depends on) and the
@@ -469,6 +539,29 @@ EOF
   echo " in the database it shows a setup wizard automatically."
   echo "================================================================"
 }
+
+if [ "$ADMIN_ONLY" = "true" ]; then
+  # Re-run of just the account-creation step against a stack this script
+  # already installed — reads the API port back out of wherever install_*_mode
+  # wrote it rather than re-picking a free one, since the stack is expected
+  # to already be up.
+  if [ "$MODE" = "docker" ]; then
+    API_PORT_VAL="$(grep '^API_PORT=' .env 2>/dev/null | cut -d= -f2-)"
+  else
+    API_PORT_VAL="$(grep '^PORT=' apps/api/.env 2>/dev/null | cut -d= -f2-)"
+  fi
+  if [ -z "$API_PORT_VAL" ]; then
+    echo "Could not find an existing API_PORT for mode=$MODE — is the stack installed?" >&2
+    exit 1
+  fi
+  echo "Waiting for the API to become healthy..."
+  for _ in $(seq 1 30); do
+    curl -fs "http://localhost:${API_PORT_VAL}/health" >/dev/null 2>&1 && break
+    sleep 2
+  done
+  create_superadmin "$API_PORT_VAL"
+  exit 0
+fi
 
 if [ "$MODE" = "docker" ]; then
   install_docker_mode
