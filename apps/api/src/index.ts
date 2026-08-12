@@ -46,9 +46,10 @@ import {
   setTenantTheme,
   getProxyAutomationEnabled,
   setProxyAutomationEnabled,
+  setTenantCertInfo,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
-import { syncCaddy, pingCaddy } from "./proxy-sync.js";
+import { syncCaddy, pingCaddy, parseCertExpiry, loadCaddyCert } from "./proxy-sync.js";
 import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
 import {
   exportTenantBackup,
@@ -457,6 +458,55 @@ app.post("/api/portal/proxy-settings/resync", async (req, reply) => {
     reply.code(502);
     return { synced: false, error: (err as Error).message };
   }
+});
+
+// Uploads USIM's own paid certificate for `host`, forwarded straight to
+// Caddy — never written to this API's own disk or DB (see proxy-sync.ts's
+// loadCaddyCert). Caddy is the one real validator of the cert/key pair.
+app.post("/api/portal/tenants/:host/cert", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  if (!(await getProxyAutomationEnabled())) {
+    reply.code(400);
+    return { error: "proxy automation is not enabled" };
+  }
+  const { host } = req.params as { host: string };
+  let certPem: string | null = null;
+  let keyPem: string | null = null;
+  for await (const part of req.parts()) {
+    if (part.type !== "file") continue;
+    const buf = await part.toBuffer();
+    if (part.fieldname === "cert") certPem = buf.toString("utf8");
+    if (part.fieldname === "key") keyPem = buf.toString("utf8");
+  }
+  if (!certPem || !keyPem) {
+    reply.code(400);
+    return { error: "cert and key files required (multipart/form-data, fields 'cert' and 'key')" };
+  }
+  let expiresAt: Date;
+  try {
+    expiresAt = parseCertExpiry(certPem);
+  } catch {
+    reply.code(400);
+    return { error: "certificate could not be parsed (expected PEM)" };
+  }
+  try {
+    await loadCaddyCert(certPem, keyPem);
+  } catch (err) {
+    reply.code(400);
+    return { error: (err as Error).message };
+  }
+  await setTenantCertInfo(host, expiresAt);
+  await maybeSyncCaddy();
+  return { hasCustomCert: true, certExpiresAt: expiresAt.toISOString() };
+});
+
+// Reverts `host` to Caddy's automatic Let's Encrypt HTTPS.
+app.delete("/api/portal/tenants/:host/cert", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  await setTenantCertInfo(host, null);
+  await maybeSyncCaddy();
+  return { hasCustomCert: false };
 });
 
 app.get("/api/portal/users", async (req, reply) => {
