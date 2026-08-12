@@ -1541,7 +1541,10 @@ await app.register(async (protectedScope) => {
 });
 
 const port = Number(process.env.PORT ?? 3000);
-app.listen({ port }, (err) => {
+// Fastify defaults to binding 127.0.0.1 — inside a container that's the
+// container's OWN loopback, unreachable from the host's docker-proxy/NAT
+// even though an in-container healthcheck hitting 127.0.0.1 looks healthy.
+app.listen({ port, host: "0.0.0.0" }, (err) => {
   if (err) {
     app.log.error(err);
     process.exit(1);
