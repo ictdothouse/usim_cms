@@ -1,8 +1,13 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from "node:crypto";
 
-// ponytail: dev fallback secret. Must be set to a real random value via
-// SESSION_SECRET before any real deployment.
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET must be set in production — refusing to boot with the insecure dev default.");
+}
 const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret-change-me";
+
+// Normal login sessions (setup/login/impersonate) get this TTL; preview/
+// theme-preview tokens set their own, much shorter exp already.
+export const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -43,8 +48,10 @@ export interface SessionPayload {
   // them for this request only, without writing to site_theme. Same
   // previewOnly/exp gating as a page-preview token.
   themePreview?: Record<string, string>;
-  // Unix ms expiry — optional because normal login sessions never expire
-  // today; only preview tokens set this.
+  // Unix ms expiry. Optional only because a token predating this field
+  // (signed before SESSION_TTL_MS existed) must still verify — every
+  // signSession call today sets it, whether SESSION_TTL_MS (login/setup/
+  // impersonate) or a preview token's own short TTL.
   exp?: number;
 }
 

@@ -14,8 +14,18 @@ Package manager is pnpm (via corepack — run `corepack enable` once if `pnpm` i
 - `pnpm dev:frontend` — run the Astro SSR site renderer (`apps/frontend`)
 - `pnpm build` — build all workspace packages
 - `pnpm typecheck` — typecheck all workspace packages
-- `pnpm --filter @usim-cms/api db:generate` — generate a Drizzle migration from `apps/api/src/db/schema.ts`
-- `pnpm --filter @usim-cms/api db:migrate` — apply pending Drizzle migrations
+- `pnpm --filter @usim-cms/api db:generate` — generate a Drizzle migration `.sql` file from
+  `apps/api/src/db/schema.ts` into `src/db/migrations` (authoring only — writes the file, applies nothing)
+- `pnpm --filter @usim-cms/api db:migrate` — **do not run this against `DATABASE_URL` in normal use.**
+  `schema.ts` defines tenant-content tables (`pages`/`posts`/`categories`/etc), but `DATABASE_URL` is the
+  control-plane DB, which never holds those tables (see "Multi-tenancy" below) — running drizzle-kit's own
+  migrate here would create them there anyway, alongside the registry tables that actually belong. The
+  mechanism that actually applies these `.sql` files is `tenant-pool.ts`'s `ensureTenantDatabase`: every
+  file in `src/db/migrations` is replayed (idempotent, `IF NOT EXISTS`/`DROP POLICY IF EXISTS` throughout)
+  into each tenant's own database the first time that host is requested per process — no drizzle-kit
+  migration-tracking table involved on the tenant side. `db:generate` is still the right way to author a
+  new migration `.sql` file; `db:migrate` exists only because drizzle-kit requires a `migrate` command to
+  exist for `db:generate` to work, not because it's part of the real deploy flow.
 
 `apps/api` needs a `DATABASE_URL` (see `apps/api/.env.example`) pointing at a Postgres instance before
 routes that touch the database will work — `/health` does not need one. On a fresh DB, connect as a

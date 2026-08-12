@@ -46,7 +46,7 @@ import {
   setTenantTheme,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
-import { verifyPassword, hashPassword, signSession, verifySession } from "./db/auth.js";
+import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
 import {
   exportTenantBackup,
   importTenantBackup,
@@ -189,10 +189,15 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
-// Dev-open CORS so apps/admin (different port) can call this API. Lock
-// `origin` down to the real admin domain before any real deployment.
+// ADMIN_ORIGIN: comma-separated list of allowed admin origins in production
+// (e.g. https://admin.usim.edu.my). Unset in dev only — falls back to
+// origin:true so apps/admin's own dev-server port keeps working locally.
+const adminOrigins = process.env.ADMIN_ORIGIN?.split(",").map((o) => o.trim()).filter(Boolean);
+if (process.env.NODE_ENV === "production" && !adminOrigins?.length) {
+  throw new Error("ADMIN_ORIGIN must be set in production — refusing to boot with CORS open to any origin.");
+}
 await app.register(cors, {
-  origin: true,
+  origin: adminOrigins?.length ? adminOrigins : true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "x-tenant-host"],
 });
@@ -244,6 +249,7 @@ app.post("/api/setup", async (req, reply) => {
     role: "superadmin",
     tenantHost: null,
     permissions: [],
+    exp: Date.now() + SESSION_TTL_MS,
   });
   return { token, role: "superadmin", tenantHost: null };
 });
@@ -269,6 +275,7 @@ app.post("/api/auth/login", async (req, reply) => {
       await getRolePermissions(user.roleId as string | null),
       user.extraPermissions as string[] | null,
     ),
+    exp: Date.now() + SESSION_TTL_MS,
   });
   return { token, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
 });
@@ -631,6 +638,7 @@ app.post("/api/portal/impersonate", async (req, reply) => {
     tenantHosts: (target.tenantHosts as string[] | null) ?? [],
     permissions,
     impersonatedBy: admin.email,
+    exp: Date.now() + SESSION_TTL_MS,
   });
   return {
     token,

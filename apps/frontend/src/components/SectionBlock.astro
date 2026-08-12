@@ -280,7 +280,8 @@ function parseSlideText(raw: unknown): SlideText {
   if (typeof raw === "string") return { ...TEXT_DEFAULTS, text: raw };
   if (raw && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
-    const str = (key: keyof SlideText) => (typeof o[key] === "string" ? (o[key] as string) : TEXT_DEFAULTS[key]);
+    type StrKey = "color" | "fontSize" | "width" | "fontFamily" | "fontWeight" | "lineHeight" | "letterSpacing" | "textTransform" | "fontStyle" | "textDecoration";
+    const str = (key: StrKey) => (typeof o[key] === "string" ? (o[key] as string) : TEXT_DEFAULTS[key]);
     return {
       text: typeof o.text === "string" ? o.text : "",
       color: str("color"),
