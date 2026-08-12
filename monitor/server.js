@@ -143,9 +143,26 @@ function getGitInfo(cb) {
 function getHostStats(cb) {
   execFile(
     "sh",
-    ["-c", "df -h / | tail -1; echo ---; free -m | sed -n '2p'"],
+    ["-c", "df -h / | tail -1; echo ===SPLIT===; free -m | sed -n '2p'"],
     { timeout: 10_000 },
-    (err, stdout) => cb(err ? null : stdout.trim()),
+    (err, stdout) => {
+      if (err) return cb(null);
+      const raw = stdout.trim();
+      const [diskLine, memLine] = raw.split("===SPLIT===").map((s) => (s || "").trim());
+      let disk = null;
+      let mem = null;
+      const dparts = (diskLine || "").split(/\s+/); // dev size used avail use% mount
+      if (dparts.length >= 6) {
+        disk = { total: dparts[1], used: dparts[2], avail: dparts[3], pct: parseInt(dparts[4], 10) || 0, mount: dparts[5] };
+      }
+      const mparts = (memLine || "").split(/\s+/); // Mem: total used free shared buff/cache available
+      if (mparts.length >= 3) {
+        const total = Number(mparts[1]);
+        const used = Number(mparts[2]);
+        mem = { totalMB: total, usedMB: used, pct: total ? Math.round((used / total) * 100) : 0 };
+      }
+      cb({ raw, disk, mem });
+    },
   );
 }
 
@@ -310,27 +327,58 @@ const DASHBOARD_HTML = `<!doctype html>
 <title>usim_cms monitor</title>
 <style>
   :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+  body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
   h1 { font-size: 1.25rem; }
-  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #8884; font-size: 0.9rem; }
-  button { cursor: pointer; padding: 0.3rem 0.7rem; margin: 0.15rem; border-radius: 6px; border: 1px solid #8884; background: #0071e3; color: #fff; font-size: 0.85rem; }
+  h3 { margin-top: 1.6rem; }
+  button { cursor: pointer; padding: 0.3rem 0.7rem; margin: 0.15rem 0.15rem 0.15rem 0; border-radius: 6px; border: 1px solid #8884; background: #0071e3; color: #fff; font-size: 0.85rem; }
   button.secondary { background: transparent; color: inherit; }
   button.danger { background: #d32f2f; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  pre { background: #0002; padding: 0.75rem; border-radius: 8px; max-height: 300px; overflow: auto; font-size: 0.8rem; white-space: pre-wrap; }
   .row { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
   .muted { opacity: 0.7; font-size: 0.85rem; }
-  .badge { padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; }
-  .badge.up { background: #2e7d3220; color: #2e7d32; }
-  .badge.down { background: #d32f2f20; color: #d32f2f; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.7rem; margin: 0.8rem 0; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 0.6rem 0.8rem; }
+  .card .label { font-size: 0.72rem; opacity: 0.65; text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 1.1rem; font-weight: 600; margin: .15rem 0 .4rem; }
+  .meter { height: 8px; border-radius: 999px; background: #8882; overflow: hidden; }
+  .meter > span { display: block; height: 100%; border-radius: 999px; transition: width .5s; }
+  .meter.ok > span { background: #2e7d32; }
+  .meter.warn > span { background: #f9a825; }
+  .meter.bad > span { background: #d32f2f; }
+
+  .services-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.7rem; margin: 0.6rem 0; }
+  .svc-card { border: 1px solid #8884; border-radius: 10px; padding: 0.7rem 0.8rem; }
+  .svc-head { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.3rem; }
+  .svc-head b { font-size: 0.95rem; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: #8888; flex: none; }
+  .dot.up { background: #2e7d32; box-shadow: 0 0 6px #2e7d3299; }
+  .dot.down { background: #d32f2f; box-shadow: 0 0 6px #d32f2f99; }
+  .history { display: flex; gap: 2px; margin: 0.4rem 0; }
+  .history span { width: 6px; height: 14px; border-radius: 2px; background: #8884; }
+  .history span.up { background: #2e7d32; }
+  .history span.down { background: #d32f2f; }
+
+  .term { background: #0d1117; color: #c9d1d9; border-radius: 8px; padding: 0.75rem; max-height: 300px; overflow: auto; font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; white-space: pre-wrap; }
+  .t-head { color: #79c0ff; }
+  .t-head2 { color: #d2a8ff; font-weight: 600; }
+  .t-err { color: #ff7b72; }
+  .t-ok { color: #7ee787; }
+
+  .progress-track { height: 6px; border-radius: 999px; background: #8882; overflow: hidden; margin: .5rem 0; }
+  .progress-fill { height: 100%; width: 0; border-radius: 999px; background: #0071e3; }
+  .progress-fill.running { width: 40%; animation: indet 1.1s ease-in-out infinite; transform-origin: left; }
+  .progress-fill.success { width: 100%; background: #2e7d32; }
+  .progress-fill.fail { width: 100%; background: #d32f2f; }
+  @keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 </style>
 </head>
 <body>
 <h1>usim_cms — server monitor</h1>
 <p class="muted" id="mode">loading…</p>
 <p class="muted" id="git"></p>
-<p class="muted" id="host"></p>
+
+<div class="grid" id="hostGrid"></div>
 
 <div class="row">
   <button onclick="pull()">Pull latest &amp; rebuild</button>
@@ -338,23 +386,27 @@ const DASHBOARD_HTML = `<!doctype html>
   <button class="secondary" onclick="refresh()">Refresh now</button>
 </div>
 <p class="muted" id="deployState"></p>
-<pre id="deployLog" style="display:none"></pre>
+<div class="progress-track" id="deployTrack" style="display:none"><div class="progress-fill" id="deployFill"></div></div>
+<pre class="term" id="deployLog" style="display:none"></pre>
 
-<table id="services"><tbody></tbody></table>
+<h3>Services</h3>
+<div class="services-grid" id="services"></div>
 
 <h3>Database</h3>
 <div class="row">
+  <span class="dot" id="dbDot"></span>
   <span class="muted" id="dbStatus">checking…</span>
   <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
 </div>
 
 <h3>Logs</h3>
 <div class="row" id="logButtons"></div>
-<pre id="logs">Pick a service above to view its logs.</pre>
+<pre class="term" id="logs">Pick a service above to view its logs.</pre>
 
 <script>
 let SERVICES = [];
 let DB_MANAGED = true;
+let history = {};
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -364,12 +416,68 @@ async function api(path, opts) {
   return body;
 }
 
-function statusBadge(s) {
+function pctClass(pct) {
+  if (pct >= 90) return "bad";
+  if (pct >= 70) return "warn";
+  return "ok";
+}
+
+function meterCard(label, pct, sub) {
+  const cls = pctClass(pct);
+  return "<div class=\\"card\\"><div class=\\"label\\">" + label + "</div>" +
+    "<div class=\\"value\\">" + pct + "% <span class=\\"muted\\">" + sub + "</span></div>" +
+    "<div class=\\"meter " + cls + "\\"><span style=\\"width:" + pct + "%\\"></span></div></div>";
+}
+
+function renderHost(host) {
+  const grid = document.getElementById("hostGrid");
+  if (!host) { grid.innerHTML = ""; return; }
+  let html = "";
+  if (host.disk) html += meterCard("Disk /", host.disk.pct, host.disk.used + " / " + host.disk.total);
+  if (host.mem) html += meterCard("Memory", host.mem.pct, host.mem.usedMB + "MB / " + host.mem.totalMB + "MB");
+  grid.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function colorizeLog(text) {
+  const lines = escapeHtml(text).split("\\n");
+  return lines
+    .map((line) => {
+      let cls = "";
+      if (/^===/.test(line)) cls = "t-head2";
+      else if (/^---/.test(line)) cls = "t-head";
+      else if (/error/i.test(line)) cls = "t-err";
+      else if (/done|finished|success/i.test(line)) cls = "t-ok";
+      return cls ? "<span class=\\"" + cls + "\\">" + line + "</span>" : line;
+    })
+    .join("\\n");
+}
+
+function statusDot(s) {
   const up = /running|healthy|active/i.test(s.State || s.Health || "");
   const span = document.createElement("span");
-  span.className = "badge " + (up ? "up" : "down");
-  span.textContent = (s.State || "unknown") + (s.Health ? " (" + s.Health + ")" : "");
-  return span;
+  span.className = "dot " + (up ? "up" : "down");
+  return { up, el: span };
+}
+
+function pushHistory(name, up) {
+  if (!history[name]) history[name] = [];
+  history[name].push(up ? 1 : 0);
+  if (history[name].length > 24) history[name].shift();
+}
+
+function historyEl(name) {
+  const wrap = document.createElement("div");
+  wrap.className = "history";
+  for (const v of history[name] || []) {
+    const span = document.createElement("span");
+    span.className = v ? "up" : "down";
+    wrap.appendChild(span);
+  }
+  return wrap;
 }
 
 function actionButton(label, name, action, secondary) {
@@ -404,35 +512,55 @@ async function refresh() {
   try {
     const data = await api("/api/status");
     document.getElementById("git").textContent = "HEAD: " + (data.git || "unknown");
-    document.getElementById("host").textContent = data.host ? data.host.replace(/\\n/g, " · ") : "";
-    const tbody = document.querySelector("#services tbody");
-    tbody.innerHTML = "";
+    renderHost(data.host);
+    const grid = document.getElementById("services");
+    grid.innerHTML = "";
     const byName = {};
     for (const s of data.services || []) byName[s.Service || s.Name] = s;
     for (const name of SERVICES) {
       const s = byName[name] || {};
-      const tr = document.createElement("tr");
-      const nameCell = document.createElement("td");
+      const d = statusDot(s);
+      pushHistory(name, d.up);
+      const card = document.createElement("div");
+      card.className = "svc-card";
+      const head = document.createElement("div");
+      head.className = "svc-head";
       const b = document.createElement("b");
       b.textContent = name;
-      nameCell.appendChild(b);
-      const statusCell = document.createElement("td");
-      statusCell.appendChild(statusBadge(s));
-      const actionsCell = document.createElement("td");
-      actionsCell.className = "row";
-      actionsCell.appendChild(actionButton("Restart", name, "restart", false));
-      actionsCell.appendChild(actionButton("Stop", name, "stop", true));
-      actionsCell.appendChild(actionButton("Start", name, "start", true));
-      tr.append(nameCell, statusCell, actionsCell);
-      tbody.appendChild(tr);
+      head.appendChild(d.el);
+      head.appendChild(b);
+      card.appendChild(head);
+      const state = document.createElement("div");
+      state.className = "muted";
+      state.textContent = (s.State || "unknown") + (s.Health ? " (" + s.Health + ")" : "");
+      card.appendChild(state);
+      card.appendChild(historyEl(name));
+      const actions = document.createElement("div");
+      actions.className = "row";
+      actions.appendChild(actionButton("Restart", name, "restart", false));
+      actions.appendChild(actionButton("Stop", name, "stop", true));
+      actions.appendChild(actionButton("Start", name, "start", true));
+      card.appendChild(actions);
+      grid.appendChild(card);
     }
     const d = data.deploy;
+    const track = document.getElementById("deployTrack");
+    const fill = document.getElementById("deployFill");
     document.getElementById("deployState").textContent = d.running
       ? "Deploy running since " + d.startedAt + "…"
       : d.finishedAt
         ? "Last deploy: exit " + d.exitCode + " at " + d.finishedAt
         : "No deploy run yet.";
-    if (d.running) pollDeployLog();
+    if (d.running) {
+      track.style.display = "block";
+      fill.className = "progress-fill running";
+      pollDeployLog();
+    } else if (d.finishedAt) {
+      track.style.display = "block";
+      fill.className = "progress-fill " + (d.exitCode === 0 ? "success" : "fail");
+    } else {
+      track.style.display = "none";
+    }
   } catch (e) {
     document.getElementById("git").textContent = "Error: " + e.message;
   }
@@ -441,6 +569,7 @@ async function refresh() {
 async function refreshDb() {
   try {
     const d = await api("/api/db/status");
+    document.getElementById("dbDot").className = "dot " + (d.ok ? "up" : "down");
     document.getElementById("dbStatus").textContent = (d.ok ? "up — " : "down — ") + (d.output || "");
   } catch (e) {
     document.getElementById("dbStatus").textContent = "Error: " + e.message;
@@ -487,7 +616,7 @@ async function pollDeployLog() {
   pre.style.display = "block";
   const tick = async () => {
     const log = await api("/api/pull/log");
-    pre.textContent = log;
+    pre.innerHTML = colorizeLog(log);
     pre.scrollTop = pre.scrollHeight;
     const st = await api("/api/pull/status");
     if (st.running) {
@@ -503,7 +632,8 @@ async function pollDeployLog() {
 async function showLogs(name) {
   document.getElementById("logs").textContent = "loading…";
   try {
-    document.getElementById("logs").textContent = await api("/api/logs/" + name + "?tail=300");
+    const text = await api("/api/logs/" + name + "?tail=300");
+    document.getElementById("logs").innerHTML = colorizeLog(text);
   } catch (e) {
     document.getElementById("logs").textContent = "Error: " + e.message;
   }
