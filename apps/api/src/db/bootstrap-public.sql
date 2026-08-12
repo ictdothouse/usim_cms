@@ -10,6 +10,21 @@ CREATE TABLE IF NOT EXISTS "public"."tenants" (
 -- Upgrade path for control-plane DBs bootstrapped before db_url existed.
 ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "db_url" text;
 
+-- Upgrade path: paid/custom certificate tracking for the Domain & SSL
+-- Automation card (see apps/api/src/proxy-sync.ts).
+ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "has_custom_cert" boolean DEFAULT false NOT NULL;
+ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "cert_expires_at" timestamp;
+
+-- Single-row instance-wide switch: whether apps/api keeps the bundled
+-- Caddy proxy's config in sync with the tenants table above. Off by
+-- default — orgs using their own reverse proxy/ingress/cPanel never touch
+-- this. "singleton" is the only id ever inserted.
+CREATE TABLE IF NOT EXISTS "public"."platform_settings" (
+	"id" text PRIMARY KEY DEFAULT 'singleton',
+	"proxy_automation_enabled" boolean DEFAULT false NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS "public"."shared_content" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"source_host" text NOT NULL,

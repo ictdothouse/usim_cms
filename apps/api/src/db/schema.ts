@@ -189,6 +189,22 @@ export const tenants = pgTable("tenants", {
   // topology is data here, never code.
   dbUrl: text("db_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Set once a paid/custom certificate (uploaded via the Settings "Domain &
+  // SSL Automation" card) is loaded into Caddy for this host in place of
+  // its automatic Let's Encrypt certificate — see proxy-sync.ts.
+  hasCustomCert: boolean("has_custom_cert").notNull().default(false),
+  certExpiresAt: timestamp("cert_expires_at"),
+});
+
+// Instance-wide switch: whether apps/api keeps the bundled Caddy proxy's
+// live config synced with the tenants table above (see proxy-sync.ts). Off
+// by default — an organization routing domains/TLS some other way (k8s
+// ingress, cPanel, an external load balancer) never touches this. Single
+// row, "singleton" is the only id this table's code ever reads/writes.
+export const platformSettings = pgTable("platform_settings", {
+  id: text("id").primaryKey().default("singleton"),
+  proxyAutomationEnabled: boolean("proxy_automation_enabled").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Explicit "publish to portal" copy of shareable content, also "public"
