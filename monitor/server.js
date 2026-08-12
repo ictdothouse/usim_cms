@@ -143,17 +143,23 @@ function getGitInfo(cb) {
 function getHostStats(cb) {
   execFile(
     "sh",
-    ["-c", "df -h / | tail -1; echo ===SPLIT===; free -m | sed -n '2p'"],
+    ["-c", "uptime -p; echo ===SPLIT===; df -h / | tail -1; echo ===SPLIT===; free -m | sed -n '2p'"],
     { timeout: 10_000 },
     (err, stdout) => {
       if (err) return cb(null);
       const raw = stdout.trim();
-      const [diskLine, memLine] = raw.split("===SPLIT===").map((s) => (s || "").trim());
+      const [uptime, diskLine, memLine] = raw.split("===SPLIT===").map((s) => (s || "").trim());
       let disk = null;
       let mem = null;
       const dparts = (diskLine || "").split(/\s+/); // dev size used avail use% mount
       if (dparts.length >= 6) {
-        disk = { total: dparts[1], used: dparts[2], avail: dparts[3], pct: parseInt(dparts[4], 10) || 0, mount: dparts[5] };
+        disk = {
+          total: dparts[1],
+          used: dparts[2],
+          avail: dparts[3],
+          pct: parseInt(dparts[4], 10) || 0,
+          mount: dparts[5],
+        };
       }
       const mparts = (memLine || "").split(/\s+/); // Mem: total used free shared buff/cache available
       if (mparts.length >= 3) {
@@ -161,7 +167,7 @@ function getHostStats(cb) {
         const used = Number(mparts[2]);
         mem = { totalMB: total, usedMB: used, pct: total ? Math.round((used / total) * 100) : 0 };
       }
-      cb({ raw, disk, mem });
+      cb({ raw, uptime, disk, mem });
     },
   );
 }
@@ -272,6 +278,8 @@ function handlePull(req, res) {
     docker compose build
     echo "--- docker compose up -d ---"
     docker compose up -d db api frontend admin
+    echo "--- restarting monitor ---"
+    systemctl restart usim-cms-monitor
     echo "--- done ---"
   `
       : `
@@ -292,6 +300,8 @@ function handlePull(req, res) {
     API_URL="http://127.0.0.1:${API_PORT}" pnpm --filter @usim-cms/frontend build
     echo "--- restarting services ---"
     systemctl restart usim-cms-api usim-cms-frontend usim-cms-admin
+    echo "--- restarting monitor ---"
+    systemctl restart usim-cms-monitor
     echo "--- done ---"
   `;
   const child = spawn("sh", ["-c", script], {
@@ -376,7 +386,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <body>
 <h1>usim_cms — server monitor</h1>
 <p class="muted" id="mode">loading…</p>
-<p class="muted" id="git"></p>
+<p class="muted" id="uptime"></p>
 
 <div class="grid" id="hostGrid"></div>
 
@@ -402,6 +412,8 @@ const DASHBOARD_HTML = `<!doctype html>
 <h3>Logs</h3>
 <div class="row" id="logButtons"></div>
 <pre class="term" id="logs">Pick a service above to view its logs.</pre>
+
+<p id="git" style="opacity:0.35; font-size:0.7rem; margin-top:2rem;"></p>
 
 <script>
 let SERVICES = [];
@@ -512,6 +524,7 @@ async function refresh() {
   try {
     const data = await api("/api/status");
     document.getElementById("git").textContent = "HEAD: " + (data.git || "unknown");
+    document.getElementById("uptime").textContent = data.host && data.host.uptime ? data.host.uptime : "";
     renderHost(data.host);
     const grid = document.getElementById("services");
     grid.innerHTML = "";
@@ -615,15 +628,21 @@ async function pollDeployLog() {
   const pre = document.getElementById("deployLog");
   pre.style.display = "block";
   const tick = async () => {
-    const log = await api("/api/pull/log");
-    pre.innerHTML = colorizeLog(log);
-    pre.scrollTop = pre.scrollHeight;
-    const st = await api("/api/pull/status");
-    if (st.running) {
+    try {
+      const log = await api("/api/pull/log");
+      pre.innerHTML = colorizeLog(log);
+      pre.scrollTop = pre.scrollHeight;
+      const st = await api("/api/pull/status");
+      if (st.running) {
+        setTimeout(tick, 2000);
+      } else {
+        polling = false;
+        refresh();
+      }
+    } catch (e) {
+      // The pull step restarts the monitor's own process, so a request can
+      // briefly fail while it bounces — keep retrying instead of dying here.
       setTimeout(tick, 2000);
-    } else {
-      polling = false;
-      refresh();
     }
   };
   tick();
