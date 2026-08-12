@@ -241,19 +241,28 @@ json_escape() {
 # if setup was already completed (by this call or the admin's Setup Wizard),
 # it just skips instead of erroring.
 create_superadmin() {
-  local api_port="$1" status
+  local api_port="$1" status status_rc resp
   echo ""
   echo "Creating superadmin account..."
-  status=$(curl -fs "http://localhost:${api_port}/api/setup/status" 2>/dev/null || true)
+  status=$(curl -fs "http://localhost:${api_port}/api/setup/status" 2>/dev/null)
+  status_rc=$?
+  if [ $status_rc -ne 0 ]; then
+    echo "Warning: could not reach /api/setup/status on port ${api_port} — skipping superadmin creation." >&2
+    echo "  Re-run with --admin-only once the API is reachable to create it." >&2
+    return
+  fi
   if ! echo "$status" | grep -q '"needsSetup":true'; then
     echo "Setup already completed — skipping (log in with the existing account)."
     return
   fi
-  local resp
-  resp=$(curl -fs -X POST "http://localhost:${api_port}/api/setup" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"$(json_escape "$SUPERADMIN_EMAIL")\",\"password\":\"$(json_escape "$SUPERADMIN_PASSWORD")\"}" \
-    2>/dev/null || true)
+  # JSON body goes over stdin, never as a curl argv — a password passed via
+  # -d "..." would sit in this process's command line, readable by any local
+  # user via `ps` for as long as the request is in flight.
+  resp=$(printf '{"email":"%s","password":"%s"}' \
+      "$(json_escape "$SUPERADMIN_EMAIL")" "$(json_escape "$SUPERADMIN_PASSWORD")" \
+    | curl -fs -X POST "http://localhost:${api_port}/api/setup" \
+        -H "Content-Type: application/json" --data-binary @- \
+        2>/dev/null || true)
   if echo "$resp" | grep -q '"token"'; then
     echo "Superadmin created: ${SUPERADMIN_EMAIL}"
   else
