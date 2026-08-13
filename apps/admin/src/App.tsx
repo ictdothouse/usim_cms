@@ -3412,6 +3412,7 @@ const COMMON_LANGUAGES: Array<{ code: string; label: string }> = [
 function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Record<string, unknown>> }) {
   const { t } = useT();
   const confirm = useConfirm();
+  const [settingsTab, setSettingsTab] = useState<"global" | "site">("global");
   const [host, setHost] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -3422,6 +3423,14 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [langSuggestOpen, setLangSuggestOpen] = useState(false);
+  const [proxyEnabled, setProxyEnabled] = useState(false);
+  const [proxyConnected, setProxyConnected] = useState(false);
+  const [proxyErr, setProxyErr] = useState<string | null>(null);
+  const [proxyBusy, setProxyBusy] = useState(false);
+  const [proxyTenants, setProxyTenants] = useState<Array<Record<string, unknown>>>(tenants);
+  const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [keyFile, setKeyFile] = useState<File | null>(null);
   const existingCodes = new Set(langs.map((l) => l.code));
   const langSuggestions = newLabel.trim()
     ? COMMON_LANGUAGES.filter(
@@ -3439,6 +3448,83 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
     void api.listPortalLanguages(token).then(setLangs).catch((e) => setLangErr((e as Error).message));
   }
   useEffect(reloadLanguages, [token]);
+
+  function reloadProxySettings() {
+    void api.getProxySettings(token).then((s) => {
+      setProxyEnabled(s.enabled);
+      setProxyConnected(s.connected);
+    }).catch((e) => setProxyErr((e as Error).message));
+  }
+  useEffect(reloadProxySettings, [token]);
+  useEffect(() => setProxyTenants(tenants), [tenants]);
+
+  function reloadProxyTenants() {
+    void api.listPortalTenants(token).then(setProxyTenants);
+  }
+  // Cert status (hasCustomCert/certExpiresAt) can change from another admin's
+  // session or a previous one of this admin's own — refresh whenever this
+  // panel becomes visible or the selected site changes, not only right after
+  // this session's own upload/revert.
+  useEffect(() => {
+    if (settingsTab === "site") reloadProxyTenants();
+  }, [settingsTab, host, token]);
+
+  async function toggleProxyEnabled(enabled: boolean) {
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      await api.setProxyAutomationEnabled(token, enabled);
+      reloadProxySettings();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
+
+  async function resyncProxy() {
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      const res = await api.resyncProxy(token);
+      if (!res.synced) setProxyErr(res.error ?? "Resync failed");
+      reloadProxySettings();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
+
+  async function submitCertUpload() {
+    if (!certUploadHost || !certFile || !keyFile) return;
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      await api.uploadTenantCert(token, certUploadHost, certFile, keyFile);
+      setCertUploadHost(null);
+      setCertFile(null);
+      setKeyFile(null);
+      reloadProxyTenants();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
+
+  async function revertCert(host: string) {
+    setProxyErr(null);
+    setProxyBusy(true);
+    try {
+      await api.revertTenantCert(token, host);
+      reloadProxyTenants();
+    } catch (e) {
+      setProxyErr((e as Error).message);
+    } finally {
+      setProxyBusy(false);
+    }
+  }
 
   async function addLanguage() {
     setLangErr(null);
@@ -3529,120 +3615,251 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
     input.click();
   }
 
+  const selectedTenant = proxyTenants.find((tn) => (tn.host as string) === host);
+
   return (
     <div className="max-w-2xl space-y-4">
-      <Select value={host} onValueChange={setHost}>
-        <SelectTrigger>
-          <SelectValue placeholder={t("settings-tenant")} />
-        </SelectTrigger>
-        <SelectContent>
-          {tenants.map((tn) => (
-            <SelectItem key={tn.host as string} value={tn.host as string}>
-              {(tn.departmentName as string) || (tn.host as string)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {err && <p className="text-xs text-red-600">{err}</p>}
-      {msg && <p className="text-xs text-green-700">{msg}</p>}
-      {sections.map((s) => (
-        <div key={s.key} className={`${card} space-y-2 p-5`}>
-          <h3 className="text-xs font-bold text-ink">{t(s.title)}</h3>
-          <p className="text-xs text-sub">{t(s.desc)}</p>
-          <button disabled={!host || busy !== null} onClick={s.onClick} className={btnPrimary}>
-            {busy === s.key ? t("settings-busy") : t(s.btn)}
+      <div className="flex w-fit gap-1 rounded-full bg-canvas p-0.5">
+        {(["global", "site"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setSettingsTab(tab)}
+            className={`rounded-full px-4 py-1 text-[11px] font-semibold ${
+              settingsTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
+            }`}
+          >
+            {t(tab === "global" ? "settings-tab-global" : "settings-tab-site")}
           </button>
-        </div>
-      ))}
-      <div className={`${card} space-y-2 p-5`}>
-        <h3 className="text-xs font-bold text-ink">{t("settings-restore-title")}</h3>
-        <p className="text-xs text-sub">{t("settings-restore-desc")}</p>
-        <button disabled={!host || busy !== null} onClick={pickRestoreFile} className={btnPrimary}>
-          {busy === "restore" ? t("settings-busy") : t("settings-restore-btn")}
-        </button>
+        ))}
       </div>
-      <div className={`${card} space-y-3 p-5`}>
-        <h3 className="text-xs font-bold text-ink">{t("settings-languages-title")}</h3>
-        <p className="text-xs text-sub">{t("settings-languages-desc")}</p>
-        {langErr && <p className="text-xs text-red-600">{langErr}</p>}
-        <div className="space-y-1.5">
-          {langs.map((l) => {
-            const isLastEnabled = l.enabled && langs.filter((x) => x.enabled).length === 1;
-            return (
-              <div key={l.id} className="flex items-center gap-2">
-                <span className="w-12 shrink-0 font-mono text-[11px] text-sub">{l.code}</span>
+
+      {settingsTab === "global" && (
+        <>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="text-xs font-bold text-ink">{t("settings-languages-title")}</h3>
+            <p className="text-xs text-sub">{t("settings-languages-desc")}</p>
+            {langErr && <p className="text-xs text-red-600">{langErr}</p>}
+            <div className="space-y-1.5">
+              {langs.map((l) => {
+                const isLastEnabled = l.enabled && langs.filter((x) => x.enabled).length === 1;
+                return (
+                  <div key={l.id} className="flex items-center gap-2">
+                    <span className="w-12 shrink-0 font-mono text-[11px] text-sub">{l.code}</span>
+                    <input
+                      className={inputCls}
+                      defaultValue={l.label}
+                      onBlur={(e) => void saveLanguageLabel(l.id, e.target.value)}
+                    />
+                    <label className="flex shrink-0 items-center gap-1 text-[11px] text-sub">
+                      <input
+                        type="checkbox"
+                        checked={l.enabled}
+                        onChange={(e) => void toggleLanguageEnabled(l.id, e.target.checked)}
+                      />
+                      {t("settings-languages-enabled")}
+                    </label>
+                    <button
+                      onClick={() => void removeLanguage(l.id)}
+                      disabled={isLastEnabled}
+                      title={isLastEnabled ? t("settings-languages-last-enabled") : undefined}
+                      className="shrink-0 text-sub hover:text-red-600 disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-start gap-2 pt-1">
+              <div className="relative flex-1">
                 <input
                   className={inputCls}
-                  defaultValue={l.label}
-                  onBlur={(e) => void saveLanguageLabel(l.id, e.target.value)}
+                  placeholder={t("settings-languages-label-placeholder")}
+                  value={newLabel}
+                  onChange={(e) => {
+                    setNewLabel(e.target.value);
+                    setLangSuggestOpen(true);
+                  }}
+                  onFocus={() => setLangSuggestOpen(true)}
+                  onBlur={() => setTimeout(() => setLangSuggestOpen(false), 150)}
                 />
-                <label className="flex shrink-0 items-center gap-1 text-[11px] text-sub">
-                  <input
-                    type="checkbox"
-                    checked={l.enabled}
-                    onChange={(e) => void toggleLanguageEnabled(l.id, e.target.checked)}
-                  />
-                  {t("settings-languages-enabled")}
-                </label>
-                <button
-                  onClick={() => void removeLanguage(l.id)}
-                  disabled={isLastEnabled}
-                  title={isLastEnabled ? t("settings-languages-last-enabled") : undefined}
-                  className="shrink-0 text-sub hover:text-red-600 disabled:opacity-40"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
+                {langSuggestOpen && langSuggestions.length > 0 && (
+                  <div className={`${card} absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-auto shadow-lg`}>
+                    {langSuggestions.map((l) => (
+                      <button
+                        key={l.code}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          pickLanguageSuggestion(l);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-ink hover:bg-canvas"
+                      >
+                        <span>{l.label}</span>
+                        <span className="font-mono text-[10px] text-sub">{l.code}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <input
+                className={`${inputCls} !w-20 shrink-0`}
+                placeholder={t("settings-languages-code-placeholder")}
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value)}
+              />
+              <button
+                onClick={() => void addLanguage()}
+                disabled={!newCode.trim() || !newLabel.trim()}
+                className={`${btnGhost} shrink-0`}
+              >
+                {t("settings-languages-add-btn")}
+              </button>
+            </div>
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <ShieldCheck className="h-3.5 w-3.5 text-accent" /> {t("settings-proxy-title")}
+            </h3>
+            <p className="text-xs text-sub">{t("settings-proxy-desc")}</p>
+            {proxyErr && <p className="text-xs text-red-600">{proxyErr}</p>}
+            <label className="flex items-center gap-2 text-xs font-medium text-ink">
+              <input
+                type="checkbox"
+                checked={proxyEnabled}
+                disabled={proxyBusy}
+                onChange={(e) => void toggleProxyEnabled(e.target.checked)}
+              />
+              {t("settings-proxy-enable")}
+            </label>
+            <p className="text-xs text-sub">{t("settings-proxy-dns-reminder")}</p>
+            {!proxyEnabled && <p className="text-xs text-sub">{t("settings-proxy-manual-hint")}</p>}
+          </div>
+        </>
+      )}
+
+      {settingsTab === "site" && (
+        <>
+          <Select value={host} onValueChange={setHost}>
+            <SelectTrigger>
+              <SelectValue placeholder={t("settings-tenant")} />
+            </SelectTrigger>
+            <SelectContent>
+              {tenants.map((tn) => (
+                <SelectItem key={tn.host as string} value={tn.host as string}>
+                  {(tn.departmentName as string) || (tn.host as string)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {err && <p className="text-xs text-red-600">{err}</p>}
+          {msg && <p className="text-xs text-green-700">{msg}</p>}
+          {sections.map((s) => (
+            <div key={s.key} className={`${card} space-y-2 p-5`}>
+              <h3 className="text-xs font-bold text-ink">{t(s.title)}</h3>
+              <p className="text-xs text-sub">{t(s.desc)}</p>
+              <button disabled={!host || busy !== null} onClick={s.onClick} className={btnPrimary}>
+                {busy === s.key ? t("settings-busy") : t(s.btn)}
+              </button>
+            </div>
+          ))}
+          <div className={`${card} space-y-2 p-5`}>
+            <h3 className="text-xs font-bold text-ink">{t("settings-restore-title")}</h3>
+            <p className="text-xs text-sub">{t("settings-restore-desc")}</p>
+            <button disabled={!host || busy !== null} onClick={pickRestoreFile} className={btnPrimary}>
+              {busy === "restore" ? t("settings-busy") : t("settings-restore-btn")}
+            </button>
+          </div>
+          {proxyEnabled && host && (
+            <div className={`${card} space-y-3 p-5`}>
+              <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+                <ShieldCheck className="h-3.5 w-3.5 text-accent" /> {t("settings-proxy-title")}
+              </h3>
+              {proxyErr && <p className="text-xs text-red-600">{proxyErr}</p>}
+              <div className="flex items-center gap-2 text-xs">
+                <span className={proxyConnected ? "text-ok" : "text-red-600"}>
+                  {proxyConnected ? t("settings-proxy-status-connected") : t("settings-proxy-status-disconnected")}
+                </span>
+                <button onClick={() => void resyncProxy()} disabled={proxyBusy} className={btnGhost}>
+                  {proxyBusy ? t("settings-busy") : t("settings-proxy-resync-btn")}
                 </button>
               </div>
-            );
-          })}
-        </div>
-        <div className="flex items-start gap-2 pt-1">
-          <div className="relative flex-1">
-            <input
-              className={inputCls}
-              placeholder={t("settings-languages-label-placeholder")}
-              value={newLabel}
-              onChange={(e) => {
-                setNewLabel(e.target.value);
-                setLangSuggestOpen(true);
-              }}
-              onFocus={() => setLangSuggestOpen(true)}
-              onBlur={() => setTimeout(() => setLangSuggestOpen(false), 150)}
-            />
-            {langSuggestOpen && langSuggestions.length > 0 && (
-              <div className={`${card} absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-auto shadow-lg`}>
-                {langSuggestions.map((l) => (
+              {selectedTenant && (
+                <div className="space-y-2">
+                  {(() => {
+                    const tHost = selectedTenant.host as string;
+                    const hasCustomCert = Boolean(selectedTenant.hasCustomCert);
+                    const certExpiresAt = selectedTenant.certExpiresAt as string | null;
+                    const expiringSoon =
+                      hasCustomCert && Boolean(certExpiresAt) &&
+                      new Date(certExpiresAt as string).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000;
+                    return (
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <div>
+                          <p className="font-mono text-ink">{tHost}</p>
+                          <p className={expiringSoon ? "font-semibold text-amber-700" : "text-sub"}>
+                            {hasCustomCert && certExpiresAt
+                              ? `${t("settings-proxy-cert-custom")} — ${new Date(certExpiresAt).toLocaleDateString()}`
+                              : t("settings-proxy-cert-auto")}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {hasCustomCert && (
+                            <button onClick={() => void revertCert(tHost)} disabled={proxyBusy} className={btnGhost}>
+                              {t("settings-proxy-revert-btn")}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setCertUploadHost(certUploadHost === tHost ? null : tHost);
+                              setCertFile(null);
+                              setKeyFile(null);
+                            }}
+                            disabled={proxyBusy}
+                            className={btnGhost}
+                          >
+                            {t("settings-proxy-upload-btn")}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {certUploadHost && (
+                <div className={`${card} space-y-2 border border-line p-3`}>
+                  <p className="text-xs font-semibold text-ink">{certUploadHost}</p>
+                  <label className="block text-xs text-sub">
+                    {t("settings-proxy-upload-cert-file")}
+                    <input
+                      type="file"
+                      accept=".crt,.pem,.cer"
+                      onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
+                      className="mt-1 block text-xs"
+                    />
+                  </label>
+                  <label className="block text-xs text-sub">
+                    {t("settings-proxy-upload-key-file")}
+                    <input
+                      type="file"
+                      accept=".key,.pem"
+                      onChange={(e) => setKeyFile(e.target.files?.[0] ?? null)}
+                      className="mt-1 block text-xs"
+                    />
+                  </label>
                   <button
-                    key={l.code}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      pickLanguageSuggestion(l);
-                    }}
-                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-ink hover:bg-canvas"
+                    onClick={() => void submitCertUpload()}
+                    disabled={proxyBusy || !certFile || !keyFile}
+                    className={btnPrimary}
                   >
-                    <span>{l.label}</span>
-                    <span className="font-mono text-[10px] text-sub">{l.code}</span>
+                    {proxyBusy ? t("settings-busy") : t("settings-proxy-upload-submit")}
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <input
-            className={`${inputCls} !w-20 shrink-0`}
-            placeholder={t("settings-languages-code-placeholder")}
-            value={newCode}
-            onChange={(e) => setNewCode(e.target.value)}
-          />
-          <button
-            onClick={() => void addLanguage()}
-            disabled={!newCode.trim() || !newLabel.trim()}
-            className={`${btnGhost} shrink-0`}
-          >
-            {t("settings-languages-add-btn")}
-          </button>
-        </div>
-      </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

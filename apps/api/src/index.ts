@@ -44,8 +44,12 @@ import {
   setTenantLanguageSelection,
   getMergedTheme,
   setTenantTheme,
+  getProxyAutomationEnabled,
+  setProxyAutomationEnabled,
+  setTenantCertInfo,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
+import { syncCaddy, pingCaddy, parseCertExpiry, loadCaddyCert, unloadCaddyCert } from "./proxy-sync.js";
 import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
 import {
   exportTenantBackup,
@@ -368,6 +372,41 @@ app.post("/api/theme-preview-token", async (req, reply) => {
   return { token };
 });
 
+// Fires the Caddy resync after any tenant-table change, but only when the
+// superadmin has opted in (getProxyAutomationEnabled) — and never lets a
+// sync failure fail the request that triggered it; a tenant create/delete
+// must always succeed at the DB level regardless of proxy state.
+async function maybeSyncCaddy(): Promise<void> {
+  try {
+    if (!(await getProxyAutomationEnabled())) return;
+    await syncCaddy(await listTenants());
+  } catch (err) {
+    app.log.warn({ err }, "Caddy proxy sync failed");
+  }
+}
+
+// Boot-only variant: docker-compose starts `proxy` only after api/admin/
+// frontend have merely STARTED (not become healthy), so on a fresh
+// `docker compose up` this process's own boot can fire before Caddy inside
+// the proxy container is actually accepting connections yet — a bare
+// single-shot maybeSyncCaddy() would reliably fail here. Retries a few
+// times with a short delay instead of giving up on the very first race.
+async function maybeSyncCaddyAtBoot(): Promise<void> {
+  if (!(await getProxyAutomationEnabled())) return;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await syncCaddy(await listTenants());
+      return;
+    } catch (err) {
+      if (attempt === 5) {
+        app.log.warn({ err }, "Caddy proxy sync failed after retries");
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+}
+
 app.get("/api/portal/tenants", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   return { tenants: await listTenants() };
@@ -385,6 +424,7 @@ app.post("/api/portal/tenants", async (req, reply) => {
     return { error: "host and departmentName required" };
   }
   await createTenant(host, departmentName, dbUrl || null);
+  await maybeSyncCaddy();
   return { created: true };
 });
 
@@ -404,7 +444,109 @@ app.delete("/api/portal/tenants/:host", async (req, reply) => {
     const tenantFolder = host.toLowerCase().replace(/[^a-z0-9]/g, "_");
     await rm(path.join(localUploadsDir, tenantFolder), { recursive: true, force: true });
   }
+  await maybeSyncCaddy();
   return { deleted: true };
+});
+
+app.get("/api/portal/proxy-settings", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const enabled = await getProxyAutomationEnabled();
+  const connected = enabled ? await pingCaddy() : false;
+  return { enabled, connected };
+});
+
+app.put("/api/portal/proxy-settings", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { enabled } = req.body as { enabled?: boolean };
+  if (typeof enabled !== "boolean") {
+    reply.code(400);
+    return { error: "enabled must be a boolean" };
+  }
+  await setProxyAutomationEnabled(enabled);
+  if (enabled) await maybeSyncCaddy();
+  return { enabled };
+});
+
+app.post("/api/portal/proxy-settings/resync", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  if (!(await getProxyAutomationEnabled())) {
+    reply.code(400);
+    return { error: "proxy automation is not enabled" };
+  }
+  try {
+    await syncCaddy(await listTenants());
+    return { synced: true };
+  } catch (err) {
+    reply.code(502);
+    return { synced: false, error: (err as Error).message };
+  }
+});
+
+// Uploads USIM's own paid certificate for `host`, forwarded straight to
+// Caddy — never written to this API's own disk or DB (see proxy-sync.ts's
+// loadCaddyCert). Caddy is the one real validator of the cert/key pair.
+app.post("/api/portal/tenants/:host/cert", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  if (!(await getProxyAutomationEnabled())) {
+    reply.code(400);
+    return { error: "proxy automation is not enabled" };
+  }
+  const { host } = req.params as { host: string };
+  if (!(await listTenants()).some((t) => t.host === host)) {
+    reply.code(404);
+    return { error: "tenant not found" };
+  }
+  let certPem: string | null = null;
+  let keyPem: string | null = null;
+  for await (const part of req.parts()) {
+    if (part.type !== "file") continue;
+    const buf = await part.toBuffer();
+    if (part.fieldname === "cert") certPem = buf.toString("utf8");
+    if (part.fieldname === "key") keyPem = buf.toString("utf8");
+  }
+  if (!certPem || !keyPem) {
+    reply.code(400);
+    return { error: "cert and key files required (multipart/form-data, fields 'cert' and 'key')" };
+  }
+  let expiresAt: Date;
+  try {
+    expiresAt = parseCertExpiry(certPem);
+  } catch {
+    reply.code(400);
+    return { error: "certificate could not be parsed (expected PEM)" };
+  }
+  try {
+    await loadCaddyCert(host, certPem, keyPem);
+  } catch (err) {
+    reply.code(400);
+    return { error: (err as Error).message };
+  }
+  await setTenantCertInfo(host, expiresAt);
+  await maybeSyncCaddy();
+  return { hasCustomCert: true, certExpiresAt: expiresAt.toISOString() };
+});
+
+// Reverts `host` to Caddy's automatic Let's Encrypt HTTPS.
+app.delete("/api/portal/tenants/:host/cert", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  if (!(await getProxyAutomationEnabled())) {
+    reply.code(400);
+    return { error: "proxy automation is not enabled" };
+  }
+  const { host } = req.params as { host: string };
+  if (!(await listTenants()).some((t) => t.host === host)) {
+    reply.code(404);
+    return { error: "tenant not found" };
+  }
+  try {
+    await unloadCaddyCert(host);
+  } catch (err) {
+    reply.code(502);
+    return { error: (err as Error).message };
+  }
+  await setTenantCertInfo(host, null);
+  await maybeSyncCaddy();
+  return { hasCustomCert: false };
 });
 
 app.get("/api/portal/users", async (req, reply) => {
@@ -734,6 +876,7 @@ app.post("/api/portal/clones/:id/stage", async (req, reply) => {
   }
   const source = (await listTenants()).find((t) => t.host === entry.meta.sourceHost);
   await createTenant(stagingHost, `${(source?.departmentName as string) ?? entry.meta.sourceHost} (Staging)`, null);
+  await maybeSyncCaddy();
   await importTenantBackup(stagingHost, entry.zip);
   markCloneStaged(id, stagingHost);
   return { staged: true, stagingHost };
@@ -757,6 +900,7 @@ app.post("/api/portal/clones/:id/promote", async (req, reply) => {
     return { error: `tenant ${newHost} already exists — use restore instead` };
   }
   await createTenant(newHost, departmentName, null);
+  await maybeSyncCaddy();
   await importTenantBackup(newHost, entry.zip);
   return { promoted: true, host: newHost };
 });
@@ -1557,4 +1701,10 @@ app.listen({ port, host: "0.0.0.0" }, (err) => {
     app.log.error(err);
     process.exit(1);
   }
+  // Self-heal: if the proxy container was recreated or lost its volume
+  // since this process last ran, resync it from the tenants table now
+  // rather than waiting for the next tenant create/delete. No-op when the
+  // switch is off (maybeSyncCaddyAtBoot checks getProxyAutomationEnabled
+  // itself); see maybeSyncCaddyAtBoot for why this retries.
+  void maybeSyncCaddyAtBoot();
 });

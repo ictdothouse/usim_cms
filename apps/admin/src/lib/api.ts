@@ -315,6 +315,49 @@ export const deletePortalTenant = (token: string, host: string, confirm: string)
     body: JSON.stringify({ confirm }),
   }) as Promise<{ deleted: boolean }>;
 
+export interface ProxySettings {
+  enabled: boolean;
+  connected: boolean;
+}
+
+// Superadmin-only "Domain & SSL Automation" switch in the Settings tab —
+// off by default (see CLAUDE.md's Deployment section). All of the below
+// are no-ops on the server unless that switch is on.
+export const getProxySettings = (token: string) =>
+  request("/api/portal/proxy-settings", null, token) as Promise<ProxySettings>;
+
+export const setProxyAutomationEnabled = (token: string, enabled: boolean) =>
+  request("/api/portal/proxy-settings", null, token, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  }) as Promise<{ enabled: boolean }>;
+
+export const resyncProxy = (token: string) =>
+  request("/api/portal/proxy-settings/resync", null, token, { method: "POST" }) as Promise<{
+    synced: boolean;
+    error?: string;
+  }>;
+
+// cert/key are PEM files (USIM's paid certificate) — forwarded to apps/api,
+// which forwards them straight to Caddy without ever writing the key to
+// its own disk or DB (see apps/api/src/proxy-sync.ts).
+export async function uploadTenantCert(token: string, host: string, cert: File, key: File): Promise<{ certExpiresAt: string }> {
+  const form = new FormData();
+  form.append("cert", cert);
+  form.append("key", key);
+  const res = await fetch(`${API_URL}/api/portal/tenants/${host}/cert`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error ?? "Upload failed");
+  return body;
+}
+
+export const revertTenantCert = (token: string, host: string) =>
+  request(`/api/portal/tenants/${host}/cert`, null, token, { method: "DELETE" });
+
 export const listPortalUsers = (token: string) =>
   request("/api/portal/users", null, token).then((b) => b.users as Array<Record<string, unknown>>);
 

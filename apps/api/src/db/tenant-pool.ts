@@ -568,6 +568,57 @@ export async function setGlobalTheme(settings: Record<string, unknown>): Promise
   }
 }
 
+// Instance-wide switch (see schema.ts's platformSettings) — whether apps/api
+// keeps the bundled Caddy proxy's live config synced with the tenants table
+// (proxy-sync.ts). Off by default; orgs routing domains/TLS some other way
+// (k8s ingress, cPanel, an external load balancer) never touch this.
+export async function getProxyAutomationEnabled(): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.select().from(schema.platformSettings);
+    return row?.proxyAutomationEnabled ?? false;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setProxyAutomationEnabled(enabled: boolean): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .insert(schema.platformSettings)
+      .values({ id: "singleton", proxyAutomationEnabled: enabled })
+      .onConflictDoUpdate({
+        target: schema.platformSettings.id,
+        set: { proxyAutomationEnabled: enabled, updatedAt: new Date() },
+      });
+  } finally {
+    client.release();
+  }
+}
+
+// Records that `host` now has a custom certificate loaded into Caddy
+// (certExpiresAt parsed from the cert by the caller — see proxy-sync.ts's
+// parseCertExpiry), or pass null to clear both columns and revert that
+// host to Caddy's automatic HTTPS.
+export async function setTenantCertInfo(host: string, certExpiresAt: Date | null): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .update(schema.tenants)
+      .set({ hasCustomCert: certExpiresAt !== null, certExpiresAt })
+      .where(eq(schema.tenants.host, host));
+  } finally {
+    client.release();
+  }
+}
+
 // "My collection" in the admin's Theme panel — personal, per-user, never
 // read by getMergedTheme/apps/frontend. Ownership is enforced in the WHERE
 // clause itself (not just an app-level check before the query), so a
