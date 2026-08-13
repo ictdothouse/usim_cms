@@ -34,7 +34,7 @@ const NUM_RE = /^-?[0-9]+(\.[0-9]+)?$/;
 // relative/anchor/bare-relative all fine, only a non-http(s) URI scheme like
 // javascript:/data: is rejected) — kept here too since API-side validation
 // must not rely solely on the frontend's render-time guard.
-function isSafeUrl(v: string): boolean {
+export function isSafeUrl(v: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v);
   return true;
 }
@@ -44,7 +44,7 @@ function isSafeUrl(v: string): boolean {
 // like href/src/url are — a bare scheme check isn't enough here, an
 // embedded quote/semicolon/paren/brace can still break out of that one CSS
 // declaration.
-function isSafeCssUrl(v: string): boolean {
+export function isSafeCssUrl(v: string): boolean {
   return isSafeUrl(v) && !/['";(){}\s]/.test(v);
 }
 
