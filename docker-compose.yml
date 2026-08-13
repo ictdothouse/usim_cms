@@ -29,6 +29,13 @@ services:
       DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       PORT: 3000
+      # The api's Dockerfile bakes NODE_ENV=production, which trips index.ts's
+      # own boot-time guard (`ADMIN_ORIGIN must be set in production`) unless
+      # this is set — the browser reaches the admin container directly on
+      # ADMIN_PORT here (no proxy in front for local/dev compose runs).
+      # Override to the real https://<ADMIN_DOMAIN> once behind the `proxy`
+      # service in production.
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:${ADMIN_PORT:-5173}}
       # Static export renders pages through the frontend container.
       FRONTEND_INTERNAL_URL: http://frontend:4321
       # Caddy's Admin API, docker-internal only (never published — see the
