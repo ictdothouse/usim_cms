@@ -137,22 +137,28 @@ export function isSafeCssUrl(v: string): boolean {
 Create `apps/api/src/collections/validate-menu.test.ts`:
 
 ```ts
-import { describe, it, expect } from "vitest";
+// This repo uses Node's built-in test runner (see apps/api's "test" script:
+// `tsx --test src/**/*.test.ts`, and the existing proxy-sync.test.ts) — not
+// vitest/jest. `describe`/`it` come from "node:test", assertions from
+// "node:assert/strict" (no expect()/toBeNull()/toMatch() — use assert.equal/
+// assert.match instead).
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import { validateMenuItems } from "./validate-menu.js";
 
 describe("validateMenuItems", () => {
   it("accepts an empty menu", () => {
-    expect(validateMenuItems([])).toBeNull();
+    assert.equal(validateMenuItems([]), null);
   });
 
   it("accepts a simple custom-link item", () => {
     const items = [{ id: "a", label: "Home", linkType: "custom", url: "/", target: "_self" }];
-    expect(validateMenuItems(items)).toBeNull();
+    assert.equal(validateMenuItems(items), null);
   });
 
   it("rejects a javascript: URL", () => {
     const items = [{ id: "a", label: "Bad", linkType: "custom", url: "javascript:alert(1)" }];
-    expect(validateMenuItems(items)).toMatch(/unsafe/i);
+    assert.match(validateMenuItems(items) ?? "", /unsafe/i);
   });
 
   it("accepts one level of nested children", () => {
@@ -165,7 +171,7 @@ describe("validateMenuItems", () => {
         children: [{ id: "b", label: "History", linkType: "custom", url: "/about/history" }],
       },
     ];
-    expect(validateMenuItems(items)).toBeNull();
+    assert.equal(validateMenuItems(items), null);
   });
 
   it("accepts a mega menu with columns and icon/image items", () => {
@@ -187,7 +193,7 @@ describe("validateMenuItems", () => {
         },
       },
     ];
-    expect(validateMenuItems(items)).toBeNull();
+    assert.equal(validateMenuItems(items), null);
   });
 
   it("rejects a mega menu image with an unsafe URL", () => {
@@ -200,7 +206,7 @@ describe("validateMenuItems", () => {
         megaMenu: { columns: [{ items: [{ label: "X", linkType: "custom", url: "/x", image: "javascript:alert(1)" }] }] },
       },
     ];
-    expect(validateMenuItems(items)).toMatch(/unsafe/i);
+    assert.match(validateMenuItems(items) ?? "", /unsafe/i);
   });
 
   it("rejects nesting deeper than 3 levels", () => {
@@ -211,22 +217,22 @@ describe("validateMenuItems", () => {
         ] },
       ] },
     ] }];
-    expect(validateMenuItems(items)).toMatch(/depth/i);
+    assert.match(validateMenuItems(items) ?? "", /depth/i);
   });
 
   it("rejects an item missing a label", () => {
-    expect(validateMenuItems([{ id: "a", linkType: "custom", url: "/" }])).toMatch(/label/);
+    assert.match(validateMenuItems([{ id: "a", linkType: "custom", url: "/" }]) ?? "", /label/);
   });
 
   it("rejects linkType page/post/category with no refId", () => {
-    expect(validateMenuItems([{ id: "a", label: "X", linkType: "page" }])).toMatch(/refId/);
+    assert.match(validateMenuItems([{ id: "a", label: "X", linkType: "page" }]) ?? "", /refId/);
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @usim-cms/api exec vitest run validate-menu.test.ts`
+Run: `pnpm --filter @usim-cms/api exec tsx --test src/collections/validate-menu.test.ts`
 Expected: FAIL — `Cannot find module './validate-menu.js'`
 
 - [ ] **Step 3: Implement `validate-menu.ts`**
@@ -350,7 +356,7 @@ export function validateMenuItems(items: unknown): string | null {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @usim-cms/api exec vitest run validate-menu.test.ts`
+Run: `pnpm --filter @usim-cms/api exec tsx --test src/collections/validate-menu.test.ts`
 Expected: PASS (all 9 cases)
 
 - [ ] **Step 5: Commit**
@@ -1568,7 +1574,7 @@ In `validateValue`, add a `menuId` branch before the generic `ENUM_VALUES` check
 
 - [ ] **Step 3: Write the test cases**
 
-Add to the test file:
+Add to the test file — this repo uses Node's built-in test runner (`describe`/`it` from `"node:test"`, assertions from `"node:assert/strict"`, not vitest/jest; if the existing test file already has its own `describe`/`it`/`assert` imports at the top, reuse those rather than adding a second import):
 ```ts
 it("accepts a menu element's props", () => {
   const layout = [
@@ -1579,7 +1585,7 @@ it("accepts a menu element's props", () => {
       },
     },
   ];
-  expect(validateLayout(layout)).toBeNull();
+  assert.equal(validateLayout(layout), null);
 });
 
 it("rejects an invalid menu dropdownTrigger", () => {
@@ -1591,13 +1597,13 @@ it("rejects an invalid menu dropdownTrigger", () => {
       },
     },
   ];
-  expect(validateLayout(layout)).toMatch(/unrecognized/);
+  assert.match(validateLayout(layout) ?? "", /unrecognized/);
 });
 ```
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm --filter @usim-cms/api exec vitest run validate-layout.test.ts`
+Run: `pnpm --filter @usim-cms/api exec tsx --test src/collections/validate-layout.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
