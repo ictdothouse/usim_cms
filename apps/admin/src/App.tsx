@@ -3299,11 +3299,11 @@ function ContentManager({
     { id: "pages", labelKey: "pages-title", icon: FileText },
     { id: "posts", labelKey: "posts-title", icon: Newspaper },
     { id: "media", labelKey: "media-title", icon: ImageIcon },
-    { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
     ...(isSuper
       ? [
           { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
           { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
+          { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
         ]
       : []),
   ];
