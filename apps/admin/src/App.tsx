@@ -3703,7 +3703,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                 )}
               </div>
               <input
-                className={`${inputCls} w-20 shrink-0`}
+                className={`${inputCls} !w-20 shrink-0`}
                 placeholder={t("settings-languages-code-placeholder")}
                 value={newCode}
                 onChange={(e) => setNewCode(e.target.value)}
