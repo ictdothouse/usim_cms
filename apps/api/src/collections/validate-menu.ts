@@ -42,14 +42,23 @@ function validateTranslations(o: Record<string, unknown>, path: string): string 
   return null;
 }
 
-function validateMegaMenuItem(item: unknown, path: string): string | null {
-  if (typeof item !== "object" || item === null) return `${path} must be an object`;
-  const o = item as Record<string, unknown>;
+function validateCommonItemFields(o: Record<string, unknown>, path: string): string | null {
   if (typeof o.label !== "string" || !o.label) return `${path}.label is required`;
   const linkErr = validateLinkFields(o, path);
   if (linkErr) return linkErr;
   const trErr = validateTranslations(o, path);
   if (trErr) return trErr;
+  return null;
+}
+
+function validateMegaMenuItem(item: unknown, path: string): string | null {
+  if (typeof item !== "object" || item === null) return `${path} must be an object`;
+  const o = item as Record<string, unknown>;
+  const commonErr = validateCommonItemFields(o, path);
+  if (commonErr) return commonErr;
+  if (o.children !== undefined || o.megaMenu !== undefined) {
+    return `${path} cannot have children or megaMenu`;
+  }
   if (o.icon !== undefined && (typeof o.icon !== "string" || !ICON_NAME_RE.test(o.icon))) {
     return `${path}.icon has invalid characters`;
   }
@@ -84,11 +93,8 @@ function validateMegaMenu(mega: unknown, path: string): string | null {
 function validateItem(item: unknown, path: string, depth: number): string | null {
   if (typeof item !== "object" || item === null) return `${path} must be an object`;
   const o = item as Record<string, unknown>;
-  if (typeof o.label !== "string" || !o.label) return `${path}.label is required`;
-  const linkErr = validateLinkFields(o, path);
-  if (linkErr) return linkErr;
-  const trErr = validateTranslations(o, path);
-  if (trErr) return trErr;
+  const commonErr = validateCommonItemFields(o, path);
+  if (commonErr) return commonErr;
   if (o.children !== undefined && o.megaMenu !== undefined) {
     return `${path} cannot have both children and megaMenu`;
   }
