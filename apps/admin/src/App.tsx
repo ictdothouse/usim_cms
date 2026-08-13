@@ -12,6 +12,7 @@ import {
   Languages,
   Layers,
   LayoutDashboard,
+  ListTree,
   LogOut,
   Newspaper,
   Palette,
@@ -43,6 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import Designer from "@/Designer";
 import CategoriesPanel from "./CategoriesPanel";
 import PostEditorPage from "./PostEditorPage";
+import MenusPanel from "./MenusPanel";
 
 const SESSION_KEY = "usim_cms_session";
 
@@ -3272,7 +3274,7 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   );
 }
 
-type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages";
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus";
 
 function ContentManager({
   isSuper,
@@ -3297,6 +3299,7 @@ function ContentManager({
     { id: "pages", labelKey: "pages-title", icon: FileText },
     { id: "posts", labelKey: "posts-title", icon: Newspaper },
     { id: "media", labelKey: "media-title", icon: ImageIcon },
+    { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
     ...(isSuper
       ? [
           { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
@@ -3347,6 +3350,7 @@ function ContentManager({
             <Route path="posts/categories" element={<CategoriesPanel tenantHost={siteHost} token={token} />} />
             <Route path="posts/:id" element={<PostEditorPage tenantHost={siteHost} token={token} />} />
             <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
+            <Route path="menus" element={<MenusPanel tenantHost={siteHost} token={token} />} />
             {isSuper && (
               <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
             )}
@@ -3361,7 +3365,7 @@ function ContentManager({
 }
 
 // ---------- Shell (sidebar + header, prototype layout) ----------
-type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "languages" | "global-theme" | "feed" | "settings";
+type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "languages" | "menus" | "global-theme" | "feed" | "settings";
 
 const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = {
   dashboard: { labelKey: "tab-dashboard", icon: LayoutDashboard },
@@ -3371,6 +3375,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   content: { labelKey: "tab-content", icon: FileText },
   theme: { labelKey: "tab-theme", icon: Palette },
   languages: { labelKey: "tab-languages", icon: Globe },
+  menus: { labelKey: "menus-title", icon: ListTree },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
@@ -3951,7 +3956,7 @@ function Shell({
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings"] : ["dashboard"];
-  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages"];
+  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -4051,6 +4056,7 @@ function Shell({
                 <Route path="content/*" element={<ContentManager isSuper={isSuper} showSitePicker={showSitePicker} siteHost={siteHost} setSiteHost={setSiteHost} tenants={siteOptions} token={session.token} />} />
                 <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />
