@@ -203,6 +203,54 @@ export const updateCategory = (
 export const deleteCategory = (tenantHost: string, token: string, id: string) =>
   request(`/api/categories/${id}`, tenantHost, token, { method: "DELETE" });
 
+export interface MenuLinkFields {
+  linkType: "page" | "post" | "category" | "custom";
+  refId?: string;
+  url?: string;
+  target?: "_self" | "_blank";
+}
+
+export interface MenuMegaColumnItem extends MenuLinkFields {
+  label: string;
+  translations?: Record<string, { label: string }>;
+  icon?: string;
+  image?: string;
+}
+
+export interface MenuMegaColumn {
+  heading?: string;
+  translations?: Record<string, { heading: string }>;
+  items: MenuMegaColumnItem[];
+}
+
+export interface MenuItem extends MenuLinkFields {
+  id: string;
+  label: string;
+  translations?: Record<string, { label: string }>;
+  children?: MenuItem[];
+  megaMenu?: { columns: MenuMegaColumn[] };
+}
+
+export interface Menu {
+  id: string;
+  name: string;
+  items: MenuItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listMenus = (tenantHost: string, token: string) =>
+  request("/api/menus", tenantHost, token).then((b) => b.items as Menu[]);
+
+export const createMenu = (tenantHost: string, token: string, name: string) =>
+  request("/api/menus", tenantHost, token, { method: "POST", body: JSON.stringify({ name }) }).then((b) => b.item as Menu);
+
+export const updateMenu = (tenantHost: string, token: string, id: string, patch: Partial<Pick<Menu, "name" | "items">>) =>
+  request(`/api/menus/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) }).then((b) => b.item as Menu);
+
+export const deleteMenu = (tenantHost: string, token: string, id: string) =>
+  request(`/api/menus/${id}`, tenantHost, token, { method: "DELETE" });
+
 export interface DesignTemplate {
   id: string;
   name: string;
