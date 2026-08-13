@@ -29,8 +29,20 @@ services:
       DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       PORT: 3000
+      # The api's Dockerfile bakes NODE_ENV=production, which trips index.ts's
+      # own boot-time guard (`ADMIN_ORIGIN must be set in production`) unless
+      # this is set — the browser reaches the admin container directly on
+      # ADMIN_PORT here (no proxy in front for local/dev compose runs).
+      # Override to the real https://<ADMIN_DOMAIN> once behind the `proxy`
+      # service in production.
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:${ADMIN_PORT:-5173}}
       # Static export renders pages through the frontend container.
       FRONTEND_INTERNAL_URL: http://frontend:4321
+      # Caddy's Admin API, docker-internal only (never published — see the
+      # proxy service below). Harmless to always set: proxy-sync.ts's calls
+      # are only ever made when a superadmin turns the Settings "Domain &
+      # SSL Automation" switch on (default off).
+      CADDY_ADMIN_URL: http://proxy:2019
     ports:
       # Host port overridable via .env's API_PORT (install.sh writes this
       # when the default 3000 is already taken on the host) — a separate
@@ -81,6 +93,13 @@ services:
   # ./certs mount below if USIM ICT provides its own certificate instead.
   proxy:
     image: caddy:2-alpine
+    # No --resume: this proxy container's Caddy config is always adapted
+    # fresh from ./Caddyfile on every start. syncCaddy's dynamic tenant/cert
+    # routes (proxy-sync.ts) are re-pushed on top by the api container's own
+    # boot self-heal, not persisted via Caddy's autosave — --resume would
+    # otherwise make Caddy ignore Caddyfile edits (including a manual
+    # cert-swap restart) on every restart after the first.
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     restart: unless-stopped
     depends_on:
       - admin

@@ -6,6 +6,16 @@
 # Only for local trial without a real domain (ADMIN_DOMAIN=localhost etc.):
 # Caddy falls back to an internal self-signed cert, browser will warn once.
 
+# Admin API bound to all interfaces INSIDE this container so the api
+# service (same docker-internal network, see docker-compose.yml's
+# CADDY_ADMIN_URL) can reach it — this port is never published to the host
+# (no "2019:2019" in docker-compose.yml's proxy.ports), so it stays
+# unreachable from outside the Docker network regardless of any firewall
+# rule on the host.
+{
+	admin 0.0.0.0:2019
+}
+
 {$ADMIN_DOMAIN:admin.localhost} {
 	reverse_proxy admin:80
 }
