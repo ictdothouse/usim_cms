@@ -50,6 +50,20 @@ export const categories = pgTable("categories", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Navigation menus — a named, ordered tree of links an author builds once
+// and places anywhere via the "menu" Designer element (see Designer.tsx's
+// ELS registry). `items` is the full nested tree (top-level items, each
+// optionally with `children` for a simple dropdown OR `megaMenu` for
+// multi-column rich content) — never split into rows, there is nothing
+// relational about a menu's structure. See validate-menu.ts for the shape.
+export const menus = pgTable("menus", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  items: jsonb("items").notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Post/Article content per tenant. body is sanitized HTML from the admin
 // rich-text editor (see the posts collection's beforeChange hook). Public
 // visibility is enforced by RLS: anonymous SELECT only sees status='published'
