@@ -49,7 +49,7 @@ import {
   setTenantCertInfo,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
-import { syncCaddy, pingCaddy, parseCertExpiry, loadCaddyCert } from "./proxy-sync.js";
+import { syncCaddy, pingCaddy, parseCertExpiry, loadCaddyCert, unloadCaddyCert } from "./proxy-sync.js";
 import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
 import {
   exportTenantBackup,
@@ -385,6 +385,28 @@ async function maybeSyncCaddy(): Promise<void> {
   }
 }
 
+// Boot-only variant: docker-compose starts `proxy` only after api/admin/
+// frontend have merely STARTED (not become healthy), so on a fresh
+// `docker compose up` this process's own boot can fire before Caddy inside
+// the proxy container is actually accepting connections yet — a bare
+// single-shot maybeSyncCaddy() would reliably fail here. Retries a few
+// times with a short delay instead of giving up on the very first race.
+async function maybeSyncCaddyAtBoot(): Promise<void> {
+  if (!(await getProxyAutomationEnabled())) return;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await syncCaddy(await listTenants());
+      return;
+    } catch (err) {
+      if (attempt === 5) {
+        app.log.warn({ err }, "Caddy proxy sync failed after retries");
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+}
+
 app.get("/api/portal/tenants", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   return { tenants: await listTenants() };
@@ -470,6 +492,10 @@ app.post("/api/portal/tenants/:host/cert", async (req, reply) => {
     return { error: "proxy automation is not enabled" };
   }
   const { host } = req.params as { host: string };
+  if (!(await listTenants()).some((t) => t.host === host)) {
+    reply.code(404);
+    return { error: "tenant not found" };
+  }
   let certPem: string | null = null;
   let keyPem: string | null = null;
   for await (const part of req.parts()) {
@@ -490,7 +516,7 @@ app.post("/api/portal/tenants/:host/cert", async (req, reply) => {
     return { error: "certificate could not be parsed (expected PEM)" };
   }
   try {
-    await loadCaddyCert(certPem, keyPem);
+    await loadCaddyCert(host, certPem, keyPem);
   } catch (err) {
     reply.code(400);
     return { error: (err as Error).message };
@@ -503,7 +529,21 @@ app.post("/api/portal/tenants/:host/cert", async (req, reply) => {
 // Reverts `host` to Caddy's automatic Let's Encrypt HTTPS.
 app.delete("/api/portal/tenants/:host/cert", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
+  if (!(await getProxyAutomationEnabled())) {
+    reply.code(400);
+    return { error: "proxy automation is not enabled" };
+  }
   const { host } = req.params as { host: string };
+  if (!(await listTenants()).some((t) => t.host === host)) {
+    reply.code(404);
+    return { error: "tenant not found" };
+  }
+  try {
+    await unloadCaddyCert(host);
+  } catch (err) {
+    reply.code(502);
+    return { error: (err as Error).message };
+  }
   await setTenantCertInfo(host, null);
   await maybeSyncCaddy();
   return { hasCustomCert: false };
@@ -836,6 +876,7 @@ app.post("/api/portal/clones/:id/stage", async (req, reply) => {
   }
   const source = (await listTenants()).find((t) => t.host === entry.meta.sourceHost);
   await createTenant(stagingHost, `${(source?.departmentName as string) ?? entry.meta.sourceHost} (Staging)`, null);
+  await maybeSyncCaddy();
   await importTenantBackup(stagingHost, entry.zip);
   markCloneStaged(id, stagingHost);
   return { staged: true, stagingHost };
@@ -859,6 +900,7 @@ app.post("/api/portal/clones/:id/promote", async (req, reply) => {
     return { error: `tenant ${newHost} already exists — use restore instead` };
   }
   await createTenant(newHost, departmentName, null);
+  await maybeSyncCaddy();
   await importTenantBackup(newHost, entry.zip);
   return { promoted: true, host: newHost };
 });
@@ -1662,6 +1704,7 @@ app.listen({ port, host: "0.0.0.0" }, (err) => {
   // Self-heal: if the proxy container was recreated or lost its volume
   // since this process last ran, resync it from the tenants table now
   // rather than waiting for the next tenant create/delete. No-op when the
-  // switch is off (maybeSyncCaddy checks getProxyAutomationEnabled itself).
-  void maybeSyncCaddy();
+  // switch is off (maybeSyncCaddyAtBoot checks getProxyAutomationEnabled
+  // itself); see maybeSyncCaddyAtBoot for why this retries.
+  void maybeSyncCaddyAtBoot();
 });

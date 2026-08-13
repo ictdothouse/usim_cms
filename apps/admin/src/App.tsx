@@ -3461,6 +3461,13 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   function reloadProxyTenants() {
     void api.listPortalTenants(token).then(setProxyTenants);
   }
+  // Cert status (hasCustomCert/certExpiresAt) can change from another admin's
+  // session or a previous one of this admin's own — refresh whenever this
+  // panel becomes visible or the selected site changes, not only right after
+  // this session's own upload/revert.
+  useEffect(() => {
+    if (settingsTab === "site") reloadProxyTenants();
+  }, [settingsTab, host, token]);
 
   async function toggleProxyEnabled(enabled: boolean) {
     setProxyErr(null);
@@ -3784,8 +3791,8 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                     const hasCustomCert = Boolean(selectedTenant.hasCustomCert);
                     const certExpiresAt = selectedTenant.certExpiresAt as string | null;
                     const expiringSoon =
-                      hasCustomCert && certExpiresAt !== null &&
-                      new Date(certExpiresAt).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000;
+                      hasCustomCert && Boolean(certExpiresAt) &&
+                      new Date(certExpiresAt as string).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000;
                     return (
                       <div className="flex items-center justify-between gap-2 text-xs">
                         <div>
@@ -3803,7 +3810,11 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                             </button>
                           )}
                           <button
-                            onClick={() => setCertUploadHost(certUploadHost === tHost ? null : tHost)}
+                            onClick={() => {
+                              setCertUploadHost(certUploadHost === tHost ? null : tHost);
+                              setCertFile(null);
+                              setKeyFile(null);
+                            }}
                             disabled={proxyBusy}
                             className={btnGhost}
                           >

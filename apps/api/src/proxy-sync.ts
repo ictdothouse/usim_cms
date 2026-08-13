@@ -44,6 +44,12 @@ export function buildCaddyConfig(tenants: TenantRouteInfo[]): Record<string, unk
   ];
 
   return {
+    // Must be repeated on every /load push: POSTing a config replaces the
+    // ENTIRE active config, so omitting `admin` here would reset Caddy's
+    // admin listener to its loopback-only default and cut this api
+    // container off from it permanently. Keep in sync with Caddyfile's own
+    // top-level `admin 0.0.0.0:2019` block.
+    admin: { listen: "0.0.0.0:2019" },
     apps: {
       http: {
         servers: {
@@ -98,17 +104,39 @@ export async function syncCaddy(tenants: TenantRouteInfo[]): Promise<void> {
   if (!res.ok) throw new Error(`Caddy /load failed: ${res.status} ${await res.text()}`);
 }
 
+// Tags a host's loaded cert with a stable Caddy `@id` so it can be found
+// and removed again later — Caddy's config API has no "delete the cert for
+// this hostname" concept otherwise (load_pem is just an array; a bare POST
+// can only append to it, never target one entry by hostname).
+function certId(host: string): string {
+  return `tenant-cert-${host}`;
+}
+
 // Loads a certificate+key pair into Caddy; Caddy automatically prefers an
 // already-loaded certificate over requesting one via automatic HTTPS for a
 // matching hostname — no route-level change needed (see buildCaddyConfig).
 // Caddy is the one real validator of the pair (mismatched key, malformed
 // PEM, ...); its rejection is thrown verbatim for the caller to surface to
 // the admin UI rather than this module reimplementing that validation.
-export async function loadCaddyCert(certPem: string, keyPem: string): Promise<void> {
+// Removes any cert previously loaded for this exact host first — Caddy
+// rejects a duplicate `@id`, and re-uploading for the same host should
+// replace, not stack on top of, whatever was there before.
+export async function loadCaddyCert(host: string, certPem: string, keyPem: string): Promise<void> {
+  await unloadCaddyCert(host);
   const res = await caddyRequest("/config/apps/tls/certificates/load_pem", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify([{ certificate: certPem, key: keyPem }]),
+    body: JSON.stringify([{ "@id": certId(host), certificate: certPem, key: keyPem }]),
   });
   if (!res.ok) throw new Error(`Caddy rejected certificate: ${res.status} ${await res.text()}`);
+}
+
+// Removes host's previously loaded certificate, if any. A 404 means nothing
+// was ever loaded for this host — the expected, harmless case for a plain
+// revert on a host that only ever used automatic HTTPS.
+export async function unloadCaddyCert(host: string): Promise<void> {
+  const res = await caddyRequest(`/id/${encodeURIComponent(certId(host))}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Caddy failed to remove certificate: ${res.status} ${await res.text()}`);
+  }
 }

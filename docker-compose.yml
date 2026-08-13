@@ -93,7 +93,13 @@ services:
   # ./certs mount below if USIM ICT provides its own certificate instead.
   proxy:
     image: caddy:2-alpine
-    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile --resume
+    # No --resume: this proxy container's Caddy config is always adapted
+    # fresh from ./Caddyfile on every start. syncCaddy's dynamic tenant/cert
+    # routes (proxy-sync.ts) are re-pushed on top by the api container's own
+    # boot self-heal, not persisted via Caddy's autosave — --resume would
+    # otherwise make Caddy ignore Caddyfile edits (including a manual
+    # cert-swap restart) on every restart after the first.
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     restart: unless-stopped
     depends_on:
       - admin
