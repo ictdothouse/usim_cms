@@ -2479,6 +2479,7 @@ const PERMISSIONS = [
   "users.manage",
   "sites.multi",
   "languages.write",
+  "menus.write",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -2493,6 +2494,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "users.manage": "perm-users-manage",
   "sites.multi": "perm-sites-multi",
   "languages.write": "perm-languages-write",
+  "menus.write": "perm-menus-write",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {

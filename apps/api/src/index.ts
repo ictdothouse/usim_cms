@@ -12,6 +12,7 @@ import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/au
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
 import { validateLayout } from "./collections/validate-layout.js";
+import { validateMenuItems } from "./collections/validate-menu.js";
 import * as schema from "./db/schema.js";
 import {
   closePool,
@@ -84,6 +85,7 @@ const PERMISSIONS = new Set([
   "users.manage",
   "sites.multi",
   "languages.write",
+  "menus.write",
 ]);
 
 // Superadmin bypasses every permission check — a role's permissions are only
@@ -1234,6 +1236,40 @@ const categoriesCollection: CollectionConfig = {
   hooks: { beforeChange: categoriesBeforeChange },
 };
 
+// Site navigation menus. `items` is a nested tree (see validate-menu.ts) —
+// no separate menu-items table, the whole structure lives in one jsonb
+// column, same "one row holds the whole tree" shape templates.data already
+// uses. Gated on its own menus.write permission (not pages.*/posts.*) since
+// managing site navigation is its own concern, not a sub-concern of either.
+const menusBeforeChange = (data: unknown) => {
+  const record = data as Record<string, unknown>;
+  const err = validateMenuItems(record.items ?? []);
+  if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  record.updatedAt = new Date();
+  return record;
+};
+
+const menusCollection: CollectionConfig = {
+  slug: "menus",
+  table: schema.menus,
+  createSchema: {
+    type: "object",
+    required: ["name"],
+    additionalProperties: false,
+    properties: {
+      name: { type: "string", minLength: 1 },
+      items: { type: "array" },
+    },
+  },
+  access: {
+    read: () => true,
+    create: (a) => hasPermission(a, "menus.write"),
+    update: (a) => hasPermission(a, "menus.write"),
+    delete: (a) => hasPermission(a, "menus.write"),
+  },
+  hooks: { beforeChange: menusBeforeChange },
+};
+
 // Reusable Designer section blocks. Protected-scope only (see registration
 // below) — no `access.update` since there's no PATCH route (replacing a
 // template is delete-and-recreate), and no `shareable` since these aren't
@@ -1268,6 +1304,7 @@ await app.register(async (publicScope) => {
   registerPublicCollectionRoutes(publicScope, pagesCollection);
   registerPublicCollectionRoutes(publicScope, postsCollection);
   registerPublicCollectionRoutes(publicScope, categoriesCollection);
+  registerPublicCollectionRoutes(publicScope, menusCollection);
   // Theme lives in the control-plane DB, not the tenant DB — req.db's own
   // site_theme copy is always empty under DB-per-tenant. A theme-preview
   // Bearer token (ThemeForm's "Test" button) overlays its not-yet-saved
@@ -1337,6 +1374,7 @@ await app.register(async (protectedScope) => {
   });
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
+  registerProtectedCollectionRoutes(protectedScope, menusCollection);
 
   // History/restore — a post-specific feature the generic CRUD mechanism
   // doesn't cover (same reasoning as the preview-token route above), so
