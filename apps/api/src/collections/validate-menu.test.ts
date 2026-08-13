@@ -88,4 +88,78 @@ describe("validateMenuItems", () => {
   it("rejects linkType page/post/category with no refId", () => {
     assert.match(validateMenuItems([{ id: "a", label: "X", linkType: "page" }]) ?? "", /refId/);
   });
+
+  it("rejects an item with both children and megaMenu", () => {
+    const items = [
+      {
+        id: "a",
+        label: "Both",
+        linkType: "custom",
+        url: "/",
+        children: [{ id: "b", label: "Child", linkType: "custom", url: "/" }],
+        megaMenu: { columns: [] },
+      },
+    ];
+    assert.match(validateMenuItems(items) ?? "", /both/i);
+  });
+
+  it("rejects a mega menu with more than 8 columns", () => {
+    const columns = Array.from({ length: 9 }, (_, i) => ({
+      items: [{ label: `Item ${i}`, linkType: "custom", url: "/" }],
+    }));
+    const items = [
+      {
+        id: "a",
+        label: "TooMany",
+        linkType: "custom",
+        url: "/",
+        megaMenu: { columns },
+      },
+    ];
+    assert.match(validateMenuItems(items) ?? "", /too many columns/i);
+  });
+
+  it("rejects a mega menu column with more than 20 items", () => {
+    const items_array = Array.from({ length: 21 }, (_, i) => ({
+      label: `Item ${i}`,
+      linkType: "custom",
+      url: `/item${i}`,
+    }));
+    const items = [
+      {
+        id: "a",
+        label: "Academic",
+        linkType: "custom",
+        url: "/academic",
+        megaMenu: { columns: [{ items: items_array }] },
+      },
+    ];
+    assert.match(validateMenuItems(items) ?? "", /too many items/i);
+  });
+
+  it("rejects a mega menu column item with children or megaMenu", () => {
+    const items = [
+      {
+        id: "a",
+        label: "Academic",
+        linkType: "custom",
+        url: "/academic",
+        megaMenu: {
+          columns: [
+            {
+              items: [
+                {
+                  label: "Bad",
+                  linkType: "custom",
+                  url: "/bad",
+                  children: [{ label: "Nested", linkType: "custom", url: "/" }],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ];
+    assert.match(validateMenuItems(items) ?? "", /cannot have children or megaMenu/i);
+  });
 });
