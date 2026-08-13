@@ -490,6 +490,12 @@ install_docker_mode() {
   fill_env_if_blank .env SESSION_SECRET
   set_env_kv .env VITE_API_URL "http://${public_host}:${api_port}"
   set_env_kv .env VITE_FRONTEND_URL "http://${public_host}:${frontend_port}"
+  # Without this, docker-compose.yml's own ADMIN_ORIGIN fallback
+  # (http://localhost:${ADMIN_PORT}) never matches a real VPS's public
+  # IP/domain — every admin request gets CORS-blocked. Whatever origin the
+  # admin panel actually gets served from (this same public_host:admin_port)
+  # must be the allowed one.
+  set_env_kv .env ADMIN_ORIGIN "http://${public_host}:${admin_port}"
   # Host-side port remapping goes through .env (API_PORT/FRONTEND_PORT/
   # ADMIN_PORT, read by docker-compose.yml's `${VAR:-default}` port entries)
   # rather than a docker-compose.override.yml: Compose concatenates
@@ -616,6 +622,12 @@ install_baremetal_mode() {
 
   set_env_kv apps/api/.env PORT "$api_port"
   set_env_kv apps/api/.env STORAGE_DRIVER "local"
+  # Bare-metal mode has no docker-compose.yml wrapping it, so there's no
+  # localhost fallback to fall back to — apps/api/.env is the only place
+  # this gets set, and it must match wherever the admin panel actually gets
+  # served from (this same public_host:admin_port), same reasoning as the
+  # docker-mode .env above.
+  set_env_kv apps/api/.env ADMIN_ORIGIN "http://${public_host}:${admin_port}"
   grep -q '^SESSION_SECRET=' apps/api/.env || echo "SESSION_SECRET=" >> apps/api/.env
   fill_env_if_blank apps/api/.env SESSION_SECRET
 
