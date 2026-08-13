@@ -44,6 +44,17 @@ async function request(path: string, tenantHost: string | null, token: string | 
   if (tenantHost) headers["x-tenant-host"] = tenantHost;
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
+  // A 401 here always means the bearer we sent is missing/expired/signature-
+  // mismatched (see requireTenantAuth/verifySuperadmin/verifyAnyUser in
+  // apps/api) — never a permission problem (that's 403). Clearing the stored
+  // session and reloading immediately avoids the confusing state of every
+  // panel silently failing with "Invalid or expired token" while the UI
+  // still looks logged in.
+  if (token && res.status === 401) {
+    localStorage.removeItem("usim_cms_session");
+    window.location.reload();
+    return new Promise(() => {});
+  }
   const body = await res.json();
   // Hand-written routes return `{ error: "..." }` directly; a thrown Error
   // with `.statusCode` instead goes through Fastify's default error handler,
