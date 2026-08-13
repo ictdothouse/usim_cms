@@ -1,6 +1,7 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import {
+  Check,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -3422,7 +3423,9 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [langErr, setLangErr] = useState<string | null>(null);
   const [newCode, setNewCode] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [codeTouched, setCodeTouched] = useState(false);
   const [langSuggestOpen, setLangSuggestOpen] = useState(false);
+  const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [proxyConnected, setProxyConnected] = useState(false);
   const [proxyErr, setProxyErr] = useState<string | null>(null);
@@ -3441,7 +3444,19 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   function pickLanguageSuggestion(l: { code: string; label: string }) {
     setNewLabel(l.label);
     setNewCode(l.code);
+    setCodeTouched(false);
     setLangSuggestOpen(false);
+  }
+
+  function onNewLabelChange(value: string) {
+    setNewLabel(value);
+    setLangSuggestOpen(true);
+    if (codeTouched) return;
+    const trimmed = value.trim().toLowerCase();
+    const match =
+      COMMON_LANGUAGES.find((l) => l.label.toLowerCase() === trimmed) ??
+      COMMON_LANGUAGES.find((l) => l.label.toLowerCase().startsWith(trimmed));
+    setNewCode(trimmed && match ? match.code : "");
   }
 
   function reloadLanguages() {
@@ -3532,6 +3547,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
       await api.createPortalLanguage(token, newCode.trim(), newLabel.trim());
       setNewCode("");
       setNewLabel("");
+      setCodeTouched(false);
       reloadLanguages();
     } catch (e) {
       setLangErr((e as Error).message);
@@ -3540,11 +3556,17 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
 
   async function saveLanguageLabel(id: string, label: string) {
     if (!label.trim()) return;
+    setLangErr(null);
     try {
       await api.updatePortalLanguage(token, id, { label: label.trim() });
+      setLabelDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      reloadLanguages();
     } catch (e) {
       setLangErr((e as Error).message);
-      reloadLanguages();
     }
   }
 
@@ -3642,14 +3664,25 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
             <div className="space-y-1.5">
               {langs.map((l) => {
                 const isLastEnabled = l.enabled && langs.filter((x) => x.enabled).length === 1;
+                const draft = labelDrafts[l.id] ?? l.label;
+                const dirty = draft !== l.label;
                 return (
                   <div key={l.id} className="flex items-center gap-2">
                     <span className="w-12 shrink-0 font-mono text-[11px] text-sub">{l.code}</span>
                     <input
                       className={inputCls}
-                      defaultValue={l.label}
-                      onBlur={(e) => void saveLanguageLabel(l.id, e.target.value)}
+                      value={draft}
+                      onChange={(e) => setLabelDrafts((prev) => ({ ...prev, [l.id]: e.target.value }))}
                     />
+                    {dirty && (
+                      <button
+                        onClick={() => void saveLanguageLabel(l.id, draft)}
+                        title={t("settings-languages-save-btn")}
+                        className="shrink-0 text-accent hover:text-ink"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <label className="flex shrink-0 items-center gap-1 text-[11px] text-sub">
                       <input
                         type="checkbox"
@@ -3676,10 +3709,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                   className={inputCls}
                   placeholder={t("settings-languages-label-placeholder")}
                   value={newLabel}
-                  onChange={(e) => {
-                    setNewLabel(e.target.value);
-                    setLangSuggestOpen(true);
-                  }}
+                  onChange={(e) => onNewLabelChange(e.target.value)}
                   onFocus={() => setLangSuggestOpen(true)}
                   onBlur={() => setTimeout(() => setLangSuggestOpen(false), 150)}
                 />
@@ -3706,7 +3736,10 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                 className={`${inputCls} !w-20 shrink-0`}
                 placeholder={t("settings-languages-code-placeholder")}
                 value={newCode}
-                onChange={(e) => setNewCode(e.target.value)}
+                onChange={(e) => {
+                  setNewCode(e.target.value);
+                  setCodeTouched(true);
+                }}
               />
               <button
                 onClick={() => void addLanguage()}
