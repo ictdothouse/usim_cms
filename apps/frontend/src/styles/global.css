@@ -7,3 +7,39 @@ h1 {
 h2, h3, h4, h5, h6 {
   font-family: var(--font-subheading, var(--font-heading, var(--font-family, inherit)));
 }
+
+.ds-menu-list { display: flex; gap: 1.5rem; list-style: none; margin: 0; padding: 0; }
+.ds-menu-vertical .ds-menu-list { flex-direction: column; gap: 0.25rem; }
+.ds-menu-item { position: relative; }
+.ds-menu-item > a { text-decoration: none; color: inherit; }
+.ds-menu-dropdown, .ds-mega-menu { display: none; position: absolute; top: 100%; left: 0; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; }
+.ds-menu-dropdown { list-style: none; margin: 0; padding: 0.5rem 0; min-width: 12rem; }
+.ds-menu-dropdown li { padding: 0; }
+.ds-menu-dropdown a { display: block; padding: 0.5rem 1rem; text-decoration: none; color: inherit; }
+.ds-mega-menu { padding: 1.5rem; gap: 2rem; }
+.ds-mega-full { left: 0; right: 0; width: 100%; }
+.ds-mega-contained { min-width: 40rem; }
+.ds-mega-column ul { list-style: none; margin: 0; padding: 0; }
+.ds-mega-column a { display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: inherit; padding: 0.35rem 0; }
+.ds-mega-column img { width: 1.5rem; height: 1.5rem; object-fit: cover; border-radius: 0.25rem; }
+.ds-mega-heading { font-weight: 700; margin: 0 0 0.5rem; }
+[data-trigger="hover"] .ds-menu-item.has-dropdown:hover > .ds-menu-dropdown,
+[data-trigger="hover"] .ds-menu-item.has-mega:hover > .ds-mega-menu,
+.ds-menu-item.has-dropdown:focus-within > .ds-menu-dropdown,
+.ds-menu-item.has-mega:focus-within > .ds-mega-menu,
+.ds-menu-item.is-open-click > .ds-menu-dropdown,
+.ds-menu-item.is-open-click > .ds-mega-menu {
+  display: flex;
+  flex-wrap: wrap;
+}
+.ds-menu-dropdown.is-open, .ds-menu-item.is-open-click > .ds-menu-dropdown { display: block; }
+.ds-menu-toggle { display: none; flex-direction: column; gap: 4px; background: none; border: none; cursor: pointer; padding: 0.5rem; }
+.ds-menu-toggle span { display: block; width: 22px; height: 2px; background: currentColor; }
+@media (max-width: 768px) {
+  .ds-menu-toggle { display: flex; }
+  .ds-menu-list { display: none; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 1rem; z-index: 30; }
+  .ds-menu.is-open .ds-menu-list { display: flex; }
+  .ds-menu-dropdown, .ds-mega-menu { position: static; box-shadow: none; padding-left: 1rem; }
+  .ds-mega-menu { display: none; flex-direction: column; }
+  .ds-menu-item.is-open-click > .ds-mega-menu, .ds-menu-item.is-open-click > .ds-menu-dropdown { display: flex; }
+}

@@ -4,6 +4,8 @@
 // element except tabs/slider, which need a small vanilla-JS listener (see
 // the <script> at the bottom) — accordion stays zero-JS via native
 // <details>/<summary>.
+import MenuBlock from "./MenuBlock.astro";
+
 interface El {
   id?: string;
   type: string;
@@ -75,6 +77,15 @@ interface Props {
   // Page-wide default column gap ([...slug].astro's page.settings.gap) — a
   // row's own `gap` (Row.gap, set in Designer.tsx) always wins over this.
   pageGap?: string;
+  // Threaded through for the "menu" element case below (MenuBlock needs both
+  // to fetch/resolve the right tenant's menu in the requested language) — a
+  // menu element is never nested any deeper than column.elements, all within
+  // this SAME component's own template scope (rows/columns/elements are
+  // plain nested array maps here, not recursive SectionBlock instances), so
+  // these two just need to be in scope once at the top, not re-passed at
+  // each nesting level.
+  tenantHost?: string;
+  requestedLang?: string | null;
 }
 const {
   bg,
@@ -114,6 +125,8 @@ const {
   hideDesktop,
   hideTablet,
   hideMobile,
+  tenantHost = "",
+  requestedLang = null,
 } = Astro.props;
 
 const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
@@ -1244,6 +1257,17 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                     </div>
                   );
                 }
+                case "menu":
+                  return (
+                    <MenuBlock
+                      menuId={p.menuId ?? ""}
+                      layout={p.layout as "horizontal" | "vertical" | undefined}
+                      dropdownTrigger={p.dropdownTrigger as "hover" | "click" | undefined}
+                      megaMenuWidth={p.megaMenuWidth as "contained" | "full-width" | undefined}
+                      tenantHost={tenantHost}
+                      lang={requestedLang}
+                    />
+                  );
                 default:
                   return null;
               }

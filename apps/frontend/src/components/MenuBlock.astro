@@ -1,0 +1,89 @@
+---
+import { getMenu, resolveMenuTree, type ResolvedMenuItem } from "../lib/api";
+
+interface Props {
+  menuId: string;
+  layout?: "horizontal" | "vertical";
+  dropdownTrigger?: "hover" | "click";
+  megaMenuWidth?: "contained" | "full-width";
+  tenantHost: string;
+  lang: string | null;
+}
+const { menuId, layout = "horizontal", dropdownTrigger = "hover", megaMenuWidth = "contained", tenantHost, lang } = Astro.props;
+
+const menu = await getMenu(tenantHost, menuId);
+const items: ResolvedMenuItem[] = menu ? await resolveMenuTree(menu.items, lang, tenantHost) : [];
+---
+
+{items.length > 0 && (
+  <nav class={`ds-menu ds-menu-${layout}`} data-trigger={dropdownTrigger}>
+    <button class="ds-menu-toggle" type="button" aria-label="Menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="ds-menu-list">
+      {items.map((item) => (
+        <li class={`ds-menu-item ${item.children ? "has-dropdown" : ""} ${item.megaMenu ? "has-mega" : ""}`}>
+          <a href={item.href} target={item.target}>{item.label}</a>
+          {item.children && (
+            <ul class="ds-menu-dropdown">
+              {item.children.map((child) => (
+                <li><a href={child.href} target={child.target}>{child.label}</a></li>
+              ))}
+            </ul>
+          )}
+          {item.megaMenu && (
+            <div class={`ds-mega-menu ds-mega-${megaMenuWidth}`}>
+              {item.megaMenu.columns.map((col) => (
+                <div class="ds-mega-column">
+                  {col.heading && <p class="ds-mega-heading">{col.heading}</p>}
+                  <ul>
+                    {col.items.map((mi) => (
+                      <li>
+                        <a href={mi.href} target={mi.target}>
+                          {mi.image && <img src={mi.image} alt="" />}
+                          {mi.label}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+
+<script>
+  // One listener per rendered ds-menu, event-delegated — matches this
+  // codebase's existing "tabs" element convention of a single small script
+  // bundled once per page regardless of instance count. Handles two
+  // concerns: click-to-toggle dropdowns/mega-menus when dropdownTrigger is
+  // "click" (desktop, no hover), and the mobile hamburger toggle (all
+  // triggers, since touch has no hover at all).
+  document.querySelectorAll<HTMLElement>(".ds-menu").forEach((nav) => {
+    const toggle = nav.querySelector<HTMLButtonElement>(".ds-menu-toggle");
+    const list = nav.querySelector<HTMLUListElement>(".ds-menu-list");
+    toggle?.addEventListener("click", () => {
+      const open = nav.classList.toggle("is-open");
+      toggle.setAttribute("aria-expanded", String(open));
+    });
+    if (nav.dataset.trigger === "click") {
+      nav.querySelectorAll<HTMLElement>(".has-dropdown > a, .has-mega > a").forEach((link) => {
+        link.addEventListener("click", (e) => {
+          const li = link.closest("li");
+          if (!li) return;
+          const isOpenAlready = li.classList.contains("is-open-click");
+          nav.querySelectorAll("li.is-open-click").forEach((el) => el.classList.remove("is-open-click"));
+          if (!isOpenAlready) {
+            e.preventDefault();
+            li.classList.add("is-open-click");
+          }
+        });
+      });
+    }
+    list?.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => nav.classList.remove("is-open")));
+  });
+</script>
