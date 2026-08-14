@@ -112,6 +112,7 @@ export default function MenuItemsEditor({
                 />
               ) : (
                 <RefIdPicker
+                  key={item.linkType}
                   tenantHost={tenantHost}
                   token={token}
                   linkType={item.linkType}
