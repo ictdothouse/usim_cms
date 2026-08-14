@@ -187,7 +187,8 @@ type ElType =
   | "accordion"
   | "infobox"
   | "tabs"
-  | "slider";
+  | "slider"
+  | "menu";
 
 export interface El {
   id: string;
@@ -302,7 +303,8 @@ type FieldKind =
   | "pairs"
   | "slides"
   | "font"
-  | "stepper";
+  | "stepper"
+  | "menu-select";
 interface Field {
   key: string;
   labelKey: Key;
@@ -708,6 +710,20 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "transition", labelKey: "designer-f-slider-transition", kind: "select", options: ["slide", "fade"] },
     ],
   },
+  // Drops a saved Menu (built in the Menus admin panel, Tasks 1-8) into any
+  // page — the element itself just holds a reference (menuId) plus render
+  // options; the actual item tree lives on the Menu row, edited elsewhere.
+  menu: {
+    labelKey: "designer-el-menu",
+    icon: Menu,
+    defaults: { menuId: "", layout: "horizontal", dropdownTrigger: "hover", megaMenuWidth: "contained" },
+    fields: [
+      { key: "menuId", labelKey: "designer-f-menu", kind: "menu-select" },
+      { key: "layout", labelKey: "designer-f-menu-layout", kind: "select", options: ["horizontal", "vertical"] },
+      { key: "dropdownTrigger", labelKey: "designer-f-menu-trigger", kind: "select", options: ["hover", "click"] },
+      { key: "megaMenuWidth", labelKey: "designer-f-menu-width", kind: "select", options: ["contained", "full-width"] },
+    ],
+  },
 };
 
 // "Paste style" strips these before merging onto a target, so copying a
@@ -730,6 +746,7 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   infobox: ["name", "heading", "text"],
   tabs: ["items"],
   slider: ["slides"],
+  menu: ["menuId"],
 };
 // i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
 // a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through
@@ -814,6 +831,12 @@ const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   text: "content", src: "content", alt: "content", href: "content", label: "content",
   url: "content", name: "content", items: "content", html: "content", images: "content",
   variant: "content", style: "content",
+  // "menu" element only — menuId/dropdownTrigger/megaMenuWidth are new keys,
+  // no collision with any other element's fields. `layout` is also new (no
+  // other element uses that key name) but isn't listed here: the lookup
+  // already falls back to "content" for any unmapped key (see the `?? "content"`
+  // default a few hundred lines below), so it lands in the same group either way.
+  menuId: "content", dropdownTrigger: "content", megaMenuWidth: "content",
   fontFamily: "typography", color: "typography", lineHeight: "typography",
   letterSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
   textTransform: "typography", fontStyle: "typography", textDecoration: "typography",
@@ -1741,6 +1764,14 @@ export default function Designer({
   // pageSettings above; persisted via save()'s `language` field.
   const [pageLanguage, setPageLanguage] = useState<string>((page.language as string | null) ?? "");
   const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
+  // "menu" element's Inspector needs a live list to populate its menuId
+  // picker — dynamic per-tenant data, unlike every other field here which
+  // is a static enum, so it's fetched once (like siteLanguages above) rather
+  // than baked into ELS.menu.fields' static `options`.
+  const [availableMenus, setAvailableMenus] = useState<api.Menu[]>([]);
+  useEffect(() => {
+    void api.listMenus(tenantHost, token).then(setAvailableMenus);
+  }, [tenantHost]);
   // i18n Phase 5 — site-wide master switch, plus this page's own opt-in;
   // the Translations block below is only offered when both are true.
   const [siteMultilangEnabled, setSiteMultilangEnabled] = useState(false);
@@ -2963,6 +2994,18 @@ export default function Designer({
     const base =
       "w-full rounded-lg border border-line/30 bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-line";
     if (field.kind === "textarea") return <BufferedTextarea rows={4} className={base} value={value} onCommit={onChange} />;
+    if (field.kind === "menu-select") {
+      return (
+        <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{t("designer-f-menu-none")}</option>
+          {availableMenus.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      );
+    }
     if (field.kind === "select" && field.key === "align") {
       const ALIGN_ICON: Record<string, typeof AlignLeft> = {
         left: AlignLeft,
@@ -5600,6 +5643,15 @@ export default function Designer({
                 </span>
               )}
             </div>
+          </div>
+        );
+      }
+      case "menu": {
+        const linked = availableMenus.find((m) => m.id === el.props.menuId);
+        return (
+          <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
+            <Menu className="h-3.5 w-3.5" />
+            {linked ? linked.name : t("designer-f-menu-none")}
           </div>
         );
       }
