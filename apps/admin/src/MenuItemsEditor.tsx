@@ -129,6 +129,77 @@ export default function MenuItemsEditor({
                 <option value="_blank">{t("menus-target-blank")}</option>
               </select>
             </div>
+            <div className="flex items-center gap-2 border-t border-line/20 pt-2">
+              {!item.children && !item.megaMenu && (
+                <>
+                  <Button size="sm" variant="ghost" onClick={() => patchItem(item.id, { children: [] })}>
+                    {t("menus-add-submenu")}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => patchItem(item.id, { megaMenu: { columns: [] } })}>
+                    {t("menus-convert-mega")}
+                  </Button>
+                </>
+              )}
+              {(item.children || item.megaMenu) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-red-500"
+                  onClick={() => patchItem(item.id, { children: undefined, megaMenu: undefined })}
+                >
+                  {t("menus-remove-submenu")}
+                </Button>
+              )}
+            </div>
+            {item.children && (
+              <div className="ml-4 space-y-2 border-l-2 border-line/30 pl-3">
+                {item.children.map((child, ci) => (
+                  <div key={child.id} className="flex items-center gap-2">
+                    <input
+                      className={inputCls}
+                      placeholder={t("menus-item-label")}
+                      value={child.label}
+                      onChange={(e) =>
+                        patchItem(item.id, {
+                          children: item.children!.map((c, i) => (i === ci ? { ...c, label: e.target.value } : c)),
+                        })
+                      }
+                    />
+                    <input
+                      className={inputCls}
+                      placeholder="/child-path"
+                      value={child.url ?? ""}
+                      onChange={(e) =>
+                        patchItem(item.id, {
+                          children: item.children!.map((c, i) => (i === ci ? { ...c, url: e.target.value } : c)),
+                        })
+                      }
+                    />
+                    <button
+                      onClick={() => patchItem(item.id, { children: item.children!.filter((_, i) => i !== ci) })}
+                      className="rounded p-1 text-red-500 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    patchItem(item.id, { children: [...(item.children ?? []), { id: uid(), label: "", linkType: "custom", url: "" }] })
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" /> {t("menus-add-item")}
+                </Button>
+              </div>
+            )}
+            {item.megaMenu && (
+              <MegaMenuEditor
+                mega={item.megaMenu}
+                onChange={(mega) => patchItem(item.id, { megaMenu: mega })}
+              />
+            )}
           </li>
         ))}
       </ul>
@@ -194,5 +265,108 @@ function RefIdPicker({
         </option>
       ))}
     </select>
+  );
+}
+
+function emptyMegaColumnItem(): api.MenuMegaColumnItem {
+  return { label: "", linkType: "custom", url: "", icon: "", image: "" };
+}
+
+function MegaMenuEditor({
+  mega,
+  onChange,
+}: {
+  mega: { columns: api.MenuMegaColumn[] };
+  onChange: (mega: { columns: api.MenuMegaColumn[] }) => void;
+}) {
+  const { t } = useT();
+
+  function setColumns(columns: api.MenuMegaColumn[]) {
+    onChange({ columns });
+  }
+
+  function addColumn() {
+    setColumns([...mega.columns, { heading: "", items: [] }]);
+  }
+
+  function removeColumn(ci: number) {
+    setColumns(mega.columns.filter((_, i) => i !== ci));
+  }
+
+  function patchColumn(ci: number, patch: Partial<api.MenuMegaColumn>) {
+    setColumns(mega.columns.map((c, i) => (i === ci ? { ...c, ...patch } : c)));
+  }
+
+  function addColumnItem(ci: number) {
+    patchColumn(ci, { items: [...mega.columns[ci].items, emptyMegaColumnItem()] });
+  }
+
+  function patchColumnItem(ci: number, ii: number, patch: Partial<api.MenuMegaColumnItem>) {
+    patchColumn(ci, { items: mega.columns[ci].items.map((it, i) => (i === ii ? { ...it, ...patch } : it)) });
+  }
+
+  function removeColumnItem(ci: number, ii: number) {
+    patchColumn(ci, { items: mega.columns[ci].items.filter((_, i) => i !== ii) });
+  }
+
+  return (
+    <div className="ml-4 space-y-3 border-l-2 border-accent/40 pl-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {mega.columns.map((col, ci) => (
+          <div key={ci} className="space-y-2 rounded-lg border border-line/30 bg-canvas/40 p-2">
+            <div className="flex items-center gap-1">
+              <input
+                className={inputCls}
+                placeholder={t("menus-column-heading")}
+                value={col.heading ?? ""}
+                onChange={(e) => patchColumn(ci, { heading: e.target.value })}
+              />
+              <button onClick={() => removeColumn(ci)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {col.items.map((it, ii) => (
+              <div key={ii} className="space-y-1 rounded border border-line/20 bg-white p-2">
+                <input
+                  className={inputCls}
+                  placeholder={t("menus-item-label")}
+                  value={it.label}
+                  onChange={(e) => patchColumnItem(ci, ii, { label: e.target.value })}
+                />
+                <input
+                  className={inputCls}
+                  placeholder="/link-path"
+                  value={it.url ?? ""}
+                  onChange={(e) => patchColumnItem(ci, ii, { url: e.target.value })}
+                />
+                <div className="flex gap-1">
+                  <input
+                    className={inputCls}
+                    placeholder={t("menus-icon-name")}
+                    value={it.icon ?? ""}
+                    onChange={(e) => patchColumnItem(ci, ii, { icon: e.target.value })}
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder={t("menus-image-url")}
+                    value={it.image ?? ""}
+                    onChange={(e) => patchColumnItem(ci, ii, { image: e.target.value })}
+                  />
+                  <button onClick={() => removeColumnItem(ci, ii)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => addColumnItem(ci)}>
+              <Plus className="h-3.5 w-3.5" /> {t("menus-add-item")}
+            </Button>
+          </div>
+        ))}
+      </div>
+      <Button size="sm" variant="outline" onClick={addColumn}>
+        <Plus className="h-3.5 w-3.5" /> {t("menus-add-column")}
+      </Button>
+    </div>
   );
 }
