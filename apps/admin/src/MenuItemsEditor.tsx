@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import * as api from "@/lib/api";
 import { useT, inputCls } from "./App";
@@ -26,6 +26,15 @@ export default function MenuItemsEditor({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
+  const [siteMultilangEnabled, setSiteMultilangEnabled] = useState(false);
+
+  useEffect(() => {
+    void api.getTenantLanguages(tenantHost, token).then((d) => {
+      setSiteLanguages(d.allEnabled);
+      setSiteMultilangEnabled(d.multilangEnabled);
+    });
+  }, [tenantHost, token]);
 
   function update(fn: (draft: api.MenuItem[]) => api.MenuItem[]) {
     setItems((prev) => fn(prev));
@@ -129,6 +138,16 @@ export default function MenuItemsEditor({
                 <option value="_blank">{t("menus-target-blank")}</option>
               </select>
             </div>
+            {siteMultilangEnabled && (
+              <ItemTranslations
+                tenantHost={tenantHost}
+                token={token}
+                label={item.label}
+                translations={item.translations ?? {}}
+                siteLanguages={siteLanguages}
+                onChange={(translations) => patchItem(item.id, { translations })}
+              />
+            )}
             <div className="flex items-center gap-2 border-t border-line/20 pt-2">
               {!item.children && !item.megaMenu && (
                 <>
@@ -367,6 +386,90 @@ function MegaMenuEditor({
       <Button size="sm" variant="outline" onClick={addColumn}>
         <Plus className="h-3.5 w-3.5" /> {t("menus-add-column")}
       </Button>
+    </div>
+  );
+}
+
+function ItemTranslations({
+  tenantHost,
+  token,
+  label,
+  translations,
+  siteLanguages,
+  onChange,
+}: {
+  tenantHost: string;
+  token: string;
+  label: string;
+  translations: Record<string, { label: string }>;
+  siteLanguages: api.SiteLanguage[];
+  onChange: (translations: Record<string, { label: string }>) => void;
+}) {
+  const { t } = useT();
+  const [translating, setTranslating] = useState<string | null>(null);
+  const [editingCode, setEditingCode] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState("");
+
+  async function ensureTranslation(code: string) {
+    const existing = translations[code];
+    if (existing) {
+      setEditingCode(code);
+      setEditVal(existing.label);
+      return;
+    }
+    if (!label) return;
+    setTranslating(code);
+    try {
+      const translated = await api.translateText(tenantHost, token, label, code);
+      onChange({ ...translations, [code]: { label: translated } });
+      setEditingCode(code);
+      setEditVal(translated);
+    } finally {
+      setTranslating(null);
+    }
+  }
+
+  function saveEdit(code: string) {
+    const trimmed = editVal.trim();
+    if (!trimmed) return;
+    onChange({ ...translations, [code]: { label: trimmed } });
+    setEditingCode(null);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {siteLanguages.map((l) => {
+        const entry = translations[l.code];
+        if (editingCode === l.code) {
+          return (
+            <span key={l.code} className="flex items-center gap-1">
+              <input
+                className={`${inputCls} h-6 w-28 py-0 text-[11px]`}
+                value={editVal}
+                onChange={(e) => setEditVal(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveEdit(l.code)}
+                autoFocus
+              />
+              <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => saveEdit(l.code)}>
+                {t("menus-save")}
+              </Button>
+            </span>
+          );
+        }
+        return (
+          <button
+            key={l.code}
+            type="button"
+            disabled={translating === l.code}
+            onClick={() => void ensureTranslation(l.code)}
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold disabled:opacity-50 ${
+              entry ? "bg-canvas text-ink hover:bg-[#e8e8ed]" : "border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
+            }`}
+          >
+            {l.label}: {entry ? entry.label : translating === l.code ? "…" : "+"}
+          </button>
+        );
+      })}
     </div>
   );
 }
