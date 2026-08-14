@@ -10,6 +10,10 @@ h2, h3, h4, h5, h6 {
 
 .ds-menu-list { display: flex; gap: 1.5rem; list-style: none; margin: 0; padding: 0; }
 .ds-menu-vertical .ds-menu-list { flex-direction: column; gap: 0.25rem; }
+/* position:relative here (not just on .ds-menu-item) is needed so the
+   mobile slide-down panel (.ds-menu-list, below) positions against the nav
+   bar itself rather than the page's initial containing block. */
+.ds-menu { position: relative; }
 .ds-menu-item { position: relative; }
 .ds-menu-item > a { text-decoration: none; color: inherit; }
 .ds-menu-dropdown, .ds-mega-menu { display: none; position: absolute; top: 100%; left: 0; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; }
@@ -17,22 +21,37 @@ h2, h3, h4, h5, h6 {
 .ds-menu-dropdown li { padding: 0; }
 .ds-menu-dropdown a { display: block; padding: 0.5rem 1rem; text-decoration: none; color: inherit; }
 .ds-mega-menu { padding: 1.5rem; gap: 2rem; }
-.ds-mega-full { left: 0; right: 0; width: 100%; }
+/* ponytail: viewport-width breakout via the classic left:50%/translateX(-50%)
+   trick — keeps position:absolute (so top:100% still anchors right below
+   the triggering <li>, unlike position:fixed which would measure top:100%
+   against the viewport height instead) while width:100vw + centering
+   escapes the <li>'s own narrow containing block. Known minor side effect:
+   on a page with a vertical scrollbar, 100vw is a scrollbar-width sliver
+   wider than the visible viewport — upgrade to a ResizeObserver-measured
+   width if that sliver ever matters. */
+.ds-mega-full { left: 50%; width: 100vw; transform: translateX(-50%); }
 .ds-mega-contained { min-width: 40rem; }
 .ds-mega-column ul { list-style: none; margin: 0; padding: 0; }
 .ds-mega-column a { display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: inherit; padding: 0.35rem 0; }
 .ds-mega-column img { width: 1.5rem; height: 1.5rem; object-fit: cover; border-radius: 0.25rem; }
 .ds-mega-heading { font-weight: 700; margin: 0 0 0.5rem; }
-[data-trigger="hover"] .ds-menu-item.has-dropdown:hover > .ds-menu-dropdown,
+/* .ds-mega-menu wants a flex/grid multi-column layout; .ds-menu-dropdown is
+   a plain vertical <ul> and must stay display:block on every trigger path
+   (hover, focus-within, click) — these used to be one combined selector
+   block that gave the dropdown flex+wrap too, laying its items out
+   side-by-side instead of stacked. */
 [data-trigger="hover"] .ds-menu-item.has-mega:hover > .ds-mega-menu,
-.ds-menu-item.has-dropdown:focus-within > .ds-menu-dropdown,
 .ds-menu-item.has-mega:focus-within > .ds-mega-menu,
-.ds-menu-item.is-open-click > .ds-menu-dropdown,
 .ds-menu-item.is-open-click > .ds-mega-menu {
   display: flex;
   flex-wrap: wrap;
 }
-.ds-menu-dropdown.is-open, .ds-menu-item.is-open-click > .ds-menu-dropdown { display: block; }
+[data-trigger="hover"] .ds-menu-item.has-dropdown:hover > .ds-menu-dropdown,
+.ds-menu-item.has-dropdown:focus-within > .ds-menu-dropdown,
+.ds-menu-item.is-open-click > .ds-menu-dropdown {
+  display: block;
+}
+.ds-menu-dropdown.is-open { display: block; }
 .ds-menu-toggle { display: none; flex-direction: column; gap: 4px; background: none; border: none; cursor: pointer; padding: 0.5rem; }
 .ds-menu-toggle span { display: block; width: 22px; height: 2px; background: currentColor; }
 @media (max-width: 768px) {
@@ -41,5 +60,10 @@ h2, h3, h4, h5, h6 {
   .ds-menu.is-open .ds-menu-list { display: flex; }
   .ds-menu-dropdown, .ds-mega-menu { position: static; box-shadow: none; padding-left: 1rem; }
   .ds-mega-menu { display: none; flex-direction: column; }
-  .ds-menu-item.is-open-click > .ds-mega-menu, .ds-menu-item.is-open-click > .ds-menu-dropdown { display: flex; }
+  /* position:static on mobile (above) makes .ds-mega-full's left/width
+     breakout moot, but transform still applies to a statically-positioned
+     box — reset it so the click-open mega-menu doesn't shift sideways. */
+  .ds-mega-full { width: auto; transform: none; }
+  .ds-menu-item.is-open-click > .ds-mega-menu { display: flex; }
+  .ds-menu-item.is-open-click > .ds-menu-dropdown { display: block; }
 }

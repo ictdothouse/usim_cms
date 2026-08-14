@@ -194,7 +194,6 @@ export interface MenuItem {
   megaMenu?: {
     columns: Array<{
       heading?: string;
-      translations?: Record<string, { heading: string }>;
       items: Array<{
         label: string;
         translations?: Record<string, { label: string }>;
@@ -217,8 +216,17 @@ export interface Menu {
 
 export async function getMenu(tenantHost: string, id: string): Promise<Menu | null> {
   if (!id) return null;
-  const { item } = await apiGet<{ item: Menu | null }>(`/api/menus/${id}`, tenantHost);
-  return item;
+  try {
+    const { item } = await apiGet<{ item: Menu | null }>(`/api/menus/${id}`, tenantHost);
+    return item;
+  } catch (err) {
+    // A menuId can reference a since-deleted menu (deleted from the admin
+    // after a page/Designer element still points at it) — MenuBlock.astro
+    // already renders nothing for menu === null, so failing soft here keeps
+    // a missing menu a no-op nav instead of a whole-page 500.
+    console.error(`getMenu: ${id} failed, rendering no menu`, err);
+    return null;
+  }
 }
 
 // Resolved, render-ready shape — href is always a plain string (already
@@ -234,21 +242,49 @@ export interface ResolvedMenuItem extends ResolvedMenuLink {
   megaMenu?: { columns: Array<{ heading: string; items: Array<ResolvedMenuLink & { icon?: string; image?: string }> }> };
 }
 
-async function resolveHref(tenantHost: string, linkType: MenuItem["linkType"], refId: string | undefined, url: string | undefined): Promise<string> {
+// The lists a menu's page/post/category links resolve against — fetched at
+// most ONCE per resolveMenuTree call (see fetchMenuLinkTargets), not once
+// per menu item, to avoid an N-item nav firing N sequential full-list
+// round-trips (each pulling every page's full layout jsonb).
+interface MenuLinkTargets {
+  pages: Array<{ id: string; slug: string; language: string | null }>;
+  posts: Array<{ id: string; slug: string; language: string | null }>;
+  categories: Array<{ id: string; slug: string }>;
+}
+
+async function fetchMenuLinkTargets(tenantHost: string): Promise<MenuLinkTargets> {
+  // Sequential, not Promise.all — this codebase's own i18n notes (CLAUDE.md)
+  // call out a real Postgres 40P01 deadlock from firing concurrent requests
+  // against a cold/unmigrated tenant DB connection (ensureTenantDatabase's
+  // own DDL race); a menu can be the first thing resolved on a fresh tenant.
+  const pages = (await apiGet<{ items: MenuLinkTargets["pages"] }>("/api/pages", tenantHost)).items;
+  const posts = (await apiGet<{ items: MenuLinkTargets["posts"] }>("/api/posts", tenantHost)).items;
+  const categories = (await apiGet<{ items: MenuLinkTargets["categories"] }>("/api/categories", tenantHost)).items;
+  return { pages, posts, categories };
+}
+
+// Matches [...slug].astro's/posts/[slug].astro's own langSwitcher href
+// convention exactly: omit ?lang when it already matches the linked row's
+// own base language, since resolvePageLayout/resolvePostContent already
+// no-op in that case anyway.
+function withLangParam(path: string, baseLanguage: string | null, lang: string | null): string {
+  if (!lang || lang === baseLanguage) return path;
+  return `${path}?lang=${encodeURIComponent(lang)}`;
+}
+
+function resolveHref(linkType: MenuItem["linkType"], refId: string | undefined, url: string | undefined, targets: MenuLinkTargets, lang: string | null): string {
   if (linkType === "custom") return url ?? "#";
   if (!refId) return "#";
   if (linkType === "page") {
-    const { items } = await apiGet<{ items: Array<{ id: string; slug: string }> }>("/api/pages", tenantHost);
-    const page = items.find((p) => p.id === refId);
-    return page ? `/${page.slug}` : "#";
+    const page = targets.pages.find((p) => p.id === refId);
+    return page ? withLangParam(`/${page.slug}`, page.language, lang) : "#";
   }
   if (linkType === "post") {
-    const { items } = await apiGet<{ items: Array<{ id: string; slug: string }> }>("/api/posts", tenantHost);
-    const post = items.find((p) => p.id === refId);
-    return post ? `/posts/${post.slug}` : "#";
+    const post = targets.posts.find((p) => p.id === refId);
+    return post ? withLangParam(`/posts/${post.slug}`, post.language, lang) : "#";
   }
-  const { items } = await apiGet<{ items: Array<{ id: string; slug: string }> }>("/api/categories", tenantHost);
-  const category = items.find((c) => c.id === refId);
+  // Category archive page is documented as not language-aware — no ?lang.
+  const category = targets.categories.find((c) => c.id === refId);
   return category ? `/category/${category.slug}` : "#";
 }
 
@@ -257,42 +293,40 @@ function resolveLabel(label: string, translations: Record<string, { label: strin
   return label;
 }
 
-async function resolveLink(
-  tenantHost: string,
+function resolveLink(
   lang: string | null,
+  targets: MenuLinkTargets,
   o: { label: string; translations?: Record<string, { label: string }>; linkType: MenuItem["linkType"]; refId?: string; url?: string; target?: "_self" | "_blank" },
-): Promise<ResolvedMenuLink> {
+): ResolvedMenuLink {
   return {
     label: resolveLabel(o.label, o.translations, lang),
-    href: await resolveHref(tenantHost, o.linkType, o.refId, o.url),
+    href: resolveHref(o.linkType, o.refId, o.url, targets, lang),
     target: o.target ?? "_self",
   };
 }
 
 export async function resolveMenuTree(items: MenuItem[], lang: string | null, tenantHost: string): Promise<ResolvedMenuItem[]> {
-  const resolved: ResolvedMenuItem[] = [];
-  for (const item of items) {
-    const link = await resolveLink(tenantHost, lang, item);
-    const out: ResolvedMenuItem = { ...link };
+  const targets = await fetchMenuLinkTargets(tenantHost);
+  return resolveMenuTreeWithTargets(items, lang, targets);
+}
+
+function resolveMenuTreeWithTargets(items: MenuItem[], lang: string | null, targets: MenuLinkTargets): ResolvedMenuItem[] {
+  return items.map((item) => {
+    const out: ResolvedMenuItem = { ...resolveLink(lang, targets, item) };
     if (item.megaMenu) {
       out.megaMenu = {
-        columns: await Promise.all(
-          item.megaMenu.columns.map(async (col) => ({
-            heading: (lang && col.translations?.[lang]?.heading) || col.heading || "",
-            items: await Promise.all(
-              col.items.map(async (colItem) => ({
-                ...(await resolveLink(tenantHost, lang, colItem)),
-                icon: colItem.icon,
-                image: colItem.image,
-              })),
-            ),
+        columns: item.megaMenu.columns.map((col) => ({
+          heading: col.heading || "",
+          items: col.items.map((colItem) => ({
+            ...resolveLink(lang, targets, colItem),
+            icon: colItem.icon,
+            image: colItem.image,
           })),
-        ),
+        })),
       };
     } else if (item.children) {
-      out.children = await resolveMenuTree(item.children, lang, tenantHost);
+      out.children = resolveMenuTreeWithTargets(item.children, lang, targets);
     }
-    resolved.push(out);
-  }
-  return resolved;
+    return out;
+  });
 }
