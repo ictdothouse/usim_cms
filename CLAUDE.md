@@ -311,6 +311,48 @@ pnpm workspace monorepo with two apps:
     collection-route mechanism doesn't cover, not a general stub state. Restoring a revision always sets
     the post back to `"draft"` (never auto-republishes) so a restored old version goes live only via a
     deliberate re-publish click.
+  - `menus` (`src/db/schema.ts`) is a named, ordered navigation tree — `name` + a single `items` jsonb
+    column holding the whole nested structure (top-level items, each optionally `children` for a simple
+    dropdown OR `megaMenu` for a multi-column rich menu, never both), the same "one row holds the whole
+    tree" shape `design_templates`/`site_theme` already use — there is no separate menu-items table.
+    Gated on its own `menus.write` permission (not `pages.*`/`posts.*`, since managing site navigation is
+    its own concern) and mounted as its own superadmin ContentManager sub-tab (site-picker required
+    first, like `theme`/`languages`) plus a webmaster top-level `Tab` (a sibling of their own `theme`/
+    `languages` tabs, since a webmaster has no site picker to reach the `ContentManager` variant) —
+    `MenusPanel`/`App.tsx`. `menusBeforeChange` (`index.ts`) validates `items` through
+    `src/collections/validate-menu.ts`'s `validateMenuItems()` on every create/update: each item's
+    `linkType` (`page`/`post`/`category`/`custom`) requires either a `refId` or, for `custom`, a
+    scheme-checked `url` (`isSafeUrl`); nesting caps at 3 levels deep (`MAX_DEPTH`), a mega-menu at 8
+    columns × 20 items each (`MAX_COLUMNS`/`MAX_COLUMN_ITEMS`); a mega-menu column item's `icon` (a
+    lucide-react name, looked up client-side only, never interpolated server-side) is checked against a
+    plain identifier pattern and its `image` through the same `isSafeCssUrl` `bgImage`/gallery `images`
+    already use — both reused from `validate-layout.ts` rather than re-declared. Every item/column can
+    carry a `translations` map (`{code: {label}}` / `{code: {heading}}`) — the same per-string i18n shape
+    posts/pages/categories use — edited in `MenuItemsEditor.tsx`'s language-pill row, gated behind the
+    same `siteMultilangEnabled` global switch (`getTenantLanguages`) posts/pages/categories already gate
+    their own translation UI behind, and auto-translated on first open via the same `/api/translate`
+    `ensureTranslation` pattern `CategoryTranslations` uses.
+  - The `"menu"` Designer element (`Designer.tsx`'s `ELS.menu`) is a thin reference, not a copy — it only
+    holds a `menuId` (populated from a live `GET /api/menus` list via the Inspector's `"menu-select"`
+    field kind, not baked into `ELS.menu.fields`' static `options` the way a closed enum would be) plus
+    render options (`layout` horizontal/vertical, `dropdownTrigger` hover/click, `megaMenuWidth`
+    contained/full-width) — the actual item tree lives on the `menus` row, edited only in the Menus admin
+    panel. `validate-layout.ts` validates the 3 render-option enums the same generic `ENUM_VALUES` way as
+    every other element field; `menuId` itself is exempt from any format check (`validateValue`'s
+    `key === "menuId"` early-return) since it's only ever used as a parameterized DB lookup key
+    (`getMenu`), never interpolated into CSS/HTML. On the real page, `SectionBlock.astro`'s `"menu"` case
+    hands these straight to `MenuBlock.astro`, which calls `getMenu(tenantHost, menuId)` +
+    `resolveMenuTree(items, lang, tenantHost)` (`apps/frontend/src/lib/api.ts`) — the latter resolves each
+    item's `page`/`post`/`category` `refId` to a real `href` (a `custom` item's own `url` passes through
+    unchanged) and its label/column-heading to the requested language's `translations` entry, the same
+    `resolvePostContent`/`resolvePageLayout` pattern the post/page i18n phase already established.
+    Rendering is plain CSS, no client-JS dependency added: a `[data-trigger="hover"]` attribute selector
+    shows a `.has-dropdown`/`.has-mega` item's submenu on `:hover`/`:focus-within`; `dropdownTrigger:
+    "click"` instead toggles an `.is-open-click` class via one small event-delegated `<script>`
+    (`MenuBlock.astro`, same per-page-once convention as the `tabs` element); that same script also drives
+    the mobile hamburger toggle (`.ds-menu-toggle`, active for every trigger mode, since touch has no
+    hover at all), which only becomes visible under `global.css`'s `@media (max-width: 768px)` rule that
+    also collapses `.ds-menu-list` into a fixed dropdown panel.
   - Local API/SDK for same-process frontend access (bypassing HTTP) is not implemented yet.
 
 - **`apps/admin`** — Vite + React + TypeScript, Tailwind CSS, Shadcn UI conventions (`components.json`,
