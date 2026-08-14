@@ -219,7 +219,6 @@ export interface MenuMegaColumnItem extends MenuLinkFields {
 
 export interface MenuMegaColumn {
   heading?: string;
-  translations?: Record<string, { heading: string }>;
   items: MenuMegaColumnItem[];
 }
 

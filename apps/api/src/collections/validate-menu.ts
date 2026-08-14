@@ -78,8 +78,9 @@ function validateMegaMenu(mega: unknown, path: string): string | null {
     if (typeof col !== "object" || col === null) return `${path}.megaMenu.columns[${ci}] must be an object`;
     const c = col as Record<string, unknown>;
     if (c.heading !== undefined && typeof c.heading !== "string") return `${path}.megaMenu.columns[${ci}].heading must be a string`;
-    const trErr = validateTranslations({ translations: c.translations }, `${path}.megaMenu.columns[${ci}]`);
-    if (trErr) return trErr;
+    // No admin UI writes a column-level `translations` field (only item
+    // labels get translated — see MenuItemsEditor) — a column heading has
+    // no per-language variant to validate.
     if (!Array.isArray(c.items)) return `${path}.megaMenu.columns[${ci}].items must be an array`;
     if (c.items.length > MAX_COLUMN_ITEMS) return `${path}.megaMenu.columns[${ci}] has too many items (max ${MAX_COLUMN_ITEMS})`;
     for (let ii = 0; ii < c.items.length; ii++) {
