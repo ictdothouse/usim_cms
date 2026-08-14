@@ -181,3 +181,118 @@ export async function getTheme(tenantHost: string, token?: string): Promise<Reco
   const { theme } = await apiGet<{ theme: Record<string, unknown> }>("/api/theme", tenantHost, token);
   return theme;
 }
+
+export interface MenuItem {
+  id: string;
+  label: string;
+  translations?: Record<string, { label: string }>;
+  linkType: "page" | "post" | "category" | "custom";
+  refId?: string;
+  url?: string;
+  target?: "_self" | "_blank";
+  children?: MenuItem[];
+  megaMenu?: {
+    columns: Array<{
+      heading?: string;
+      translations?: Record<string, { heading: string }>;
+      items: Array<{
+        label: string;
+        translations?: Record<string, { label: string }>;
+        linkType: "page" | "post" | "category" | "custom";
+        refId?: string;
+        url?: string;
+        target?: "_self" | "_blank";
+        icon?: string;
+        image?: string;
+      }>;
+    }>;
+  };
+}
+
+export interface Menu {
+  id: string;
+  name: string;
+  items: MenuItem[];
+}
+
+export async function getMenu(tenantHost: string, id: string): Promise<Menu | null> {
+  if (!id) return null;
+  const { item } = await apiGet<{ item: Menu | null }>(`/api/menus/${id}`, tenantHost);
+  return item;
+}
+
+// Resolved, render-ready shape — href is always a plain string (already
+// slug-resolved for page/post/category links), label is already the
+// requested language's own translation (or the item's stored default).
+export interface ResolvedMenuLink {
+  label: string;
+  href: string;
+  target: "_self" | "_blank";
+}
+export interface ResolvedMenuItem extends ResolvedMenuLink {
+  children?: ResolvedMenuItem[];
+  megaMenu?: { columns: Array<{ heading: string; items: Array<ResolvedMenuLink & { icon?: string; image?: string }> }> };
+}
+
+async function resolveHref(tenantHost: string, linkType: MenuItem["linkType"], refId: string | undefined, url: string | undefined): Promise<string> {
+  if (linkType === "custom") return url ?? "#";
+  if (!refId) return "#";
+  if (linkType === "page") {
+    const { items } = await apiGet<{ items: Array<{ id: string; slug: string }> }>("/api/pages", tenantHost);
+    const page = items.find((p) => p.id === refId);
+    return page ? `/${page.slug}` : "#";
+  }
+  if (linkType === "post") {
+    const { items } = await apiGet<{ items: Array<{ id: string; slug: string }> }>("/api/posts", tenantHost);
+    const post = items.find((p) => p.id === refId);
+    return post ? `/posts/${post.slug}` : "#";
+  }
+  const { items } = await apiGet<{ items: Array<{ id: string; slug: string }> }>("/api/categories", tenantHost);
+  const category = items.find((c) => c.id === refId);
+  return category ? `/category/${category.slug}` : "#";
+}
+
+function resolveLabel(label: string, translations: Record<string, { label: string }> | undefined, lang: string | null): string {
+  if (lang && translations?.[lang]) return translations[lang].label;
+  return label;
+}
+
+async function resolveLink(
+  tenantHost: string,
+  lang: string | null,
+  o: { label: string; translations?: Record<string, { label: string }>; linkType: MenuItem["linkType"]; refId?: string; url?: string; target?: "_self" | "_blank" },
+): Promise<ResolvedMenuLink> {
+  return {
+    label: resolveLabel(o.label, o.translations, lang),
+    href: await resolveHref(tenantHost, o.linkType, o.refId, o.url),
+    target: o.target ?? "_self",
+  };
+}
+
+export async function resolveMenuTree(items: MenuItem[], lang: string | null, tenantHost: string): Promise<ResolvedMenuItem[]> {
+  const resolved: ResolvedMenuItem[] = [];
+  for (const item of items) {
+    const link = await resolveLink(tenantHost, lang, item);
+    const out: ResolvedMenuItem = { ...link };
+    if (item.megaMenu) {
+      out.megaMenu = {
+        columns: await Promise.all(
+          item.megaMenu.columns.map(async (col) => ({
+            heading: (lang && col.translations?.[lang]?.heading) || col.heading || "",
+            items: await Promise.all(
+              col.items.map(async (colItem) => ({
+                ...(await resolveLink(tenantHost, lang, colItem)),
+                icon: colItem.icon,
+                image: colItem.image,
+              })),
+            ),
+          })),
+        ),
+      };
+    } else if (item.children) {
+      out.children = await resolveMenuTree(item.children, lang, tenantHost);
+    }
+    resolved.push(out);
+  }
+  return resolved;
+}
