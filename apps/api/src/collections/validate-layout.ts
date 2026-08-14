@@ -82,6 +82,10 @@ const ENUM_VALUES: Record<string, string[]> = {
   navStyle: ["arrows", "minimal", "none"],
   dotsStyle: ["dots", "lines", "numbers", "none"],
   transition: ["slide", "fade"],
+  // menu element fields (Task 9: Designer.tsx menu integration)
+  layout: ["horizontal", "vertical"],
+  dropdownTrigger: ["hover", "click"],
+  megaMenuWidth: ["contained", "full-width"],
   // Per-breakpoint visibility toggles — Section/Row/Column/Element all use
   // the same 3 keys (see Designer.tsx's VisibilityToggle); "" (not hidden)
   // is skipped by validateValue's own value === "" check above, so only
@@ -243,6 +247,7 @@ function validateValue(key: string, value: unknown): string | null {
   if (key === "anchorId") return ID_RE.test(value) ? null : `anchorId has invalid characters`;
   if (key === "fontFamily") return FONT_FAMILY_RE.test(value) ? null : `fontFamily has invalid characters`;
   if (key === "shadow") return isSafeShadow(value) ? null : `shadow has an invalid format`;
+  if (key === "menuId") return null;
   if (COLOR_KEYS.has(key)) return HEX_COLOR_RE.test(value) ? null : `${key} must be a hex color`;
   if (LENGTH_KEYS.has(key)) return LENGTH_RE.test(value) ? null : `${key} must be a plain CSS length`;
   if (ENUM_VALUES[key]) return ENUM_VALUES[key].includes(value) ? null : `${key} has an unrecognized value`;
