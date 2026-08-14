@@ -13,15 +13,18 @@ import { collectFonts } from "../lib/collectFonts";
 // (see CLAUDE.md). "home" is this site's convention for the root page,
 // since apps/api's pages.slug is NOT NULL.
 //
-// ponytail: `astro dev` has no real department domain to hit, so plain
-// localhost falls back to DEV_TENANT_HOST, or a `?__tenant=` override (used
-// by the admin panel's per-page "View" link so any of several local tenants
-// can be previewed, not just whichever one DEV_TENANT_HOST names) — dev
-// convenience only (import.meta.env.DEV is false in `astro build`/`preview`),
-// never affects a real deployment.
+// ponytail: no real department domain resolves to plain localhost/127.0.0.1
+// in any genuine deployment, so matching that pattern on the request's own
+// Host header already scopes this safely — falls back to DEV_TENANT_HOST, or
+// a `?__tenant=` override (used by the admin panel's per-page "View" link so
+// any of several local tenants can be previewed, not just whichever one
+// DEV_TENANT_HOST names). NOT gated on import.meta.env.DEV: that's baked
+// false by Vite in every `astro build` (including this project's own
+// docker-compose frontend image), which would make this dead code for any
+// local docker testing, not just real deployments.
 const rawHost = Astro.request.headers.get("host") ?? "";
 const tenantHost =
-  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+  /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
     ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
     : rawHost;
 const slug = Astro.params.slug || "home";

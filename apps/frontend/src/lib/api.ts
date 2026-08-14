@@ -1,7 +1,11 @@
 // Server-side only fetch helpers for apps/api's public scope (no auth —
 // see apps/api/src/index.ts's public route registration). tenantHost comes
 // from the incoming request's Host header, forwarded as x-tenant-host.
-const API_URL = import.meta.env.API_URL ?? "http://localhost:3000";
+// process.env, not import.meta.env: Vite/Astro statically inlines
+// import.meta.env.* at BUILD time, so a value only set at container runtime
+// (docker-compose's API_URL: http://api:3000) would never be seen — the
+// build-time fallback would get baked in permanently instead.
+const API_URL = process.env.API_URL ?? "http://localhost:3000";
 const FETCH_TIMEOUT_MS = 5000;
 
 // ponytail: in-memory stale-while-revalidate cache. CLAUDE.md: single
