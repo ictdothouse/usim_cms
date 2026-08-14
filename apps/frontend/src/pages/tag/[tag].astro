@@ -2,11 +2,11 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { listPosts, getTheme } from "../../lib/api";
 
-// Same tenant resolution as posts/[slug].astro: Host header, with the
-// DEV_TENANT_HOST fallback (or a `?__tenant=` override) for local dev.
+// Same tenant resolution as [...slug].astro (see its comment for why this
+// is NOT gated on import.meta.env.DEV).
 const rawHost = Astro.request.headers.get("host") ?? "";
 const tenantHost =
-  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+  /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
     ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
     : rawHost;
 

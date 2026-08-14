@@ -2,12 +2,13 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { getPostBySlug, getTheme, getLanguages, resolvePostContent, resolveCategoryName } from "../../lib/api";
 
-// Same tenant resolution as [...slug].astro: Host header, with the
-// DEV_TENANT_HOST fallback (or a `?__tenant=` override, used by the admin's
-// post Preview link) for plain-localhost `astro dev` only.
+// Same tenant resolution as [...slug].astro (see its comment for why this
+// is NOT gated on import.meta.env.DEV): Host header, with the
+// DEV_TENANT_HOST fallback or a `?__tenant=` override (used by the admin's
+// post Preview link) whenever the request's own Host is plain localhost.
 const rawHost = Astro.request.headers.get("host") ?? "";
 const tenantHost =
-  import.meta.env.DEV && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+  /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
     ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
     : rawHost;
 // Set by the admin's post Preview button (PostEditorPage's preview()) to
