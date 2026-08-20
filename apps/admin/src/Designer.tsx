@@ -160,6 +160,10 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
+import type { SlideButton, SlideItem, Positionable, SlideText, EdgeRect, GapMark } from "./designer/types";
+import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, TEXT_DEFAULTS, SLIDE_DEFAULTS, BUTTON_DEFAULTS } from "./designer/parsers";
+import { dragPosition, nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
+import { PAD, RADIUS, BORDER, LEGACY_SHADOW, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
 
 // i18n Phase 5 — sentinel key for the page's own base-language layout
 // inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
@@ -861,85 +865,13 @@ const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type }[] = [
   { key: "advanced", labelKey: "designer-group-advanced", icon: Hash },
 ];
 
-const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
-// Row/page gap is stored as a plain CSS length ("24px", "0") rather than a
-// preset table — authors type an exact px value, no rem/preset guessing.
-// gapPx() round-trips that string to/from the <input type="number"> shown
-// in the Inspector; assumes rem = 16px like pxLabel() does everywhere else.
-function gapPx(v: string | undefined): number | "" {
-  if (!v) return "";
-  const n = parseFloat(v);
-  if (Number.isNaN(n)) return "";
-  return Math.round(v.endsWith("rem") ? n * 16 : n);
-}
 const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
-const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
-const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
-// Legacy preset keywords (existing pages' saved shadow="sm"/"md"/"lg" values)
-// still resolve via this table. New edits store a pipe-delimited custom
-// shadow instead — see shadowToCss()/SHADOW_DEFAULT_PARTS — no presets, a
-// real X/Y/blur/spread/color/opacity panel (user: "saya taknak preset...
-// letakkan option nombor").
-const LEGACY_SHADOW: Record<string, string | undefined> = {
-  none: undefined,
-  sm: "0 1px 3px rgba(0,0,0,.1)",
-  md: "0 4px 12px rgba(0,0,0,.12)",
-  lg: "0 12px 32px rgba(0,0,0,.16)",
-};
 // Seed values a freshly-added shadow starts from — visually close to the old
 // "md" preset, so switching a legacy preset into the new panel doesn't jump.
 const SHADOW_DEFAULT_PARTS = ["0", "4", "12", "0", "#000000", "0.12"] as const;
-function hexToRgba(hex: string, alpha: number): string {
-  const h = (hex || "#000000").replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
-  const n = parseInt(full, 16) || 0;
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Number.isFinite(alpha) ? alpha : 1})`;
-}
-// Canvas overlay chrome (dashed guides, drop hints) is drawn straight on top
-// of whatever bg color the section/column actually has, which the tenant
-// can set to anything — the old fixed light-gray `border-line` line vanished
-// on a bright/white background. bestTextColor already answers "black or
-// white reads better on this bg" for button labels; reuse it here to flip
-// the guide-line/hint-text color dark-on-light vs light-on-dark instead.
-function overlayColors(bg: string): { line: string; text: string } {
-  const dark = bestTextColor(bg) === "#000000";
-  return dark
-    ? { line: hexToRgba("#000000", 0.35), text: hexToRgba("#000000", 0.55) }
-    : { line: hexToRgba("#ffffff", 0.45), text: hexToRgba("#ffffff", 0.75) };
-}
-function shadowToCss(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  if (raw in LEGACY_SHADOW) return LEGACY_SHADOW[raw];
-  const [x, y, blur, spread, color, opacity] = raw.split("|");
-  if (!x) return undefined;
-  return `${x}px ${y}px ${blur ?? 0}px ${spread ?? 0}px ${hexToRgba(color, Number(opacity))}`;
-}
 const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
-// Resolves a spacing value that may be either a legacy preset keyword
-// ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
-// ("42px", "2.5rem") — existing pages keep their preset look, new edits get
-// free-form units. Duplicated in SectionBlock.astro like every other table.
-function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
-  if (!v) return fallback;
-  return table[v] ?? v;
-}
-
-// Shared "one item per line, first `|` splits it in two" parser for
-// accordion (question|answer) and tabs (label|content) — same simple
-// delimited-line convention `list`'s items already uses, just two fields
-// instead of one. Duplicated in SectionBlock.astro like every other table.
-function parsePairs(raw: string | undefined): { a: string; b: string }[] {
-  return (raw ?? "")
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const i = line.indexOf("|");
-      return i === -1 ? { a: line, b: "" } : { a: line.slice(0, i), b: line.slice(i + 1) };
-    });
-}
 
 // Slider slide repeater. Storage is a JSON array (one object per slide) —
 // the Embla Carousel rewrite's richer per-slide fields (multiple buttons,
@@ -950,44 +882,13 @@ function parsePairs(raw: string | undefined): { a: string; b: string }[] {
 // silently upgrades to the JSON format the next time it's edited here.
 // SectionBlock.astro's render-side parser mirrors this same fallback, and
 // validate-layout.ts's isSafeSlides() accepts both shapes on write.
-interface SlideButton {
-  label: string;
-  href: string;
-  variant: "primary" | "outline";
-  color: string; // hex bg override, "" = theme default
-  textColor: string; // hex text/border override, "" = theme default
-  radius: string; // px number, "" = default pill radius
-  size: "sm" | "md" | "lg";
-  fontSize: string; // px number, "" = derive from size — set by the canvas resize handle
-  // "flow" = original behavior, laid out inside the slide's text block
-  // alongside heading/subtitle; "custom" = absolutely positioned anywhere
-  // in the slide via x/y percent (drag-placed or preset-snapped below).
-  position: "flow" | "custom";
-  x: string; // "0".."100", only meaningful when position === "custom"
-  y: string;
-}
 // Baseline px used as the resize-handle drag's starting point when a button
 // has no explicit fontSize yet — purely a UI convenience, not stored.
 const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
-interface SlideItem {
-  imageUrl: string;
-  bgColor: string; // hex fallback fill behind the image (or the whole slide when there's no image) — "" = transparent
-  heading: SlideText;
-  subtitle: SlideText;
-  textPosition: "left" | "center" | "right";
-  overlayColor: string;
-  overlayOpacity: string; // "0".."100"
-  buttons: SlideButton[];
-}
 // Same "flow vs custom x/y" idea buttons already have, applied to the
 // heading/subtitle too — the shared shape both extend is `Positionable`,
 // used by dragPosition/nudgePosition/PositionEditor so all three item kinds
 // (heading, subtitle, button) drive the exact same drag/nudge/preset code.
-interface Positionable {
-  position: "flow" | "custom";
-  x: string;
-  y: string;
-}
 // Deliberately NOT `Positionable` — heading/subtitle tried free x/y placement
 // (like buttons) and it felt wrong in practice ("tiba2 jd tak best la heading
 // dan subtitle sama macam button"): dropped in favor of a plain `align`
@@ -1005,43 +906,6 @@ interface Positionable {
 // below) so the Inspector can render them by literally reusing that same
 // field list + FieldInput, rather than a second hand-written set of
 // fontWeight/textTransform/etc. controls — kept in lockstep by construction.
-interface SlideText extends Positionable {
-  text: string;
-  color: string; // hex text-color override, "" = inherit the slide's default
-  fontSize: string; // px, "" = derive from TEXT_BASE_PX below — set by canvas resize handle
-  width: string; // px, "" = auto (shrink-to-fit the widest rendered line, see fitTextBox) — set by the mid-edge drag handle so a line can be dragged wider before it wraps
-  align: "left" | "center" | "right";
-  fontFamily: string;
-  fontWeight: string;
-  lineHeight: string;
-  letterSpacing: string;
-  textTransform: string;
-  fontStyle: string;
-  textDecoration: string;
-  // Same "tablet:<key>"/"mobile:<key>" bag shape as Section/Col/El's own
-  // `bp` — but unlike those (admin-preview only), this one IS real on the
-  // published site (SectionBlock.astro's slideTextStyleBp), same convention
-  // as the Visibility toggle above it. Only fontSize/align expose a BpToggle
-  // right now; the bag itself isn't restricted to just those two keys.
-  bp?: Record<string, string>;
-}
-const TEXT_DEFAULTS: SlideText = {
-  text: "",
-  color: "",
-  fontSize: "",
-  width: "",
-  align: "left",
-  fontFamily: "",
-  fontWeight: "",
-  lineHeight: "",
-  letterSpacing: "",
-  textTransform: "",
-  fontStyle: "",
-  textDecoration: "",
-  position: "flow",
-  x: "50",
-  y: "50",
-};
 // Baseline px used as the canvas resize handle's starting point when
 // heading/subtitle have no explicit fontSize yet (mirrors SIZE_PX for
 // buttons, just no discrete sm/md/lg enum of their own to derive from).
@@ -1055,91 +919,11 @@ const TEXT_BASE_PX = { heading: 20, subtitle: 13 };
 // window, not this simulated container, and never visibly shrink. This gives
 // the canvas an accurate preview of how the real fluid font-size will look
 // small instead of staying full (and overflowing) size regardless of bp.
-const BP_REFERENCE_PX: Record<"desktop" | "tablet" | "mobile", number> = { desktop: 1000, tablet: 768, mobile: 384 };
-function fluidPreviewPx(px: number, bp: "desktop" | "tablet" | "mobile"): number {
-  const floor = Math.max(14, Math.round(px * 0.55));
-  const scaled = Math.round((px * BP_REFERENCE_PX[bp]) / 1000);
-  return Math.min(px, Math.max(floor, scaled));
-}
 // Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
 // before the height field became free-form ("length" kind, below) still
 // store one of these keywords; resolving it here lets the canvas preview
 // show the real height for those too, not just newly-typed literal values.
 const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
-// Sizes the dashed resize box to the widest actually-rendered line of
-// (possibly wrapped) text. No CSS value can do this: `width:fit-content`
-// resolves to min(max-content, available), and the moment text wraps,
-// max-content (its unwrapped width) exceeds available — so it collapses to
-// the full container width and the box floats far past the glyphs. That was
-// the real cause behind three failed attempts at this (nowrap, lineHeight,
-// w-fit). Range.getClientRects() returns one rect per rendered line box, so
-// the widest of those is the true ink width. Called from an inline ref
-// callback (a new function identity each render, so React re-runs it every
-// render) rather than a layout effect, since ElPreview is a plain function,
-// not a component that can hold hooks.
-function fitTextBox(node: HTMLElement | null): void {
-  if (!node) return;
-  node.style.width = "";
-  const text = node.firstChild;
-  if (!text || text.nodeType !== Node.TEXT_NODE) return;
-  const range = document.createRange();
-  range.selectNodeContents(text);
-  const rects = Array.from(range.getClientRects());
-  if (rects.length === 0) return;
-  const widest = Math.max(...rects.map((r) => r.width));
-  if (widest <= 0) return;
-  // Tailwind sets box-sizing:border-box globally, so `width` has to include
-  // the chip's own border/padding or the last glyph gets clipped.
-  const cs = getComputedStyle(node);
-  const extra =
-    parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
-  node.style.width = `${Math.ceil(widest) + extra}px`;
-}
-// Heading/subtitle were plain strings before this upgrade — a string input
-// here means legacy content, wrapped into TEXT_DEFAULTS with that string as
-// `text` (same JSON-then-legacy-shape fallback convention as everywhere else
-// in this file), so a page saved before this change keeps opening/saving
-// and silently upgrades the next time its slider is edited.
-function parseSlideText(raw: unknown): SlideText {
-  if (typeof raw === "string") return { ...TEXT_DEFAULTS, text: raw };
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>;
-    const str = (key: keyof SlideText): string => (typeof o[key] === "string" ? (o[key] as string) : (TEXT_DEFAULTS[key] as string));
-    return {
-      text: typeof o.text === "string" ? o.text : "",
-      color: str("color"),
-      fontSize: str("fontSize"),
-      width: str("width"),
-      align: o.align === "center" || o.align === "right" ? o.align : "left",
-      fontFamily: str("fontFamily"),
-      fontWeight: str("fontWeight"),
-      lineHeight: str("lineHeight"),
-      letterSpacing: str("letterSpacing"),
-      textTransform: str("textTransform"),
-      fontStyle: str("fontStyle"),
-      textDecoration: str("textDecoration"),
-      position: o.position === "custom" ? "custom" : "flow",
-      x: typeof o.x === "string" ? o.x : TEXT_DEFAULTS.x,
-      y: typeof o.y === "string" ? o.y : TEXT_DEFAULTS.y,
-      bp: o.bp && typeof o.bp === "object" && !Array.isArray(o.bp) ? (o.bp as Record<string, string>) : undefined,
-    };
-  }
-  return { ...TEXT_DEFAULTS };
-}
-const SLIDE_DEFAULTS = { bgColor: "", textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
-const BUTTON_DEFAULTS: SlideButton = {
-  label: "",
-  href: "",
-  variant: "primary",
-  color: "",
-  textColor: "",
-  radius: "",
-  size: "md",
-  fontSize: "",
-  position: "flow",
-  x: "50",
-  y: "50",
-};
 // 3x3 anchor grid offered as one-click shortcuts — clicking a dot just sets
 // x/y to a canonical spot and switches position to "custom"; there's no
 // separate named-preset enum to keep in sync between admin/frontend/
@@ -1150,138 +934,6 @@ const POSITION_PRESETS: { x: string; y: string }[] = [
   { x: "10", y: "50" }, { x: "50", y: "50" }, { x: "90", y: "50" },
   { x: "10", y: "85" }, { x: "50", y: "85" }, { x: "90", y: "85" },
 ];
-// Click-or-drag inside a position minimap: computes percent from the
-// pointerdown target's own bounding box (captured once, cheap — the
-// minimap doesn't resize mid-drag) and tracks the pointer on window until
-// release. Plain function, not a hook — safe to call from inside a .map().
-function dragPosition(e: React.PointerEvent<HTMLDivElement>, onMove: (x: string, y: string) => void) {
-  const rect = e.currentTarget.getBoundingClientRect();
-  const set = (clientX: number, clientY: number) => {
-    const x = Math.round(Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100)));
-    const y = Math.round(Math.min(100, Math.max(0, ((clientY - rect.top) / rect.height) * 100)));
-    onMove(String(x), String(y));
-  };
-  set(e.clientX, e.clientY);
-  const move = (ev: PointerEvent) => set(ev.clientX, ev.clientY);
-  const up = () => {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", up);
-  };
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", up);
-}
-const POSITION_NUDGE_STEP = 2; // percent per arrow-key press
-// Arrow-key nudge for whichever canvas chip (button, heading, or subtitle)
-// currently has keyboard focus — same x/y percent space as
-// dragPosition/POSITION_PRESETS above, just a smaller fixed step instead of
-// a pointer position. Generic over `Positionable` since a still-"flow" item
-// of any of the three kinds has no x/y yet — the first nudge starts it from
-// the shared 50/50 center and switches it to "custom", same as dragging does.
-function nudgePosition<T extends Positionable>(item: T, key: string): Partial<T> | null {
-  const dx = key === "ArrowLeft" ? -POSITION_NUDGE_STEP : key === "ArrowRight" ? POSITION_NUDGE_STEP : 0;
-  const dy = key === "ArrowUp" ? -POSITION_NUDGE_STEP : key === "ArrowDown" ? POSITION_NUDGE_STEP : 0;
-  if (dx === 0 && dy === 0) return null;
-  const baseX = item.position === "custom" ? Number(item.x) : 50;
-  const baseY = item.position === "custom" ? Number(item.y) : 50;
-  return {
-    position: "custom",
-    x: String(Math.min(100, Math.max(0, baseX + dx))),
-    y: String(Math.min(100, Math.max(0, baseY + dy))),
-  } as Partial<T>;
-}
-// Minimal DOMRect-shaped bag — the canvas smart-guide math only ever needs
-// these four numbers, and building a plain object (vs. a real DOMRect) keeps
-// the dragged button's "virtual" rect (built from clientX/Y, not an actual
-// live DOM node — it's mid-drag) the same type as every real rect it's
-// compared against.
-interface EdgeRect {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-type GapMark = { top: number; left: number; length: number };
-// Figma-style "nearest neighbor" spacing tick: only returns a mark when the
-// two rects don't overlap on that axis AND do overlap on the other (so the
-// line has a sensible perpendicular anchor point) — a vertical gap needs
-// x-overlap, a horizontal gap needs y-overlap. `axis` picks which one to
-// compute; startMove below calls this once per axis per candidate and keeps
-// only the smallest (nearest) result.
-function edgeGap(a: EdgeRect, b: EdgeRect, boxRect: EdgeRect, axis: "v" | "h"): GapMark | null {
-  if (axis === "v") {
-    const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-    if (xOverlap <= 0) return null;
-    const midX = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2;
-    if (a.bottom <= b.top) return { top: a.bottom - boxRect.top, left: midX - boxRect.left, length: b.top - a.bottom };
-    if (b.bottom <= a.top) return { top: b.bottom - boxRect.top, left: midX - boxRect.left, length: a.top - b.bottom };
-    return null;
-  }
-  const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-  if (yOverlap <= 0) return null;
-  const midY = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2;
-  if (a.right <= b.left) return { top: midY - boxRect.top, left: a.right - boxRect.left, length: b.left - a.right };
-  if (b.right <= a.left) return { top: midY - boxRect.top, left: b.right - boxRect.left, length: a.left - b.right };
-  return null;
-}
-function parseSlideButtons(raw: unknown): SlideButton[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((b) => {
-    const btn = (b ?? {}) as Record<string, unknown>;
-    return {
-      label: typeof btn.label === "string" ? btn.label : "",
-      href: typeof btn.href === "string" ? btn.href : "",
-      variant: btn.variant === "outline" ? "outline" : ("primary" as const),
-      color: typeof btn.color === "string" ? btn.color : BUTTON_DEFAULTS.color,
-      textColor: typeof btn.textColor === "string" ? btn.textColor : BUTTON_DEFAULTS.textColor,
-      radius: typeof btn.radius === "string" ? btn.radius : BUTTON_DEFAULTS.radius,
-      size: btn.size === "sm" || btn.size === "lg" ? btn.size : "md",
-      fontSize: typeof btn.fontSize === "string" ? btn.fontSize : BUTTON_DEFAULTS.fontSize,
-      position: btn.position === "custom" ? "custom" : "flow",
-      x: typeof btn.x === "string" ? btn.x : BUTTON_DEFAULTS.x,
-      y: typeof btn.y === "string" ? btn.y : BUTTON_DEFAULTS.y,
-    };
-  });
-}
-function parseSlides(raw: string | undefined): SlideItem[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((item) => {
-        const s = (item ?? {}) as Record<string, unknown>;
-        return {
-          imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
-          bgColor: typeof s.bgColor === "string" ? s.bgColor : SLIDE_DEFAULTS.bgColor,
-          heading: parseSlideText(s.heading),
-          subtitle: parseSlideText(s.subtitle),
-          textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
-          overlayColor: typeof s.overlayColor === "string" ? s.overlayColor : SLIDE_DEFAULTS.overlayColor,
-          overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : SLIDE_DEFAULTS.overlayOpacity,
-          buttons: parseSlideButtons(s.buttons),
-        };
-      });
-    }
-  } catch {
-    // Not JSON — fall through to the legacy pipe-line format below.
-  }
-  return raw
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [imageUrl = "", heading = "", subtitle = "", buttonLabel = "", buttonHref = ""] = line.split("|");
-      return {
-        imageUrl,
-        heading: parseSlideText(heading),
-        subtitle: parseSlideText(subtitle),
-        ...SLIDE_DEFAULTS,
-        buttons: buttonLabel ? [{ ...BUTTON_DEFAULTS, label: buttonLabel, href: buttonHref }] : [],
-      };
-    });
-}
-function stringifySlides(items: SlideItem[]): string {
-  return JSON.stringify(items);
-}
 
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
 // "0") into the rounded px number shown on the badge. rem assumed at the
@@ -1348,52 +1000,6 @@ function headingFontFamily(level: string | undefined): string {
   return level === "1"
     ? "var(--font-heading, var(--font-family, inherit))"
     : "var(--font-subheading, var(--font-heading, var(--font-family, inherit)))";
-}
-
-function typoStyle(p: Record<string, string>): React.CSSProperties {
-  const s: React.CSSProperties = {};
-  if (p.fontFamily) s.fontFamily = p.fontFamily;
-  if (p.color) s.color = p.color;
-  if (p.lineHeight) s.lineHeight = p.lineHeight;
-  if (p.letterSpacing) s.letterSpacing = p.letterSpacing;
-  if (p.fontWeight) s.fontWeight = p.fontWeight;
-  if (p.textTransform) s.textTransform = p.textTransform as React.CSSProperties["textTransform"];
-  if (p.fontStyle) s.fontStyle = p.fontStyle;
-  if (p.textDecoration) s.textDecoration = p.textDecoration;
-  return s;
-}
-
-function colStyle(cp?: Record<string, string>): React.CSSProperties {
-  if (!cp) return {};
-  const anyPadding = cp.padding || cp.paddingTop || cp.paddingRight || cp.paddingBottom || cp.paddingLeft;
-  const padSide = (per: string) => lengthValue(cp[per] || cp.padding, PAD, "0");
-  const anyRadius = cp.radius || cp.radiusTopLeft || cp.radiusTopRight || cp.radiusBottomRight || cp.radiusBottomLeft;
-  const radCorner = (per: string) => lengthValue(cp[per] || cp.radius, RADIUS, RADIUS.none);
-  const anyMargin = cp.marginY || cp.marginX || cp.marginTop || cp.marginRight || cp.marginBottom || cp.marginLeft;
-  const marginSide = (per: string, axis: string) => lengthValue(cp[per] || cp[axis], PAD, "0");
-  return {
-    background: cp.bg || undefined,
-    padding: anyPadding
-      ? `${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}`
-      : undefined,
-    margin: anyMargin
-      ? `${marginSide("marginTop", "marginY")} ${marginSide("marginRight", "marginX")} ${marginSide("marginBottom", "marginY")} ${marginSide("marginLeft", "marginX")}`
-      : undefined,
-    alignSelf: cp.valign === "top" ? "start" : cp.valign === "bottom" ? "end" : cp.valign === "center" ? "center" : undefined,
-    border: cp.border ? BORDER[cp.border] : undefined,
-    boxShadow: shadowToCss(cp.shadow),
-    borderRadius: anyRadius
-      ? `${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}`
-      : undefined,
-  };
-}
-
-// Element radius (image/embed/gallery): same per-corner freedom as Section/
-// Column, but these elements default to a rounded "md" look out of the box
-// (see their ELS defaults), so the fallback is RADIUS.md, not RADIUS.none.
-function elRadius(p: Record<string, string>): string {
-  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.md);
-  return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
 }
 
 // Hatched spacing-overlay band: shown while a padding/margin drag handle is
