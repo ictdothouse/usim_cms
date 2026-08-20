@@ -25,6 +25,33 @@ CREATE TABLE IF NOT EXISTS "public"."platform_settings" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 
+-- Upgrade path: instance-wide MFA master switch (Settings "Login Methods").
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "mfa_enabled" boolean DEFAULT false NOT NULL;
+
+-- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
+-- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
+-- counter table.
+CREATE TABLE IF NOT EXISTS "public"."login_attempts" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"email" text NOT NULL,
+	"ip" text NOT NULL,
+	"success" boolean NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
+
+-- Control-plane audit trail for superadmin-level mutations (tenant/role/
+-- user changes, the mfa_enabled toggle itself) — see insertAuditLog.
+CREATE TABLE IF NOT EXISTS "public"."audit_log" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"actor_user_id" uuid,
+	"actor_email" text,
+	"action" text NOT NULL,
+	"target" text,
+	"meta" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"ip" text,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS "public"."shared_content" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"source_host" text NOT NULL,
@@ -72,6 +99,8 @@ ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "role_id" uuid REFERENCES 
 -- extra_permissions existed (multi-site users + per-user extra grants).
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "tenant_hosts" text[] DEFAULT '{}' NOT NULL;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "extra_permissions" text[] DEFAULT '{}' NOT NULL;
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_secret" text;
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_enabled" boolean DEFAULT false NOT NULL;
 UPDATE "public"."users" SET "tenant_hosts" = ARRAY["tenant_host"] WHERE "tenant_host" IS NOT NULL AND cardinality("tenant_hosts") = 0;
 
 -- A user's personal saved theme presets ("my collection" in the Theme

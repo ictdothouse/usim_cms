@@ -232,6 +232,65 @@ a silent no-op under a superuser connection. That role also needs `CREATEDB` (se
 - The one sanctioned cross-tenant path is `publishSharedContent`/`listSharedContent` — an explicit
   author opt-in into the control-plane `shared_content` table, not a general query capability.
 
+## Auth hardening (rate limiting, audit log, MFA)
+
+Built in response to a security audit's "wajib diperbaiki" (must-fix) findings — see the audit's own
+callouts before assuming any of this is speculative hardening.
+
+- **Login rate limiting.** `login_attempts` (control-plane, one row per attempt, both success and
+  failure) backs `isLoginRateLimited(email, ip)`/`recordLoginAttempt` (`tenant-pool.ts`) — a DB table,
+  not an in-memory counter, because blue-green/multi-replica means separate processes don't share memory.
+  `POST /api/auth/login` checks the limit **before** even looking up the password (so a locked-out
+  caller never gets a fresh timing oracle either) — 5 failed attempts per email OR per ip within 15
+  minutes trips a 429. Old rows are pruned lazily on every write (24h retention), no separate cleanup
+  cron.
+- **Audit log.** `audit_log` (control-plane) records who did what to instance-wide/cross-tenant state —
+  currently wired into tenant delete, user delete, the mfaEnabled toggle, and a user's own MFA enable/
+  disable. Deliberately not wired into every read/list route or every possible mutation — see the
+  table's own schema.ts comment for the intended scope (superadmin-answerable "who did this",
+  not a full change-data-capture log). `insertAuditLog(entry)` is the one write path; there's no
+  read/viewer UI yet — a fast-follow if this becomes a real ask, not built speculatively now.
+- **MFA (TOTP).** Implemented via `node:crypto` only — no otplib/speakeasy dependency for a standard
+  RFC 6238 6-digit/30-second code (`generateTotpSecret`/`verifyTotpCode`/`totpAuthUri` in `db/auth.ts`).
+  `verifyTotpCode` is verified against RFC 6238 Appendix B's official SHA1 test vector in
+  `auth.test.ts`, not just self-consistency with its own encoder. Two-level toggle, deliberately:
+  `platformSettings.mfaEnabled` is the instance-wide master switch (Settings tab's "Login Methods"
+  card, superadmin-only) — while off, MFA is invisible everywhere; while on, the Security tab's
+  enrollment flow becomes available to every user. `users.totpEnabled`/`totpSecret` is the per-user
+  opt-in on top of that — a user isn't required to enroll just because the instance switch is on,
+  but if they HAVE enrolled, login always requires their code regardless of the instance switch's
+  current state (turning the instance switch off doesn't silently stop enforcing a user's own already-
+  confirmed MFA — `setUserTotpEnabled(id, false)` is the only way to drop that, and it also clears the
+  secret so a future re-enable needs a fresh enrollment, not a silently-reactivated old one).
+  **Login flow**: password-only login is unchanged when `totpEnabled` is false. When true,
+  `POST /api/auth/login` returns `{ mfaRequired: true, pendingToken }` instead of a real session — a
+  5-minute-TTL `SessionPayload` with a new `pendingMfa: true` flag, rejected by every other route
+  (`requireTenantAuth`/`verifySuperadmin`/`verifyAnyUser` in `plugins/auth.ts`, same treatment as the
+  existing `previewOnly` flag) until `POST /api/auth/totp-verify` exchanges it for a real session.
+  **Enrollment** is two-step on purpose (`POST /api/auth/totp-setup` stores a secret with
+  `totpEnabled` still false; `POST /api/auth/totp-confirm` only flips it true once a real code
+  verifies) so a half-finished enrollment can never start requiring a code the user hasn't proven
+  they can generate. `GET /api/auth/me` is the Security tab's own-status check
+  (`{ totpEnabled }`) — deliberately separate from the superadmin-only
+  `GET /api/portal/login-settings` (the instance switch), since a webmaster can't reach that route.
+  **This is the extension point for Entra ID/SSO later** (already anticipated in `users`' own schema
+  comment): the "Login Methods" Settings card shows Password (always on) + MFA (real, toggleable) +
+  "Microsoft Entra ID / SSO — coming soon" (shown, not wired) — `signSession`/`SessionPayload` already
+  don't care how a session was established, only that it ends up with the right shape, so a future SSO
+  login route can issue the exact same token shape through a completely different first step.
+- **Security tab** (`SecurityPanel`, a new top-level `Tab` reachable by both superadmin and webmaster —
+  unlike Settings, which only a superadmin can reach) is where a user manages their OWN MFA
+  enrollment, independent of the instance-wide switch's location.
+- **`@fastify/helmet`** registered with `contentSecurityPolicy: false` (this API only ever returns JSON,
+  never HTML it renders itself — apps/frontend's own headers are the real CSP surface, out of scope
+  here) and `crossOriginResourcePolicy: false` (media/uploads are deliberately fetched cross-origin by
+  the tenant frontend and Live Edit's iframe).
+- **Deliberately not done in this pass** (flagged, not forgotten): session tokens still live in
+  `localStorage`, not an `httpOnly` cookie — that migration touches every single admin request and
+  needs its own CSRF strategy, kept separate rather than rushed into the same change as the above.
+  Postgres HA/replication, monitoring/alerting, and auto-rollback-after-promote all need real VPS
+  topology decisions this repo can't make blind — see the audit's own phased roadmap.
+
 ## Architecture
 
 pnpm workspace monorepo with two apps:
