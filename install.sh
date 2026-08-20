@@ -402,7 +402,11 @@ diagnose_reachability() {
   echo "---- diagnostic report (port :${api_port}) ----" >&2
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     echo "-- docker compose ps --" >&2
-    docker compose ps >&2 || true
+    if [ -f .deploy-color ]; then
+      docker compose -p "ucms-$(cat .deploy-color)" -f docker-compose.release.yml ps >&2 || true
+    else
+      docker compose -f docker-compose.yml -f docker-compose.trial.yml ps >&2 || true
+    fi
     echo "-- port listener (ss -ltnp) --" >&2
     ss -ltnp 2>/dev/null | grep ":${api_port} " >&2 || echo "  (nothing listening on :${api_port})" >&2
     echo "-- iptables FORWARD chain --" >&2
@@ -432,6 +436,16 @@ ensure_reachable_or_selfheal() {
     systemctl restart docker
     sleep 5
     docker compose up -d >/dev/null 2>&1 || true
+    # Trial mode's api/frontend/admin live in docker-compose.trial.yml, not
+    # the bare `docker compose up -d` above — bring those back too, but only
+    # on a box still in trial mode. .deploy-color only ever exists once
+    # scripts/deploy.sh has adopted this box for real (see CLAUDE.md's
+    # Deployment section) — bringing trial containers back up on a box
+    # that's gone live would fight the blue/green containers for the same
+    # host ports.
+    if [ ! -f .deploy-color ]; then
+      docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d >/dev/null 2>&1 || true
+    fi
   else
     echo "Restarting the app services..." >&2
     systemctl restart ucms-api ucms-frontend ucms-admin
@@ -513,7 +527,10 @@ install_docker_mode() {
 
   echo ""
   echo "Building and starting containers (first run can take a few minutes)..."
-  docker compose up -d --build db api frontend admin
+  # docker-compose.trial.yml adds api/frontend/admin on host-published ports
+  # (no Caddy) on top of this file's db+proxy — see that file's own header
+  # for why docker-compose.yml alone no longer has those 3 services.
+  docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d --build db api frontend admin
 
   if ! ensure_reachable_or_selfheal "$api_port" "$admin_port" "$frontend_port" "docker"; then
     echo "" >&2

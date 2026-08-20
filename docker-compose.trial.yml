@@ -1,0 +1,80 @@
+# install.sh's docker-mode trial flow ONLY. Adds api/frontend/admin — each
+# published straight to a host port, no Caddy in front — on top of
+# docker-compose.yml's db+proxy (proxy stays unused here; install.sh never
+# starts it). This recreates the single-container shape docker-compose.yml
+# itself used before it was split for blue-green (see docker-compose.release.yml),
+# since that split otherwise breaks a fresh `docker compose up db api frontend
+# admin` — those services no longer live in docker-compose.yml alone.
+#
+# Usage (what install.sh runs):
+#   docker compose -f docker-compose.yml -f docker-compose.trial.yml \
+#     up -d --build db api frontend admin
+#
+# This is NOT the zero-downtime path — one container each, a plain restart on
+# update. Good enough pre-launch, when nothing is depending on uptime yet.
+# Going live for real is a deliberate separate step: stop these containers,
+# `docker compose up -d proxy`, then `scripts/deploy.sh` once — see CLAUDE.md's
+# Deployment section. From then on, manage the stack via scripts/deploy.sh /
+# the monitor dashboard, not this file.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ucms-net
+    environment:
+      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      PORT: 3000
+      # The api's Dockerfile bakes NODE_ENV=production, which trips index.ts's
+      # own boot-time guard (`ADMIN_ORIGIN must be set in production`) unless
+      # this is set — the browser reaches the admin container directly on
+      # ADMIN_PORT here (no proxy in front for this trial mode).
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:${ADMIN_PORT:-5173}}
+      FRONTEND_INTERNAL_URL: http://frontend:4321
+      CADDY_ADMIN_URL: http://proxy:2019
+    ports:
+      - "${API_PORT:-3000}:3000"
+    volumes:
+      - ucms-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ucms-net
+    environment:
+      API_URL: http://api:3000
+      PORT: 4321
+    ports:
+      - "${FRONTEND_PORT:-4321}:4321"
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+        VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:-http://localhost:4321}
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - ucms-net
+    ports:
+      - "${ADMIN_PORT:-5173}:80"

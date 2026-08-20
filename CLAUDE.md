@@ -1105,6 +1105,20 @@ pnpm workspace monorepo with two apps:
   helper `--admin-only` uses (extended to also resolve `ADMIN_PORT`/`FRONTEND_PORT`, from
   `.env` for docker mode or `/etc/ucms-monitor.env` for bare-metal) — meant to replace a
   manual `curl`/`ss`/`iptables` debugging session with one command.
+- **`docker-compose.trial.yml`** — install.sh's docker-mode trial flow only. When
+  `docker-compose.yml` was split for blue-green (below), `api`/`frontend`/`admin` moved out
+  of it entirely, which silently broke install.sh's original `docker compose up -d --build
+  db api frontend admin` (those services no longer exist in that file alone). Rather than
+  rearchitect the proven, incident-hardened trial/reachability-check flow above to route
+  through Caddy from install time, this file restores the original pre-split shape (one
+  container each, host-published `API_PORT`/`FRONTEND_PORT`/`ADMIN_PORT`, no Caddy) as a
+  second compose file merged in via `-f`: `docker compose -f docker-compose.yml -f
+  docker-compose.trial.yml up -d --build db api frontend admin`. `ensure_reachable_or_
+  selfheal`'s self-heal step and `diagnose_reachability`'s `docker compose ps` both branch
+  on whether `.deploy-color` exists (a go-live box that's adopted `scripts/deploy.sh`) to
+  avoid fighting the blue/green containers for the same host ports. Superseded the moment a
+  box goes live (see "Blue-green zero-downtime deploys" below) — never touched again after
+  that.
 - `install-dev.mjs` is the LOCAL-DEV counterpart — `node install-dev.mjs`, same command on
   Mac/Windows/Linux, Docker-only (no bare-metal path: Docker Desktop is assumed, so there's
   no 3-different-OS systemd-equivalent to maintain). Mirrors `install.sh`'s docker mode
@@ -1156,6 +1170,19 @@ Any failure before promote succeeds leaves the previously-live color completely 
   called container-to-container by `deploy.sh` (via `docker compose exec` running a small
   inline `node -e` using Node 22's built-in `fetch`, not the image's busybox `wget` —
   its `--post-data`/`--header` support isn't reliably consistent across busybox builds).
+  `caddyRequest` (`proxy-sync.ts`) talks to Caddy's admin API via `node:http`, deliberately
+  not the global `fetch()` — undici's `fetch` sends an empty `Origin` header on a plain
+  server-to-server call, which Caddy's admin API treats as a present-but-unrecognized
+  origin and 403s with "not allowed to access from origin ''", regardless of any
+  `origins`/`enforce_origin` setting on the Caddy side (confirmed live: `node:http` to the
+  same endpoint succeeds). Authenticating the promote caller isn't the same as authorizing
+  what they can do with that call: the `admin`/`api`/`frontend` dial-target arrays in the
+  request body land straight in Caddy's `reverse_proxy` config, so `proxy-sync.ts` exports
+  `isValidDialTargets` (a strict `host:port`-only regex — no dot, scheme, path, or query,
+  matching the exact shape `deploy.sh` ever constructs) and both the route (400 on a bad
+  value) and `dials()` itself (throws, defense-in-depth for any other future caller)
+  enforce it — otherwise anyone holding `DEPLOY_SECRET` could redirect all admin/api/tenant
+  traffic to a host of their choosing instead of merely triggering a redeploy.
 - `Caddyfile`'s own static `admin`/`api`/tenant routes are now only ever read ONCE — the
   very first time the `proxy` container starts, before `deploy.sh` has ever run — pointing
   at what a first-ever deploy always produces (`ucms-blue-{admin,api,frontend}-1`). Every
