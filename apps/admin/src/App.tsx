@@ -2066,6 +2066,7 @@ type TenantCreateForm = z.infer<typeof tenantCreateSchema>;
 function TenantsPanel({ token }: { token: string }) {
   const { t } = useT();
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
+  const [usage, setUsage] = useState<Record<string, api.TenantUsage>>({});
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [manageHost, setManageHost] = useState<string | null>(null);
@@ -2076,6 +2077,15 @@ function TenantsPanel({ token }: { token: string }) {
 
   async function refresh() {
     setTenants(await api.listPortalTenants(token));
+    // Best-effort, separate from the tenant list itself — a slow/failed
+    // disk-size scan on one tenant shouldn't block the rest of the panel
+    // from rendering.
+    try {
+      const rows = await api.getTenantsUsage(token);
+      setUsage(Object.fromEntries(rows.map((r) => [r.host, r])));
+    } catch {
+      setUsage({});
+    }
   }
   useEffect(() => {
     void refresh();
@@ -2180,7 +2190,13 @@ function TenantsPanel({ token }: { token: string }) {
       </Form>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {liveTenants.map((tn) => (
-          <TenantCard key={tn.id as string} tn={tn} staging={false} onManage={() => setManageHost(tn.host as string)} />
+          <TenantCard
+            key={tn.id as string}
+            tn={tn}
+            staging={false}
+            usage={usage[tn.host as string]}
+            onManage={() => setManageHost(tn.host as string)}
+          />
         ))}
       </div>
       {stagingTenants.length > 0 && (
@@ -2190,7 +2206,13 @@ function TenantsPanel({ token }: { token: string }) {
           </h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {stagingTenants.map((tn) => (
-              <TenantCard key={tn.id as string} tn={tn} staging onManage={() => setManageHost(tn.host as string)} />
+              <TenantCard
+                key={tn.id as string}
+                tn={tn}
+                staging
+                usage={usage[tn.host as string]}
+                onManage={() => setManageHost(tn.host as string)}
+              />
             ))}
           </div>
         </div>
@@ -2199,13 +2221,30 @@ function TenantsPanel({ token }: { token: string }) {
   );
 }
 
+// cPanel-style rough quota display — a glance metric, not billing-grade
+// precision, so 3 significant figures is plenty.
+function formatBytes(bytes: number | null): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
+}
+
 function TenantCard({
   tn,
   staging,
+  usage,
   onManage,
 }: {
   tn: Record<string, unknown>;
   staging: boolean;
+  usage?: api.TenantUsage;
   onManage: () => void;
 }) {
   const { t } = useT();
@@ -2231,6 +2270,9 @@ function TenantCard({
       </div>
       <h3 className="text-sm font-semibold leading-snug text-ink">{tn.departmentName as string}</h3>
       <p className="mt-1 truncate font-mono text-xs text-sub">{tn.host as string}</p>
+      <p className="mt-1 text-[11px] text-sub">
+        DB {formatBytes(usage?.dbSizeBytes ?? null)} · Storan {formatBytes(usage?.diskSizeBytes ?? null)}
+      </p>
       <div className="mt-4 flex items-center gap-2">
         <a
           href={api.previewUrl(tn.host as string, "home")}

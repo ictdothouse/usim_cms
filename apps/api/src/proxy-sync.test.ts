@@ -27,6 +27,34 @@ test("buildCaddyConfig always includes the static admin/api routes", () => {
   assert.equal(hosts.length, 2); // admin domain + api domain, no tenants
 });
 
+test("buildCaddyConfig defaults to one dial target per service when no upstreams given", () => {
+  const config = buildCaddyConfig([{ host: "dept-a.usim.edu.my", active: true }]);
+  const servers = (config as any).apps.http.servers.srv0;
+  const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
+  assert.deepEqual(apiRoute.handle[0].upstreams, [{ dial: "api:3000" }]);
+  const tenantRoute = servers.routes.find((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
+  assert.deepEqual(tenantRoute.handle[0].upstreams, [{ dial: "frontend:4321" }]);
+});
+
+test("buildCaddyConfig fans out to every replica dial target for a blue-green/scaled deploy", () => {
+  const config = buildCaddyConfig([{ host: "dept-a.usim.edu.my", active: true }], {
+    admin: ["ucms-green-admin-1:80"],
+    api: ["ucms-green-api-1:3000", "ucms-green-api-2:3000"],
+    frontend: ["ucms-green-frontend-1:4321", "ucms-green-frontend-2:4321"],
+  });
+  const servers = (config as any).apps.http.servers.srv0;
+  const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
+  assert.deepEqual(apiRoute.handle[0].upstreams, [
+    { dial: "ucms-green-api-1:3000" },
+    { dial: "ucms-green-api-2:3000" },
+  ]);
+  const tenantRoute = servers.routes.find((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
+  assert.deepEqual(tenantRoute.handle[0].upstreams, [
+    { dial: "ucms-green-frontend-1:4321" },
+    { dial: "ucms-green-frontend-2:4321" },
+  ]);
+});
+
 test("parseCertExpiry rejects a malformed PEM", () => {
   // A deliberately truncated/invalid PEM body — exercises the same
   // rejection path apps/api's cert-upload route (Task 4) depends on to

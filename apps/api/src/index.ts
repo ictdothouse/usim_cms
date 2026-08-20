@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
-import { rm } from "node:fs/promises";
+import { rm, readdir, stat } from "node:fs/promises";
 import Fastify from "fastify";
 import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
@@ -26,6 +26,7 @@ import {
   listTenants,
   createTenant,
   deleteTenant,
+  getTenantDbSizeBytes,
   listUsers,
   createUser,
   updateUserRole,
@@ -50,7 +51,14 @@ import {
   setTenantCertInfo,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
-import { syncCaddy, pingCaddy, parseCertExpiry, loadCaddyCert, unloadCaddyCert } from "./proxy-sync.js";
+import {
+  syncCaddy,
+  pingCaddy,
+  parseCertExpiry,
+  loadCaddyCert,
+  unloadCaddyCert,
+  type CaddyUpstreams,
+} from "./proxy-sync.js";
 import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
 import {
   exportTenantBackup,
@@ -414,6 +422,54 @@ app.get("/api/portal/tenants", async (req, reply) => {
   return { tenants: await listTenants() };
 });
 
+// Recursively sums file sizes under `dir` — used for a tenant's uploads
+// folder. Returns null (not 0) when the folder doesn't exist at all yet
+// (a tenant with no uploads), so the Multisite column can tell "empty" from
+// "unmeasurable" apart from a real zero.
+async function dirSizeBytes(dir: string): Promise<number | null> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let total = 0;
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      total += (await dirSizeBytes(full)) ?? 0;
+    } else {
+      try {
+        total += (await stat(full)).size;
+      } catch {
+        // File removed mid-scan — ignore, not worth failing the whole sum.
+      }
+    }
+  }
+  return total;
+}
+
+// Multisite panel's resource-usage column (disk + DB size per tenant) — a
+// glance metric, not billing-grade metering. Sequential, not Promise.all:
+// this is a superadmin dashboard refresh, not a hot path, and running ~100
+// tenants' worth of queries concurrently against the control-plane pool has
+// no benefit worth the extra connection pressure.
+app.get("/api/portal/tenants/usage", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const tenants = await listTenants();
+  const usage = [];
+  for (const t of tenants) {
+    const dbSizeBytes = await getTenantDbSizeBytes(t.host);
+    let diskSizeBytes: number | null = null;
+    if (isLocalDriver) {
+      const tenantFolder = t.host.toLowerCase().replace(/[^a-z0-9]/g, "_");
+      diskSizeBytes = await dirSizeBytes(path.join(localUploadsDir, tenantFolder));
+    }
+    usage.push({ host: t.host, dbSizeBytes, diskSizeBytes });
+  }
+  return { usage };
+});
+
 app.post("/api/portal/tenants", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   const { host, departmentName, dbUrl } = req.body as {
@@ -481,6 +537,44 @@ app.post("/api/portal/proxy-settings/resync", async (req, reply) => {
   } catch (err) {
     reply.code(502);
     return { synced: false, error: (err as Error).message };
+  }
+});
+
+// Blue-green deploy promotion (scripts/deploy.sh): once the just-started
+// color's own containers report healthy, the deploy script calls this on
+// one of them, telling Caddy to route admin/api/tenant traffic at THIS
+// color's containers instead of whichever was live before. Deliberately
+// bypasses getProxyAutomationEnabled() — that switch only ever gated
+// automatic DNS/cert provisioning for a tenant's own CUSTOM domain, a
+// separate concern from which color of container is currently live. A
+// blue-green deploy only works at all if Caddy's base routing is driven
+// dynamically on every deploy, switch or no switch — see CLAUDE.md. Guarded
+// by a shared secret rather than a session token, since this is called
+// container-to-container over the docker-internal network by deploy
+// tooling, never by a browser.
+const DEPLOY_SECRET = process.env.DEPLOY_SECRET;
+app.post("/internal/deploy/promote", async (req, reply) => {
+  if (!DEPLOY_SECRET) {
+    reply.code(503);
+    return { error: "DEPLOY_SECRET not configured — blue-green promote is disabled" };
+  }
+  const provided = Buffer.from((req.headers["x-deploy-secret"] as string | undefined) ?? "");
+  const expected = Buffer.from(DEPLOY_SECRET);
+  // Compare against a length that's always the same regardless of `provided`
+  // so a mismatched length doesn't short-circuit the timing check faster
+  // than a near-miss of the right length.
+  const matches = provided.length === expected.length && timingSafeEqual(provided, expected);
+  if (!matches) {
+    reply.code(401);
+    return { error: "invalid deploy secret" };
+  }
+  const { admin, api, frontend } = (req.body as CaddyUpstreams) ?? {};
+  try {
+    await syncCaddy(await listTenants(), { admin, api, frontend });
+    return { promoted: true };
+  } catch (err) {
+    reply.code(502);
+    return { promoted: false, error: (err as Error).message };
   }
 });
 

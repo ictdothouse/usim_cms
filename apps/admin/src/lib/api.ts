@@ -359,6 +359,15 @@ export const deleteMediaFolder = (tenantHost: string, token: string, id: string)
 export const listPortalTenants = (token: string) =>
   request("/api/portal/tenants", null, token).then((b) => b.tenants as Array<Record<string, unknown>>);
 
+export interface TenantUsage {
+  host: string;
+  dbSizeBytes: number | null;
+  diskSizeBytes: number | null;
+}
+
+export const getTenantsUsage = (token: string) =>
+  request("/api/portal/tenants/usage", null, token).then((b) => b.usage as TenantUsage[]);
+
 export const createPortalTenant = (token: string, host: string, departmentName: string) =>
   request("/api/portal/tenants", null, token, {
     method: "POST",

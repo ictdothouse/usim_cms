@@ -7,7 +7,7 @@ import { hashPassword } from "../src/db/auth.js";
 const [email, password, role, tenantHost] = process.argv.slice(2);
 if (!email || !password || !role || (role === "webmaster" && !tenantHost)) {
   console.error(
-    "Usage: pnpm --filter @usim-cms/api user:add <email> <password> <superadmin|webmaster> [tenantHost]",
+    "Usage: pnpm --filter @ucms/api user:add <email> <password> <superadmin|webmaster> [tenantHost]",
   );
   process.exit(1);
 }

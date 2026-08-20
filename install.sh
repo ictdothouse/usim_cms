@@ -15,7 +15,7 @@
 #               for orgs that don't want Docker at all. Still fully
 #               conflict-safe: it never installs Node into the system PATH
 #               (a private, pinned Node runtime is downloaded to
-#               /opt/usim-cms/node and referenced by absolute path only) and
+#               /opt/ucms/node and referenced by absolute path only) and
 #               it reuses an already-running Postgres cluster instead of
 #               installing a second one (creates its own database + role
 #               inside it — this is exactly the same "one Postgres server,
@@ -221,7 +221,7 @@ set_env_kv() {
 # version any other project on this VPS already relies on. Referenced only
 # by the absolute path this prints, from systemd units and this script.
 NODE_VERSION="20.18.1"
-NODE_ROOT="/opt/usim-cms/node"
+NODE_ROOT="/opt/ucms/node"
 ensure_private_node() {
   local arch node_bin
   case "$(uname -m)" in
@@ -250,33 +250,33 @@ install_monitor() {
   local node_bin="$1" deploy_mode="$2" monitor_port="$3"
   echo ""
   echo "Setting up the ops monitor..."
-  if [ ! -f /etc/usim-cms-monitor.env ]; then
+  if [ ! -f /etc/ucms-monitor.env ]; then
     local monitor_password
     monitor_password="$(openssl rand -hex 16)"
-    cat > /etc/usim-cms-monitor.env <<EOF
+    cat > /etc/ucms-monitor.env <<EOF
 MONITOR_PORT=${monitor_port}
 REPO_DIR=${REPO_DIR}
 MONITOR_USER=admin
 MONITOR_PASSWORD=${monitor_password}
 DEPLOY_MODE=${deploy_mode}
 EOF
-    chmod 600 /etc/usim-cms-monitor.env
-    echo "Generated monitor password (saved in /etc/usim-cms-monitor.env)."
+    chmod 600 /etc/ucms-monitor.env
+    echo "Generated monitor password (saved in /etc/ucms-monitor.env)."
   else
     sed -i.bak \
       -e "s|^MONITOR_PORT=.*|MONITOR_PORT=${monitor_port}|" \
       -e "s|^REPO_DIR=.*|REPO_DIR=${REPO_DIR}|" \
       -e "s|^DEPLOY_MODE=.*|DEPLOY_MODE=${deploy_mode}|" \
-      /etc/usim-cms-monitor.env
-    rm -f /etc/usim-cms-monitor.env.bak
-    echo "Reusing existing monitor password from /etc/usim-cms-monitor.env."
+      /etc/ucms-monitor.env
+    rm -f /etc/ucms-monitor.env.bak
+    echo "Reusing existing monitor password from /etc/ucms-monitor.env."
   fi
   sed -e "s|__NODE_BIN__|${node_bin}|g" -e "s|__REPO_DIR__|${REPO_DIR}|g" \
-    monitor/usim-cms-monitor.service.template > /etc/systemd/system/usim-cms-monitor.service
+    monitor/ucms-monitor.service.template > /etc/systemd/system/ucms-monitor.service
   systemctl daemon-reload
-  systemctl enable --now usim-cms-monitor
-  systemctl restart usim-cms-monitor
-  MONITOR_PASSWORD="$(grep '^MONITOR_PASSWORD=' /etc/usim-cms-monitor.env | cut -d= -f2-)"
+  systemctl enable --now ucms-monitor
+  systemctl restart ucms-monitor
+  MONITOR_PASSWORD="$(grep '^MONITOR_PASSWORD=' /etc/ucms-monitor.env | cut -d= -f2-)"
 }
 
 open_firewall_ports() {
@@ -409,7 +409,7 @@ diagnose_reachability() {
     iptables -L FORWARD -n -v 2>/dev/null >&2 || echo "  (iptables not available)" >&2
   else
     echo "-- systemd unit status --" >&2
-    systemctl status usim-cms-api --no-pager -l 2>&1 | head -20 >&2 || true
+    systemctl status ucms-api --no-pager -l 2>&1 | head -20 >&2 || true
     echo "-- port listener (ss -ltnp) --" >&2
     ss -ltnp 2>/dev/null | grep ":${api_port} " >&2 || echo "  (nothing listening on :${api_port})" >&2
   fi
@@ -434,7 +434,7 @@ ensure_reachable_or_selfheal() {
     docker compose up -d >/dev/null 2>&1 || true
   else
     echo "Restarting the app services..." >&2
-    systemctl restart usim-cms-api usim-cms-frontend usim-cms-admin
+    systemctl restart ucms-api ucms-frontend ucms-admin
   fi
   if verify_external_reachability "$api_port" "$admin_port" "$frontend_port"; then
     echo "Self-heal worked — stack is reachable now." >&2
@@ -538,7 +538,7 @@ install_docker_mode() {
   echo "   Ops monitor:  http://${public_host}:${monitor_port}"
   echo "     user: admin"
   echo "     pass: ${MONITOR_PASSWORD}"
-  echo "     (also saved in /etc/usim-cms-monitor.env on this VPS)"
+  echo "     (also saved in /etc/ucms-monitor.env on this VPS)"
   echo ""
   echo " First time here? Open the admin panel URL above — with zero users"
   echo " in the database it shows a setup wizard automatically."
@@ -643,18 +643,18 @@ install_baremetal_mode() {
   pnpm install --frozen-lockfile
 
   echo "Building api..."
-  pnpm --filter @usim-cms/api build
+  pnpm --filter @ucms/api build
 
   echo "Building admin (VITE_API_URL=http://${public_host}:${api_port})..."
   VITE_API_URL="http://${public_host}:${api_port}" \
   VITE_FRONTEND_URL="http://${public_host}:${frontend_port}" \
-  pnpm --filter @usim-cms/admin build
+  pnpm --filter @ucms/admin build
 
   echo "Building frontend (API_URL=http://127.0.0.1:${api_port})..."
-  API_URL="http://127.0.0.1:${api_port}" pnpm --filter @usim-cms/frontend build
+  API_URL="http://127.0.0.1:${api_port}" pnpm --filter @ucms/frontend build
 
   # ---- systemd units for the 3 app processes ----
-  cat > /etc/systemd/system/usim-cms-api.service <<EOF
+  cat > /etc/systemd/system/ucms-api.service <<EOF
 [Unit]
 Description=usim_cms API
 After=network.target postgresql.service
@@ -671,10 +671,10 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-  cat > /etc/systemd/system/usim-cms-frontend.service <<EOF
+  cat > /etc/systemd/system/ucms-frontend.service <<EOF
 [Unit]
 Description=usim_cms frontend
-After=network.target usim-cms-api.service
+After=network.target ucms-api.service
 
 [Service]
 Type=simple
@@ -688,7 +688,7 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-  cat > /etc/systemd/system/usim-cms-admin.service <<EOF
+  cat > /etc/systemd/system/ucms-admin.service <<EOF
 [Unit]
 Description=usim_cms admin (static)
 After=network.target
@@ -705,8 +705,8 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable --now usim-cms-api usim-cms-frontend usim-cms-admin
-  systemctl restart usim-cms-api usim-cms-frontend usim-cms-admin
+  systemctl enable --now ucms-api ucms-frontend ucms-admin
+  systemctl restart ucms-api ucms-frontend ucms-admin
 
   if ! ensure_reachable_or_selfheal "$api_port" "$admin_port" "$frontend_port" "bare-metal"; then
     echo "" >&2
@@ -722,13 +722,13 @@ EOF
   # when it's not something another app on this VPS also depends on) and the
   # values its "pull latest & rebuild" action needs to redo the build step —
   # docker mode doesn't need these, docker-compose already carries them.
-  set_env_kv /etc/usim-cms-monitor.env DB_MANAGED "$DB_MANAGED"
-  set_env_kv /etc/usim-cms-monitor.env NODE_BIN "$node_bin"
-  set_env_kv /etc/usim-cms-monitor.env API_PORT "$api_port"
-  set_env_kv /etc/usim-cms-monitor.env FRONTEND_PORT "$frontend_port"
-  set_env_kv /etc/usim-cms-monitor.env ADMIN_PORT "$admin_port"
-  set_env_kv /etc/usim-cms-monitor.env PUBLIC_HOST "$public_host"
-  systemctl restart usim-cms-monitor
+  set_env_kv /etc/ucms-monitor.env DB_MANAGED "$DB_MANAGED"
+  set_env_kv /etc/ucms-monitor.env NODE_BIN "$node_bin"
+  set_env_kv /etc/ucms-monitor.env API_PORT "$api_port"
+  set_env_kv /etc/ucms-monitor.env FRONTEND_PORT "$frontend_port"
+  set_env_kv /etc/ucms-monitor.env ADMIN_PORT "$admin_port"
+  set_env_kv /etc/ucms-monitor.env PUBLIC_HOST "$public_host"
+  systemctl restart ucms-monitor
   open_firewall_ports "$api_port" "$frontend_port" "$admin_port" "$monitor_port"
 
   echo ""
@@ -740,7 +740,7 @@ EOF
   echo "   Ops monitor:  http://${public_host}:${monitor_port}"
   echo "     user: admin"
   echo "     pass: ${MONITOR_PASSWORD}"
-  echo "     (also saved in /etc/usim-cms-monitor.env on this VPS)"
+  echo "     (also saved in /etc/ucms-monitor.env on this VPS)"
   echo "   PostgreSQL:   $([ "$DB_MANAGED" = "true" ] && echo "installed by this script" || echo "reusing your existing cluster")"
   echo ""
   echo " First time here? Open the admin panel URL above — with zero users"
@@ -759,8 +759,8 @@ resolve_running_ports() {
     FRONTEND_PORT_VAL="$(grep '^FRONTEND_PORT=' .env 2>/dev/null | cut -d= -f2-)"
   else
     API_PORT_VAL="$(grep '^PORT=' apps/api/.env 2>/dev/null | cut -d= -f2-)"
-    ADMIN_PORT_VAL="$(grep '^ADMIN_PORT=' /etc/usim-cms-monitor.env 2>/dev/null | cut -d= -f2-)"
-    FRONTEND_PORT_VAL="$(grep '^FRONTEND_PORT=' /etc/usim-cms-monitor.env 2>/dev/null | cut -d= -f2-)"
+    ADMIN_PORT_VAL="$(grep '^ADMIN_PORT=' /etc/ucms-monitor.env 2>/dev/null | cut -d= -f2-)"
+    FRONTEND_PORT_VAL="$(grep '^FRONTEND_PORT=' /etc/ucms-monitor.env 2>/dev/null | cut -d= -f2-)"
   fi
   if [ -z "$API_PORT_VAL" ]; then
     echo "Could not find an existing API port for mode=$MODE — is the stack installed?" >&2

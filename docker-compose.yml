@@ -5,6 +5,8 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
       POSTGRES_DB: usim_cms
+    networks:
+      - ucms-net
     volumes:
       - db-data:/var/lib/postgresql/data
       # Runs once, only on an empty data dir: creates the non-superuser
@@ -17,80 +19,20 @@ services:
       timeout: 5s
       retries: 10
 
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
-      PORT: 3000
-      # The api's Dockerfile bakes NODE_ENV=production, which trips index.ts's
-      # own boot-time guard (`ADMIN_ORIGIN must be set in production`) unless
-      # this is set — the browser reaches the admin container directly on
-      # ADMIN_PORT here (no proxy in front for local/dev compose runs).
-      # Override to the real https://<ADMIN_DOMAIN> once behind the `proxy`
-      # service in production.
-      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:${ADMIN_PORT:-5173}}
-      # Static export renders pages through the frontend container.
-      FRONTEND_INTERNAL_URL: http://frontend:4321
-      # Caddy's Admin API, docker-internal only (never published — see the
-      # proxy service below). Harmless to always set: proxy-sync.ts's calls
-      # are only ever made when a superadmin turns the Settings "Domain &
-      # SSL Automation" switch on (default off).
-      CADDY_ADMIN_URL: http://proxy:2019
-    ports:
-      # Host port overridable via .env's API_PORT (install.sh writes this
-      # when the default 3000 is already taken on the host) — a separate
-      # docker-compose.override.yml is NOT used for this: Compose
-      # concatenates list-valued keys like `ports` across files instead of
-      # replacing them, so an override here would bind BOTH ports at once.
-      - "${API_PORT:-3000}:3000"
-    volumes:
-      - api-uploads:/app/uploads
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-  frontend:
-    build:
-      context: .
-      dockerfile: apps/frontend/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      api:
-        condition: service_healthy
-    environment:
-      # Internal Docker network call, api container-to-container — not the
-      # browser-facing VITE_API_URL the admin's build uses.
-      API_URL: http://api:3000
-      PORT: 4321
-    ports:
-      - "${FRONTEND_PORT:-4321}:4321"
-
-  admin:
-    build:
-      context: .
-      dockerfile: apps/admin/Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
-        VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:-http://localhost:4321}
-    restart: unless-stopped
-    depends_on:
-      - api
-    ports:
-      - "${ADMIN_PORT:-5173}:80"
-
   # Public-facing reverse proxy + TLS. Auto-issues/renews Let's Encrypt certs
   # for ADMIN_DOMAIN/API_DOMAIN/TENANT_DOMAINS (see .env.example) by default —
   # swap a site block in ./Caddyfile to `tls <cert> <key>` and uncomment the
   # ./certs mount below if USIM ICT provides its own certificate instead.
+  #
+  # api/frontend/admin used to live in THIS file. They moved to
+  # docker-compose.release.yml (see scripts/deploy.sh) so they can be
+  # blue-green deployed — started under a `ucms-blue`/`ucms-green` project
+  # name, health-checked, and promoted (Caddy's routes flipped to them)
+  # with zero downtime, while db/proxy here stay up the whole time as the
+  # one always-on "base" every color of release shares. Plain single-box
+  # use without blue-green still works: run `docker compose up -d --build`
+  # here for db+proxy, then `scripts/deploy.sh` once for the app tier —
+  # see CLAUDE.md's Deployment section.
   proxy:
     image: caddy:2-alpine
     # No --resume: this proxy container's Caddy config is always adapted
@@ -101,10 +43,8 @@ services:
     # cert-swap restart) on every restart after the first.
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     restart: unless-stopped
-    depends_on:
-      - admin
-      - api
-      - frontend
+    networks:
+      - ucms-net
     ports:
       - "80:80"
       - "443:443"
@@ -118,8 +58,21 @@ services:
       - caddy-config:/config
       # - ./certs:/etc/caddy/certs:ro
 
+# Named (not project-scoped) so docker-compose.release.yml's api/frontend/
+# admin — started under a DIFFERENT compose project name for blue-green —
+# can join this same network and reach db/proxy by their bare service name.
+networks:
+  ucms-net:
+    name: ucms-net
+
 volumes:
   db-data:
-  api-uploads:
   caddy-data:
   caddy-config:
+  # Named (not project-scoped), same reasoning as ucms-net above: local-disk
+  # uploads (apps/api/src/storage.ts) must survive a blue-green color swap —
+  # ucms-blue/ucms-green are different compose projects and would otherwise
+  # each get their own uploads volume. Referenced as `external: true` from
+  # docker-compose.release.yml's api service.
+  ucms-uploads:
+    name: ucms-uploads

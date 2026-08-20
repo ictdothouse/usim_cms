@@ -17,11 +17,11 @@
 }
 
 {$ADMIN_DOMAIN:admin.localhost} {
-	reverse_proxy admin:80
+	reverse_proxy ucms-blue-admin-1:80
 }
 
 {$API_DOMAIN:api.localhost} {
-	reverse_proxy api:3000
+	reverse_proxy ucms-blue-api-1:3000
 }
 
 # Tenant sites (the actual department/faculty websites). Add every live
@@ -30,8 +30,22 @@
 # preserved by reverse_proxy, which is how apps/frontend resolves the tenant
 # (see CLAUDE.md's Multi-tenancy section) — do not rewrite it here.
 {$TENANT_DOMAINS:tenant.localhost} {
-	reverse_proxy frontend:4321
+	reverse_proxy ucms-blue-frontend-1:4321
 }
+
+# The three routes above are only ever read ONCE — the very first time this
+# `proxy` container starts, before scripts/deploy.sh has ever run. They point
+# at what deploy.sh's first-ever run always produces: a `ucms-blue` project
+# with 1 replica of each service (docker-compose.release.yml). From that
+# first successful deploy onward, apps/api/src/proxy-sync.ts's syncCaddy
+# pushes a full replacement config straight to Caddy's Admin API on every
+# deploy (see index.ts's POST /internal/deploy/promote) — which is what
+# actually flips these routes to whichever color/replica-set is live, and
+# also adds/removes each tenant's own route. Editing ADMIN_DOMAIN/API_DOMAIN/
+# TENANT_DOMAINS here after that first deploy has no effect until the proxy
+# container is fully recreated (not just restarted — its live config comes
+# from Caddy's own autosave under the caddy-config volume by then, not this
+# file) — manage tenants/domains through the admin's Settings tab instead.
 
 # --- Bringing your own SSL certificate instead of Caddy's automatic one -----
 # If USIM's ICT centre issues its own certificate for a department domain

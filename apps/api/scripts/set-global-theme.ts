@@ -5,7 +5,7 @@ import { Client } from "pg";
 
 const [json] = process.argv.slice(2);
 if (!json) {
-  console.error(`Usage: pnpm --filter @usim-cms/api theme:set-global '{"primaryColor":"#0a5c36"}'`);
+  console.error(`Usage: pnpm --filter @ucms/api theme:set-global '{"primaryColor":"#0a5c36"}'`);
   process.exit(1);
 }
 

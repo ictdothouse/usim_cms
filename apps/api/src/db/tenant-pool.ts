@@ -200,6 +200,24 @@ export async function listTenants() {
   }
 }
 
+// Best-effort per-tenant database size for the Multisite panel's
+// resource-usage column — a superadmin "how big is this site" glance, not
+// billing-grade metering. Never throws: returns null (renders as "—") if
+// the query fails for any reason, e.g. a tenant whose database hasn't been
+// provisioned yet (never had its first request) has nothing to measure.
+export async function getTenantDbSizeBytes(host: string): Promise<number | null> {
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query("SELECT pg_database_size($1) AS size", [tenantDbName(host)]);
+    const size = rows[0]?.size;
+    return size == null ? null : Number(size);
+  } catch {
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createTenant(host: string, departmentName: string, dbUrl: string | null = null) {
   const client = await pool.connect();
   try {

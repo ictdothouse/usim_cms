@@ -9,3 +9,5 @@ build/
 *.tsbuildinfo
 apps/api/uploads/
 .astro/
+.deploy-color
+.deploy.log

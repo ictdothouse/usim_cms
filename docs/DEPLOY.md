@@ -19,18 +19,18 @@ Setup DB kali pertama (sekali sahaja, sambung sebagai superuser dulu):
 
 ```bash
 # .env sementara guna DATABASE_URL superuser
-pnpm --filter @usim-cms/api db:setup-role
+pnpm --filter @ucms/api db:setup-role
 # kemudian tukar DATABASE_URL ke role usim_cms_app yang dicipta
-pnpm --filter @usim-cms/api tenant:add   # daftar host jabatan
-pnpm --filter @usim-cms/api user:add     # cipta superadmin/webmaster
+pnpm --filter @ucms/api tenant:add   # daftar host jabatan
+pnpm --filter @ucms/api user:add     # cipta superadmin/webmaster
 ```
 
 Jalankan:
 
 ```bash
 pnpm install
-pnpm --filter @usim-cms/api build   # salin migrations .sql ke dist sekali
-pnpm --filter @usim-cms/api start   # node --env-file=.env dist/index.js
+pnpm --filter @ucms/api build   # salin migrations .sql ke dist sekali
+pnpm --filter @ucms/api start   # node --env-file=.env dist/index.js
 ```
 
 Migration tenant di-replay automatik pada permintaan pertama setiap tenant — tiada langkah migrate manual.
@@ -52,7 +52,7 @@ Runtime (adapter `@astrojs/node` standalone):
 | `PORT` | Default `4321` |
 
 ```bash
-API_URL=http://127.0.0.1:3000 pnpm --filter @usim-cms/frontend build
+API_URL=http://127.0.0.1:3000 pnpm --filter @ucms/frontend build
 HOST=0.0.0.0 PORT=4321 node apps/frontend/dist/server/entry.mjs
 ```
 
@@ -69,7 +69,7 @@ Env dibaca **semasa build** sahaja:
 | `VITE_API_URL` | ✅ | URL **awam** API yang boleh dicapai pelayar admin, cth. `https://api.usim.edu.my` |
 
 ```bash
-VITE_API_URL=https://api.usim.edu.my pnpm --filter @usim-cms/admin build
+VITE_API_URL=https://api.usim.edu.my pnpm --filter @ucms/admin build
 # hidang apps/admin/dist dengan nginx/Caddy (fail statik, tiada proses Node)
 ```
 

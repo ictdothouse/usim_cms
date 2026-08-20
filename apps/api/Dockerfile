@@ -1,4 +1,4 @@
-# Build from repo root: docker build -f apps/api/Dockerfile -t usim-cms-api .
+# Build from repo root: docker build -f apps/api/Dockerfile -t ucms-api .
 # Runtime config via env vars only (DATABASE_URL, PORT, SESSION_SECRET, ...)
 # — see apps/api/.env.example. No .env file is baked into or read from the image.
 FROM node:22-alpine AS base
@@ -12,8 +12,8 @@ COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/api apps/api
-RUN pnpm --filter @usim-cms/api build
-RUN pnpm --filter @usim-cms/api deploy --prod --legacy /app/deploy/api
+RUN pnpm --filter @ucms/api build
+RUN pnpm --filter @ucms/api deploy --prod --legacy /app/deploy/api
 
 FROM base AS runtime
 ENV NODE_ENV=production

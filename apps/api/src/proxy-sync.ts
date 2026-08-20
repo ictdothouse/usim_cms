@@ -1,4 +1,5 @@
 import { X509Certificate } from "node:crypto";
+import http from "node:http";
 
 // Bundled Caddy proxy's Admin API — reachable only on the docker-internal
 // network (never published to the host, see docker-compose.yml's proxy
@@ -11,35 +12,65 @@ const ADMIN_DOMAIN = process.env.ADMIN_DOMAIN ?? "admin.localhost";
 const API_DOMAIN = process.env.API_DOMAIN ?? "api.localhost";
 const TIMEOUT_MS = 5000;
 
+// Fallback dial targets for the plain single-stack setup (no blue-green
+// deploy in use) — one container each, matching docker-compose.yml's
+// service names. A blue-green deploy (scripts/deploy.sh) always passes its
+// own CaddyUpstreams explicitly instead of relying on these.
+const DEFAULT_ADMIN_UPSTREAM = process.env.ADMIN_UPSTREAM ?? "admin:80";
+const DEFAULT_API_UPSTREAM = process.env.API_UPSTREAM ?? "api:3000";
+const DEFAULT_FRONTEND_UPSTREAM = process.env.FRONTEND_UPSTREAM ?? "frontend:4321";
+
 export interface TenantRouteInfo {
   host: string;
   active: boolean;
 }
 
+// One dial target per live replica of that service — lets buildCaddyConfig
+// express "route to N containers" (Caddy load-balances/health-checks across
+// whatever's listed) instead of exactly one, which is what a scaled or
+// blue-green deploy needs. An empty/omitted array falls back to the single
+// default dial target above (the plain non-blue-green setup).
+export interface CaddyUpstreams {
+  admin?: string[];
+  api?: string[];
+  frontend?: string[];
+}
+
+function dials(hosts: string[] | undefined, fallback: string): { dial: string }[] {
+  return (hosts?.length ? hosts : [fallback]).map((dial) => ({ dial }));
+}
+
 // Pure — the whole desired Caddy config for the bundled proxy: static
 // admin/API routes (always present) + one route per ACTIVE tenant, each
-// reverse-proxied to the frontend container. No DB/network access, so this
-// is unit-testable without a live Postgres or Caddy. A tenant with a custom
-// certificate needs no special-casing here — loadCaddyCert (below) loads
-// the certificate into Caddy separately, and Caddy automatically prefers an
-// already-loaded certificate over requesting one via automatic HTTPS for a
-// matching hostname.
-export function buildCaddyConfig(tenants: TenantRouteInfo[]): Record<string, unknown> {
+// reverse-proxied to the frontend container(s). No DB/network access, so
+// this is unit-testable without a live Postgres or Caddy. A tenant with a
+// custom certificate needs no special-casing here — loadCaddyCert (below)
+// loads the certificate into Caddy separately, and Caddy automatically
+// prefers an already-loaded certificate over requesting one via automatic
+// HTTPS for a matching hostname.
+export function buildCaddyConfig(
+  tenants: TenantRouteInfo[],
+  upstreams: CaddyUpstreams = {},
+): Record<string, unknown> {
+  const adminUpstreams = dials(upstreams.admin, DEFAULT_ADMIN_UPSTREAM);
+  const apiUpstreams = dials(upstreams.api, DEFAULT_API_UPSTREAM);
+  const frontendUpstreams = dials(upstreams.frontend, DEFAULT_FRONTEND_UPSTREAM);
+
   const tenantRoutes = tenants
     .filter((t) => t.active)
     .map((t) => ({
       match: [{ host: [t.host] }],
-      handle: [{ handler: "reverse_proxy", upstreams: [{ dial: "frontend:4321" }] }],
+      handle: [{ handler: "reverse_proxy", upstreams: frontendUpstreams }],
     }));
 
   const staticRoutes = [
     {
       match: [{ host: [ADMIN_DOMAIN] }],
-      handle: [{ handler: "reverse_proxy", upstreams: [{ dial: "admin:80" }] }],
+      handle: [{ handler: "reverse_proxy", upstreams: adminUpstreams }],
     },
     {
       match: [{ host: [API_DOMAIN] }],
-      handle: [{ handler: "reverse_proxy", upstreams: [{ dial: "api:3000" }] }],
+      handle: [{ handler: "reverse_proxy", upstreams: apiUpstreams }],
     },
   ];
 
@@ -72,9 +103,51 @@ export function parseCertExpiry(certPem: string): Date {
   return new Date(cert.validTo);
 }
 
-async function caddyRequest(path: string, init?: RequestInit): Promise<Response> {
-  if (!CADDY_ADMIN_URL) throw new Error("CADDY_ADMIN_URL not configured");
-  return fetch(`${CADDY_ADMIN_URL}${path}`, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+interface CaddyResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+}
+
+// Deliberately node:http, not the global fetch(): fetch's undici
+// implementation sends an empty `Origin` header on every request (a Fetch-
+// spec artifact of running outside a browser), which Caddy's admin API
+// treats as a present-but-unrecognized origin and rejects with 403 "client
+// is not allowed to access from origin ''" — regardless of any
+// origins/enforce_origin setting on the Caddy side, since this container-to-
+// container call has no real browser origin to declare. node:http never
+// sends that header at all, so the admin API's default same-network trust
+// applies.
+function caddyRequest(
+  path: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
+): Promise<CaddyResponse> {
+  if (!CADDY_ADMIN_URL) return Promise.reject(new Error("CADDY_ADMIN_URL not configured"));
+  const url = new URL(`${CADDY_ADMIN_URL}${path}`);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        method: init?.method ?? "GET",
+        headers: init?.headers,
+        timeout: TIMEOUT_MS,
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          resolve({ ok: status >= 200 && status < 300, status, text: async () => body });
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("Caddy admin request timed out")));
+    req.on("error", reject);
+    if (init?.body) req.write(init.body);
+    req.end();
+  });
 }
 
 // Cheap connectivity probe for the Settings card's Connected/Not connected
@@ -94,8 +167,8 @@ export async function pingCaddy(): Promise<boolean> {
 // (passed in by the caller), never whatever Caddy happened to have before —
 // safe to call repeatedly, and safe as a self-heal after the proxy
 // container is recreated or loses its volume.
-export async function syncCaddy(tenants: TenantRouteInfo[]): Promise<void> {
-  const config = buildCaddyConfig(tenants);
+export async function syncCaddy(tenants: TenantRouteInfo[], upstreams: CaddyUpstreams = {}): Promise<void> {
+  const config = buildCaddyConfig(tenants, upstreams);
   const res = await caddyRequest("/load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
