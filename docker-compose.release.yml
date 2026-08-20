@@ -1,0 +1,94 @@
+# The blue-green-able "app tier" — api/frontend/admin. Always run this
+# ALONGSIDE docker-compose.yml (db+proxy), never instead of it, and always
+# with an explicit `-p` project name so two colors can run side by side:
+#
+#   docker compose -p ucms-green -f docker-compose.release.yml up -d --build
+#
+# scripts/deploy.sh is the normal way to drive this (build the idle color,
+# health-check it, flip Caddy's routes to it, tear down the old color) —
+# see CLAUDE.md's Deployment section. Scale a service with
+# `--scale api=2` on the same `up` command; Caddy fans out to every replica
+# (see apps/api/src/proxy-sync.ts's CaddyUpstreams) once promoted.
+#
+# `ucms-net` is declared in docker-compose.yml and shared here as external
+# so these containers can reach `db`/`proxy` by bare name regardless of
+# which project (`ucms-blue`/`ucms-green`) they're running under. `default`
+# is declared explicitly too — Compose stops auto-creating the implicit
+# per-project network once ANY custom network is declared — so that
+# frontend/admin can still reach `api` (and vice versa) by bare service
+# name, scoped to just this color's own project (never the other color's).
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    networks:
+      - default
+      - ucms-net
+    environment:
+      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      # Shared secret the deploy script presents to POST /internal/deploy/
+      # promote (see index.ts) — never a session token, since this is
+      # called container-to-container by deploy tooling, not a browser.
+      DEPLOY_SECRET: ${DEPLOY_SECRET:?set DEPLOY_SECRET in .env}
+      PORT: 3000
+      NODE_ENV: production
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:?set ADMIN_ORIGIN in .env, e.g. https://admin.usim.edu.my}
+      FRONTEND_INTERNAL_URL: http://frontend:4321
+      CADDY_ADMIN_URL: http://proxy:2019
+    volumes:
+      - api-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    restart: unless-stopped
+    networks:
+      - default
+      - ucms-net
+    environment:
+      API_URL: http://api:3000
+      PORT: 4321
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4321/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:?set VITE_API_URL in .env, e.g. https://api.usim.edu.my}
+        VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:?set VITE_FRONTEND_URL in .env}
+    restart: unless-stopped
+    networks:
+      - default
+      - ucms-net
+
+networks:
+  default: {}
+  ucms-net:
+    external: true
+
+# external, same reasoning as ucms-net: local-disk uploads must survive a
+# color swap (ucms-blue <-> ucms-green are different compose projects, which
+# would otherwise each get their OWN api-uploads volume — uploads written
+# while blue is live would silently vanish once green is promoted). Declared
+# for real (non-external) in docker-compose.yml, which is always up before
+# this file's services start — see scripts/deploy.sh's own `docker compose
+# up -d db proxy` step. Irrelevant when STORAGE_DRIVER=s3 (storage.ts) since
+# that driver keeps files outside Docker entirely.
+volumes:
+  api-uploads:
+    name: ucms-uploads
+    external: true
