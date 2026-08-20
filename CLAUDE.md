@@ -267,10 +267,18 @@ callouts before assuming any of this is speculative hardening.
   5-minute-TTL `SessionPayload` with a new `pendingMfa: true` flag, rejected by every other route
   (`requireTenantAuth`/`verifySuperadmin`/`verifyAnyUser` in `plugins/auth.ts`, same treatment as the
   existing `previewOnly` flag) until `POST /api/auth/totp-verify` exchanges it for a real session.
-  **Enrollment** is two-step on purpose (`POST /api/auth/totp-setup` stores a secret with
-  `totpEnabled` still false; `POST /api/auth/totp-confirm` only flips it true once a real code
-  verifies) so a half-finished enrollment can never start requiring a code the user hasn't proven
-  they can generate. `GET /api/auth/me` is the Security tab's own-status check
+  `totp-verify` is rate-limited the same way the password step is (`isLoginRateLimited`/
+  `recordLoginAttempt`, keyed by the pending token's own email + the caller's ip) — a 6-digit code is
+  only ~1M combinations, and a valid `pendingToken` already proves the password was correct, so an
+  unthrottled verify route would let that alone brute-force the second factor away. **Enrollment** is
+  two-step on purpose (`POST /api/auth/totp-setup` stores a secret with `totpEnabled` still false;
+  `POST /api/auth/totp-confirm` only flips it true once a real code verifies) so a half-finished
+  enrollment can never start requiring a code the user hasn't proven they can generate. Both
+  `totp-setup` (when the account is ALREADY confirmed — i.e. a re-enrollment, not a first-time setup)
+  and `totp-disable` require the CURRENT valid code in the request body before proceeding — a stolen
+  bearer token alone (the session's own `localStorage` exposure, still on the to-do list below) must
+  never be sufficient to strip a victim's MFA, since that would defeat the entire point of a second
+  factor. `GET /api/auth/me` is the Security tab's own-status check
   (`{ totpEnabled }`) — deliberately separate from the superadmin-only
   `GET /api/portal/login-settings` (the instance switch), since a webmaster can't reach that route.
   **This is the extension point for Entra ID/SSO later** (already anticipated in `users`' own schema

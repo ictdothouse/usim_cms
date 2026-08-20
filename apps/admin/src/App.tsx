@@ -4094,6 +4094,7 @@ function SecurityPanel({ token }: { token: string }) {
   const { t } = useT();
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [enrolling, setEnrolling] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [disabling, setDisabling] = useState(false);
   const [code, setCode] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -4134,11 +4135,14 @@ function SecurityPanel({ token }: { token: string }) {
     }
   }
 
-  async function disable() {
+  async function confirmDisable(e: React.FormEvent) {
+    e.preventDefault();
     setErr(null);
     setBusy(true);
     try {
-      await api.totpDisable(token);
+      await api.totpDisable(token, code);
+      setDisabling(false);
+      setCode("");
       setMsg(t("security-mfa-disabled-msg"));
       reload();
     } catch (e) {
@@ -4159,12 +4163,44 @@ function SecurityPanel({ token }: { token: string }) {
         {err && <p className="text-xs text-red-600">{err}</p>}
         {msg && <p className="text-xs text-green-700">{msg}</p>}
         {totpEnabled ? (
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-ok">{t("security-mfa-status-on")}</span>
-            <button onClick={() => void disable()} disabled={busy} className={btnGhost}>
-              {t("security-mfa-disable-btn")}
-            </button>
-          </div>
+          disabling ? (
+            <form onSubmit={confirmDisable} className="space-y-2">
+              <p className="text-xs text-sub">{t("security-mfa-disable-code-hint")}</p>
+              <input
+                className={inputCls}
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000000"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                autoFocus
+                required
+              />
+              <div className="flex gap-2">
+                <button type="submit" disabled={busy || code.length !== 6} className={btnPrimary}>
+                  {t("security-mfa-disable-btn")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDisabling(false);
+                    setCode("");
+                    setErr(null);
+                  }}
+                  className={btnGhost}
+                >
+                  {t("cancel")}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-ok">{t("security-mfa-status-on")}</span>
+              <button onClick={() => setDisabling(true)} disabled={busy} className={btnGhost}>
+                {t("security-mfa-disable-btn")}
+              </button>
+            </div>
+          )
         ) : enrolling ? (
           <form onSubmit={confirmEnroll} className="space-y-2">
             <p className="text-xs text-sub">{t("security-mfa-scan-hint")}</p>
