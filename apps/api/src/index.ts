@@ -348,12 +348,22 @@ app.post("/api/auth/totp-verify", async (req, reply) => {
     reply.code(401);
     return { error: "invalid or expired pending token" };
   }
+  // A 6-digit code is only ~1M combinations — without a limit here, holding
+  // a valid pendingToken (which already proves the password was correct)
+  // would let an attacker brute-force the second factor away entirely.
+  // Same table/keying as the password step (login route above).
+  if (await isLoginRateLimited(pending.email, req.ip)) {
+    reply.code(429);
+    return { error: "Too many failed attempts — try again later" };
+  }
   const user = await findUserById(pending.userId);
+  const valid = !!user?.totpEnabled && !!user.totpSecret && verifyTotpCode(user.totpSecret, code);
+  await recordLoginAttempt(pending.email, req.ip, valid);
   if (!user?.totpEnabled || !user.totpSecret) {
     reply.code(401);
     return { error: "MFA is not enabled for this account" };
   }
-  if (!verifyTotpCode(user.totpSecret, code)) {
+  if (!valid) {
     reply.code(401);
     return { error: "invalid code" };
   }
@@ -391,6 +401,19 @@ app.post("/api/auth/totp-setup", async (req, reply) => {
     reply.code(400);
     return { error: "MFA is not enabled for this instance" };
   }
+  const user = await findUserById(session.userId);
+  // Re-enrolling on an ALREADY-confirmed account must prove possession of
+  // the current code first — otherwise a stolen bearer token alone (e.g.
+  // via XSS, given the session's own localStorage exposure) would let an
+  // attacker silently start overwriting a victim's real MFA secret before
+  // it's ever confirmed, with no proof they still hold the original device.
+  if (user?.totpEnabled) {
+    const { code } = req.body as { code?: string };
+    if (!user.totpSecret || !code || !verifyTotpCode(user.totpSecret, code)) {
+      reply.code(401);
+      return { error: "current MFA code required to re-enroll" };
+    }
+  }
   const secret = generateTotpSecret();
   await setUserTotpSecret(session.userId, secret);
   return { secret, otpauthUri: totpAuthUri(secret, session.email) };
@@ -417,6 +440,19 @@ app.post("/api/auth/totp-confirm", async (req, reply) => {
 app.post("/api/auth/totp-disable", async (req, reply) => {
   const session = verifyAnyUser(req, reply);
   if (!session) return;
+  const user = await findUserById(session.userId);
+  if (!user?.totpEnabled) {
+    return { disabled: true };
+  }
+  // Same reasoning as totp-setup's re-enroll guard: a stolen bearer token
+  // alone must never be enough to strip a victim's MFA — the whole point of
+  // a second factor is that possessing the token isn't sufficient by
+  // itself, so removing it requires proving the second factor too.
+  const { code } = req.body as { code?: string };
+  if (!user.totpSecret || !code || !verifyTotpCode(user.totpSecret, code)) {
+    reply.code(401);
+    return { error: "current MFA code required to disable" };
+  }
   await setUserTotpEnabled(session.userId, false);
   await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.disabled_self", ip: req.ip });
   return { disabled: true };

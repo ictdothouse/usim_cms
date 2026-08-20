@@ -135,7 +135,8 @@ export const totpSetup = (token: string) =>
 export const totpConfirm = (token: string, code: string) =>
   request("/api/auth/totp-confirm", null, token, { method: "POST", body: JSON.stringify({ code }) });
 
-export const totpDisable = (token: string) => request("/api/auth/totp-disable", null, token, { method: "POST" });
+export const totpDisable = (token: string, code: string) =>
+  request("/api/auth/totp-disable", null, token, { method: "POST", body: JSON.stringify({ code }) });
 
 export const getMe = (token: string) =>
   request("/api/auth/me", null, token).then((b) => ({ totpEnabled: b.totpEnabled as boolean }));
