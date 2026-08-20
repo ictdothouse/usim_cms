@@ -109,13 +109,16 @@ export function parseSlideButtons(raw: unknown): SlideButton[] {
   });
 }
 
-// Slider slide repeater. Storage is a JSON array (one object per slide).
-// parseSlides() also accepts the legacy pipe-delimited single-line format
-// (JSON.parse throws on it, falls through) so a page saved before the Embla
-// Carousel rewrite keeps opening/saving — it silently upgrades to the JSON
-// format the next time it's edited. SectionBlock.astro's render-side parser
-// mirrors this same fallback, and validate-layout.ts's isSafeSlides()
-// accepts both shapes on write.
+// Slider slide repeater. Storage is a JSON array (one object per slide) —
+// the Embla Carousel rewrite's richer per-slide fields (multiple buttons,
+// overlay color/opacity, text position) don't fit the old single
+// imageUrl|heading|subtitle|buttonLabel|buttonHref line format. parseSlides()
+// still accepts that legacy format too (JSON.parse throws on it, falls
+// through) so a page saved before this change keeps opening/saving — it
+// silently upgrades to the JSON format the next time it's edited in the
+// Designer. SectionBlock.astro's render-side parser mirrors this same
+// fallback, and validate-layout.ts's isSafeSlides() accepts both shapes on
+// write.
 export function parseSlides(raw: string | undefined): SlideItem[] {
   if (!raw) return [];
   try {

@@ -32,15 +32,34 @@ export interface SlideItem {
   buttons: SlideButton[];
 }
 
-// Shared shape for heading/subtitle/button drag-position — dragPosition/
-// nudgePosition/POSITION_PRESETS all operate on this generically so every
-// item kind drives the same drag/nudge/preset code.
+// Same "flow vs custom x/y" idea buttons already have, applied to the
+// heading/subtitle too — the shared shape both extend is `Positionable`,
+// used by dragPosition/nudgePosition/PositionEditor so all three item kinds
+// (heading, subtitle, button) drive the exact same drag/nudge/preset code.
+// Deliberately NOT `Positionable` — heading/subtitle tried free x/y placement
+// (like buttons) and it felt wrong in practice ("tiba2 jd tak best la heading
+// dan subtitle sama macam button"): dropped in favor of a plain `align`
+// select, the same left/center/right control the standalone heading/text
+// element types already use (`designer-f-align`), and `fontSize` moved from
+// a canvas resize-handle to a typed number input next to it — a "Typography"
+// mini-section, not a drag interaction.
+// `Positionable` again (canvas hand-drag/resize for heading/subtitle stays —
+// only the Inspector's minimap went away, replaced by a simple align
+// icon-row, same ALIGN_ICON control the standard heading/text element types
+// already use). `align` only matters while `position === "flow"` (it's the
+// text-align inside the shared content block); it's ignored once dragged to
+// a custom x/y, same as a standalone positioned box has no "alignment".
 export interface Positionable {
   position: "flow" | "custom";
   x: string;
   y: string;
 }
 
+// Typography fields mirror TYPOGRAPHY_FIELDS' own keys/options exactly
+// (defined in Designer.tsx) so the Inspector can render them by literally
+// reusing that same field list + FieldInput, rather than a second
+// hand-written set of fontWeight/textTransform/etc. controls — kept in
+// lockstep by construction.
 export interface SlideText extends Positionable {
   text: string;
   color: string; // hex text-color override, "" = inherit the slide's default

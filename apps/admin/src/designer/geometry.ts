@@ -10,8 +10,13 @@ const BP_REFERENCE_PX: Record<"desktop" | "tablet" | "mobile", number> = { deskt
 
 // Mirrors SectionBlock.astro's fluidClamp/fluidFontSize math (real site:
 // clamp(floor, vw, ceiling)) but evaluated in JS against a fixed reference
-// width per breakpoint instead of an actual `vw` unit, since the admin's
-// canvas preview can't measure a real viewport width.
+// width per breakpoint instead of an actual `vw` unit — the Blocks canvas's
+// "bp" preview is just a max-width box inside the admin's own full browser
+// window (Designer.tsx's `style={{ maxWidth: ... }}` on the canvas), so a
+// real `vw`/`clamp()` here would measure the admin's actual (probably wide)
+// window, not this simulated container, and never visibly shrink. This gives
+// the canvas an accurate preview of how the real fluid font-size will look
+// small instead of staying full (and overflowing) size regardless of bp.
 export function fluidPreviewPx(px: number, bp: "desktop" | "tablet" | "mobile"): number {
   const floor = Math.max(14, Math.round(px * 0.55));
   const scaled = Math.round((px * BP_REFERENCE_PX[bp]) / 1000);
