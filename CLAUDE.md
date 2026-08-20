@@ -793,6 +793,15 @@ pnpm workspace monorepo with two apps:
   puts the real reason in `body.message` and just the generic HTTP phrase ("Bad Request") in `body.error`
   — every validation-rejection toast was showing that useless generic phrase instead of the actual
   problem. Both fixed in the same pass; `request()` now reads `body.message ?? body.error`.
+  `Designer.tsx`'s pure helpers (types + style/geometry/slide-parsing functions with no
+  dependency on the component's own state) live in `src/designer/` (`types.ts`, `style.ts`,
+  `geometry.ts`, `parsers.ts`) — Layer 0 of the God Component refactor described in
+  `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md`. Each has its own
+  `node:test` unit test (`pnpm --filter @ucms/admin test`, mirroring `apps/api`'s existing
+  `tsx --test` convention) — the first automated coverage this file has ever had. The
+  4 giant nested render sub-functions (`FieldInput`/`FieldGroups`/`Inspector`/`ElPreview`)
+  and the 50+ hooks/100+ mutation functions inside `Designer()` itself are still in
+  `Designer.tsx` — later layers in the same design doc, not yet started.
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
