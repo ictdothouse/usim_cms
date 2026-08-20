@@ -19,7 +19,7 @@ export function parsePairs(raw: string | undefined): { a: string; b: string }[] 
     });
 }
 
-const TEXT_DEFAULTS: SlideText = {
+export const TEXT_DEFAULTS: SlideText = {
   text: "",
   color: "",
   fontSize: "",
@@ -74,8 +74,8 @@ export function parseSlideText(raw: unknown): SlideText {
   return { ...TEXT_DEFAULTS };
 }
 
-const SLIDE_DEFAULTS = { bgColor: "", textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
-const BUTTON_DEFAULTS: SlideButton = {
+export const SLIDE_DEFAULTS = { bgColor: "", textPosition: "center" as const, overlayColor: "#000000", overlayOpacity: "35" };
+export const BUTTON_DEFAULTS: SlideButton = {
   label: "",
   href: "",
   variant: "primary",
