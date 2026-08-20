@@ -873,52 +873,13 @@ const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5re
 const SHADOW_DEFAULT_PARTS = ["0", "4", "12", "0", "#000000", "0.12"] as const;
 const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
 
-// Slider slide repeater. Storage is a JSON array (one object per slide) —
-// the Embla Carousel rewrite's richer per-slide fields (multiple buttons,
-// overlay color/opacity, text position) don't fit the old single
-// imageUrl|heading|subtitle|buttonLabel|buttonHref line format. parseSlides()
-// still accepts that legacy format too (JSON.parse throws on it, falls
-// through) so a page saved before this change keeps opening/saving — it
-// silently upgrades to the JSON format the next time it's edited here.
-// SectionBlock.astro's render-side parser mirrors this same fallback, and
-// validate-layout.ts's isSafeSlides() accepts both shapes on write.
 // Baseline px used as the resize-handle drag's starting point when a button
 // has no explicit fontSize yet — purely a UI convenience, not stored.
 const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
-// Same "flow vs custom x/y" idea buttons already have, applied to the
-// heading/subtitle too — the shared shape both extend is `Positionable`,
-// used by dragPosition/nudgePosition/PositionEditor so all three item kinds
-// (heading, subtitle, button) drive the exact same drag/nudge/preset code.
-// Deliberately NOT `Positionable` — heading/subtitle tried free x/y placement
-// (like buttons) and it felt wrong in practice ("tiba2 jd tak best la heading
-// dan subtitle sama macam button"): dropped in favor of a plain `align`
-// select, the same left/center/right control the standalone heading/text
-// element types already use (`designer-f-align`), and `fontSize` moved from
-// a canvas resize-handle to a typed number input next to it — a "Typography"
-// mini-section, not a drag interaction.
-// `Positionable` again (canvas hand-drag/resize for heading/subtitle stays —
-// only the Inspector's minimap went away, replaced by a simple align
-// icon-row, same ALIGN_ICON control the standard heading/text element types
-// already use). `align` only matters while `position === "flow"` (it's the
-// text-align inside the shared content block); it's ignored once dragged to
-// a custom x/y, same as a standalone positioned box has no "alignment".
-// Typography fields mirror TYPOGRAPHY_FIELDS' own keys/options exactly (see
-// below) so the Inspector can render them by literally reusing that same
-// field list + FieldInput, rather than a second hand-written set of
-// fontWeight/textTransform/etc. controls — kept in lockstep by construction.
 // Baseline px used as the canvas resize handle's starting point when
 // heading/subtitle have no explicit fontSize yet (mirrors SIZE_PX for
 // buttons, just no discrete sm/md/lg enum of their own to derive from).
 const TEXT_BASE_PX = { heading: 20, subtitle: 13 };
-// Mirrors SectionBlock.astro's fluidClamp/fluidFontSize math (real site:
-// clamp(floor, vw, ceiling)) but evaluated in JS against a fixed reference
-// width per breakpoint instead of an actual `vw` unit — the Blocks canvas's
-// "bp" preview is just a max-width box inside the admin's own full browser
-// window (Designer.tsx's `style={{ maxWidth: ... }}` on the canvas), so a
-// real `vw`/`clamp()` here would measure the admin's actual (probably wide)
-// window, not this simulated container, and never visibly shrink. This gives
-// the canvas an accurate preview of how the real fluid font-size will look
-// small instead of staying full (and overflowing) size regardless of bp.
 // Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
 // before the height field became free-form ("length" kind, below) still
 // store one of these keywords; resolving it here lets the canvas preview
