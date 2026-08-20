@@ -1,4 +1,4 @@
-# Build from repo root: docker build -f apps/frontend/Dockerfile -t usim-cms-frontend .
+# Build from repo root: docker build -f apps/frontend/Dockerfile -t ucms-frontend .
 # Runtime config via env vars only (API_URL, PORT, ...). No tenant identity is
 # baked in here — it always comes from the request's Host header (CLAUDE.md).
 FROM node:22-alpine AS base
@@ -12,8 +12,8 @@ COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/frontend apps/frontend
-RUN pnpm --filter @usim-cms/frontend build
-RUN pnpm --filter @usim-cms/frontend deploy --prod --legacy /app/deploy/frontend
+RUN pnpm --filter @ucms/frontend build
+RUN pnpm --filter @ucms/frontend deploy --prod --legacy /app/deploy/frontend
 
 FROM base AS runtime
 ENV NODE_ENV=production

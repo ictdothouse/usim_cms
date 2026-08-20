@@ -7,7 +7,7 @@ const [host, ...nameParts] = process.argv.slice(2);
 const departmentName = nameParts.join(" ");
 
 if (!host || !departmentName) {
-  console.error("Usage: pnpm --filter @usim-cms/api tenant:add <host> <department name>");
+  console.error("Usage: pnpm --filter @ucms/api tenant:add <host> <department name>");
   process.exit(1);
 }
 

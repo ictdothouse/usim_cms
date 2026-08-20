@@ -2,12 +2,12 @@
 // Zero-dependency ops dashboard for the usim_cms stack — no npm install,
 // just Node's own builtins, so installing it never touches whatever package
 // versions any other project on this VPS depends on.
-// Started by install.sh as a systemd unit; see monitor/usim-cms-monitor.service.template.
+// Started by install.sh as a systemd unit; see monitor/ucms-monitor.service.template.
 //
 // Two backends, selected by $DEPLOY_MODE (set by install.sh):
 //   "docker"  — actions run `docker compose <action> <service>` against the
 //               db/api/frontend/admin services in docker-compose.yml.
-//   "systemd" — actions run `systemctl <action> usim-cms-<service>` against
+//   "systemd" — actions run `systemctl <action> ucms-<service>` against
 //               the bare-metal install's own units, and Postgres is only
 //               ever restarted if $DB_MANAGED=true (this install's own
 //               ensure_postgres actually installed it — if it instead
@@ -38,7 +38,30 @@ const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
 // Whitelisted so a service name never reaches child_process from raw user
 // input — every route validates against this array before shelling out.
 const SERVICES = DEPLOY_MODE === "docker" ? ["db", "api", "frontend", "admin"] : ["api", "frontend", "admin"];
-const UNIT_MAP = { api: "usim-cms-api", frontend: "usim-cms-frontend", admin: "usim-cms-admin" };
+const UNIT_MAP = { api: "ucms-api", frontend: "ucms-frontend", admin: "ucms-admin" };
+
+// api/frontend/admin were split out of docker-compose.yml into
+// docker-compose.release.yml so scripts/deploy.sh can blue-green deploy
+// them (see CLAUDE.md's Deployment section) — they now run under whichever
+// color (`ucms-blue`/`ucms-green`) that script last promoted, tracked in
+// .deploy-color, never under this repo's own default compose project the
+// way db/proxy still do. Every docker-mode compose call below needs the
+// right -p/-f prefix depending on which file a service actually lives in.
+const RELEASE_FILE = "docker-compose.release.yml";
+const RELEASE_SERVICES = ["api", "frontend", "admin"];
+function currentColor() {
+  try {
+    return fs.readFileSync(path.join(REPO_DIR, ".deploy-color"), "utf8").trim() || "blue";
+  } catch {
+    return "blue";
+  }
+}
+function composeArgsFor(name) {
+  if (RELEASE_SERVICES.includes(name)) {
+    return ["-p", `ucms-${currentColor()}`, "-f", RELEASE_FILE];
+  }
+  return [];
+}
 
 if (!MONITOR_PASSWORD) {
   console.error("MONITOR_PASSWORD is not set — refusing to start with no auth.");
@@ -93,27 +116,38 @@ function runCompose(args, cb) {
   );
 }
 
+function parseComposePs(stdout) {
+  // `docker compose ps --format json` emits one JSON object per line, not
+  // a single array — has changed shape across Compose versions, so accept
+  // both.
+  const lines = stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 1 && lines[0].startsWith("[")) return JSON.parse(lines[0]);
+  return lines.map((l) => JSON.parse(l));
+}
+
+// db/proxy (docker-compose.yml, this repo's default project) and
+// api/frontend/admin (docker-compose.release.yml, the currently-promoted
+// color's project — see composeArgsFor) are two separate compose
+// invocations now, merged into one list for the dashboard.
 function getComposeStatus(cb) {
-  runCompose(["ps", "--format", "json"], (err, stdout, stderr) => {
-    if (err) return cb(err, null);
-    // `docker compose ps --format json` emits one JSON object per line, not
-    // a single array — has changed shape across Compose versions, so accept
-    // both.
-    const lines = stdout
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    let services = [];
-    try {
-      if (lines.length === 1 && lines[0].startsWith("[")) {
-        services = JSON.parse(lines[0]);
-      } else {
-        services = lines.map((l) => JSON.parse(l));
+  runCompose(["ps", "--format", "json"], (baseErr, baseOut, baseErrText) => {
+    runCompose([...composeArgsFor("api"), "ps", "--format", "json"], (relErr, relOut, relErrText) => {
+      if (baseErr && relErr) return cb(baseErr, null);
+      let services = [];
+      try {
+        if (!baseErr && baseOut.trim()) services = services.concat(parseComposePs(baseOut));
+        if (!relErr && relOut.trim()) services = services.concat(parseComposePs(relOut));
+      } catch {
+        return cb(
+          new Error(`could not parse compose ps output: ${baseErrText || relErrText || baseOut || relOut}`),
+          null,
+        );
       }
-    } catch {
-      return cb(new Error(`could not parse compose ps output: ${stderr || stdout}`), null);
-    }
-    cb(null, services);
+      cb(null, services);
+    });
   });
 }
 
@@ -195,7 +229,7 @@ function handleServiceAction(req, res, name, action) {
   if (!SERVICES.includes(name)) return sendJson(res, 400, { error: "unknown service" });
   if (!["start", "stop", "restart"].includes(action)) return sendJson(res, 400, { error: "unknown action" });
   if (DEPLOY_MODE === "docker") {
-    return runCompose([action, name], (err, stdout, stderr) => {
+    return runCompose([...composeArgsFor(name), action, name], (err, stdout, stderr) => {
       if (err) return sendJson(res, 500, { error: String(err.message || err), stderr });
       sendJson(res, 200, { ok: true, stdout, stderr });
     });
@@ -217,7 +251,7 @@ function handleLogs(req, res, name, tail) {
   if (DEPLOY_MODE === "docker") {
     return execFile(
       "docker",
-      ["compose", "logs", "--no-color", "--tail", n, name],
+      ["compose", ...composeArgsFor(name), "logs", "--no-color", "--tail", n, name],
       { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
       respond,
     );
@@ -274,12 +308,10 @@ function handlePull(req, res) {
     set -e
     echo "--- git pull ---"
     ${pullStep}
-    echo "--- docker compose build ---"
-    docker compose build
-    echo "--- docker compose up -d ---"
-    docker compose up -d db api frontend admin
+    echo "--- blue-green deploy (zero-downtime, see scripts/deploy.sh) ---"
+    bash scripts/deploy.sh
     echo "--- restarting monitor ---"
-    systemctl restart usim-cms-monitor
+    systemctl restart ucms-monitor
     echo "--- done ---"
   `
       : `
@@ -292,16 +324,16 @@ function handlePull(req, res) {
     echo "--- pnpm install ---"
     pnpm install --frozen-lockfile
     echo "--- build api ---"
-    pnpm --filter @usim-cms/api build
+    pnpm --filter @ucms/api build
     echo "--- build admin ---"
     VITE_API_URL="http://${PUBLIC_HOST}:${API_PORT}" VITE_FRONTEND_URL="http://${PUBLIC_HOST}:${FRONTEND_PORT}" \\
-      pnpm --filter @usim-cms/admin build
+      pnpm --filter @ucms/admin build
     echo "--- build frontend ---"
-    API_URL="http://127.0.0.1:${API_PORT}" pnpm --filter @usim-cms/frontend build
+    API_URL="http://127.0.0.1:${API_PORT}" pnpm --filter @ucms/frontend build
     echo "--- restarting services ---"
-    systemctl restart usim-cms-api usim-cms-frontend usim-cms-admin
+    systemctl restart ucms-api ucms-frontend ucms-admin
     echo "--- restarting monitor ---"
-    systemctl restart usim-cms-monitor
+    systemctl restart ucms-monitor
     echo "--- done ---"
   `;
   const child = spawn("sh", ["-c", script], {
@@ -391,7 +423,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <div class="grid" id="hostGrid"></div>
 
 <div class="row">
-  <button onclick="pull()">Pull latest &amp; rebuild</button>
+  <button onclick="pull()">Pull latest &amp; deploy</button>
   <button class="secondary" onclick="restartAll()">Restart all</button>
   <button class="secondary" onclick="refresh()">Refresh now</button>
 </div>

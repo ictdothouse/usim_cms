@@ -14,9 +14,9 @@ Package manager is pnpm (via corepack — run `corepack enable` once if `pnpm` i
 - `pnpm dev:frontend` — run the Astro SSR site renderer (`apps/frontend`)
 - `pnpm build` — build all workspace packages
 - `pnpm typecheck` — typecheck all workspace packages
-- `pnpm --filter @usim-cms/api db:generate` — generate a Drizzle migration `.sql` file from
+- `pnpm --filter @ucms/api db:generate` — generate a Drizzle migration `.sql` file from
   `apps/api/src/db/schema.ts` into `src/db/migrations` (authoring only — writes the file, applies nothing)
-- `pnpm --filter @usim-cms/api db:migrate` — **do not run this against `DATABASE_URL` in normal use.**
+- `pnpm --filter @ucms/api db:migrate` — **do not run this against `DATABASE_URL` in normal use.**
   `schema.ts` defines tenant-content tables (`pages`/`posts`/`categories`/etc), but `DATABASE_URL` is the
   control-plane DB, which never holds those tables (see "Multi-tenancy" below) — running drizzle-kit's own
   migrate here would create them there anyway, alongside the registry tables that actually belong. The
@@ -29,7 +29,7 @@ Package manager is pnpm (via corepack — run `corepack enable` once if `pnpm` i
 
 `apps/api` needs a `DATABASE_URL` (see `apps/api/.env.example`) pointing at a Postgres instance before
 routes that touch the database will work — `/health` does not need one. On a fresh DB, connect as a
-superuser once and run `pnpm --filter @usim-cms/api db:setup-role`, then switch `DATABASE_URL` to the
+superuser once and run `pnpm --filter @ucms/api db:setup-role`, then switch `DATABASE_URL` to the
 `usim_cms_app` role it creates — the `pages` RLS policies (`src/db/migrations/0002_pages_rls.sql`) are
 a silent no-op under a superuser connection. That role also needs `CREATEDB` (see the grant in
 `scripts/setup-db-role.sql`): each tenant gets its own database, auto-provisioned on first request.
@@ -1103,7 +1103,7 @@ pnpm workspace monorepo with two apps:
   reruns just `verify_external_reachability`/`diagnose_reachability` (no self-heal, no
   credential prompt) against an already-running stack via the same `resolve_running_ports`
   helper `--admin-only` uses (extended to also resolve `ADMIN_PORT`/`FRONTEND_PORT`, from
-  `.env` for docker mode or `/etc/usim-cms-monitor.env` for bare-metal) — meant to replace a
+  `.env` for docker mode or `/etc/ucms-monitor.env` for bare-metal) — meant to replace a
   manual `curl`/`ss`/`iptables` debugging session with one command.
 - `install-dev.mjs` is the LOCAL-DEV counterpart — `node install-dev.mjs`, same command on
   Mac/Windows/Linux, Docker-only (no bare-metal path: Docker Desktop is assumed, so there's
@@ -1118,6 +1118,89 @@ pnpm workspace monorepo with two apps:
 - Monitoring/alerting is not implemented — known gap. `restart: unless-stopped` +
   compose healthchecks only cover crash-restart, not metrics or alerting; revisit if/when
   the instance carries enough tenants that a silent outage would go unnoticed.
+
+### Blue-green zero-downtime deploys (docker mode only)
+
+Built for the ~100-tenant department/faculty rollout: `docker-compose.yml` now holds only
+`db`+`proxy` (the always-on "base"); `api`/`frontend`/`admin` moved to
+`docker-compose.release.yml`, started under an explicit `-p ucms-blue`/`-p ucms-green`
+project name so two colors can run side by side. `scripts/deploy.sh` drives the whole
+cycle: reads `.deploy-color` (repo root) for the currently-live color, builds+starts the
+OTHER one (`--scale api=$API_REPLICAS` etc, default 1 each — see `.env.example`), polls
+each new container's real Docker healthcheck (`docker inspect`'s `.State.Health.Status`;
+a service with no HEALTHCHECK, like `admin`, just needs `.State.Running`) up to 90s, and
+only once every container is healthy does it POST to `POST /internal/deploy/promote` —
+which flips Caddy's live routes to the new color, atomically, via the exact same
+`syncCaddy`/`buildCaddyConfig` (`apps/api/src/proxy-sync.ts`) the tenant-domain-automation
+feature already used. Only then is `.deploy-color` updated and the OLD color torn down.
+Any failure before promote succeeds leaves the previously-live color completely untouched
+(zero impact) and tears down just the failed new color — safe to re-run.
+- `buildCaddyConfig(tenants, upstreams?)` gained an optional `CaddyUpstreams` param
+  (`{admin?, api?, frontend?}`, each an array of `host:port` dial strings) — omitted, it
+  falls back to the single-container dial targets (`ADMIN_UPSTREAM`/`API_UPSTREAM`/
+  `FRONTEND_UPSTREAM` env vars, defaulting to the plain `admin:80`/`api:3000`/
+  `frontend:4321` names) for anyone running the old-style single-stack setup without
+  blue-green. A blue-green/scaled deploy instead passes every live replica's own
+  Compose-generated container name (`ucms-green-api-1`, `-2`, ...) — Caddy fans out
+  (round-robins + health-checks) across all of them.
+- **This is a real, deliberate change to what the "Domain & SSL Automation" switch
+  (`getProxyAutomationEnabled`) means.** That switch used to gate the ONLY way Caddy's
+  config ever got pushed dynamically (tenant create/delete, `PUT /api/portal/proxy-
+  settings`). `POST /internal/deploy/promote` bypasses it unconditionally — blue-green can
+  only exist at all if Caddy's base admin/api/tenant routing is driven dynamically on
+  every deploy, switch or no switch, since a color's own container name isn't known at
+  Caddyfile-authoring time. The switch's remaining, narrower meaning: whether a newly
+  created tenant's CUSTOM domain gets automatic DNS/cert provisioning — a separate
+  concern it still fully controls. Guarded by a shared secret (`DEPLOY_SECRET`,
+  `x-deploy-secret` header, `crypto.timingSafeEqual`), never a session token, since it's
+  called container-to-container by `deploy.sh` (via `docker compose exec` running a small
+  inline `node -e` using Node 22's built-in `fetch`, not the image's busybox `wget` —
+  its `--post-data`/`--header` support isn't reliably consistent across busybox builds).
+- `Caddyfile`'s own static `admin`/`api`/tenant routes are now only ever read ONCE — the
+  very first time the `proxy` container starts, before `deploy.sh` has ever run — pointing
+  at what a first-ever deploy always produces (`ucms-blue-{admin,api,frontend}-1`). Every
+  deploy after that overwrites Caddy's live config entirely via the promote endpoint;
+  editing `ADMIN_DOMAIN`/`API_DOMAIN`/`TENANT_DOMAINS` in `.env` after that point has no
+  effect until the `proxy` container is fully recreated (its config now lives in Caddy's
+  own autosave, not this file) — manage tenants/domains through the admin's Settings tab.
+- `apps/frontend/server.mjs` gained a plain `GET /health` (before `serveStatic`/`handler`)
+  — Docker's own healthcheck in `docker-compose.release.yml` and `deploy.sh`'s promotion
+  gate both need a liveness probe that never depends on a tenant or the api being
+  reachable, unlike every real page route.
+- **`install.sh`'s existing docker-mode trial flow is deliberately untouched** — it still
+  publishes `api`/`frontend`/`admin` straight to host ports and never starts `proxy`,
+  exactly as before. That flow is proven across real incidents (multi-distro, iptables,
+  port-conflict reachability hardening, all documented above) and doesn't need
+  zero-downtime at all — nothing is depending on uptime before a site has ever gone live.
+  Blue-green is a deliberately SEPARATE "go-live" step: once the trial install is
+  confirmed reachable and a real domain is pointed at the box, bring up `proxy`
+  (`docker compose up -d proxy`) and run `scripts/deploy.sh` once — this adopts the
+  `ucms-blue` project as the live app tier and every subsequent update should go through
+  `scripts/deploy.sh` (or the monitor's "Pull latest & deploy" button, below) instead of
+  `install.sh`'s original `docker compose up -d --build db api frontend admin`. The
+  original trial containers (if left running) should be stopped manually at that point —
+  this transition is not yet automated by `install.sh` itself, by design (see the
+  reasoning above: keeping the tested trial path untouched was judged lower-risk than
+  rewriting its reachability/bootstrap assumptions to route through Caddy from the start).
+- `monitor/server.js`'s "Pull latest & deploy" button (docker mode) now runs
+  `bash scripts/deploy.sh` instead of `docker compose up -d db api frontend admin` — this
+  is what makes routine updates zero-downtime. Its per-service status/restart/stop/start/
+  logs actions also had to learn that `api`/`frontend`/`admin` live in
+  `docker-compose.release.yml` under whichever color `.deploy-color` names
+  (`composeArgsFor`), while `db`/`proxy` stay in the plain default-project
+  `docker-compose.yml` — unaffected. A manual "Restart" on `api` restarts every replica of
+  that service at once (coarser than `deploy.sh`'s health-checked one-color-at-a-time
+  flip) — a quick fix-it action, not the zero-downtime deploy path.
+- Multisite panel (`TenantsPanel`/`TenantCard`, `apps/admin/src/App.tsx`) gained a
+  cPanel-quota-style resource-usage line per tenant card — `GET /api/portal/tenants/usage`
+  (superadmin-only) returns `{host, dbSizeBytes, diskSizeBytes}[]`: `dbSizeBytes` via a new
+  `getTenantDbSizeBytes` (`tenant-pool.ts`, `pg_database_size`, best-effort — `null` on any
+  failure, e.g. a tenant whose database was never provisioned), `diskSizeBytes` via a
+  recursive `dirSizeBytes` walk of that tenant's uploads folder (`null` when the folder
+  doesn't exist yet, or always `null` when `STORAGE_DRIVER=s3` — summing an S3 bucket's
+  objects isn't a cheap "folder size" the way local disk is). A glance metric for a
+  superadmin managing ~100 sites, not billing-grade metering — fetched separately from the
+  tenant list itself so one slow scan can't block the panel from rendering.
 
 ## Key constraints (from architecture.md)
 

@@ -38,6 +38,15 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer((req, res) => {
+  // Plain liveness probe for Docker's own healthcheck (docker-compose.
+  // release.yml) and scripts/deploy.sh's blue-green promotion gate — must
+  // never depend on a tenant or the api being reachable, unlike every real
+  // page route.
+  if (req.method === "GET" && req.url === "/health") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"status":"ok"}');
+    return;
+  }
   if (serveStatic(req, res)) return;
   handler(req, res);
 });
