@@ -218,7 +218,45 @@ export const tenants = pgTable("tenants", {
 export const platformSettings = pgTable("platform_settings", {
   id: text("id").primaryKey().default("singleton"),
   proxyAutomationEnabled: boolean("proxy_automation_enabled").notNull().default(false),
+  // Instance-wide master switch for the "Login Methods" Settings card — off
+  // by default (no disruption to an already-live install). While on: any
+  // user who has personally enrolled TOTP (users.totpEnabled) is required to
+  // complete it as a second factor at login; users who haven't enrolled yet
+  // just see the "Set up MFA" prompt appear in their own Security tab. This
+  // is the extension point for Entra ID/SSO later — see users table comment.
+  mfaEnabled: boolean("mfa_enabled").notNull().default(false),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Every failed AND successful login attempt, kept a short while for rate-
+// limiting (see isLoginRateLimited in tenant-pool.ts) — deliberately a plain
+// row-per-attempt table, not per-user counters, so it can key on email OR ip
+// (an attacker enumerating many emails from one IP is still caught). Old
+// rows are pruned lazily by the same query that checks the limit, so no
+// separate cleanup cron is needed.
+export const loginAttempts = pgTable("login_attempts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull(),
+  ip: text("ip").notNull(),
+  success: boolean("success").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Control-plane, not tenant-scoped — records who did what to instance-wide
+// or cross-tenant state (tenant create/delete, role/permission changes, the
+// mfaEnabled toggle itself). Deliberately NOT wired into every read/list
+// route — only mutations a superadmin could later need to answer "who did
+// this" about. `meta` carries whatever small, action-specific detail is
+// useful (e.g. { host } for a tenant delete), never a full row dump.
+export const auditLog = pgTable("audit_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  actorUserId: uuid("actor_user_id"),
+  actorEmail: text("actor_email"),
+  action: text("action").notNull(),
+  target: text("target"),
+  meta: jsonb("meta").notNull().default({}),
+  ip: text("ip"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // Explicit "publish to portal" copy of shareable content, also "public"
@@ -344,5 +382,13 @@ export const users = pgTable("users", {
   // Per-user permissions on top of the role's — for one-off grants that
   // don't warrant a whole new named role.
   extraPermissions: text("extra_permissions").array().notNull().default([]),
+  // TOTP MFA (RFC 6238) — a personal opt-in only reachable when
+  // platformSettings.mfaEnabled is on (see the Security tab). totpSecret is
+  // the base32 key set on enroll (POST /api/auth/totp-setup) but only
+  // trusted once totpEnabled flips true (POST /api/auth/totp-confirm) — a
+  // secret alone with totpEnabled still false means enrollment was started
+  // but never confirmed, and login ignores it entirely.
+  totpSecret: text("totp_secret"),
+  totpEnabled: boolean("totp_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

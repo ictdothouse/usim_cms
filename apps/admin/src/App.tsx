@@ -9,6 +9,7 @@ import {
   Folder,
   Globe,
   Image as ImageIcon,
+  KeyRound,
   Languages,
   Layers,
   LayoutDashboard,
@@ -166,13 +167,36 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set once step 1 (password) succeeds but the account has TOTP enabled —
+  // switches the form to the code-entry step instead of a second page/route.
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const session = await api.login(email, password);
+      const result = await api.login(email, password);
+      if (result.mfaRequired && result.pendingToken) {
+        setPendingToken(result.pendingToken);
+        return;
+      }
+      localStorage.setItem(SESSION_KEY, JSON.stringify(result.session));
+      onLogin(result.session!);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitCode(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await api.verifyTotp(pendingToken!, code);
       localStorage.setItem(SESSION_KEY, JSON.stringify(session));
       onLogin(session);
     } catch (err) {
@@ -184,7 +208,10 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas font-sans text-ink antialiased">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-line/30 bg-white p-8 shadow-sm">
+      <form
+        onSubmit={pendingToken ? submitCode : submit}
+        className="w-full max-w-sm space-y-4 rounded-2xl border border-line/30 bg-white p-8 shadow-sm"
+      >
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-accent to-[#00c6ff] text-sm font-bold text-white shadow-sm">
             U
@@ -194,27 +221,61 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
             <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
           </div>
         </div>
-        <p className="text-xs text-sub">{t("login-desc")}</p>
-        <input
-          className={inputCls}
-          type="email"
-          placeholder={t("login-email")}
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          className={inputCls}
-          type="password"
-          placeholder={t("login-password")}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>
-          {busy ? t("login-busy") : t("login-submit")}
-        </button>
+        {pendingToken ? (
+          <>
+            <p className="text-xs text-sub">{t("login-mfa-desc")}</p>
+            <input
+              className={inputCls}
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              autoFocus
+              required
+            />
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <button type="submit" disabled={busy || code.length !== 6} className={`${btnPrimary} w-full`}>
+              {busy ? t("login-busy") : t("login-mfa-submit")}
+            </button>
+            <button
+              type="button"
+              className="w-full text-center text-xs text-sub underline"
+              onClick={() => {
+                setPendingToken(null);
+                setCode("");
+                setError(null);
+              }}
+            >
+              {t("login-mfa-back")}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-sub">{t("login-desc")}</p>
+            <input
+              className={inputCls}
+              type="email"
+              placeholder={t("login-email")}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <input
+              className={inputCls}
+              type="password"
+              placeholder={t("login-password")}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>
+              {busy ? t("login-busy") : t("login-submit")}
+            </button>
+          </>
+        )}
       </form>
     </div>
   );
@@ -3407,7 +3468,19 @@ function ContentManager({
 }
 
 // ---------- Shell (sidebar + header, prototype layout) ----------
-type Tab = "dashboard" | "multisite" | "users" | "roles" | "content" | "theme" | "languages" | "menus" | "global-theme" | "feed" | "settings";
+type Tab =
+  | "dashboard"
+  | "multisite"
+  | "users"
+  | "roles"
+  | "content"
+  | "theme"
+  | "languages"
+  | "menus"
+  | "global-theme"
+  | "feed"
+  | "settings"
+  | "security";
 
 const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = {
   dashboard: { labelKey: "tab-dashboard", icon: LayoutDashboard },
@@ -3421,6 +3494,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
+  security: { labelKey: "tab-security", icon: KeyRound },
 };
 
 // Common languages for the "add language" typeahead below — picking a
@@ -3479,6 +3553,9 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [proxyConnected, setProxyConnected] = useState(false);
   const [proxyErr, setProxyErr] = useState<string | null>(null);
   const [proxyBusy, setProxyBusy] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaErr, setMfaErr] = useState<string | null>(null);
+  const [mfaBusy, setMfaBusy] = useState(false);
   const [proxyTenants, setProxyTenants] = useState<Array<Record<string, unknown>>>(tenants);
   const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
@@ -3543,6 +3620,24 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
       setProxyErr((e as Error).message);
     } finally {
       setProxyBusy(false);
+    }
+  }
+
+  function reloadLoginSettings() {
+    void api.getLoginSettings(token).then((s) => setMfaEnabled(s.mfaEnabled)).catch((e) => setMfaErr((e as Error).message));
+  }
+  useEffect(reloadLoginSettings, [token]);
+
+  async function toggleMfaEnabled(enabled: boolean) {
+    setMfaErr(null);
+    setMfaBusy(true);
+    try {
+      await api.setLoginSettings(token, enabled);
+      reloadLoginSettings();
+    } catch (e) {
+      setMfaErr((e as Error).message);
+    } finally {
+      setMfaBusy(false);
     }
   }
 
@@ -3817,6 +3912,35 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
             <p className="text-xs text-sub">{t("settings-proxy-dns-reminder")}</p>
             {!proxyEnabled && <p className="text-xs text-sub">{t("settings-proxy-manual-hint")}</p>}
           </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <ShieldCheck className="h-3.5 w-3.5 text-accent" /> {t("settings-login-methods-title")}
+            </h3>
+            <p className="text-xs text-sub">{t("settings-login-methods-desc")}</p>
+            {mfaErr && <p className="text-xs text-red-600">{mfaErr}</p>}
+            <div className="space-y-2 rounded-lg border border-line/40 p-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-ink">{t("settings-login-password")}</span>
+                <span className="text-sub">{t("settings-login-always-on")}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex items-center gap-2 font-medium text-ink">
+                  <input
+                    type="checkbox"
+                    checked={mfaEnabled}
+                    disabled={mfaBusy}
+                    onChange={(e) => void toggleMfaEnabled(e.target.checked)}
+                  />
+                  {t("settings-login-mfa")}
+                </label>
+              </div>
+              <div className="flex items-center justify-between text-xs opacity-50">
+                <span className="font-medium text-ink">{t("settings-login-entra")}</span>
+                <span className="text-sub">{t("settings-login-coming-soon")}</span>
+              </div>
+            </div>
+            {mfaEnabled && <p className="text-xs text-sub">{t("settings-login-mfa-hint")}</p>}
+          </div>
         </>
       )}
 
@@ -3962,6 +4086,122 @@ function NavButton({ tab, active, onClick }: { tab: Tab; active: boolean; onClic
   );
 }
 
+// Personal MFA enrollment — reachable by any logged-in user regardless of
+// role (a webmaster has no site-picker to reach SettingsPanel, but still
+// needs to manage their own MFA), unlike the instance-wide switch in
+// SettingsPanel's "Login Methods" card.
+function SecurityPanel({ token }: { token: string }) {
+  const { t } = useT();
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [enrolling, setEnrolling] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function reload() {
+    void api.getMe(token).then((s) => setTotpEnabled(s.totpEnabled));
+  }
+  useEffect(reload, [token]);
+
+  async function startEnroll() {
+    setErr(null);
+    setMsg(null);
+    setBusy(true);
+    try {
+      setEnrolling(await api.totpSetup(token));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmEnroll(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    setBusy(true);
+    try {
+      await api.totpConfirm(token, code);
+      setEnrolling(null);
+      setCode("");
+      setMsg(t("security-mfa-enabled-msg"));
+      reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api.totpDisable(token);
+      setMsg(t("security-mfa-disabled-msg"));
+      reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="max-w-lg space-y-4">
+      <h2 className="text-lg font-bold text-ink">{t("tab-security")}</h2>
+      <div className={`${card} space-y-3 p-5`}>
+        <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+          <KeyRound className="h-3.5 w-3.5 text-accent" /> {t("security-mfa-title")}
+        </h3>
+        <p className="text-xs text-sub">{t("security-mfa-desc")}</p>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+        {msg && <p className="text-xs text-green-700">{msg}</p>}
+        {totpEnabled ? (
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-ok">{t("security-mfa-status-on")}</span>
+            <button onClick={() => void disable()} disabled={busy} className={btnGhost}>
+              {t("security-mfa-disable-btn")}
+            </button>
+          </div>
+        ) : enrolling ? (
+          <form onSubmit={confirmEnroll} className="space-y-2">
+            <p className="text-xs text-sub">{t("security-mfa-scan-hint")}</p>
+            <p className="rounded-lg border border-line/40 bg-canvas p-2 font-mono text-[11px] break-all">
+              {enrolling.secret}
+            </p>
+            <input
+              className={inputCls}
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              required
+            />
+            <div className="flex gap-2">
+              <button type="submit" disabled={busy || code.length !== 6} className={btnPrimary}>
+                {t("security-mfa-confirm-btn")}
+              </button>
+              <button type="button" onClick={() => setEnrolling(null)} className={btnGhost}>
+                {t("cancel")}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-sub">{t("security-mfa-status-off")}</span>
+            <button onClick={() => void startEnroll()} disabled={busy} className={btnPrimary}>
+              {t("security-mfa-setup-btn")}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Shell({
   session,
   onLogout,
@@ -3997,7 +4237,7 @@ function Shell({
     : session.tenantHosts.map((h) => ({ id: h, host: h, departmentName: h }));
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
-  const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings"] : ["dashboard"];
+  const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings", "security"] : ["dashboard", "security"];
   const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus"];
 
   return (
@@ -4102,6 +4342,7 @@ function Shell({
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />
+                <Route path="security" element={<SecurityPanel token={session.token} />} />
               </Routes>
             </div>
           </main>

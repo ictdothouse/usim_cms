@@ -619,6 +619,147 @@ export async function setProxyAutomationEnabled(enabled: boolean): Promise<void>
   }
 }
 
+// Instance-wide "Login Methods" master switch (Settings tab) — same
+// singleton-row pattern as proxy automation above.
+export async function getMfaEnabled(): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.select().from(schema.platformSettings);
+    return row?.mfaEnabled ?? false;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setMfaEnabled(enabled: boolean): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .insert(schema.platformSettings)
+      .values({ id: "singleton", mfaEnabled: enabled })
+      .onConflictDoUpdate({
+        target: schema.platformSettings.id,
+        set: { mfaEnabled: enabled, updatedAt: new Date() },
+      });
+  } finally {
+    client.release();
+  }
+}
+
+export async function findUserById(id: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));
+    return user;
+  } finally {
+    client.release();
+  }
+}
+
+// Enrollment step 1 (POST /api/auth/totp-setup) — stores the new secret but
+// leaves totpEnabled false until confirmed with a real code
+// (setUserTotpEnabled below), so a half-finished enrollment never silently
+// starts requiring a code the user hasn't confirmed they can generate.
+export async function setUserTotpSecret(id: string, secret: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.update(schema.users).set({ totpSecret: secret, totpEnabled: false }).where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+// enabled=false also clears totpSecret (a user turning MFA off, or a
+// superadmin resetting a locked-out user's MFA for recovery, should require
+// a fresh enrollment next time, not silently reactivate an old secret).
+export async function setUserTotpEnabled(id: string, enabled: boolean): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .update(schema.users)
+      .set(enabled ? { totpEnabled: true } : { totpEnabled: false, totpSecret: null })
+      .where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX_FAILURES = 5;
+const LOGIN_ATTEMPTS_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+export async function recordLoginAttempt(email: string, ip: string, success: boolean): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.insert(schema.loginAttempts).values({ email, ip, success });
+    // Lazy prune, piggybacked on the same write — no separate cleanup cron.
+    await client.query("DELETE FROM login_attempts WHERE created_at < $1", [
+      new Date(Date.now() - LOGIN_ATTEMPTS_RETENTION_MS),
+    ]);
+  } finally {
+    client.release();
+  }
+}
+
+// True once either this email or this IP has LOGIN_RATE_LIMIT_MAX_FAILURES
+// failed attempts within LOGIN_RATE_LIMIT_WINDOW_MS — checked BEFORE the
+// password is even compared, so a locked-out caller never gets a fresh
+// timing oracle either. Keying on email OR ip (not just one) catches both a
+// single account under brute force AND one IP enumerating many emails.
+export async function isLoginRateLimited(email: string, ip: string): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const cutoff = new Date(Date.now() - LOGIN_RATE_LIMIT_WINDOW_MS);
+    const { rows } = await client.query(
+      "SELECT count(*)::int AS n FROM login_attempts WHERE success = false AND created_at > $1 AND (email = $2 OR ip = $3)",
+      [cutoff, email, ip],
+    );
+    return (rows[0]?.n ?? 0) >= LOGIN_RATE_LIMIT_MAX_FAILURES;
+  } finally {
+    client.release();
+  }
+}
+
+// Control-plane audit trail — see schema.ts's audit_log comment for what
+// this is (and isn't) meant to cover.
+export async function insertAuditLog(entry: {
+  actorUserId?: string | null;
+  actorEmail?: string | null;
+  action: string;
+  target?: string | null;
+  meta?: Record<string, unknown>;
+  ip?: string | null;
+}): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.insert(schema.auditLog).values({
+      actorUserId: entry.actorUserId ?? null,
+      actorEmail: entry.actorEmail ?? null,
+      action: entry.action,
+      target: entry.target ?? null,
+      meta: entry.meta ?? {},
+      ip: entry.ip ?? null,
+    });
+  } finally {
+    client.release();
+  }
+}
+
 // Records that `host` now has a custom certificate loaded into Caddy
 // (certExpiresAt parsed from the cert by the caller — see proxy-sync.ts's
 // parseCertExpiry), or pass null to clear both columns and revert that

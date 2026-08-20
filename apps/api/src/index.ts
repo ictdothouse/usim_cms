@@ -4,6 +4,7 @@ import { rm, readdir, stat } from "node:fs/promises";
 import Fastify from "fastify";
 import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -49,6 +50,14 @@ import {
   getProxyAutomationEnabled,
   setProxyAutomationEnabled,
   setTenantCertInfo,
+  getMfaEnabled,
+  setMfaEnabled,
+  findUserById,
+  setUserTotpSecret,
+  setUserTotpEnabled,
+  recordLoginAttempt,
+  isLoginRateLimited,
+  insertAuditLog,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import {
@@ -60,7 +69,16 @@ import {
   isValidDialTargets,
   type CaddyUpstreams,
 } from "./proxy-sync.js";
-import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
+import {
+  verifyPassword,
+  hashPassword,
+  signSession,
+  verifySession,
+  SESSION_TTL_MS,
+  generateTotpSecret,
+  verifyTotpCode,
+  totpAuthUri,
+} from "./db/auth.js";
 import {
   exportTenantBackup,
   importTenantBackup,
@@ -216,6 +234,14 @@ await app.register(cors, {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "x-tenant-host"],
 });
+// contentSecurityPolicy off: this API only ever returns JSON, never HTML it
+// renders itself, so a CSP here has nothing to protect — apps/frontend's
+// own response headers are the real CSP surface (out of scope for this
+// change) and already need their own frame-ancestors allowance for Live
+// Edit's iframe, which a generic CSP added here would have no bearing on
+// anyway. crossOriginResourcePolicy off: media/uploads are deliberately
+// fetched cross-origin (by the tenant frontend, by Live Edit's iframe).
+await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: false });
 await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 // Only serves files when STORAGE_DRIVER=local (default) — an S3-backed
 // upload returns a full external URL and doesn't need this at all.
@@ -275,12 +301,20 @@ app.post("/api/auth/login", async (req, reply) => {
     reply.code(400);
     return { error: "email and password required" };
   }
+  // Checked BEFORE the password is even compared, so a locked-out caller
+  // never gets a fresh timing oracle on top of the lockout itself.
+  if (await isLoginRateLimited(email, req.ip)) {
+    reply.code(429);
+    return { error: "Too many failed attempts — try again later" };
+  }
   const user = await findUserByEmail(email);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  const valid = !!user && verifyPassword(password, user.passwordHash);
+  await recordLoginAttempt(email, req.ip, valid);
+  if (!user || !valid) {
     reply.code(401);
     return { error: "invalid credentials" };
   }
-  const token = signSession({
+  const basePayload = {
     userId: user.id,
     email: user.email,
     role: user.role as "superadmin" | "webmaster",
@@ -290,9 +324,130 @@ app.post("/api/auth/login", async (req, reply) => {
       await getRolePermissions(user.roleId as string | null),
       user.extraPermissions as string[] | null,
     ),
+  };
+  // Second factor required — issue a short-lived pending token instead of a
+  // real session; POST /api/auth/totp-verify exchanges it once the code
+  // checks out. pendingMfa tokens are rejected by every other route (see
+  // plugins/auth.ts).
+  if (user.totpEnabled) {
+    const pendingToken = signSession({ ...basePayload, pendingMfa: true, exp: Date.now() + 5 * 60 * 1000 });
+    return { mfaRequired: true, pendingToken };
+  }
+  const token = signSession({ ...basePayload, exp: Date.now() + SESSION_TTL_MS });
+  return { token, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
+});
+
+app.post("/api/auth/totp-verify", async (req, reply) => {
+  const { pendingToken, code } = req.body as { pendingToken?: string; code?: string };
+  if (!pendingToken || !code) {
+    reply.code(400);
+    return { error: "pendingToken and code required" };
+  }
+  const pending = verifySession(pendingToken);
+  if (!pending || !pending.pendingMfa) {
+    reply.code(401);
+    return { error: "invalid or expired pending token" };
+  }
+  const user = await findUserById(pending.userId);
+  if (!user?.totpEnabled || !user.totpSecret) {
+    reply.code(401);
+    return { error: "MFA is not enabled for this account" };
+  }
+  if (!verifyTotpCode(user.totpSecret, code)) {
+    reply.code(401);
+    return { error: "invalid code" };
+  }
+  const tenantHosts = pending.tenantHosts ?? [];
+  const token = signSession({
+    userId: pending.userId,
+    email: pending.email,
+    role: pending.role,
+    tenantHost: pending.tenantHost,
+    tenantHosts,
+    permissions: pending.permissions,
     exp: Date.now() + SESSION_TTL_MS,
   });
-  return { token, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
+  return { token, role: pending.role, tenantHost: pending.tenantHost, tenantHosts };
+});
+
+// Personal MFA enrollment — any logged-in user, only reachable while the
+// instance-wide switch (platformSettings.mfaEnabled) is on. Two-step
+// (setup then confirm) so a secret is never trusted until the user has
+// proven they can actually generate a matching code with it.
+// Own-account status for the Security tab — whether TOTP is currently
+// enrolled and confirmed, not the instance-wide switch (see
+// GET /api/portal/login-settings for that, superadmin-only).
+app.get("/api/auth/me", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  const user = await findUserById(session.userId);
+  return { totpEnabled: !!user?.totpEnabled };
+});
+
+app.post("/api/auth/totp-setup", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  if (!(await getMfaEnabled())) {
+    reply.code(400);
+    return { error: "MFA is not enabled for this instance" };
+  }
+  const secret = generateTotpSecret();
+  await setUserTotpSecret(session.userId, secret);
+  return { secret, otpauthUri: totpAuthUri(secret, session.email) };
+});
+
+app.post("/api/auth/totp-confirm", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  const { code } = req.body as { code?: string };
+  const user = await findUserById(session.userId);
+  if (!user?.totpSecret) {
+    reply.code(400);
+    return { error: "call /api/auth/totp-setup first" };
+  }
+  if (!code || !verifyTotpCode(user.totpSecret, code)) {
+    reply.code(401);
+    return { error: "invalid code" };
+  }
+  await setUserTotpEnabled(session.userId, true);
+  await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.enabled_self", ip: req.ip });
+  return { enabled: true };
+});
+
+app.post("/api/auth/totp-disable", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  await setUserTotpEnabled(session.userId, false);
+  await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.disabled_self", ip: req.ip });
+  return { disabled: true };
+});
+
+// Superadmin-only "Login Methods" master switch — same shape as
+// proxy-settings above. Read is superadmin-only too (unlike proxy-settings'
+// GET): whether MFA is required isn't public information the way proxy
+// automation's on/off state is.
+app.get("/api/portal/login-settings", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  return { mfaEnabled: await getMfaEnabled() };
+});
+
+app.put("/api/portal/login-settings", async (req, reply) => {
+  const session = verifySuperadmin(req, reply);
+  if (!session) return;
+  const { mfaEnabled } = req.body as { mfaEnabled?: boolean };
+  if (typeof mfaEnabled !== "boolean") {
+    reply.code(400);
+    return { error: "mfaEnabled must be a boolean" };
+  }
+  await setMfaEnabled(mfaEnabled);
+  await insertAuditLog({
+    actorUserId: session.userId,
+    actorEmail: session.email,
+    action: "platform.mfa_toggle",
+    meta: { mfaEnabled },
+    ip: req.ip,
+  });
+  return { mfaEnabled };
 });
 
 // Cross-department aggregator (portal), reads public.shared_content directly
@@ -491,7 +646,8 @@ app.post("/api/portal/tenants", async (req, reply) => {
 // exactly (the admin's type-to-confirm box) — a second, server-side check
 // of the same confirmation, not just client-side UX.
 app.delete("/api/portal/tenants/:host", async (req, reply) => {
-  if (!verifySuperadmin(req, reply)) return;
+  const session = verifySuperadmin(req, reply);
+  if (!session) return;
   const { host } = req.params as { host: string };
   const { confirm } = req.body as { confirm?: string };
   if (confirm !== host) {
@@ -504,6 +660,13 @@ app.delete("/api/portal/tenants/:host", async (req, reply) => {
     await rm(path.join(localUploadsDir, tenantFolder), { recursive: true, force: true });
   }
   await maybeSyncCaddy();
+  await insertAuditLog({
+    actorUserId: session.userId,
+    actorEmail: session.email,
+    action: "tenant.delete",
+    target: host,
+    ip: req.ip,
+  });
   return { deleted: true };
 });
 
@@ -739,6 +902,7 @@ app.delete("/api/portal/users/:id", async (req, reply) => {
     return { error: "cannot delete your own account" };
   }
   await deleteUser(id);
+  await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "user.delete", target: id, ip: req.ip });
   return { deleted: true };
 });
 

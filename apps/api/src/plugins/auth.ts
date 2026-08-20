@@ -28,6 +28,9 @@ export async function requireTenantAuth(app: FastifyInstance) {
     if (session.previewOnly) {
       return reply.code(403).send({ error: "Preview token cannot be used here" });
     }
+    if (session.pendingMfa) {
+      return reply.code(403).send({ error: "Complete MFA verification first" });
+    }
     const allowedHosts = session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []);
     if (session.role === "webmaster" && !allowedHosts.includes(req.tenantHost)) {
       return reply.code(403).send({ error: "Not authorized for this tenant" });
@@ -56,6 +59,10 @@ export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): Sess
     reply.code(403).send({ error: "Preview token cannot be used here" });
     return null;
   }
+  if (session.pendingMfa) {
+    reply.code(403).send({ error: "Complete MFA verification first" });
+    return null;
+  }
   if (session.role !== "superadmin") {
     reply.code(403).send({ error: "Superadmin only" });
     return null;
@@ -79,6 +86,10 @@ export function verifyAnyUser(req: FastifyRequest, reply: FastifyReply): Session
   }
   if (session.previewOnly) {
     reply.code(403).send({ error: "Preview token cannot be used here" });
+    return null;
+  }
+  if (session.pendingMfa) {
+    reply.code(403).send({ error: "Complete MFA verification first" });
     return null;
   }
   return session;

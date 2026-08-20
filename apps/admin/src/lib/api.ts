@@ -89,13 +89,56 @@ export async function impersonateUser(token: string, userId: string): Promise<Se
   return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
 }
 
-export async function login(email: string, password: string): Promise<Session> {
+export interface LoginResult {
+  session?: Session;
+  // Present instead of `session` when the account has TOTP enabled —
+  // exchange this for a real session via verifyTotp() below.
+  mfaRequired?: boolean;
+  pendingToken?: string;
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
   const body = await request("/api/auth/login", null, null, {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
+  if (body.mfaRequired) return { mfaRequired: true, pendingToken: body.pendingToken };
+  return { session: { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] } };
+}
+
+export async function verifyTotp(pendingToken: string, code: string): Promise<Session> {
+  const body = await request("/api/auth/totp-verify", null, null, {
+    method: "POST",
+    body: JSON.stringify({ pendingToken, code }),
+  });
   return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
 }
+
+export interface LoginSettings {
+  mfaEnabled: boolean;
+}
+
+export const getLoginSettings = (token: string) =>
+  request("/api/portal/login-settings", null, token).then((b) => ({ mfaEnabled: b.mfaEnabled as boolean }));
+
+export const setLoginSettings = (token: string, mfaEnabled: boolean) =>
+  request("/api/portal/login-settings", null, token, { method: "PUT", body: JSON.stringify({ mfaEnabled }) }).then(
+    (b) => ({ mfaEnabled: b.mfaEnabled as boolean }),
+  );
+
+export const totpSetup = (token: string) =>
+  request("/api/auth/totp-setup", null, token, { method: "POST" }).then((b) => ({
+    secret: b.secret as string,
+    otpauthUri: b.otpauthUri as string,
+  }));
+
+export const totpConfirm = (token: string, code: string) =>
+  request("/api/auth/totp-confirm", null, token, { method: "POST", body: JSON.stringify({ code }) });
+
+export const totpDisable = (token: string) => request("/api/auth/totp-disable", null, token, { method: "POST" });
+
+export const getMe = (token: string) =>
+  request("/api/auth/me", null, token).then((b) => ({ totpEnabled: b.totpEnabled as boolean }));
 
 export const getPages = (tenantHost: string, token: string) =>
   request("/api/pages", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
