@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildCaddyConfig, parseCertExpiry } from "./proxy-sync.js";
+import { buildCaddyConfig, parseCertExpiry, isValidDialTargets } from "./proxy-sync.js";
 
 test("buildCaddyConfig includes one route per active tenant", () => {
   const config = buildCaddyConfig([
@@ -53,6 +53,27 @@ test("buildCaddyConfig fans out to every replica dial target for a blue-green/sc
     { dial: "ucms-green-frontend-1:4321" },
     { dial: "ucms-green-frontend-2:4321" },
   ]);
+});
+
+test("isValidDialTargets accepts plain host:port container-name strings", () => {
+  assert.equal(isValidDialTargets(["ucms-green-api-1:3000", "ucms-green-api-2:3000"]), true);
+});
+
+test("isValidDialTargets rejects a redirect to an attacker-controlled host", () => {
+  // The exact attack this guards: someone holding DEPLOY_SECRET pointing
+  // Caddy's admin/api/tenant routes at their own server instead of a real
+  // container.
+  assert.equal(isValidDialTargets(["evil.example.com:3000"]), false);
+});
+
+test("isValidDialTargets rejects a scheme/path smuggled into the dial string", () => {
+  assert.equal(isValidDialTargets(["http://api:3000/../whatever"]), false);
+});
+
+test("isValidDialTargets rejects non-array and non-string entries", () => {
+  assert.equal(isValidDialTargets("api:3000"), false);
+  assert.equal(isValidDialTargets([123]), false);
+  assert.equal(isValidDialTargets(undefined), false);
 });
 
 test("parseCertExpiry rejects a malformed PEM", () => {

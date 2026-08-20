@@ -36,8 +36,27 @@ export interface CaddyUpstreams {
   frontend?: string[];
 }
 
+// These strings land straight in Caddy's reverse_proxy `dial` config — the
+// one real trust boundary CaddyUpstreams crosses, since /internal/deploy/
+// promote (index.ts) accepts them over the network (shared-secret
+// authenticated, but authentication isn't authorization: an unvalidated
+// value here would let anyone holding DEPLOY_SECRET redirect all admin/api/
+// tenant traffic to a host of their choosing). Only the plain `host:port`
+// shape scripts/deploy.sh ever actually constructs
+// (`<project>-<service>-<index>:<port>`) is allowed — no scheme, path, or
+// query.
+// No dot: deploy.sh only ever constructs plain Docker container names
+// (letters/digits/hyphen/underscore, no domain suffix) — allowing `.` here
+// would also accept an arbitrary external hostname like evil.example.com.
+const DIAL_TARGET_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*:[0-9]{1,5}$/;
+export function isValidDialTargets(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === "string" && DIAL_TARGET_RE.test(v));
+}
+
 function dials(hosts: string[] | undefined, fallback: string): { dial: string }[] {
-  return (hosts?.length ? hosts : [fallback]).map((dial) => ({ dial }));
+  if (!hosts?.length) return [{ dial: fallback }];
+  if (!isValidDialTargets(hosts)) throw new Error("invalid dial target(s) — expected host:port strings");
+  return hosts.map((dial) => ({ dial }));
 }
 
 // Pure — the whole desired Caddy config for the bundled proxy: static

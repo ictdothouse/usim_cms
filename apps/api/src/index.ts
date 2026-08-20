@@ -57,6 +57,7 @@ import {
   parseCertExpiry,
   loadCaddyCert,
   unloadCaddyCert,
+  isValidDialTargets,
   type CaddyUpstreams,
 } from "./proxy-sync.js";
 import { verifyPassword, hashPassword, signSession, verifySession, SESSION_TTL_MS } from "./db/auth.js";
@@ -553,6 +554,7 @@ app.post("/api/portal/proxy-settings/resync", async (req, reply) => {
 // container-to-container over the docker-internal network by deploy
 // tooling, never by a browser.
 const DEPLOY_SECRET = process.env.DEPLOY_SECRET;
+
 app.post("/internal/deploy/promote", async (req, reply) => {
   if (!DEPLOY_SECRET) {
     reply.code(503);
@@ -569,6 +571,16 @@ app.post("/internal/deploy/promote", async (req, reply) => {
     return { error: "invalid deploy secret" };
   }
   const { admin, api, frontend } = (req.body as CaddyUpstreams) ?? {};
+  for (const [name, value] of [
+    ["admin", admin],
+    ["api", api],
+    ["frontend", frontend],
+  ] as const) {
+    if (value !== undefined && !isValidDialTargets(value)) {
+      reply.code(400);
+      return { error: `invalid ${name} dial target(s) — expected host:port strings` };
+    }
+  }
   try {
     await syncCaddy(await listTenants(), { admin, api, frontend });
     return { promoted: true };
