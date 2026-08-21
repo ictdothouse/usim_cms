@@ -4,6 +4,8 @@
 // docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md).
 // Pure type declarations only, no runtime code.
 
+import type { Key } from "@/i18n";
+
 export interface SlideButton {
   label: string;
   href: string;
@@ -56,7 +58,7 @@ export interface Positionable {
 }
 
 // Typography fields mirror TYPOGRAPHY_FIELDS' own keys/options exactly
-// (defined in Designer.tsx) so the Inspector can render them by literally
+// (defined in designer/fields.ts) so the Inspector can render them by literally
 // reusing that same field list + FieldInput, rather than a second
 // hand-written set of fontWeight/textTransform/etc. controls — kept in
 // lockstep by construction.
@@ -90,3 +92,41 @@ export interface EdgeRect {
 }
 
 export type GapMark = { top: number; left: number; length: number };
+
+// Field-schema types for the Inspector's data-driven field renderer
+// (FieldInput/FieldGroups) — split out of Designer.tsx (Layer 1a of the God
+// Component refactor, see
+// docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md) so
+// FieldInput.tsx/FieldGroups.tsx/fields.ts can share them without importing
+// back from Designer.tsx.
+export type FieldKind =
+  | "text"
+  | "textarea"
+  | "select"
+  | "color"
+  | "image"
+  | "gallery"
+  | "length"
+  | "icon"
+  | "shadow"
+  | "pairs"
+  | "slides"
+  | "font"
+  | "stepper"
+  | "menu-select";
+
+export interface Field {
+  key: string;
+  labelKey: Key;
+  kind: FieldKind;
+  options?: string[];
+  // "pairs" kind only: i18n keys for the two sub-field placeholders (e.g. Question/Answer vs Label/Content).
+  subLabels?: [Key, Key];
+  // "stepper" kind only: +/- nudge amount (default 1 if omitted).
+  step?: number;
+}
+
+// Grouped Styles panel (Framer/Webflow-style) bucket key — keyed by
+// field.key since that's stable across section/column/element, unlike
+// labelKey which a few fields share for unrelated purposes.
+export type FieldGroupKey = "content" | "typography" | "background" | "spacing" | "size" | "appearance" | "border" | "advanced";

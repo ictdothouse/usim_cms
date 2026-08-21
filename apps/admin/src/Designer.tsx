@@ -160,10 +160,11 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
-import type { SlideButton, SlideItem, Positionable, SlideText, EdgeRect, GapMark } from "./designer/types";
+import type { SlideButton, SlideItem, Positionable, SlideText, EdgeRect, GapMark, Field, FieldKind, FieldGroupKey } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, TEXT_DEFAULTS, SLIDE_DEFAULTS, BUTTON_DEFAULTS } from "./designer/parsers";
 import { dragPosition, nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { PAD, RADIUS, BORDER, LEGACY_SHADOW, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
+import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, SHADOW_DEFAULT_PARTS, POSITION_PRESETS, FIELD_GROUP_BY_KEY, GROUP_META } from "./designer/fields";
 
 // i18n Phase 5 — sentinel key for the page's own base-language layout
 // inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
@@ -293,32 +294,6 @@ export interface Block {
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
-
-type FieldKind =
-  | "text"
-  | "textarea"
-  | "select"
-  | "color"
-  | "image"
-  | "gallery"
-  | "length"
-  | "icon"
-  | "shadow"
-  | "pairs"
-  | "slides"
-  | "font"
-  | "stepper"
-  | "menu-select";
-interface Field {
-  key: string;
-  labelKey: Key;
-  kind: FieldKind;
-  options?: string[];
-  // "pairs" kind only: i18n keys for the two sub-field placeholders (e.g. Question/Answer vs Label/Content).
-  subLabels?: [Key, Key];
-  // "stepper" kind only: +/- nudge amount (default 1 if omitted).
-  step?: number;
-}
 
 // One glyph per field label, so the inspector reads at a glance instead of
 // requiring every label to be sounded out — same "icon + short label" idea
@@ -491,30 +466,6 @@ const ICONS: Record<string, typeof Check> = {
   "chevron-down": ChevronDown,
   "arrow-up-right": ArrowUpRight,
 };
-
-// Shared across heading/text/list — full typography control. fontFamily is
-// any Google Font name; see the useEffect near the component body that
-// keeps a matching <link> synced into document.head for canvas preview.
-const TYPOGRAPHY_FIELDS: Field[] = [
-  { key: "fontFamily", labelKey: "designer-f-fontfamily", kind: "font" },
-  { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
-  { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "stepper", step: 0.1 },
-  { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "stepper", step: 0.5 },
-  { key: "fontWeight", labelKey: "designer-f-fontweight", kind: "select", options: ["400", "500", "600", "700", "800"] },
-  {
-    key: "textTransform",
-    labelKey: "designer-f-texttransform",
-    kind: "select",
-    options: ["none", "uppercase", "lowercase", "capitalize"],
-  },
-  { key: "fontStyle", labelKey: "designer-f-fontstyle", kind: "select", options: ["normal", "italic"] },
-  {
-    key: "textDecoration",
-    labelKey: "designer-f-textdecoration",
-    kind: "select",
-    options: ["none", "underline", "line-through"],
-  },
-];
 
 const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<string, string>; fields: Field[] }> = {
   heading: {
@@ -824,77 +775,19 @@ const COLUMN_SPACING_KEYS = [
 // other field instead of rendering them as a special tail case).
 const CSS_CLASS_FIELD: Field = { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" };
 
-// Grouped Styles panel (Framer/Webflow-style): buckets the same flat Field
-// lists (SECTION_FIELDS/COLUMN_FIELDS/ELS[type].fields) into collapsible
-// sections by what the field actually controls, instead of one long form.
-// Keyed by field.key since that's stable across section/column/element,
-// unlike labelKey which a few fields share for unrelated purposes.
-type FieldGroupKey = "content" | "typography" | "background" | "spacing" | "size" | "appearance" | "border" | "advanced";
-
-const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
-  text: "content", src: "content", alt: "content", href: "content", label: "content",
-  url: "content", name: "content", items: "content", html: "content", images: "content",
-  variant: "content", style: "content",
-  // "menu" element only — menuId/dropdownTrigger/megaMenuWidth are new keys,
-  // no collision with any other element's fields. `layout` is also new (no
-  // other element uses that key name) but isn't listed here: the lookup
-  // already falls back to "content" for any unmapped key (see the `?? "content"`
-  // default a few hundred lines below), so it lands in the same group either way.
-  menuId: "content", dropdownTrigger: "content", megaMenuWidth: "content",
-  fontFamily: "typography", color: "typography", lineHeight: "typography",
-  letterSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
-  textTransform: "typography", fontStyle: "typography", textDecoration: "typography",
-  bg: "background", bgImage: "background", textColor: "background",
-  paddingY: "spacing", paddingX: "spacing", padding: "spacing", marginY: "spacing",
-  width: "size", valign: "size", height: "size", ratio: "size", columns: "size", size: "size",
-  // Figma-style split: Appearance (opacity/shadow/radius — visual effects)
-  // vs Stroke (the actual border color/width/style), each its own card.
-  opacity: "appearance", shadow: "appearance", radius: "appearance",
-  border: "border", borderWidth: "border", borderColor: "border", borderStyle: "border",
-  anchorId: "advanced", cssClass: "advanced",
-};
-
-const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type }[] = [
-  { key: "content", labelKey: "designer-group-content", icon: Type },
-  { key: "typography", labelKey: "designer-group-typography", icon: Baseline },
-  { key: "background", labelKey: "designer-group-background", icon: PaintBucket },
-  { key: "spacing", labelKey: "designer-group-spacing", icon: Frame },
-  { key: "size", labelKey: "designer-group-size", icon: RectangleHorizontal },
-  { key: "appearance", labelKey: "designer-group-appearance", icon: Blend },
-  { key: "border", labelKey: "designer-group-border", icon: Square },
-  { key: "advanced", labelKey: "designer-group-advanced", icon: Hash },
-];
-
 const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
 const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
-// Seed values a freshly-added shadow starts from — visually close to the old
-// "md" preset, so switching a legacy preset into the new panel doesn't jump.
-const SHADOW_DEFAULT_PARTS = ["0", "4", "12", "0", "#000000", "0.12"] as const;
 const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
 
 // Baseline px used as the resize-handle drag's starting point when a button
 // has no explicit fontSize yet — purely a UI convenience, not stored.
 const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
-// Baseline px used as the canvas resize handle's starting point when
-// heading/subtitle have no explicit fontSize yet (mirrors SIZE_PX for
-// buttons, just no discrete sm/md/lg enum of their own to derive from).
-const TEXT_BASE_PX = { heading: 20, subtitle: 13 };
 // Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
 // before the height field became free-form ("length" kind, below) still
 // store one of these keywords; resolving it here lets the canvas preview
 // show the real height for those too, not just newly-typed literal values.
 const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
-// 3x3 anchor grid offered as one-click shortcuts — clicking a dot just sets
-// x/y to a canonical spot and switches position to "custom"; there's no
-// separate named-preset enum to keep in sync between admin/frontend/
-// validator, presets are purely a UI convenience over the same x/y percent
-// every custom-dragged button already uses.
-const POSITION_PRESETS: { x: string; y: string }[] = [
-  { x: "10", y: "15" }, { x: "50", y: "15" }, { x: "90", y: "15" },
-  { x: "10", y: "50" }, { x: "50", y: "50" }, { x: "90", y: "50" },
-  { x: "10", y: "85" }, { x: "50", y: "85" }, { x: "90", y: "85" },
-];
 
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
 // "0") into the rounded px number shown on the badge. rem assumed at the
