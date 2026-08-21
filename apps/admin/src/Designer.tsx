@@ -160,11 +160,12 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
-import type { SlideButton, SlideItem, Positionable, SlideText, EdgeRect, GapMark, Field, FieldKind, FieldGroupKey } from "./designer/types";
+import type { SlideButton, SlideItem, Positionable, SlideText, EdgeRect, GapMark, Field, FieldKind, FieldGroupKey, Bp } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, TEXT_DEFAULTS, SLIDE_DEFAULTS, BUTTON_DEFAULTS } from "./designer/parsers";
 import { dragPosition, nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { PAD, RADIUS, BORDER, LEGACY_SHADOW, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
 import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, SHADOW_DEFAULT_PARTS, POSITION_PRESETS, FIELD_GROUP_BY_KEY, GROUP_META } from "./designer/fields";
+import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, BpToggle } from "./designer/FieldControls";
 
 // i18n Phase 5 — sentinel key for the page's own base-language layout
 // inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
@@ -2813,6 +2814,8 @@ export default function Designer({
               <BpToggle
                 active={bpKeysOverridden(txt.bp, ["align"])}
                 onToggle={() => onChange({ bp: toggleBpKeys(txt.bp, ["align"]) })}
+                bp={bp}
+                t={t}
               />
             </div>
             <div className="flex gap-1">
@@ -2969,6 +2972,8 @@ export default function Designer({
                     <BpToggle
                       active={bpKeysOverridden(s.heading.bp, ["fontSize"])}
                       onToggle={() => update(i, { heading: { ...s.heading, bp: toggleBpKeys(s.heading.bp, ["fontSize"]) } })}
+                      bp={bp}
+                      t={t}
                     />
                   </span>
                   {FieldInput({
@@ -3017,6 +3022,8 @@ export default function Designer({
                     <BpToggle
                       active={bpKeysOverridden(s.subtitle.bp, ["fontSize"])}
                       onToggle={() => update(i, { subtitle: { ...s.subtitle, bp: toggleBpKeys(s.subtitle.bp, ["fontSize"]) } })}
+                      bp={bp}
+                      t={t}
                     />
                   </span>
                   {FieldInput({
@@ -3243,227 +3250,10 @@ export default function Designer({
     return <BufferedInput className={base} value={value} onCommit={onChange} />;
   }
 
-  // Local-buffered text input: typing updates only this component's own
-  // state (cheap) instead of committing on every keystroke — commit
-  // (calling onCommit, which runs the real mutate()/history-clone) happens
-  // on blur or Enter instead. Every Inspector field used to call onCommit
-  // straight from onChange, so on a page with many sections/rows, typing a
-  // padding/margin number (or any text field) re-cloned the whole block
-  // tree per character — laggy, and occasionally dropped/misplaced
-  // keystrokes since a slow re-render can land after focus has already
-  // moved. useEffect only re-syncs from the external value while NOT
-  // focused, so an in-progress edit is never clobbered by, e.g., a canvas
-  // drag changing the same value elsewhere.
-  function BufferedInput({
-    value,
-    onCommit,
-    className,
-    type,
-    placeholder,
-    title,
-    step,
-  }: {
-    value: string;
-    onCommit: (v: string) => void;
-    className?: string;
-    type?: string;
-    placeholder?: string;
-    title?: string;
-    step?: number;
-  }) {
-    const [draft, setDraft] = useState(value);
-    const focused = useRef(false);
-    useEffect(() => {
-      if (!focused.current) setDraft(value);
-    }, [value]);
-    return (
-      <input
-        type={type}
-        step={step}
-        className={className}
-        placeholder={placeholder}
-        title={title}
-        value={draft}
-        onFocus={() => (focused.current = true)}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          focused.current = false;
-          if (draft !== value) onCommit(draft);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
-        }}
-      />
-    );
-  }
-  function BufferedTextarea({
-    value,
-    onCommit,
-    className,
-    rows,
-    placeholder,
-  }: {
-    value: string;
-    onCommit: (v: string) => void;
-    className?: string;
-    rows?: number;
-    placeholder?: string;
-  }) {
-    const [draft, setDraft] = useState(value);
-    const focused = useRef(false);
-    useEffect(() => {
-      if (!focused.current) setDraft(value);
-    }, [value]);
-    return (
-      <textarea
-        rows={rows}
-        className={className}
-        placeholder={placeholder}
-        value={draft}
-        onFocus={() => (focused.current = true)}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          focused.current = false;
-          if (draft !== value) onCommit(draft);
-        }}
-      />
-    );
-  }
-
-  // Typeable/scrollable Google Font picker — mirrors App.tsx's ThemeForm
-  // FontField exactly (typing filters a dropdown of matches, each option
-  // rendered in its own font-family so it previews rather than just naming
-  // itself), but with no <label> of its own since FieldInput's other kinds
-  // are bare controls — FieldGroups/renderTypographyFields already render
-  // the field's label above it.
-  function FontPickerInput({
-    value,
-    onChange,
-    className,
-  }: {
-    value: string;
-    onChange: (v: string) => void;
-    className?: string;
-  }) {
-    const [open, setOpen] = useState(false);
-    const matches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(value.toLowerCase()));
-    return (
-      <div className="relative">
-        <input
-          className={className}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="Poppins"
-        />
-        {open && matches.length > 0 && (
-          <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
-            {matches.map((f) => (
-              <li key={f}>
-                <button
-                  type="button"
-                  onMouseDown={() => {
-                    onChange(f);
-                    setOpen(false);
-                  }}
-                  className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
-                  style={{ fontFamily: f }}
-                >
-                  {f}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-  }
-
-  // "Volume up/down" style numeric stepper — a BufferedInput flanked by
-  // −/+ buttons, used by the shadow panel's X/Y/blur/spread fields (no
-  // preset dropdown; user explicitly asked for real numbers here).
-  function NumberStepper({
-    label,
-    value,
-    step = 1,
-    min,
-    onCommit,
-  }: {
-    label: string;
-    value: string;
-    step?: number;
-    min?: number;
-    onCommit: (v: string) => void;
-  }) {
-    const n = Number(value) || 0;
-    const round = (x: number) => Math.round(x * 100) / 100;
-    return (
-      <label className="block text-[10px] font-medium text-sub">
-        {label}
-        <div className="mt-0.5 flex items-center rounded-lg border border-line/30 bg-canvas">
-          <button
-            type="button"
-            onClick={() => onCommit(String(round(Math.max(min ?? -Infinity, n - step))))}
-            className="px-2 py-1 text-sub hover:text-ink"
-          >
-            −
-          </button>
-          <BufferedInput
-            type="number"
-            step={step}
-            value={value}
-            onCommit={onCommit}
-            className="w-full border-0 bg-transparent px-1 py-1 text-center text-[11px] outline-none"
-          />
-          <button type="button" onClick={() => onCommit(String(round(n + step)))} className="px-2 py-1 text-sub hover:text-ink">
-            +
-          </button>
-        </div>
-      </label>
-    );
-  }
-
   // Figma/Elementor-style four-side control: linked shows one input that
   // sets all 4 sides/corners equal; unlinked shows independent Top/Right/
   // Bottom/Left inputs. Values are whatever fourSideValue() resolves —
   // either a per-side override or the shared axis/preset fallback.
-  // Small Tablet/Smartphone tag next to a setting's own label — reminds you
-  // which screen the value you're looking at/editing actually belongs to,
-  // since every bp-aware field already silently shows/writes a per-
-  // breakpoint override the moment the global bp toggle (bar Monitor/Tablet/
-  // Smartphone icons, see `bp` state) leaves "desktop", with no other visual
-  // cue on the field itself. Renders nothing on desktop — that's the
-  // implicit default, no tag needed for it.
-  // Elementor/Webflow-style per-field responsive toggle: a small Tablet/
-  // Smartphone icon next to a setting's own label, filled/accent when THIS
-  // field (or, for FourSideControl, any of its side keys) actually has an
-  // override at the current bp, muted/outline when it's just inheriting the
-  // desktop value. Clicking toggles between the two — enabling seeds the
-  // override at "" (falls through to the normal default-preset resolution
-  // until typed over), disabling removes it. Renders nothing on desktop —
-  // there's nothing to override against on the base breakpoint itself.
-  function BpToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
-    if (bp === "desktop") return null;
-    const Icon = bp === "tablet" ? Tablet : Smartphone;
-    return (
-      <button
-        type="button"
-        onClick={(ev) => {
-          ev.stopPropagation();
-          onToggle();
-        }}
-        title={t(active ? "designer-bp-override-clear" : "designer-bp-override-set")}
-        className={`inline-flex rounded p-0.5 ${active ? "text-accent" : "text-sub/40 hover:text-sub"}`}
-      >
-        <Icon className="h-3 w-3" />
-      </button>
-    );
-  }
-
   function FourSideControl({
     labelKey,
     icon: Icon,
@@ -3474,6 +3264,8 @@ export default function Designer({
     sides = ["top", "right", "bottom", "left"],
     hasOverride,
     onToggleOverride,
+    bp,
+    t,
   }: {
     labelKey: Key;
     icon: typeof Frame;
@@ -3488,13 +3280,17 @@ export default function Designer({
     // then simply never renders, same as being on desktop.
     hasOverride?: boolean;
     onToggleOverride?: () => void;
+    bp: Bp;
+    t: (k: Key) => string;
   }) {
     return (
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-[11px] font-medium text-body">
           <span className="flex items-center gap-1.5">
             <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
-            {hasOverride !== undefined && onToggleOverride && <BpToggle active={hasOverride} onToggle={onToggleOverride} />}
+            {hasOverride !== undefined && onToggleOverride && (
+              <BpToggle active={hasOverride} onToggle={onToggleOverride} bp={bp} t={t} />
+            )}
           </span>
           <button
             type="button"
@@ -3582,7 +3378,7 @@ export default function Designer({
                       <span className="inline-flex items-center gap-1">
                         {FieldLabel(f.labelKey, t)}
                         {hasOverride && onToggleOverride && f.kind !== "slides" && (
-                          <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} />
+                          <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
                         )}
                       </span>
                       <div className="mt-1">{FieldInput({ field: f, value: getValue(f), onChange: (v) => setValue(f, v) })}</div>
@@ -3802,6 +3598,8 @@ export default function Designer({
                 props.bp = toggleBpKeys(props.bp, Object.values(PADDING_SIDE_KEYS));
               })
             }
+            bp={bp}
+            t={t}
           />
           <FourSideControl
             labelKey="designer-f-radius"
@@ -3817,6 +3615,8 @@ export default function Designer({
                 props.bp = toggleBpKeys(props.bp, Object.values(RADIUS_CORNER_KEYS));
               })
             }
+            bp={bp}
+            t={t}
           />
           <FourSideControl
             labelKey="designer-f-marginy"
@@ -3832,6 +3632,8 @@ export default function Designer({
                 props.bp = toggleBpKeys(props.bp, Object.values(MARGIN_SIDE_KEYS));
               })
             }
+            bp={bp}
+            t={t}
           />
           <FieldGroups
             fields={SECTION_FIELDS}
@@ -3888,6 +3690,8 @@ export default function Designer({
             onToggleLink={() => setLinkedPadding((v) => !v)}
             getSide={(side) => (row as unknown as Record<string, string>)[PADDING_SIDE_KEYS[side]] ?? ""}
             setSide={(side, v) => setRowSide(PADDING_SIDE_KEYS[side], v)}
+            bp={bp}
+            t={t}
           />
           <FourSideControl
             labelKey="designer-f-marginy"
@@ -3897,6 +3701,8 @@ export default function Designer({
             onToggleLink={() => setLinkedMargin((v) => !v)}
             getSide={(side) => (row as unknown as Record<string, string>)[MARGIN_SIDE_KEYS[side as "top" | "bottom"]] ?? ""}
             setSide={(side, v) => setRowSide(MARGIN_SIDE_KEYS[side as "top" | "bottom"], v)}
+            bp={bp}
+            t={t}
           />
           <div className="flex gap-3">
             <button onClick={() => duplicateRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
@@ -3971,6 +3777,8 @@ export default function Designer({
                 target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
               })
             }
+            bp={bp}
+            t={t}
           />
           <FourSideControl
             labelKey="designer-f-radius"
@@ -3986,6 +3794,8 @@ export default function Designer({
                 target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
               })
             }
+            bp={bp}
+            t={t}
           />
           <FourSideControl
             labelKey="designer-f-marginy"
@@ -4001,6 +3811,8 @@ export default function Designer({
                 target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
               })
             }
+            bp={bp}
+            t={t}
           />
           <FieldGroups
             fields={COLUMN_FIELDS}
@@ -4138,6 +3950,8 @@ export default function Designer({
                     target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
                   })
                 }
+                bp={bp}
+                t={t}
               />
               {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
                 <FourSideControl
@@ -4154,6 +3968,8 @@ export default function Designer({
                       target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
                     })
                   }
+                  bp={bp}
+                  t={t}
                 />
               )}
               <FourSideControl
@@ -4170,6 +3986,8 @@ export default function Designer({
                     target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
                   })
                 }
+                bp={bp}
+                t={t}
               />
               <FieldGroups {...fieldGroupsProps} only={hasContentFields ? "style" : undefined} />
             </>

@@ -130,3 +130,8 @@ export interface Field {
 // field.key since that's stable across section/column/element, unlike
 // labelKey which a few fields share for unrelated purposes.
 export type FieldGroupKey = "content" | "typography" | "background" | "spacing" | "size" | "appearance" | "border" | "advanced";
+
+// Designer()'s canvas breakpoint-preview state — named here so files split
+// out of Designer.tsx can type a `bp` prop without duplicating the literal
+// union `Designer()` itself still declares inline via `useState<Bp>(...)`.
+export type Bp = "desktop" | "tablet" | "mobile";
