@@ -157,7 +157,7 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
-import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldKind, FieldGroupKey, Bp } from "./designer/types";
+import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldKind, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides } from "./designer/parsers";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
@@ -169,127 +169,6 @@ import { FieldInput } from "./designer/FieldInput";
 // inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
 // BASE_LANG. Never a real language code, so it can't collide with one.
 const BASE_LANG = "__base__";
-
-// ---------- data model (stored in pages.layout JSONB) ----------
-// A designer page is a list of blocks; the designer emits `section` blocks:
-//   { type: "section", props: { bg?, bgImage?, textColor?, paddingY?, width?, rows: Row[] } }
-// Legacy blocks (hero/text/image from the old BlockBuilder) are kept as-is and
-// shown as locked cards — the frontend still renders them.
-
-type ElType =
-  | "heading"
-  | "text"
-  | "image"
-  | "button"
-  | "spacer"
-  | "divider"
-  | "embed"
-  | "icon"
-  | "list"
-  | "html"
-  | "gallery"
-  | "accordion"
-  | "infobox"
-  | "tabs"
-  | "slider"
-  | "menu";
-
-export interface El {
-  id: string;
-  type: ElType;
-  props: Record<string, string>;
-  // Breakpoint style overrides, admin-preview only (see Designer's bp
-  // toggle) — keyed "tablet:<fieldKey>" / "mobile:<fieldKey>", falling back
-  // to props[fieldKey] when absent. Never read by apps/frontend.
-  bp?: Record<string, string>;
-}
-export interface Col {
-  span: number;
-  elements: El[];
-  // Column-level style escape hatch — see COLUMN_FIELDS. Kept as a loose
-  // string bag (not a typed interface) to match El.props/SectionProps'
-  // convention of storing style values as plain strings.
-  props?: Record<string, string>;
-  bp?: Record<string, string>;
-}
-export interface Row {
-  columns: Col[];
-  // Gap between this row's columns. Unset falls back to the same default
-  // the real frontend's .ds-row CSS uses (SectionBlock.astro) — "2rem".
-  gap?: string;
-  // Space above/below this row (the gap *between rows* stacked in the same
-  // section). Unset marginTop falls back to the old fixed space-y value
-  // (see the rows container below) — except row 0, which never got a
-  // leading gap under the old space-y-based layout either.
-  marginTop?: string;
-  marginBottom?: string;
-  paddingTop?: string;
-  paddingRight?: string;
-  paddingBottom?: string;
-  paddingLeft?: string;
-  // Per-breakpoint visibility — "true" hides this row on that screen size,
-  // unset/"" always shows. Real @media rules on the published site, not an
-  // admin-preview-only simulation like the `bp` style-override bag (that one
-  // never reaches apps/frontend) — see SectionBlock.astro's hideCss().
-  hideDesktop?: string;
-  hideTablet?: string;
-  hideMobile?: string;
-}
-export interface SectionProps {
-  bg?: string;
-  bgImage?: string;
-  textColor?: string;
-  paddingY?: string;
-  paddingX?: string;
-  // Per-side overrides — freedom to set Top/Right/Bottom/Left independently
-  // instead of just the Y/X shorthand above. Empty/unset falls back to the
-  // matching axis (paddingTop/Bottom -> paddingY, paddingRight/Left ->
-  // paddingX), which itself falls back to the PAD table default — same
-  // fallback-chain convention as bp overrides.
-  paddingTop?: string;
-  paddingRight?: string;
-  paddingBottom?: string;
-  paddingLeft?: string;
-  marginY?: string;
-  marginX?: string;
-  // Per-side overrides — same fallback convention as padding's per-side keys
-  // (marginTop/Bottom -> marginY, marginLeft/Right -> marginX).
-  marginTop?: string;
-  marginBottom?: string;
-  marginLeft?: string;
-  marginRight?: string;
-  width?: string;
-  border?: string;
-  // Real stroke (replaces the border preset above for anything edited after
-  // this was added): borderWidth set means "use these", otherwise render
-  // falls back to the legacy none/thin/thick preset so old pages don't move.
-  borderWidth?: string;
-  borderColor?: string;
-  borderStyle?: string;
-  // 0-100 percent string, CSS opacity applied to the whole section (backdrop
-  // + content) — unset means fully opaque, same convention as every other
-  // optional style prop here.
-  opacity?: string;
-  shadow?: string;
-  radius?: string;
-  // Per-corner overrides, same fallback convention: unset falls back to the
-  // single `radius` preset above.
-  radiusTopLeft?: string;
-  radiusTopRight?: string;
-  radiusBottomRight?: string;
-  radiusBottomLeft?: string;
-  anchorId?: string;
-  cssClass?: string;
-  rows: Row[];
-  bp?: Record<string, string>;
-  hideDesktop?: string;
-  hideTablet?: string;
-  hideMobile?: string;
-}
-export interface Block {
-  type: string;
-  props: Record<string, unknown>;
-}
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;

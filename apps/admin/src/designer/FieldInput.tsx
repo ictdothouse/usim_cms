@@ -11,7 +11,7 @@ import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Minus, Plus } 
 import type { Menu } from "@/lib/api";
 import type { Key } from "@/i18n";
 import { bestTextColor } from "@/lib/utils";
-import type { Field, Bp, Positionable, SlideItem, SlideButton, SlideText } from "./types";
+import type { Field, Bp, Positionable, SlideItem, SlideButton, SlideText, Block, SectionProps } from "./types";
 import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, SHADOW_DEFAULT_PARTS, POSITION_PRESETS } from "./fields";
 import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, BpToggle } from "./FieldControls";
 import {
@@ -24,7 +24,6 @@ import {
 } from "./parsers";
 import { dragPosition, nudgePosition } from "./geometry";
 import { LEGACY_SHADOW } from "./style";
-import type { Block, SectionProps } from "../Designer";
 
 // FieldInputProps was sketched in the Layer 1a plan from a closure audit
 // that wasn't character-exact — several of the following were confirmed (and
