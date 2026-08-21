@@ -14,6 +14,14 @@
 # rule on the host.
 {
 	admin 0.0.0.0:2019
+	# Uncomment when PROXY_BIND_HTTP/HTTPS (docker-compose.yml) point Caddy
+	# at loopback-only ports because an existing nginx (shared with other
+	# apps on this box) already owns the real 80/443 and terminates TLS
+	# itself — Caddy then only ever speaks plain HTTP to that nginx, so
+	# auto-cert/ACME would just fail (port 80 isn't really Caddy's to prove
+	# domain ownership on). Leave commented out (default) when Caddy owns
+	# 80/443 directly and should keep auto-issuing its own Let's Encrypt certs.
+	# auto_https off
 }
 
 {$ADMIN_DOMAIN:admin.localhost} {
