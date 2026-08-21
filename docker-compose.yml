@@ -19,10 +19,18 @@ services:
       timeout: 5s
       retries: 10
 
-  # Public-facing reverse proxy + TLS. Auto-issues/renews Let's Encrypt certs
-  # for ADMIN_DOMAIN/API_DOMAIN/TENANT_DOMAINS (see .env.example) by default —
-  # swap a site block in ./Caddyfile to `tls <cert> <key>` and uncomment the
-  # ./certs mount below if USIM ICT provides its own certificate instead.
+  # Reverse proxy for the app tier's own blue/green routing — NOT necessarily
+  # the public-facing TLS terminator. Default (PROXY_BIND_HTTP/HTTPS unset)
+  # still binds host 80/443 directly for a box where Caddy owns the edge and
+  # auto-issues Let's Encrypt certs (see ./Caddyfile). On a box that already
+  # runs its own nginx/other TLS proxy in front of OTHER apps (80/443 already
+  # taken), set PROXY_BIND_HTTP=127.0.0.1:8090:80 and PROXY_BIND_HTTPS=
+  # 127.0.0.1:8091:443 in .env instead — Caddy then only listens on
+  # loopback-only ports, `auto_https off` in ./Caddyfile skips ACME/TLS
+  # entirely (the outer nginx already terminates TLS), and that nginx gets an
+  # ordinary `proxy_pass http://127.0.0.1:8090;` vhost per domain (preserving
+  # the Host header, same as Caddy's own reverse_proxy does) added to ITS OWN
+  # config — outside this repo, since it's shared with other apps.
   #
   # api/frontend/admin used to live in THIS file. They moved to
   # docker-compose.release.yml (see scripts/deploy.sh) so they can be
@@ -46,8 +54,8 @@ services:
     networks:
       - ucms-net
     ports:
-      - "80:80"
-      - "443:443"
+      - "${PROXY_BIND_HTTP:-80:80}"
+      - "${PROXY_BIND_HTTPS:-443:443}"
     environment:
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:-admin.localhost}
       API_DOMAIN: ${API_DOMAIN:-api.localhost}

@@ -1316,6 +1316,20 @@ Any failure before promote succeeds leaves the previously-live color completely 
   `docker-compose.yml` — unaffected. A manual "Restart" on `api` restarts every replica of
   that service at once (coarser than `deploy.sh`'s health-checked one-color-at-a-time
   flip) — a quick fix-it action, not the zero-downtime deploy path.
+- **Going live on a box that already runs other apps' nginx on 80/443**: `docker-compose.yml`'s
+  `proxy` service ports are `${PROXY_BIND_HTTP:-80:80}`/`${PROXY_BIND_HTTPS:-443:443}` — unset
+  in `.env`, Caddy still owns 80/443 directly (the default, single-purpose-box path above).
+  Set `PROXY_BIND_HTTP=127.0.0.1:8090:80`/`PROXY_BIND_HTTPS=127.0.0.1:8091:443` instead when an
+  existing nginx (shared with unrelated Node apps on the same VPS) already holds the real
+  80/443 and terminates TLS for its own vhosts — Caddy then only listens on those loopback
+  ports, uncomment `auto_https off` in `./Caddyfile`'s global block (ACME would just fail
+  anyway, since Caddy no longer really owns port 80 to prove domain ownership on), and that
+  outer nginx gets one more ordinary vhost per USIM domain
+  (`proxy_pass http://127.0.0.1:8090; proxy_set_header Host $host;` — preserving Host is
+  required, it's how `apps/frontend` resolves the tenant) added to **its own** config, which
+  lives outside this repo. `scripts/deploy.sh`/`monitor/server.js` need no changes for this —
+  both only ever talk to the `proxy` container by its Docker-internal name/port, never the
+  host-published one.
 - Multisite panel (`TenantsPanel`/`TenantCard`, `apps/admin/src/App.tsx`) gained a
   cPanel-quota-style resource-usage line per tenant card — `GET /api/portal/tenants/usage`
   (superadmin-only) returns `{host, dbSizeBytes, diskSizeBytes}[]`: `dbSizeBytes` via a new
