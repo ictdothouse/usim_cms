@@ -10,7 +10,6 @@ import {
   AtSign,
   Award,
   BarChart3,
-  Baseline,
   Battery,
   Bell,
   Bookmark,
