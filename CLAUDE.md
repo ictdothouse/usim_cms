@@ -799,9 +799,31 @@ pnpm workspace monorepo with two apps:
   `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md`. Each has its own
   `node:test` unit test (`pnpm --filter @ucms/admin test`, mirroring `apps/api`'s existing
   `tsx --test` convention) — the first automated coverage this file has ever had. The
-  4 giant nested render sub-functions (`FieldInput`/`FieldGroups`/`Inspector`/`ElPreview`)
+  2 giant nested render sub-functions (`Inspector`/`ElPreview`)
   and the 50+ hooks/100+ mutation functions inside `Designer()` itself are still in
   `Designer.tsx` — later layers in the same design doc, not yet started.
+  Layer 1a extended this split with `designer/fields.tsx` (the field-schema
+  lookup tables `TYPOGRAPHY_FIELDS`/`FIELD_GROUP_BY_KEY`/`GROUP_META`/etc,
+  plus the `FieldLabel` helper), `designer/FieldControls.tsx` (5 small
+  hook-bearing-but-closure-free leaf controls: `BufferedInput`,
+  `BufferedTextarea`, `FontPickerInput`, `NumberStepper`, `BpToggle` — the
+  last of these gained explicit `bp`/`t` props since it no longer has
+  `Designer()`'s closure to read them from), and `designer/FieldInput.tsx`/
+  `designer/FieldGroups.tsx` (the Inspector's data-driven field renderer and
+  its Grouped Styles bucketing, both still hook-free and called as plain
+  functions/JSX exactly as before). A related fix during Task 3's review also
+  moved `Block`/`SectionProps` (and their structural dependents `ElType`/`El`/
+  `Col`/`Row`) from `Designer.tsx` into `designer/types.ts`, closing an
+  import-rule violation `FieldInput.tsx` had introduced by importing them from
+  `Designer.tsx` directly. `Inspector`/`ElPreview` — the spec's
+  remaining, much higher-risk "Layer 1" pieces (each closes over 45-55+
+  `Designer()` state values/mutator functions, including the `mutate`/
+  `section` machinery every block-tree edit goes through) — are deliberately
+  deferred to a separate "Layer 1b" pass, along with the spec's own
+  requested Playwright E2E smoke test that should land before attempting
+  them; see
+  `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md` and
+  `docs/superpowers/plans/2026-08-21-designer-layer1a-field-controls.md`.
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both

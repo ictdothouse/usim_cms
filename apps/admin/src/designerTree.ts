@@ -1,4 +1,4 @@
-import type { Block, SectionProps } from "./Designer";
+import type { Block, SectionProps } from "./designer/types";
 
 export function moveSection(blocks: Block[], from: number, to: number): void {
   blocks.splice(to, 0, blocks.splice(from, 1)[0]);
