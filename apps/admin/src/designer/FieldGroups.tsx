@@ -15,7 +15,7 @@
 // — FieldGroups forwards every FieldInputProps field (other than
 // field/value/onChange, which it supplies itself per-field below) since it's
 // the one place that actually calls FieldInput.
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
+import { type Check, ChevronDown, ChevronRight } from "lucide-react";
 import type { Menu } from "@/lib/api";
 import type { Key } from "@/i18n";
 import type { Field, FieldGroupKey, Bp, Block } from "./types";

@@ -10,7 +10,7 @@ import {
   Blend,
   Bold,
   CaseSensitive,
-  Check,
+  type Check,
   Code2,
   Columns,
   Frame,

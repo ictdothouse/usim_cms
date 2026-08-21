@@ -1,7 +1,9 @@
 // Shared type/interface declarations for the Designer's slider element and
 // canvas smart-guide geometry — split out of Designer.tsx (Layer 0 of the
 // God Component refactor, see
-// docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md).
+// docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md), since
+// grown with several Layer 1a additions (each marked with its own inline
+// provenance comment below).
 // Pure type declarations only, no runtime code.
 
 import type { Key } from "@/i18n";

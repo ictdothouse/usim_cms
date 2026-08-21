@@ -139,13 +139,13 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
-import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldKind, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block } from "./designer/types";
+import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides } from "./designer/parsers";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
 import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./designer/fields";
 import { BufferedInput, BpToggle } from "./designer/FieldControls";
-import { FieldGroups, type FieldGroupsProps } from "./designer/FieldGroups";
+import { FieldGroups } from "./designer/FieldGroups";
 
 // i18n Phase 5 — sentinel key for the page's own base-language layout
 // inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
