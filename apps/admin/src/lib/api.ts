@@ -24,7 +24,14 @@ export const previewUrl = (tenantHost: string, slug: string, previewToken?: stri
     ...(previewToken ? { token: previewToken } : {}),
     ...(themeToken ? { themeToken } : {}),
   }).toString();
-  const base = isLocal ? `${FRONTEND_DEV_URL}/${slug}` : `https://${tenantHost}/${slug}`;
+  // Scheme follows the admin panel's own protocol rather than a hardcoded
+  // https — a tenant domain shares this instance's single proxy/TLS setup
+  // (see CLAUDE.md's "Multi-tenancy" — one instance, no per-tenant deploy),
+  // so if the admin itself isn't served over TLS yet (a bare-metal/nginx
+  // box before a cert is issued), forcing https here just times out instead
+  // of falling back to the port that's actually listening.
+  const scheme = window.location.protocol === "https:" ? "https" : "http";
+  const base = isLocal ? `${FRONTEND_DEV_URL}/${slug}` : `${scheme}://${tenantHost}/${slug}`;
   return query ? `${base}?${query}` : base;
 };
 
