@@ -4,8 +4,8 @@
 // docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md). Each
 // one holds its own useState/useRef and reads nothing from Designer()'s
 // closure except BpToggle, which now takes `bp`/`t` as explicit props
-// instead (see its signature below) — its 6 call sites in Designer.tsx were
-// all updated in the same commit that created this file.
+// instead (see its signature below) — its call sites now live across
+// Designer.tsx, FieldInput.tsx, and FieldGroups.tsx.
 import { useEffect, useRef, useState } from "react";
 import { Smartphone, Tablet } from "lucide-react";
 import { GOOGLE_FONTS } from "@/lib/utils";

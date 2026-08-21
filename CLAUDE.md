@@ -799,7 +799,7 @@ pnpm workspace monorepo with two apps:
   `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md`. Each has its own
   `node:test` unit test (`pnpm --filter @ucms/admin test`, mirroring `apps/api`'s existing
   `tsx --test` convention) — the first automated coverage this file has ever had. The
-  4 giant nested render sub-functions (`FieldInput`/`FieldGroups`/`Inspector`/`ElPreview`)
+  2 giant nested render sub-functions (`Inspector`/`ElPreview`)
   and the 50+ hooks/100+ mutation functions inside `Designer()` itself are still in
   `Designer.tsx` — later layers in the same design doc, not yet started.
   Layer 1a extended this split with `designer/fields.tsx` (the field-schema
