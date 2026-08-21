@@ -2,7 +2,38 @@
 // (FieldInput/FieldGroups) — split out of Designer.tsx (Layer 1a of the God
 // Component refactor, see
 // docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md).
-import { Baseline, Blend, Frame, Hash, PaintBucket, RectangleHorizontal, Square, Type } from "lucide-react";
+import {
+  AlignLeft,
+  AlignVerticalJustifyCenter,
+  Anchor,
+  Baseline,
+  Blend,
+  Bold,
+  CaseSensitive,
+  Check,
+  Code2,
+  Columns,
+  Frame,
+  Hash,
+  Heading1,
+  Image as ImageIcon,
+  Images,
+  Link,
+  List,
+  Maximize2,
+  MoveHorizontal,
+  MoveVertical,
+  PaintBucket,
+  Palette,
+  Percent,
+  RectangleHorizontal,
+  Ruler,
+  SlidersHorizontal,
+  Square,
+  SquareDashedBottom,
+  Star,
+  Type,
+} from "lucide-react";
 import type { Key } from "@/i18n";
 import type { Field, FieldGroupKey } from "./types";
 
@@ -86,3 +117,62 @@ export const POSITION_PRESETS: { x: string; y: string }[] = [
   { x: "10", y: "50" }, { x: "50", y: "50" }, { x: "90", y: "50" },
   { x: "10", y: "85" }, { x: "50", y: "85" }, { x: "90", y: "85" },
 ];
+
+// One glyph per field label, so the inspector reads at a glance instead of
+// requiring every label to be sounded out — same "icon + short label" idea
+// Puck uses throughout its own field list. Not exhaustive on purpose: a field
+// with no obvious universal glyph (e.g. free-text href/url) just shows text.
+const FIELD_ICONS: Partial<Record<Key, typeof Check>> = {
+  "designer-s-bg": PaintBucket,
+  "designer-s-bgimage": ImageIcon,
+  "designer-s-textcolor": Palette,
+  "designer-s-padding": Frame,
+  "designer-f-padding": Frame,
+  "designer-f-paddingx": Frame,
+  "designer-f-marginy": MoveVertical,
+  "designer-s-width": RectangleHorizontal,
+  "designer-s-border": Square,
+  "designer-s-borderwidth": Square,
+  "designer-s-bordercolor": Palette,
+  "designer-s-borderstyle": Square,
+  "designer-s-opacity": Percent,
+  "designer-s-shadow": Blend,
+  "designer-f-radius": SquareDashedBottom,
+  "designer-f-anchorid": Anchor,
+  "designer-f-cssclass": Hash,
+  "designer-f-valign": AlignVerticalJustifyCenter,
+  "designer-col-span": Columns,
+  "designer-f-text": Type,
+  "designer-f-level": Heading1,
+  "designer-f-align": AlignLeft,
+  "designer-f-size": Ruler,
+  "designer-f-src": ImageIcon,
+  "designer-f-alt": CaseSensitive,
+  "designer-f-label": Type,
+  "designer-f-href": Link,
+  "designer-f-variant": SlidersHorizontal,
+  "designer-f-height": MoveVertical,
+  "designer-f-url": Link,
+  "designer-f-ratio": RectangleHorizontal,
+  "designer-f-icon-name": Star,
+  "designer-f-icon-size": Maximize2,
+  "designer-f-icon-color": Palette,
+  "designer-f-list-items": List,
+  "designer-f-list-style": List,
+  "designer-f-html": Code2,
+  "designer-f-gallery-images": Images,
+  "designer-f-gallery-columns": Columns,
+  "designer-f-fontfamily": Baseline,
+  "designer-f-lineheight": MoveVertical,
+  "designer-f-letterspacing": MoveHorizontal,
+  "designer-f-fontweight": Bold,
+};
+export function FieldLabel(labelKey: Key, t: (k: Key) => string) {
+  const Icon = FIELD_ICONS[labelKey];
+  return (
+    <>
+      {Icon && <Icon className="mr-1 inline-block h-3 w-3 shrink-0 -translate-y-px align-middle text-sub" />}
+      {t(labelKey)}
+    </>
+  );
+}
