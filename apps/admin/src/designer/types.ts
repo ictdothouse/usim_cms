@@ -58,7 +58,7 @@ export interface Positionable {
 }
 
 // Typography fields mirror TYPOGRAPHY_FIELDS' own keys/options exactly
-// (defined in designer/fields.ts) so the Inspector can render them by literally
+// (defined in designer/fields.tsx) so the Inspector can render them by literally
 // reusing that same field list + FieldInput, rather than a second
 // hand-written set of fontWeight/textTransform/etc. controls — kept in
 // lockstep by construction.
@@ -97,7 +97,7 @@ export type GapMark = { top: number; left: number; length: number };
 // (FieldInput/FieldGroups) — split out of Designer.tsx (Layer 1a of the God
 // Component refactor, see
 // docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md) so
-// FieldInput.tsx/FieldGroups.tsx/fields.ts can share them without importing
+// FieldInput.tsx/FieldGroups.tsx/fields.tsx can share them without importing
 // back from Designer.tsx.
 export type FieldKind =
   | "text"
