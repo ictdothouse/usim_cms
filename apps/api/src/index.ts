@@ -673,6 +673,10 @@ app.post("/api/portal/tenants", async (req, reply) => {
     reply.code(400);
     return { error: "host and departmentName required" };
   }
+  if (!looksLikeDomain(host)) {
+    reply.code(400);
+    return { error: "host must be a bare hostname (e.g. site.example.com), not a full URL" };
+  }
   await createTenant(host, departmentName, dbUrl || null);
   await maybeSyncCaddy();
   return { created: true };
