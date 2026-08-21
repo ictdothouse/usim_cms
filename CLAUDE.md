@@ -811,7 +811,11 @@ pnpm workspace monorepo with two apps:
   `Designer()`'s closure to read them from), and `designer/FieldInput.tsx`/
   `designer/FieldGroups.tsx` (the Inspector's data-driven field renderer and
   its Grouped Styles bucketing, both still hook-free and called as plain
-  functions/JSX exactly as before). `Inspector`/`ElPreview` — the spec's
+  functions/JSX exactly as before). A related fix during Task 3's review also
+  moved `Block`/`SectionProps` (and their structural dependents `ElType`/`El`/
+  `Col`/`Row`) from `Designer.tsx` into `designer/types.ts`, closing an
+  import-rule violation `FieldInput.tsx` had introduced by importing them from
+  `Designer.tsx` directly. `Inspector`/`ElPreview` — the spec's
   remaining, much higher-risk "Layer 1" pieces (each closes over 45-55+
   `Designer()` state values/mutator functions, including the `mutate`/
   `section` machinery every block-tree edit goes through) — are deliberately
