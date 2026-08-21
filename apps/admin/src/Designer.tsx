@@ -3,9 +3,6 @@ import {
   Activity,
   AlertCircle,
   AlertTriangle,
-  AlignLeft,
-  AlignVerticalJustifyCenter,
-  Anchor,
   Archive,
   ArrowLeft,
   ArrowRight,
@@ -16,8 +13,6 @@ import {
   Baseline,
   Battery,
   Bell,
-  Blend,
-  Bold,
   Bookmark,
   BookOpen,
   Briefcase,
@@ -25,7 +20,6 @@ import {
   Calendar,
   Camera,
   Car,
-  CaseSensitive,
   Check,
   CheckCircle,
   ChevronDown,
@@ -38,7 +32,6 @@ import {
   Cloud,
   Code2,
   Coffee,
-  Columns,
   Compass,
   Copy,
   CreditCard,
@@ -59,7 +52,6 @@ import {
   GraduationCap,
   GripVertical,
   Handshake,
-  Hash,
   Heading1,
   Headphones,
   Heart,
@@ -74,14 +66,12 @@ import {
   LayoutPanelTop,
   LayoutTemplate,
   Leaf,
-  Link,
   Link2,
   List,
   Lock,
   Mail,
   Map,
   MapPin,
-  Maximize2,
   Menu,
   MessageCircle,
   MessageSquare,
@@ -90,13 +80,10 @@ import {
   Monitor,
   Moon,
   MousePointerClick,
-  MoveHorizontal,
   MoveVertical,
   Music,
   Package,
   Paintbrush,
-  PaintBucket,
-  Palette,
   Pencil,
   Percent,
   Phone,
@@ -107,12 +94,10 @@ import {
   Printer,
   QrCode,
   Receipt,
-  RectangleHorizontal,
   Recycle,
   Redo2,
   RefreshCw,
   Rocket,
-  Ruler,
   Search,
   Send,
   Settings,
@@ -121,10 +106,8 @@ import {
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
-  SlidersHorizontal,
   Smartphone,
   Sparkles,
-  Square,
   SquareDashedBottom,
   Star,
   Stethoscope,
@@ -161,9 +144,9 @@ import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldKind, Field
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides } from "./designer/parsers";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
-import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META } from "./designer/fields";
+import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./designer/fields";
 import { BufferedInput, BpToggle } from "./designer/FieldControls";
-import { FieldInput } from "./designer/FieldInput";
+import { FieldGroups, type FieldGroupsProps } from "./designer/FieldGroups";
 
 // i18n Phase 5 — sentinel key for the page's own base-language layout
 // inside PageDesignerRoute's `content` map, mirroring PostEditorPage's own
@@ -172,65 +155,6 @@ const BASE_LANG = "__base__";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
-
-// One glyph per field label, so the inspector reads at a glance instead of
-// requiring every label to be sounded out — same "icon + short label" idea
-// Puck uses throughout its own field list. Not exhaustive on purpose: a field
-// with no obvious universal glyph (e.g. free-text href/url) just shows text.
-const FIELD_ICONS: Partial<Record<Key, typeof Check>> = {
-  "designer-s-bg": PaintBucket,
-  "designer-s-bgimage": ImageIcon,
-  "designer-s-textcolor": Palette,
-  "designer-s-padding": Frame,
-  "designer-f-padding": Frame,
-  "designer-f-paddingx": Frame,
-  "designer-f-marginy": MoveVertical,
-  "designer-s-width": RectangleHorizontal,
-  "designer-s-border": Square,
-  "designer-s-borderwidth": Square,
-  "designer-s-bordercolor": Palette,
-  "designer-s-borderstyle": Square,
-  "designer-s-opacity": Percent,
-  "designer-s-shadow": Blend,
-  "designer-f-radius": SquareDashedBottom,
-  "designer-f-anchorid": Anchor,
-  "designer-f-cssclass": Hash,
-  "designer-f-valign": AlignVerticalJustifyCenter,
-  "designer-col-span": Columns,
-  "designer-f-text": Type,
-  "designer-f-level": Heading1,
-  "designer-f-align": AlignLeft,
-  "designer-f-size": Ruler,
-  "designer-f-src": ImageIcon,
-  "designer-f-alt": CaseSensitive,
-  "designer-f-label": Type,
-  "designer-f-href": Link,
-  "designer-f-variant": SlidersHorizontal,
-  "designer-f-height": MoveVertical,
-  "designer-f-url": Link,
-  "designer-f-ratio": RectangleHorizontal,
-  "designer-f-icon-name": Star,
-  "designer-f-icon-size": Maximize2,
-  "designer-f-icon-color": Palette,
-  "designer-f-list-items": List,
-  "designer-f-list-style": List,
-  "designer-f-html": Code2,
-  "designer-f-gallery-images": Images,
-  "designer-f-gallery-columns": Columns,
-  "designer-f-fontfamily": Baseline,
-  "designer-f-lineheight": MoveVertical,
-  "designer-f-letterspacing": MoveHorizontal,
-  "designer-f-fontweight": Bold,
-};
-function FieldLabel(labelKey: Key, t: (k: Key) => string) {
-  const Icon = FIELD_ICONS[labelKey];
-  return (
-    <>
-      {Icon && <Icon className="mr-1 inline-block h-3 w-3 shrink-0 -translate-y-px align-middle text-sub" />}
-      {t(labelKey)}
-    </>
-  );
-}
 
 // Curated icon set — SectionBlock.astro hardcodes the matching raw SVG path
 // for each of these names (no lucide-react dependency on the frontend); add
@@ -2403,97 +2327,6 @@ export default function Designer({
     );
   }
 
-  // Grouped Styles panel body: buckets `fields` by FIELD_GROUP_BY_KEY and
-  // renders each non-empty bucket as a collapsible section (Advanced starts
-  // collapsed, everything else starts open — see collapsedGroups above).
-  function FieldGroups({
-    fields,
-    getValue,
-    setValue,
-    only,
-    hasOverride,
-    onToggleOverride,
-  }: {
-    fields: Field[];
-    getValue: (f: Field) => string;
-    setValue: (f: Field, v: string) => void;
-    // Element Inspector's Content/Style tabs (see hasContentFields below)
-    // reuse this same bucketing instead of a separate content-vs-style
-    // split — "content" is its own tab, every other bucket is "style".
-    only?: "content" | "style";
-    // Per-field bp-override toggle (BpToggle) — omitted for a node with no
-    // `bp` bag (none currently omit it; Row doesn't use FieldGroups at all).
-    hasOverride?: (f: Field) => boolean;
-    onToggleOverride?: (f: Field) => void;
-  }) {
-    const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
-    for (const f of fields) {
-      const g = FIELD_GROUP_BY_KEY[f.key] ?? "content";
-      (buckets[g] ??= []).push(f);
-    }
-    return (
-      <>
-        {GROUP_META.filter((g) => buckets[g.key] && (!only || (g.key === "content") === (only === "content"))).map((g) => {
-          const groupFields = buckets[g.key]!;
-          const isOpen = !collapsedGroups.has(g.key);
-          const Icon = g.icon;
-          return (
-            <div key={g.key} className="border-b border-line/20 pb-2 last:border-b-0">
-              <button
-                type="button"
-                onClick={() => toggleGroup(g.key)}
-                className="flex w-full items-center justify-between py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-sub"
-              >
-                <span className="flex items-center gap-1.5">
-                  <Icon className="h-3.5 w-3.5" /> {t(g.labelKey)}
-                </span>
-                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              </button>
-              {isOpen && (
-                <div className="space-y-3 pb-1">
-                  {groupFields.map((f) => (
-                    <label key={f.key} className="block text-[11px] font-medium text-body">
-                      <span className="inline-flex items-center gap-1">
-                        {FieldLabel(f.labelKey, t)}
-                        {hasOverride && onToggleOverride && f.kind !== "slides" && (
-                          <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
-                        )}
-                      </span>
-                      <div className="mt-1">
-                        {FieldInput({
-                          field: f,
-                          value: getValue(f),
-                          onChange: (v) => setValue(f, v),
-                          iconSearch,
-                          setIconSearch,
-                          uploading,
-                          siteTheme,
-                          sel,
-                          blocks,
-                          sliderSlideIdx,
-                          setSliderSlideIdx,
-                          bp,
-                          t,
-                          uploadImage,
-                          bpGetValue,
-                          bpKeysOverridden,
-                          toggleBpKeys,
-                          bpKey,
-                          availableMenus,
-                          ICONS,
-                        })}
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </>
-    );
-  }
-
   type VisKey = "hideDesktop" | "hideTablet" | "hideMobile";
   const VIS_ITEMS: { key: VisKey; icon: typeof Monitor }[] = [
     { key: "hideDesktop", icon: Monitor },
@@ -2756,6 +2589,25 @@ export default function Designer({
                 props.bp = toggleBpKeys(props.bp, [f.key]);
               })
             }
+            collapsedGroups={collapsedGroups}
+            toggleGroup={toggleGroup}
+            bp={bp}
+            t={t}
+            iconSearch={iconSearch}
+            setIconSearch={setIconSearch}
+            uploading={uploading}
+            siteTheme={siteTheme}
+            sel={sel}
+            blocks={blocks}
+            sliderSlideIdx={sliderSlideIdx}
+            setSliderSlideIdx={setSliderSlideIdx}
+            uploadImage={uploadImage}
+            bpGetValue={bpGetValue}
+            bpKeysOverridden={bpKeysOverridden}
+            toggleBpKeys={toggleBpKeys}
+            bpKey={bpKey}
+            availableMenus={availableMenus}
+            ICONS={ICONS}
           />
         </div>
       );
@@ -2935,6 +2787,25 @@ export default function Designer({
                 target.bp = toggleBpKeys(target.bp, [f.key]);
               })
             }
+            collapsedGroups={collapsedGroups}
+            toggleGroup={toggleGroup}
+            bp={bp}
+            t={t}
+            iconSearch={iconSearch}
+            setIconSearch={setIconSearch}
+            uploading={uploading}
+            siteTheme={siteTheme}
+            sel={sel}
+            blocks={blocks}
+            sliderSlideIdx={sliderSlideIdx}
+            setSliderSlideIdx={setSliderSlideIdx}
+            uploadImage={uploadImage}
+            bpGetValue={bpGetValue}
+            bpKeysOverridden={bpKeysOverridden}
+            toggleBpKeys={toggleBpKeys}
+            bpKey={bpKey}
+            availableMenus={availableMenus}
+            ICONS={ICONS}
           />
           <div className="flex gap-3">
             <button onClick={() => copyColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
@@ -3008,6 +2879,25 @@ export default function Designer({
             target.bp = toggleBpKeys(target.bp, [f.key]);
           });
         },
+        collapsedGroups,
+        toggleGroup,
+        bp,
+        t,
+        iconSearch,
+        setIconSearch,
+        uploading,
+        siteTheme,
+        sel,
+        blocks,
+        sliderSlideIdx,
+        setSliderSlideIdx,
+        uploadImage,
+        bpGetValue,
+        bpKeysOverridden,
+        toggleBpKeys,
+        bpKey,
+        availableMenus,
+        ICONS,
       };
       return (
         <div className="space-y-3">
