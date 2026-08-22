@@ -663,7 +663,13 @@ const ICON_PATHS: Record<string, string> = {
 // all fine — only a URI scheme other than http(s) (javascript:, data:, ...)
 // gets stripped.
 const safeUrl = (u?: string) => {
-  const v = u?.trim();
+  // Browsers discard ASCII control/space chars (0x00-0x20) from anywhere in
+  // a URL before parsing its scheme, not just the ends — a bare .trim()
+  // left "java\tscript:alert(1)" able to slip past the scheme regex below
+  // while still executing as javascript: once rendered. Stripping them from
+  // the whole string (not just trimming) closes that, and also means the
+  // href/src we actually emit can't still be smuggling one.
+  const v = u?.replace(/[\x00-\x20]+/g, "");
   if (!v) return undefined;
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : undefined;
   return v;

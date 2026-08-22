@@ -37,10 +37,10 @@ const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 const themeToken = Astro.url.searchParams.get("themeToken") ?? undefined;
 
 const page = await getPageBySlug(tenantHost, slug, previewToken);
-if (!page) {
-  return new Response("Not found", { status: 404 });
-}
 const theme = await getTheme(tenantHost, themeToken);
+if (!page) {
+  Astro.response.status = 404;
+}
 // Designer.tsx's "live view" mode: an admin iframe requesting this same
 // preview URL with an extra flag, so the bridge script + data-designer-path
 // attributes only ever activate alongside a valid preview token — never for
@@ -53,12 +53,12 @@ const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boole
 // under a `?lang=` query param, not a link to a different slug/row.
 const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
-const layout = resolvePageLayout(page, requestedLang);
+const layout = page ? resolvePageLayout(page, requestedLang) : [];
 const fonts = collectFonts(layout);
 const pageLangLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
-const availableCodes = [page.language, ...Object.keys(page.translations)].filter((c): c is string => Boolean(c));
+const availableCodes = page ? [page.language, ...Object.keys(page.translations)].filter((c): c is string => Boolean(c)) : [];
 const langSwitcher =
-  showHeaderSwitcher && availableCodes.length > 1
+  page && showHeaderSwitcher && availableCodes.length > 1
     ? {
         current: requestedLang ?? page.language,
         options: availableCodes.map((code) => ({
@@ -69,28 +69,39 @@ const langSwitcher =
       }
     : null;
 ---
-<BaseLayout title={page.title} ogImage={page.bannerImageUrl} theme={theme} fonts={fonts} designerEdit={designerEdit} langSwitcher={langSwitcher}>
-  {layout.map((block, b) => {
-    switch (block.type) {
-      case "section":
-        return (
-          <SectionBlock
-            {...(block.props ?? {})}
-            pageGap={page.settings?.gap}
-            designerEdit={designerEdit}
-            blockIndex={b}
-            tenantHost={tenantHost}
-            requestedLang={requestedLang}
-          />
-        );
-      case "hero":
-        return <HeroBlock {...(block.props ?? {})} />;
-      case "text":
-        return <TextBlock {...(block.props ?? {})} />;
-      case "image":
-        return <ImageBlock {...(block.props ?? {})} />;
-      default:
-        return <GenericBlock type={block.type} props={block.props} />;
-    }
-  })}
+<BaseLayout
+  title={page?.title ?? "Halaman tidak dijumpai"}
+  ogImage={page?.bannerImageUrl}
+  theme={theme}
+  fonts={fonts}
+  designerEdit={designerEdit}
+  langSwitcher={langSwitcher}
+>
+  {!page ? (
+    <HeroBlock title="Halaman tidak dijumpai" subtitle="Kandungan ini belum tersedia atau telah dialihkan." />
+  ) : (
+    layout.map((block, b) => {
+      switch (block.type) {
+        case "section":
+          return (
+            <SectionBlock
+              {...(block.props ?? {})}
+              pageGap={page.settings?.gap}
+              designerEdit={designerEdit}
+              blockIndex={b}
+              tenantHost={tenantHost}
+              requestedLang={requestedLang}
+            />
+          );
+        case "hero":
+          return <HeroBlock {...(block.props ?? {})} />;
+        case "text":
+          return <TextBlock {...(block.props ?? {})} />;
+        case "image":
+          return <ImageBlock {...(block.props ?? {})} />;
+        default:
+          return <GenericBlock type={block.type} props={block.props} />;
+      }
+    })
+  )}
 </BaseLayout>

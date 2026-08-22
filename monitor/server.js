@@ -82,7 +82,9 @@ function isTrialModeActive(cb) {
 
 function composeArgsFor(name, cb) {
   if (!RELEASE_SERVICES.includes(name)) return cb([]);
-  isTrialModeActive((trial) => cb(trial ? TRIAL_FILES : ["-p", `ucms-${currentColor()}`, "-f", RELEASE_FILE]));
+  isTrialModeActive((trial) =>
+    cb(trial ? TRIAL_FILES : ["-p", `ucms-${currentColor()}`, "-f", RELEASE_FILE]),
+  );
 }
 
 if (!MONITOR_PASSWORD) {

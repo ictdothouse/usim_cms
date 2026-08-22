@@ -35,7 +35,14 @@ const NUM_RE = /^-?[0-9]+(\.[0-9]+)?$/;
 // javascript:/data: is rejected) — kept here too since API-side validation
 // must not rely solely on the frontend's render-time guard.
 export function isSafeUrl(v: string): boolean {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v);
+  // Browsers discard ASCII control/space chars (0x00-0x20) from anywhere in
+  // a URL before parsing its scheme, so "java\tscript:alert(1)" defeats a
+  // naive scheme regex here (the tab breaks the match, falling through to
+  // the permissive `return true`) while still executing as javascript: once
+  // rendered — strip them first so this check sees what a browser actually
+  // parses.
+  const stripped = v.replace(/[\x00-\x20]+/g, "");
+  if (/^[a-z][a-z0-9+.-]*:/i.test(stripped)) return /^https?:/i.test(stripped);
   return true;
 }
 

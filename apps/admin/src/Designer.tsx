@@ -624,7 +624,13 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }) as Record<string, string>)[c]);
 }
 function safeHref(u: string) {
-  const v = u.trim();
+  // Browsers discard ASCII control/space chars (0x00-0x20) from anywhere in
+  // a URL before parsing its scheme, not just the ends — a bare .trim()
+  // left "java\tscript:alert(1)" able to slip past the scheme regex below
+  // while still executing as javascript: once rendered. Stripping them from
+  // the whole string (not just trimming) closes that, and also means the
+  // href we actually emit can't still be smuggling one.
+  const v = u.replace(/[\x00-\x20]+/g, "");
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : "#";
   return v;
 }
@@ -3022,6 +3028,58 @@ export default function Designer({
   // ---------- canvas element preview (visual approximation of SectionBlock.astro) ----------
   function ElPreview({ el, path }: { el: El; path?: number[] }) {
     const p = el.props;
+    // Blocks is a structure-only skeleton (icon + type + a short content
+    // hint) — just enough to see layout/arrangement while dragging/
+    // reordering. Live Edit is untouched below: same real rendering
+    // (fonts/colors/images/slider drag, canvas text edit) it always had.
+    if (mode === "blocks") {
+      const Icon = ELS[el.type].icon;
+      const hint = ((): string => {
+        switch (el.type) {
+          case "heading":
+          case "text":
+            return p.text ?? "";
+          case "button":
+            return p.label ?? "";
+          case "image":
+            return p.alt || p.src || "";
+          case "icon":
+            return p.name ?? "";
+          case "embed":
+            return p.url ?? "";
+          case "list": {
+            const n = (p.items ?? "").split("\n").filter(Boolean).length;
+            return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+          }
+          case "accordion":
+          case "tabs": {
+            const n = parsePairs(p.items).length;
+            return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+          }
+          case "gallery": {
+            const n = (p.images ?? "").split("\n").filter(Boolean).length;
+            return n ? `${n} image${n === 1 ? "" : "s"}` : "";
+          }
+          case "slider": {
+            const n = parseSlides(p.slides).length;
+            return n ? `${n} slide${n === 1 ? "" : "s"}` : "";
+          }
+          case "infobox":
+            return p.heading ?? "";
+          case "menu":
+            return availableMenus.find((m) => m.id === p.menuId)?.name ?? "";
+          default:
+            return "";
+        }
+      })();
+      return (
+        <div className="flex items-center gap-2 rounded-lg border border-dashed border-line/40 bg-canvas/40 px-3 py-2.5 text-xs">
+          <Icon className="h-4 w-4 shrink-0 text-accent" />
+          <span className="font-semibold text-ink">{t(ELS[el.type].labelKey)}</span>
+          {hint && <span className="truncate text-sub">— {hint}</span>}
+        </div>
+      );
+    }
     const align = { textAlign: (p.align as "left" | "center" | "right") ?? "left" };
     // Canvas-direct text editing (in addition to the Inspector sidebar): while
     // this exact element is selected, heading/text swap their formatted
