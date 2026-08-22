@@ -49,6 +49,7 @@ const UNIT_MAP = { api: "ucms-api", frontend: "ucms-frontend", admin: "ucms-admi
 // right -p/-f prefix depending on which file a service actually lives in.
 const RELEASE_FILE = "docker-compose.release.yml";
 const RELEASE_SERVICES = ["api", "frontend", "admin"];
+const TRIAL_FILES = ["-f", "docker-compose.yml", "-f", "docker-compose.trial.yml"];
 function currentColor() {
   try {
     return fs.readFileSync(path.join(REPO_DIR, ".deploy-color"), "utf8").trim() || "blue";
@@ -56,11 +57,32 @@ function currentColor() {
     return "blue";
   }
 }
-function composeArgsFor(name) {
-  if (RELEASE_SERVICES.includes(name)) {
-    return ["-p", `ucms-${currentColor()}`, "-f", RELEASE_FILE];
-  }
-  return [];
+
+// A box can also still be in docker-compose.trial.yml's pre-launch shape
+// (single api/frontend/admin containers under this repo's own default
+// project, no Caddy in front — install-dev.mjs's local-dev stack always is,
+// and a real VPS can be too, deliberately, right up until it goes live —
+// see CLAUDE.md's Deployment section) rather than ever having gone through
+// scripts/deploy.sh's blue-green flow at all. .deploy-color can't tell the
+// two apart (it's written once by deploy.sh's first promote and never
+// cleared, so a box rolled back to trial containers by hand still has a
+// stale one) — checking the trial project's own running container instead
+// reflects reality regardless of that history. Only matters for read/
+// idempotent actions (status, logs, restart) — handlePull's own deploy-path
+// choice does this same check itself, inline in the shell it spawns, since
+// a check-then-act gap matters more there (see that function's comment).
+function isTrialModeActive(cb) {
+  execFile(
+    "docker",
+    ["compose", ...TRIAL_FILES, "ps", "-q", "api"],
+    { cwd: REPO_DIR, timeout: 10_000 },
+    (err, stdout) => cb(!err && stdout.trim().length > 0),
+  );
+}
+
+function composeArgsFor(name, cb) {
+  if (!RELEASE_SERVICES.includes(name)) return cb([]);
+  isTrialModeActive((trial) => cb(trial ? TRIAL_FILES : ["-p", `ucms-${currentColor()}`, "-f", RELEASE_FILE]));
 }
 
 if (!MONITOR_PASSWORD) {
@@ -134,19 +156,21 @@ function parseComposePs(stdout) {
 // invocations now, merged into one list for the dashboard.
 function getComposeStatus(cb) {
   runCompose(["ps", "--format", "json"], (baseErr, baseOut, baseErrText) => {
-    runCompose([...composeArgsFor("api"), "ps", "--format", "json"], (relErr, relOut, relErrText) => {
-      if (baseErr && relErr) return cb(baseErr, null);
-      let services = [];
-      try {
-        if (!baseErr && baseOut.trim()) services = services.concat(parseComposePs(baseOut));
-        if (!relErr && relOut.trim()) services = services.concat(parseComposePs(relOut));
-      } catch {
-        return cb(
-          new Error(`could not parse compose ps output: ${baseErrText || relErrText || baseOut || relOut}`),
-          null,
-        );
-      }
-      cb(null, services);
+    composeArgsFor("api", (args) => {
+      runCompose([...args, "ps", "--format", "json"], (relErr, relOut, relErrText) => {
+        if (baseErr && relErr) return cb(baseErr, null);
+        let services = [];
+        try {
+          if (!baseErr && baseOut.trim()) services = services.concat(parseComposePs(baseOut));
+          if (!relErr && relOut.trim()) services = services.concat(parseComposePs(relOut));
+        } catch {
+          return cb(
+            new Error(`could not parse compose ps output: ${baseErrText || relErrText || baseOut || relOut}`),
+            null,
+          );
+        }
+        cb(null, services);
+      });
     });
   });
 }
@@ -229,9 +253,11 @@ function handleServiceAction(req, res, name, action) {
   if (!SERVICES.includes(name)) return sendJson(res, 400, { error: "unknown service" });
   if (!["start", "stop", "restart"].includes(action)) return sendJson(res, 400, { error: "unknown action" });
   if (DEPLOY_MODE === "docker") {
-    return runCompose([...composeArgsFor(name), action, name], (err, stdout, stderr) => {
-      if (err) return sendJson(res, 500, { error: String(err.message || err), stderr });
-      sendJson(res, 200, { ok: true, stdout, stderr });
+    return composeArgsFor(name, (args) => {
+      runCompose([...args, action, name], (err, stdout, stderr) => {
+        if (err) return sendJson(res, 500, { error: String(err.message || err), stderr });
+        sendJson(res, 200, { ok: true, stdout, stderr });
+      });
     });
   }
   execFile("systemctl", [action, UNIT_MAP[name]], { timeout: 30_000 }, (err, stdout, stderr) => {
@@ -249,12 +275,14 @@ function handleLogs(req, res, name, tail) {
     res.end(stdout || stderr || "(no output)");
   };
   if (DEPLOY_MODE === "docker") {
-    return execFile(
-      "docker",
-      ["compose", ...composeArgsFor(name), "logs", "--no-color", "--tail", n, name],
-      { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
-      respond,
-    );
+    return composeArgsFor(name, (args) => {
+      execFile(
+        "docker",
+        ["compose", ...args, "logs", "--no-color", "--tail", n, name],
+        { cwd: REPO_DIR, timeout: 20_000, maxBuffer: 10 * 1024 * 1024 },
+        respond,
+      );
+    });
   }
   execFile(
     "journalctl",
@@ -292,7 +320,7 @@ function handleDbRestart(req, res) {
   });
 }
 
-const TRIAL_FILES = "-f docker-compose.yml -f docker-compose.trial.yml";
+const TRIAL_FILES_SH = TRIAL_FILES.join(" ");
 
 // git pull + rebuild + redeploy takes a while — run detached, log to a
 // file, and let the dashboard poll /api/pull/status + /api/pull/log instead
@@ -319,9 +347,9 @@ function handlePull(req, res) {
     # rolled back to trial containers by hand still has a stale one), and
     # checking any earlier than the instant before acting on it would
     # reopen the same check-then-act gap this line is closing.
-    if [ -n "$(docker compose ${TRIAL_FILES} ps -q api)" ]; then
+    if [ -n "$(docker compose ${TRIAL_FILES_SH} ps -q api)" ]; then
       echo "--- trial rebuild (no Caddy/proxy touched — see docker-compose.trial.yml) ---"
-      docker compose ${TRIAL_FILES} up -d --build api frontend admin
+      docker compose ${TRIAL_FILES_SH} up -d --build api frontend admin
     else
       echo "--- blue-green deploy (zero-downtime, see scripts/deploy.sh) ---"
       bash scripts/deploy.sh
