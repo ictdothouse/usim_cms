@@ -3560,6 +3560,11 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [sslDomain, setSslDomain] = useState("");
+  const [sslEmail, setSslEmail] = useState("");
+  const [sslBusy, setSslBusy] = useState(false);
+  const [sslErr, setSslErr] = useState<string | null>(null);
+  const [sslMsg, setSslMsg] = useState<string | null>(null);
   const existingCodes = new Set(langs.map((l) => l.code));
   const langSuggestions = newLabel.trim()
     ? COMMON_LANGUAGES.filter(
@@ -3682,6 +3687,20 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
       setProxyErr((e as Error).message);
     } finally {
       setProxyBusy(false);
+    }
+  }
+
+  async function issueSsl() {
+    setSslErr(null);
+    setSslMsg(null);
+    setSslBusy(true);
+    try {
+      await api.issueSslCert(token, sslDomain.trim(), sslEmail.trim());
+      setSslMsg(t("settings-ssl-success"));
+    } catch (e) {
+      setSslErr((e as Error).message);
+    } finally {
+      setSslBusy(false);
     }
   }
 
@@ -3911,6 +3930,35 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
             </label>
             <p className="text-xs text-sub">{t("settings-proxy-dns-reminder")}</p>
             {!proxyEnabled && <p className="text-xs text-sub">{t("settings-proxy-manual-hint")}</p>}
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <ShieldCheck className="h-3.5 w-3.5 text-accent" /> {t("settings-ssl-title")}
+            </h3>
+            <p className="text-xs text-sub">{t("settings-ssl-desc")}</p>
+            {sslErr && <p className="text-xs text-red-600">{sslErr}</p>}
+            {sslMsg && <p className="text-xs text-green-700">{sslMsg}</p>}
+            <div className="flex flex-wrap gap-2">
+              <input
+                className={`${inputCls} !w-56`}
+                placeholder={t("settings-ssl-domain-placeholder")}
+                value={sslDomain}
+                onChange={(e) => setSslDomain(e.target.value)}
+              />
+              <input
+                className={`${inputCls} !w-56`}
+                placeholder={t("settings-ssl-email-placeholder")}
+                value={sslEmail}
+                onChange={(e) => setSslEmail(e.target.value)}
+              />
+              <button
+                onClick={() => void issueSsl()}
+                disabled={sslBusy || !sslDomain.trim() || !sslEmail.trim()}
+                className={btnGhost}
+              >
+                {sslBusy ? t("settings-ssl-busy") : t("settings-ssl-issue-btn")}
+              </button>
+            </div>
           </div>
           <div className={`${card} space-y-3 p-5`}>
             <h3 className="flex items-center gap-2 text-xs font-bold text-ink">

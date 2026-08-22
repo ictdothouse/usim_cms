@@ -744,6 +744,47 @@ app.post("/api/portal/proxy-settings/resync", async (req, reply) => {
   }
 });
 
+// Sibling of the Caddy-based automation above, for the nginx-as-edge
+// enterprise pattern instead (see CLAUDE.md's "nginx-as-edge" section) —
+// forwards to the monitor process's own POST /api/ssl/issue, which is the
+// one that actually has host-level shell access to run certbot against
+// nginx. MONITOR_URL is only set by install.sh's install_monitor when it
+// wrote MONITOR_USER/MONITOR_PASSWORD alongside it, so an unconfigured
+// deployment (Caddy-only, or nginx set up by hand before this feature
+// existed) gets a clear 501 instead of a confusing network error.
+app.post("/api/portal/ssl/issue", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { domain, email } = req.body as { domain?: string; email?: string };
+  if (typeof domain !== "string" || !domain || typeof email !== "string" || !email) {
+    reply.code(400);
+    return { error: "domain and email are required" };
+  }
+  const monitorUrl = process.env.MONITOR_URL;
+  if (!monitorUrl) {
+    reply.code(501);
+    return { error: "MONITOR_URL is not configured — this deployment has no monitor to run certbot on" };
+  }
+  const auth = Buffer.from(`${process.env.MONITOR_USER ?? "admin"}:${process.env.MONITOR_PASSWORD ?? ""}`).toString(
+    "base64",
+  );
+  try {
+    const res = await fetch(`${monitorUrl}/api/ssl/issue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+      body: JSON.stringify({ domain, email }),
+    });
+    const body = (await res.json()) as { error?: string; stdout?: string; stderr?: string };
+    if (!res.ok) {
+      reply.code(502);
+      return { error: body.error ?? "certbot request failed", stderr: body.stderr };
+    }
+    return body;
+  } catch (err) {
+    reply.code(502);
+    return { error: (err as Error).message };
+  }
+});
+
 // Blue-green deploy promotion (scripts/deploy.sh): once the just-started
 // color's own containers report healthy, the deploy script calls this on
 // one of them, telling Caddy to route admin/api/tenant traffic at THIS

@@ -476,6 +476,15 @@ export async function uploadTenantCert(token: string, host: string, cert: File, 
 export const revertTenantCert = (token: string, host: string) =>
   request(`/api/portal/tenants/${host}/cert`, null, token, { method: "DELETE" });
 
+// Sibling of the Caddy-based automation above, for the nginx-as-edge
+// enterprise pattern (see CLAUDE.md's "nginx-as-edge" section) — runs
+// certbot against a domain already pointed at this box's own nginx.
+export const issueSslCert = (token: string, domain: string, email: string) =>
+  request("/api/portal/ssl/issue", null, token, {
+    method: "POST",
+    body: JSON.stringify({ domain, email }),
+  }) as Promise<{ ok: boolean; stdout?: string; stderr?: string }>;
+
 export const listPortalUsers = (token: string) =>
   request("/api/portal/users", null, token).then((b) => b.users as Array<Record<string, unknown>>);
 

@@ -38,6 +38,17 @@ services:
       ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:${ADMIN_PORT:-5173}}
       FRONTEND_INTERNAL_URL: http://frontend:4321
       CADDY_ADMIN_URL: http://proxy:2019
+      # Backs the admin panel's "Automatic SSL (certbot)" card — see
+      # CLAUDE.md's nginx-as-edge section. Unset by default (only install.sh's
+      # install_monitor writes these into .env), so the route just 501s until
+      # then. extra_hosts is what makes host.docker.internal resolve on Linux
+      # (Docker Desktop already resolves it natively) — needed because the
+      # monitor process this calls runs on the HOST, not in a container.
+      MONITOR_URL: ${MONITOR_URL:-}
+      MONITOR_USER: ${MONITOR_USER:-admin}
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:
