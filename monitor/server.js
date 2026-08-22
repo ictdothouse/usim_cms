@@ -361,6 +361,47 @@ function handlePullLog(req, res) {
   });
 }
 
+// Auto-SSL for the nginx-fronted enterprise pattern (see CLAUDE.md's
+// "Going live" section): Caddy's own auto-cert only applies when Caddy owns
+// port 80/443 directly, which an org running its own IT-managed edge won't
+// do. certbot's official --nginx plugin edits the matching server block in
+// place and reloads nginx itself — no template/regeneration logic needed
+// here, and its package install already wires its own renewal timer/cron,
+// so this is a one-shot "issue" action, nothing to schedule. Lives in the
+// monitor (not apps/api) because nginx is a host-level resource this
+// process already has shell access to manage — apps/api runs in a
+// container with no route to the host's nginx/certbot at all.
+const HOSTNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function handleSslIssue(req, res) {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(body || "{}");
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON body" });
+    }
+    const domain = String(parsed.domain || "").trim();
+    const email = String(parsed.email || "").trim();
+    if (!HOSTNAME_RE.test(domain)) return sendJson(res, 400, { error: "invalid domain" });
+    if (!EMAIL_RE.test(email)) return sendJson(res, 400, { error: "invalid email" });
+    // Array-form execFile — args never pass through a shell, so domain/email
+    // can't break out into another command even though they're user input.
+    execFile(
+      "certbot",
+      ["--nginx", "-d", domain, "-m", email, "--agree-tos", "-n", "--redirect"],
+      { timeout: 60_000, maxBuffer: 5 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) return sendJson(res, 500, { error: String(err.message || err), stdout, stderr });
+        sendJson(res, 200, { ok: true, stdout, stderr });
+      },
+    );
+  });
+}
+
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -440,6 +481,15 @@ const DASHBOARD_HTML = `<!doctype html>
   <span class="muted" id="dbStatus">checking…</span>
   <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
 </div>
+
+<h3>SSL (certbot)</h3>
+<p class="muted">Issues/renews a Let's Encrypt cert for a domain already pointed at this box's nginx — requires certbot + the nginx plugin installed on the host (<code>apt install certbot python3-certbot-nginx</code>). Renewal is handled by certbot's own installed timer, not this dashboard.</p>
+<div class="row">
+  <input id="sslDomain" placeholder="admin.example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+  <input id="sslEmail" placeholder="admin@example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+  <button onclick="issueSsl()">Issue certificate</button>
+</div>
+<pre class="term" id="sslLog" style="display:none"></pre>
 
 <h3>Logs</h3>
 <div class="row" id="logButtons"></div>
@@ -680,6 +730,24 @@ async function pollDeployLog() {
   tick();
 }
 
+async function issueSsl() {
+  const domain = document.getElementById("sslDomain").value.trim();
+  const email = document.getElementById("sslEmail").value.trim();
+  const pre = document.getElementById("sslLog");
+  pre.style.display = "block";
+  pre.textContent = "Running certbot for " + domain + "…";
+  try {
+    const body = await api("/api/ssl/issue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domain, email }),
+    });
+    pre.innerHTML = colorizeLog("done\\n" + (body.stdout || "") + (body.stderr || ""));
+  } catch (e) {
+    pre.innerHTML = colorizeLog("error\\n" + e.message);
+  }
+}
+
 async function showLogs(name) {
   document.getElementById("logs").textContent = "loading…";
   try {
@@ -730,6 +798,8 @@ const server = http.createServer((req, res) => {
       handlePullStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/log") {
       handlePullLog(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/ssl/issue") {
+      handleSslIssue(req, res);
     } else {
       sendJson(res, 404, { error: "not found" });
     }
