@@ -47,6 +47,17 @@ services:
       # right from .env's ADMIN_DOMAIN/API_DOMAIN.
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+      # Backs the admin panel's "Automatic SSL (certbot)" card — see
+      # CLAUDE.md's nginx-as-edge section. Unset by default (only install.sh's
+      # install_monitor writes these into .env), so the route just 501s until
+      # then. extra_hosts is what makes host.docker.internal resolve on Linux
+      # (Docker Desktop already resolves it natively) — needed because the
+      # monitor process this calls runs on the HOST, not in a container.
+      MONITOR_URL: ${MONITOR_URL:-}
+      MONITOR_USER: ${MONITOR_USER:-admin}
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - api-uploads:/app/uploads
     healthcheck:

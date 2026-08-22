@@ -158,6 +158,25 @@ pkg_install() {
   fi
 }
 
+# Best-effort only: certbot backs the monitor dashboard's/admin panel's
+# "Issue certificate" action (monitor/server.js's POST /api/ssl/issue), used
+# only by the nginx-as-edge enterprise pattern (CLAUDE.md) — nginx itself is
+# still BYO/manual here, so a failed install must never abort setup of the
+# actual app stack (Caddy's own auto-HTTPS, wired separately, needs no
+# certbot at all).
+ensure_certbot() {
+  if command -v certbot >/dev/null 2>&1; then
+    return
+  fi
+  echo "Installing certbot (nginx auto-SSL action, for whoever goes that route)..."
+  if [ "$PKG_MGR" = "apt" ]; then
+    pkg_install certbot python3-certbot-nginx || echo "certbot install failed — skip, install manually later if needed." >&2
+  else
+    dnf install -y epel-release >/dev/null 2>&1 || true
+    pkg_install certbot python3-certbot-nginx || echo "certbot install failed — skip, install manually later if needed." >&2
+  fi
+}
+
 RESERVED_PORTS=()
 port_in_use() {
   ss -H -ltn "( sport = :$1 )" 2>/dev/null | grep -q LISTEN
@@ -277,6 +296,28 @@ EOF
   systemctl enable --now ucms-monitor
   systemctl restart ucms-monitor
   MONITOR_PASSWORD="$(grep '^MONITOR_PASSWORD=' /etc/ucms-monitor.env | cut -d= -f2-)"
+
+  ensure_certbot
+
+  # Lets apps/api's own POST /api/portal/ssl/issue (admin panel's SSL card)
+  # reach this same monitor process to run certbot. In docker mode api runs
+  # inside a container — host.docker.internal:host-gateway (wired on the api
+  # service in docker-compose.yml/.release.yml/.trial.yml) is how a
+  # container reaches this host-level monitor port; in systemd mode api runs
+  # directly on the host, so plain loopback works.
+  if [ "$deploy_mode" = "docker" ]; then
+    set_env_kv .env MONITOR_URL "http://host.docker.internal:${monitor_port}"
+    set_env_kv .env MONITOR_USER "admin"
+    set_env_kv .env MONITOR_PASSWORD "${MONITOR_PASSWORD}"
+    # api is already running by the time this function is called (see the
+    # trial-mode call site) — recreate it so it actually picks up the 3 vars
+    # just written, since compose only reads .env at container start.
+    docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d api 2>/dev/null || true
+  else
+    set_env_kv apps/api/.env MONITOR_URL "http://127.0.0.1:${monitor_port}"
+    set_env_kv apps/api/.env MONITOR_USER "admin"
+    set_env_kv apps/api/.env MONITOR_PASSWORD "${MONITOR_PASSWORD}"
+  fi
 }
 
 open_firewall_ports() {
