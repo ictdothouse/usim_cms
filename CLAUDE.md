@@ -1330,6 +1330,26 @@ Any failure before promote succeeds leaves the previously-live color completely 
   lives outside this repo. `scripts/deploy.sh`/`monitor/server.js` need no changes for this —
   both only ever talk to the `proxy` container by its Docker-internal name/port, never the
   host-published one.
+- **nginx-as-edge is the recommended pattern for a real org deployment** (IT already owns
+  cert lifecycle/domain governance), not just the shared-VPS workaround above — Caddy's
+  built-in auto-HTTPS is the right default only for a dedicated/solo-dev box where nothing
+  else claims 80/443. Two ways to get a cert onto that nginx: (1) a cert IT already issued —
+  plain `ssl_certificate`/`ssl_certificate_key` lines in nginx's own vhost, outside this repo
+  entirely; (2) **auto-SSL via certbot**, for whoever doesn't have (1) yet —
+  `monitor/server.js`'s `POST /api/ssl/issue` (`{domain, email}`, same Basic-auth as every
+  other monitor route) shells out to `certbot --nginx -d <domain> -m <email> --agree-tos -n
+  --redirect`, exposed as a small form on the monitor dashboard itself (not
+  `apps/admin`/`apps/api`) — deliberately, since nginx/certbot are host-level resources the
+  monitor process already has shell access to (it's the same systemd-managed agent that
+  already runs `docker compose`/`systemctl` actions), while `apps/api` runs inside a
+  container with no route to the host's nginx at all. certbot's own package install wires
+  its own renewal timer — this endpoint is a one-shot "issue", nothing here schedules
+  renewal. Requires `certbot`+`python3-certbot-nginx` installed on the host first (not yet
+  automated by `install.sh`, which has no nginx-setup path — nginx itself is still BYO/
+  manual in this pattern, same as the shared-VPS bridge above). This is a genuinely separate
+  concern from the "Domain & SSL Automation" Settings switch, which only ever talks to
+  Caddy — a deployment running nginx-primary with Caddy stopped entirely should leave that
+  switch off/ignored and use this certbot action instead.
 - Multisite panel (`TenantsPanel`/`TenantCard`, `apps/admin/src/App.tsx`) gained a
   cPanel-quota-style resource-usage line per tenant card — `GET /api/portal/tenants/usage`
   (superadmin-only) returns `{host, dbSizeBytes, diskSizeBytes}[]`: `dbSizeBytes` via a new
