@@ -292,42 +292,45 @@ function handleDbRestart(req, res) {
   });
 }
 
-const TRIAL_FILES = ["-f", "docker-compose.yml", "-f", "docker-compose.trial.yml"];
-
-// Distinguishes "pre-launch trial" (docker-compose.trial.yml's single
-// api/frontend/admin containers, no Caddy in front — see that file's own
-// header) from "gone live" (scripts/deploy.sh's blue-green flow, Caddy
-// fronting 80/443) purely from what's actually running right now, since
-// .deploy-color can't be trusted for this: it's written once by deploy.sh's
-// first-ever promote and never cleared, so a box that went live and was
-// later rolled back to trial containers by hand (e.g. to free port 80 for
-// an org's own nginx — see CLAUDE.md's nginx-as-edge section) still has a
-// stale .deploy-color left over. Checking the trial project's own container
-// state instead reflects reality regardless of that history.
-function isTrialModeActive(cb) {
-  execFile(
-    "docker",
-    ["compose", ...TRIAL_FILES, "ps", "-q", "api"],
-    { cwd: REPO_DIR, timeout: 10_000 },
-    (err, stdout) => cb(!err && stdout.trim().length > 0),
-  );
-}
+const TRIAL_FILES = "-f docker-compose.yml -f docker-compose.trial.yml";
 
 // git pull + rebuild + redeploy takes a while — run detached, log to a
 // file, and let the dashboard poll /api/pull/status + /api/pull/log instead
 // of holding the HTTP request open.
 function handlePull(req, res) {
   if (deployState.running) return sendJson(res, 409, { error: "a deploy is already running" });
+  deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+  const logFd = fs.openSync(DEPLOY_LOG, "a");
+  fs.writeSync(logFd, `\n\n=== deploy started ${deployState.startedAt} ===\n`);
 
-  const start = (useTrialMode) => {
-    deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
-    const logFd = fs.openSync(DEPLOY_LOG, "a");
-    fs.writeSync(logFd, `\n\n=== deploy started ${deployState.startedAt} ===\n`);
-
-    const pullStep = "git fetch origin && git reset --hard origin/main";
-    const script =
-      DEPLOY_MODE !== "docker"
-        ? `
+  const pullStep = "git fetch origin && git reset --hard origin/main";
+  const script =
+    DEPLOY_MODE === "docker"
+      ? `
+    set -e
+    echo "--- git pull ---"
+    ${pullStep}
+    # Distinguishes "pre-launch trial" (docker-compose.trial.yml's single
+    # api/frontend/admin containers, no Caddy in front) from "gone live"
+    # (scripts/deploy.sh's blue-green flow, Caddy fronting 80/443) from
+    # what's actually running right now, checked right here rather than
+    # earlier in this process — .deploy-color can't be trusted for this
+    # (written once by deploy.sh's first promote, never cleared, so a box
+    # rolled back to trial containers by hand still has a stale one), and
+    # checking any earlier than the instant before acting on it would
+    # reopen the same check-then-act gap this line is closing.
+    if [ -n "$(docker compose ${TRIAL_FILES} ps -q api)" ]; then
+      echo "--- trial rebuild (no Caddy/proxy touched — see docker-compose.trial.yml) ---"
+      docker compose ${TRIAL_FILES} up -d --build api frontend admin
+    else
+      echo "--- blue-green deploy (zero-downtime, see scripts/deploy.sh) ---"
+      bash scripts/deploy.sh
+    fi
+    echo "--- restarting monitor ---"
+    systemctl restart ucms-monitor
+    echo "--- done ---"
+  `
+      : `
     set -e
     NODE_DIR="$(dirname "${NODE_BIN}")"
     export PATH="$NODE_DIR:$PATH"
@@ -348,47 +351,19 @@ function handlePull(req, res) {
     echo "--- restarting monitor ---"
     systemctl restart ucms-monitor
     echo "--- done ---"
-  `
-        : useTrialMode
-          ? `
-    set -e
-    echo "--- git pull ---"
-    ${pullStep}
-    echo "--- trial rebuild (no Caddy/proxy touched — see docker-compose.trial.yml) ---"
-    docker compose ${TRIAL_FILES.join(" ")} up -d --build api frontend admin
-    echo "--- restarting monitor ---"
-    systemctl restart ucms-monitor
-    echo "--- done ---"
-  `
-          : `
-    set -e
-    echo "--- git pull ---"
-    ${pullStep}
-    echo "--- blue-green deploy (zero-downtime, see scripts/deploy.sh) ---"
-    bash scripts/deploy.sh
-    echo "--- restarting monitor ---"
-    systemctl restart ucms-monitor
-    echo "--- done ---"
   `;
-    const child = spawn("sh", ["-c", script], {
-      cwd: REPO_DIR,
-      stdio: ["ignore", logFd, logFd],
-      detached: true,
-    });
-    child.unref();
-    child.on("exit", (code) => {
-      deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
-      fs.appendFileSync(DEPLOY_LOG, `=== deploy finished, exit ${code} ===\n`);
-      fs.closeSync(logFd);
-    });
-    sendJson(res, 202, { ok: true, started: true, mode: useTrialMode ? "trial" : "blue-green" });
-  };
-
-  if (DEPLOY_MODE === "docker") {
-    isTrialModeActive((trial) => start(trial));
-  } else {
-    start(false);
-  }
+  const child = spawn("sh", ["-c", script], {
+    cwd: REPO_DIR,
+    stdio: ["ignore", logFd, logFd],
+    detached: true,
+  });
+  child.unref();
+  child.on("exit", (code) => {
+    deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+    fs.appendFileSync(DEPLOY_LOG, `=== deploy finished, exit ${code} ===\n`);
+    fs.closeSync(logFd);
+  });
+  sendJson(res, 202, { ok: true, started: true });
 }
 
 function handlePullStatus(req, res) {
