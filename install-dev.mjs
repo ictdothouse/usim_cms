@@ -223,7 +223,11 @@ async function verifyExternalReachability(apiPort, adminPort, frontendPort) {
 function printDiagnostics() {
   console.error("\n---- diagnostic report ----");
   try {
-    console.error(execFileSync("docker", ["compose", "ps"], { cwd: REPO_DIR }).toString());
+    console.error(
+      execFileSync("docker", ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.trial.yml", "ps"], {
+        cwd: REPO_DIR,
+      }).toString(),
+    );
   } catch (err) {
     console.error("Could not run docker compose ps:", err.message);
   }
@@ -307,6 +311,13 @@ async function install() {
   fillEnvIfBlank(envFile, "SESSION_SECRET");
   setEnvKv(envFile, "VITE_API_URL", `http://localhost:${apiPort}`);
   setEnvKv(envFile, "VITE_FRONTEND_URL", `http://localhost:${frontendPort}`);
+  // Without this, apps/api's CORS check rejects the admin panel's own
+  // origin (or worse, silently keeps whatever ADMIN_ORIGIN a previous run —
+  // or a stale .env from an unrelated earlier setup — happened to leave
+  // behind, e.g. a Caddy-mode "http://admin.localhost"), and every request
+  // fails client-side with a bare "Failed to fetch", no server-side error
+  // to grep for. install.sh's docker-mode path already does this.
+  setEnvKv(envFile, "ADMIN_ORIGIN", `http://localhost:${adminPort}`);
   setEnvKv(envFile, "API_PORT", String(apiPort));
   setEnvKv(envFile, "FRONTEND_PORT", String(frontendPort));
   setEnvKv(envFile, "ADMIN_PORT", String(adminPort));
@@ -314,10 +325,16 @@ async function install() {
   if (existsSync(overrideFile)) rmSync(overrideFile);
 
   console.log("\nBuilding and starting containers (first run can take a few minutes)...");
-  execFileSync("docker", ["compose", "up", "-d", "--build", "db", "api", "frontend", "admin"], {
-    cwd: REPO_DIR,
-    stdio: "inherit",
-  });
+  // api/frontend/admin no longer live in docker-compose.yml alone (moved to
+  // docker-compose.release.yml for install.sh's blue-green flow) — this -f
+  // pair is install.sh's own docker-mode trial overlay, mirrored here since
+  // local dev has no go-live/blue-green step of its own. See that file's
+  // header for why this is the right one to use pre-launch.
+  execFileSync(
+    "docker",
+    ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.trial.yml", "up", "-d", "--build", "db", "api", "frontend", "admin"],
+    { cwd: REPO_DIR, stdio: "inherit" },
+  );
 
   if (!(await ensureReachableOrReport(apiPort, adminPort, frontendPort))) {
     console.error("\nAborting — the stack is up but not reachable, so it wouldn't work in a browser either.");
