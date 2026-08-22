@@ -38,6 +38,15 @@ services:
       ADMIN_ORIGIN: ${ADMIN_ORIGIN:?set ADMIN_ORIGIN in .env, e.g. https://admin.usim.edu.my}
       FRONTEND_INTERNAL_URL: http://frontend:4321
       CADDY_ADMIN_URL: http://proxy:2019
+      # proxy-sync.ts's syncCaddy (pushed on this container's own boot self-
+      # heal and on every deploy.sh promote) reads these to build the
+      # static admin/API routes it pushes to Caddy's Admin API — without
+      # them it silently falls back to "admin.localhost"/"api.localhost",
+      # so the real domain never gets routed even though ./Caddyfile's own
+      # bootstrap-only routes (read once, before the first deploy) have it
+      # right from .env's ADMIN_DOMAIN/API_DOMAIN.
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
     volumes:
       - api-uploads:/app/uploads
     healthcheck:
