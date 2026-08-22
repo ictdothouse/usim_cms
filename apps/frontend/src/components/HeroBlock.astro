@@ -24,5 +24,10 @@ const bgUrl = safeImageUrl(imageUrl);
 </section>
 
 <style>
-  .hero { padding: 4rem 2rem; background-size: cover; background-position: center; }
+  /* display:block overrides daisyUI's own unscoped ".hero" utility
+     (display:grid + place-items:center, with ".hero > *" pinned to
+     grid-row/column-start:1) — without this, the heading and subtitle
+     stack on top of each other in the same grid cell instead of flowing
+     normally. */
+  .hero { display: block; padding: 4rem 2rem; background-size: cover; background-position: center; }
 </style>

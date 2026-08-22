@@ -232,7 +232,43 @@ export async function createTenant(host: string, departmentName: string, dbUrl: 
   }
   // Provision eagerly so the tenant works on its first request (and so a
   // missing CREATEDB grant fails loudly here, not on a visitor request).
-  await ensureTenantDatabase(host, dbUrl);
+  const connectionString = await ensureTenantDatabase(host, dbUrl);
+  await seedDefaultHomePage(connectionString, departmentName);
+}
+
+// A brand-new tenant with zero pages served a bare "Not found" for "/" —
+// confusing right after creation, before an author has touched Designer.
+// Seed one real, published "home" page (WordPress-style default content) so
+// the site is never empty. Skipped if a "home" page already exists — cheap
+// idempotency that also makes this a no-op after a clone/staging restore
+// (importTenantBackup fully replaces `pages` right after this runs).
+async function seedDefaultHomePage(connectionString: string, departmentName: string): Promise<void> {
+  const client = await getTenantPool(connectionString).connect();
+  try {
+    // pages' RLS insert/update policies require this session var (see
+    // migrations/0002_pages_rls.sql) — same as importTenantBackup's restore.
+    await client.query("SET SESSION app.authenticated = 'true'");
+    const db = drizzle(client, { schema });
+    const [existing] = await db.select({ id: schema.pages.id }).from(schema.pages).where(eq(schema.pages.slug, "home"));
+    if (existing) return;
+    await db.insert(schema.pages).values({
+      slug: "home",
+      title: departmentName,
+      status: "published",
+      publishedAt: new Date(),
+      layout: [
+        {
+          type: "hero",
+          props: {
+            title: departmentName,
+            subtitle: "Website ini sedang disediakan. Kandungan akan dikemaskini tidak lama lagi.",
+          },
+        },
+      ],
+    });
+  } finally {
+    client.release();
+  }
 }
 
 // Danger Zone: removes the registry row and, for a same-server derived

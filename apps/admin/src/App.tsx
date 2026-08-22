@@ -281,154 +281,6 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
   );
 }
 
-// ---------- Block builder (MVP: hero/text/image, up/down reorder) ----------
-// ponytail: reorder via up/down buttons, not a drag lib — dnd-kit is the
-// upgrade path if drag UX is actually wanted later.
-interface Block {
-  type: string;
-  props: Record<string, string>;
-}
-
-const BLOCK_TYPES: Record<string, { label: string; fields: Array<{ key: string; label: string }> }> = {
-  hero: {
-    label: "Hero",
-    fields: [
-      { key: "title", label: "Title" },
-      { key: "subtitle", label: "Subtitle" },
-      { key: "imageUrl", label: "Image URL" },
-    ],
-  },
-  text: {
-    label: "Text",
-    fields: [{ key: "content", label: "Content" }],
-  },
-  image: {
-    label: "Image",
-    fields: [
-      { key: "imageUrl", label: "Image URL" },
-      { key: "alt", label: "Alt text" },
-    ],
-  },
-};
-
-function BlockBuilder({
-  page,
-  tenantHost,
-  token,
-  onClose,
-  onSaved,
-}: {
-  page: Record<string, unknown>;
-  tenantHost: string;
-  token: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { t } = useT();
-  const [blocks, setBlocks] = useState<Block[]>(() => (page.layout as Block[] | undefined) ?? []);
-  const [addType, setAddType] = useState("hero");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function addBlock() {
-    setBlocks([...blocks, { type: addType, props: {} }]);
-  }
-
-  function removeBlock(i: number) {
-    setBlocks(blocks.filter((_, idx) => idx !== i));
-  }
-
-  function moveBlock(i: number, dir: -1 | 1) {
-    const j = i + dir;
-    if (j < 0 || j >= blocks.length) return;
-    const next = [...blocks];
-    [next[i], next[j]] = [next[j], next[i]];
-    setBlocks(next);
-  }
-
-  function setField(i: number, key: string, value: string) {
-    const next = [...blocks];
-    next[i] = { ...next[i], props: { ...next[i].props, [key]: value } };
-    setBlocks(next);
-  }
-
-  async function save() {
-    setSaving(true);
-    setError(null);
-    try {
-      await api.updatePage(tenantHost, token, page.id as string, { layout: blocks });
-      onSaved();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/60 p-4">
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      {blocks.length === 0 && <p className="text-xs text-sub">{t("blocks-empty")}</p>}
-      {blocks.map((block, i) => (
-        <div key={i} className="space-y-2 rounded-lg border border-line/30 bg-white p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-ink">{BLOCK_TYPES[block.type]?.label ?? block.type}</span>
-            <div className="flex gap-2 text-[11px]">
-              <button onClick={() => moveBlock(i, -1)} disabled={i === 0} className="font-semibold text-accent disabled:opacity-30">
-                {t("blocks-up")}
-              </button>
-              <button
-                onClick={() => moveBlock(i, 1)}
-                disabled={i === blocks.length - 1}
-                className="font-semibold text-accent disabled:opacity-30"
-              >
-                {t("blocks-down")}
-              </button>
-              <button onClick={() => removeBlock(i)} className="font-semibold text-red-500">
-                {t("blocks-remove")}
-              </button>
-            </div>
-          </div>
-          {(BLOCK_TYPES[block.type]?.fields ?? []).map((f) => (
-            <label key={f.key} className="block text-[11px] font-medium text-body">
-              {f.label}
-              <input
-                className={`${inputCls} mt-1`}
-                value={block.props[f.key] ?? ""}
-                onChange={(e) => setField(i, f.key, e.target.value)}
-              />
-            </label>
-          ))}
-        </div>
-      ))}
-      <div className="flex items-center gap-2">
-        <Select value={addType} onValueChange={setAddType}>
-          <SelectTrigger className="text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(BLOCK_TYPES).map(([key, bt]) => (
-              <SelectItem key={key} value={key}>
-                {bt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <button onClick={addBlock} className={btnGhost}>
-          {t("blocks-add")}
-        </button>
-        <span className="flex-1" />
-        <button onClick={onClose} className="px-2 py-1 text-xs text-body">
-          {t("blocks-close")}
-        </button>
-        <button onClick={save} disabled={saving} className={btnPrimary}>
-          {saving ? t("blocks-saving") : t("blocks-save")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ---------- Pages ----------
 const pagesCreateSchema = z.object({ title: z.string().trim().min(1, { message: "Required" }) });
 type PagesCreateForm = z.infer<typeof pagesCreateSchema>;
@@ -437,7 +289,6 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const { t } = useT();
   const confirm = useConfirm();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const form = useForm<PagesCreateForm>({ resolver: zodResolver(pagesCreateSchema), defaultValues: { title: "" } });
@@ -626,12 +477,6 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   <Palette className="h-3.5 w-3.5" /> {t("pages-design")}
                 </button>
                 <button
-                  onClick={() => setEditingId(editingId === (p.id as string) ? null : (p.id as string))}
-                  className="font-semibold text-accent hover:underline"
-                >
-                  {editingId === p.id ? t("pages-close") : t("pages-edit")}
-                </button>
-                <button
                   onClick={() => setStatus(p, published ? "draft" : "published")}
                   className="font-semibold text-body hover:underline"
                 >
@@ -651,20 +496,6 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                 </button>
               </span>
             </div>
-            {editingId === p.id && (
-              <div className="mt-3">
-                <BlockBuilder
-                  page={p}
-                  tenantHost={tenantHost}
-                  token={token}
-                  onClose={() => setEditingId(null)}
-                  onSaved={async () => {
-                    setEditingId(null);
-                    await refresh();
-                  }}
-                />
-              </div>
-            )}
           </li>
           );
         })}
