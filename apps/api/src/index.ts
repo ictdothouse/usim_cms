@@ -11,6 +11,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
+import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
 import { validateLayout } from "./collections/validate-layout.js";
 import { validateMenuItems } from "./collections/validate-menu.js";
@@ -1689,8 +1690,13 @@ await app.register(async (publicScope) => {
   // empty-string fields are skipped so a partially-filled test still falls
   // back to whatever's actually persisted, instead of blanking it.
   publicScope.get("/api/theme", async (req) => {
-    const merged = await getMergedTheme(req.tenantHost);
     const auth = req.headers.authorization;
+    const cacheKey = auth ? undefined : `ucms:cache:${req.tenantHost}:theme`;
+    if (cacheKey) {
+      const cached = await cacheGet<{ theme: Record<string, unknown> }>(cacheKey);
+      if (cached) return cached;
+    }
+    const merged = await getMergedTheme(req.tenantHost);
     if (auth?.startsWith("Bearer ")) {
       const session = verifySession(auth.slice("Bearer ".length));
       if (session?.previewOnly && session.themePreview) {
@@ -1698,7 +1704,9 @@ await app.register(async (publicScope) => {
         return { theme: { ...merged, ...overrides } };
       }
     }
-    return { theme: merged };
+    const result = { theme: merged };
+    if (cacheKey) await cacheSet(cacheKey, result);
+    return result;
   });
 
   // i18n Phase 3 — anonymous visitor's view: is the switcher even on, and
@@ -2061,6 +2069,7 @@ await app.register(async (protectedScope) => {
       return { error };
     }
     await setTenantTheme(req.tenantHost, settings);
+    await cacheInvalidate(`ucms:cache:${req.tenantHost}:theme`);
     return { saved: true };
   });
 

@@ -1145,6 +1145,53 @@ pnpm workspace monorepo with two apps:
   `usim_cms_app` role), `api`, `frontend`, `admin` (static SPA served by nginx inside its
   own image, see `apps/admin/Dockerfile`), and `proxy`. Each service has a healthcheck;
   `depends_on: condition: service_healthy` sequences the startup order.
+- **`pgbouncer`** (`docker-compose.yml`, always-on alongside `db`/`proxy`) sits between every
+  `api` replica and Postgres — architecture-review fix for connection-pool blowup: without it,
+  total backend connections scale as `(control pool × replicas) + (tenant pool × tenants ×
+  replicas)` (e.g. 3 replicas × 10 tenants ≈ 210 connections). Every replica's node-pg pool now
+  talks to `pgbouncer:6432` instead of `db:5432` directly (`docker-compose.release.yml`'s `api`
+  service `DATABASE_URL`; `tenant-pool.ts`'s `deriveTenantDbUrl` only swaps the dbname on top of
+  that URL, so every tenant pool is routed through it too, no code change needed there) —
+  replicas now share one backend pool per database instead of each keeping its own, removing the
+  `× replicas` multiplier. Config: `./pgbouncer/pgbouncer.ini` + `./pgbouncer/userlist.txt`. A
+  wildcard `* = host=db port=5432 ...` database entry forwards whatever dbname a client requests
+  unchanged, so a newly-provisioned tenant database needs zero pgbouncer config changes.
+  **`pool_mode = session`, deliberately not `transaction`**: `plugins/tenant.ts`/`plugins/auth.ts`
+  issue `SET SESSION app.authenticated = ...` per request to drive the pages/posts RLS policies;
+  transaction-mode pooling only resets session state between transactions when
+  `server_reset_query_always` is on (off by default), so without session mode a `SET SESSION`
+  value could leak onto a later, unrelated client's transaction sharing the same backend
+  connection — a real cross-tenant RLS-bypass risk, not just a performance footgun. Session mode
+  ties one backend connection to one client for its whole session, matching how `apps/api`
+  already holds one pooled client per request. Caveat: PgBouncer's `max_db_connections`/
+  `default_pool_size` cap applies **per distinct dbname**, even under one wildcard entry — it is
+  not a single shared budget across every tenant, so the true global cap is still
+  `default_pool_size × concurrent-active tenant databases`, which must stay under Postgres's own
+  `max_connections` (tune both together; this is what Fasa 1's "document the connection budget"
+  recommendation resolves to in practice). `scripts/deploy.sh`'s base-tier line
+  (`docker compose up -d db pgbouncer redis proxy`) must keep listing `pgbouncer`/`redis`
+  explicitly — an explicit service list doesn't pick up a newly added compose service on its own.
+- **`redis`** (`docker-compose.yml`, always-on alongside `db`/`pgbouncer`/`proxy`) is a shared
+  cache for public (anonymous) GETs — `apps/api/src/cache.ts`'s `cacheGet`/`cacheSet`/
+  `cacheInvalidate`, wired into `generic-crud.ts`'s public list/`:id` routes (pages/posts/
+  categories/menus) and `GET`/`PUT /api/theme` in `index.ts`. Architecture-review fix, distinct
+  from `apps/frontend`'s own `lib/api.ts` `Map`: that one is a per-process stale-while-revalidate
+  FALLBACK (only consulted after a live fetch already threw) and shares nothing across
+  replicas/blue-green colors, so it gives zero real load reduction under more than one instance.
+  This one is read on every anonymous request and is a real Redis instance shared by every
+  replica/color, so it actually cuts DB load as the api scales out. Cache key is
+  `ucms:cache:{tenantHost}:{collectionSlug}:list:{querystring}` /
+  `...:item:{id}` / `...:theme` (60s TTL); any request carrying an `Authorization` header
+  (even an invalid one, since it may elevate draft/preview visibility — see
+  `elevateIfAuthenticated`) skips the cache entirely on both read and write paths, same
+  token-bearing exclusion `apps/frontend`'s own cache already uses. Invalidation is coarse —
+  any create/update/delete on a collection (or `PUT /api/theme`) drops every cached key under
+  that tenant+collection prefix via `KEYS`+`DEL`, not a single row, since a write can't cheaply
+  know every cached query-string permutation (`?tag=`/`?from=`/`?status=`/etc) it might have
+  affected; the 60s TTL is the backstop if an invalidation call is ever missed. `REDIS_URL`
+  unset (default) makes every `cache.ts` function a no-op — a single-instance/local-dev deploy
+  needs nothing, same opt-in shape as `pgbouncer`. No persisted volume — losing the cache on
+  restart just means a cold refill, never data loss.
 - `proxy` (`caddy:2-alpine`, config in `./Caddyfile`) is the public-facing reverse proxy
   and TLS terminator. Default behavior: automatic Let's Encrypt issuance/renewal for
   every domain in `ADMIN_DOMAIN`/`API_DOMAIN`/`TENANT_DOMAINS` (`.env.example`) — no

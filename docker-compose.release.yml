@@ -27,7 +27,15 @@ services:
       - default
       - ucms-net
     environment:
-      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
+      # Routed through pgbouncer (session pooling), not straight to db:5432
+      # — see ./pgbouncer/pgbouncer.ini and CLAUDE.md's connection-budget
+      # note. tenant-pool.ts's deriveTenantDbUrl swaps only the dbname on
+      # top of this URL, so every tenant pool goes through pgbouncer too.
+      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@pgbouncer:6432/usim_cms
+      # Shared public-read cache — see ./docker-compose.yml's redis service
+      # and apps/api/src/cache.ts. Unset entirely = cache disabled, no
+      # behavior change (every read just always hits Postgres).
+      REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       # Shared secret the deploy script presents to POST /internal/deploy/
       # promote (see index.ts) — never a session token, since this is

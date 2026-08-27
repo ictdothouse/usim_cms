@@ -19,6 +19,50 @@ services:
       timeout: 5s
       retries: 10
 
+  # Connection-pool proxy sitting between every apps/api replica and
+  # Postgres — see ./pgbouncer/pgbouncer.ini for why (session pooling, not
+  # transaction) and the sizing tradeoff. Always-on alongside db, same as
+  # proxy below: neither api replica count nor a blue/green color swap
+  # should change how many real backend connections Postgres carries.
+  # docker-compose.release.yml's api service points DATABASE_URL here
+  # (pgbouncer:6432) instead of db:5432 directly. edoburu/pgbouncer (not the
+  # stale, years-unmaintained pgbouncer/pgbouncer image): it leaves a
+  # mounted pgbouncer.ini alone instead of overwriting it with its own
+  # env-var-generated config, and ships psql for the healthcheck below.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ucms-net
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD='' psql -h 127.0.0.1 -p 6432 -U usim_cms_app -d pgbouncer -c 'SHOW VERSION' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Shared cache for public (anonymous) reads — see apps/api/src/cache.ts.
+  # Always-on base tier, same reasoning as pgbouncer above: every api
+  # replica/blue-green color must read/invalidate the SAME cache, not one
+  # each. Optional — REDIS_URL unset means apps/api falls back to hitting
+  # Postgres every time (correct, just not load-reduced). No persisted
+  # volume: it's a cache, losing it on restart just means a cold refill.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - ucms-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # Reverse proxy for the app tier's own blue/green routing — NOT necessarily
   # the public-facing TLS terminator. Default (PROXY_BIND_HTTP/HTTPS unset)
   # still binds host 80/443 directly for a box where Caddy owns the edge and
