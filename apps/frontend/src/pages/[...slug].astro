@@ -37,7 +37,11 @@ const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 const themeToken = Astro.url.searchParams.get("themeToken") ?? undefined;
 
 const page = await getPageBySlug(tenantHost, slug, previewToken);
-const theme = await getTheme(tenantHost, themeToken);
+const siteTheme = await getTheme(tenantHost, themeToken);
+// Page Settings' theme picker is a snapshot copy (Theme panel's preset applied at
+// pick-time, see Designer.tsx) — overlaid last so it wins over the tenant's own
+// theme, but only for this one page's render.
+const theme = page?.settings?.theme ? { ...siteTheme, ...page.settings.theme } : siteTheme;
 if (!page) {
   Astro.response.status = 404;
 }
@@ -87,6 +91,8 @@ const langSwitcher =
             <SectionBlock
               {...(block.props ?? {})}
               pageGap={page.settings?.gap}
+              pageContentWidth={page.settings?.contentWidth}
+              pagePaddingX={page.settings?.paddingX}
               designerEdit={designerEdit}
               blockIndex={b}
               tenantHost={tenantHost}

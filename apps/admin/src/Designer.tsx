@@ -1023,10 +1023,18 @@ export default function Designer({
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
-  // Page-wide Designer defaults (currently just the default column gap) —
-  // separate from `blocks`/history since it's not part of the undo stack,
-  // same convention as slugDraft above. Persisted via save()'s `settings`.
-  const [pageSettings, setPageSettings] = useState<{ gap?: string }>(() => (page.settings as { gap?: string }) ?? {});
+  // Page-wide Designer defaults (default column gap, content width, left/right
+  // padding, and an optional theme snapshot) — separate from `blocks`/history
+  // since it's not part of the undo stack, same convention as slugDraft above.
+  // Persisted via save()'s `settings`.
+  type PageSettings = { gap?: string; contentWidth?: "contained" | "full"; paddingX?: string; theme?: Record<string, string>; themePresetName?: string };
+  const [pageSettings, setPageSettings] = useState<PageSettings>(() => (page.settings as PageSettings) ?? {});
+  // "Theme" picker in Page Settings — this user's saved presets, same list
+  // ThemeForm's own collection reads (api.listThemePresets).
+  const [themePresets, setThemePresets] = useState<api.ThemePreset[]>([]);
+  useEffect(() => {
+    api.listThemePresets(token).then(setThemePresets).catch(() => {});
+  }, [token]);
   // i18n Phase 4 — same page-level, not-part-of-the-undo-stack treatment as
   // pageSettings above; persisted via save()'s `language` field.
   const [pageLanguage, setPageLanguage] = useState<string>((page.language as string | null) ?? "");
@@ -1873,6 +1881,22 @@ export default function Designer({
     setPageSettings((s) => ({ ...s, gap }));
     setDirty(true);
   }
+  function setPageContentWidth(contentWidth: "contained" | "full" | undefined) {
+    setPageSettings((s) => ({ ...s, contentWidth }));
+    setDirty(true);
+  }
+  function setPagePaddingX(paddingX: string | undefined) {
+    setPageSettings((s) => ({ ...s, paddingX }));
+    setDirty(true);
+  }
+  // Selecting a preset copies its settings in as a one-time snapshot (same
+  // convention as every other "apply once, edit independently after" copy in
+  // this codebase — see CLAUDE.md's i18n bookmark-card note) — editing the
+  // preset later never retroactively changes this page.
+  function setPageThemePreset(preset: api.ThemePreset | null) {
+    setPageSettings((s) => (preset ? { ...s, theme: preset.settings, themePresetName: preset.name } : { ...s, theme: undefined, themePresetName: undefined }));
+    setDirty(true);
+  }
 
   function duplicateElement(b: number, r: number, c: number, e: number) {
     mutate((bs) => {
@@ -2428,6 +2452,40 @@ export default function Designer({
               onCommit={(v) => setPageGap(v === "" ? undefined : `${v}px`)}
               className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
             />
+          </label>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-content-width")}
+            <select
+              value={pageSettings.contentWidth ?? "contained"}
+              onChange={(e) => setPageContentWidth(e.target.value === "full" ? "full" : undefined)}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            >
+              <option value="contained">contained</option>
+              <option value="full">full</option>
+            </select>
+          </label>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-padding-x")}
+            <BufferedInput
+              type="number"
+              placeholder="24"
+              value={String(gapPx(pageSettings.paddingX))}
+              onCommit={(v) => setPagePaddingX(v === "" ? undefined : `${v}px`)}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            />
+          </label>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-theme")}
+            <select
+              value={pageSettings.themePresetName ?? ""}
+              onChange={(e) => setPageThemePreset(themePresets.find((p) => p.name === e.target.value) ?? null)}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            >
+              <option value="">{t("designer-page-theme-default")}</option>
+              {themePresets.map((p) => (
+                <option key={p.id} value={p.name}>{p.name}</option>
+              ))}
+            </select>
           </label>
           {siteMultilangEnabled && (
           <div className="space-y-1.5">

@@ -23,9 +23,12 @@ export interface Page {
   title: string;
   layout: PageLayout;
   bannerImageUrl: string | null;
-  // Page-wide Designer defaults — currently just the default column gap for
-  // rows that don't set their own (see SectionBlock.astro's pageGap prop).
-  settings?: { gap?: string };
+  // Page-wide Designer defaults — column gap, content width, and left/right
+  // padding that a Row/Section falls back to when it doesn't set its own (see
+  // SectionBlock.astro's pageGap/pageContentWidth/pagePaddingX props), plus an
+  // optional theme snapshot copied from a saved preset, overlaid onto the
+  // tenant's own theme for this page's render only (see [...slug].astro).
+  settings?: { gap?: string; contentWidth?: "contained" | "full"; paddingX?: string; theme?: Record<string, string> };
   // i18n Phase 5 — language is null until an author picks one for this
   // page's own base content; translations holds every OTHER language's
   // layout on this SAME row, keyed by code (no separate page per language —
