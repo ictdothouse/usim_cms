@@ -312,12 +312,19 @@ pnpm workspace monorepo with two apps:
     database-per-tenant" below) and lazily creates/caches one Drizzle/pg pool per connection string.
   - `src/db/schema.ts` defines the `pages` table. Page content is a dynamic block layout stored in the
     `layout` JSONB column, not as separate relational tables per block type. `settings` (JSONB, migration
-    `0012_page_settings.sql`) is page-wide Designer defaults — currently just `{ gap?: string }`, the
-    default column gap a row falls back to when it doesn't set its own (`Row.gap`, below); its `gap` key is
-    constrained to `GAP_PATTERN` (a bare number or number+unit) via `pagesCollection.createSchema`'s JSON
-    schema, since it's interpolated straight into a raw CSS string by `SectionBlock.astro`
-    (`` gap:${row.gap ?? pageGap ?? "2rem"} ``) — an unconstrained value would be a stored CSS-injection
-    vector into every visitor's page. The much larger surface for the same risk is `layout` itself: every
+    `0012_page_settings.sql`) is page-wide Designer defaults: `gap?: string` (default column gap a row
+    falls back to when it doesn't set its own, `Row.gap`, below), `contentWidth?: "contained" | "full"` and
+    `paddingX?: string` (same fallback role for `SectionBlock.astro`'s own `width`/`paddingX` — a section
+    that sets its own value always wins), and `theme?: Record<string,string>` (an optional snapshot copy of
+    one of the author's saved Theme Presets, picked from Designer's Page Settings panel — copied in at
+    pick-time, not a live link, same "apply once, edit independently after" convention as everything else
+    in this codebase; `[...slug].astro` overlays it onto the tenant's merged theme for that one page's
+    render only, `apps/frontend`'s `Page.settings` type mirrors the shape). `gap`/`paddingX` are constrained
+    to `GAP_PATTERN` (a bare number or number+unit) via `pagesCollection.createSchema`'s JSON schema and
+    `pagesBeforeChange`, `contentWidth` to its 2-value enum, and `theme` through the exact same
+    `validateThemeSettings` function `PUT /api/theme` already runs against `site_theme` — all three land in
+    a raw CSS string/custom-property the same way `gap` already did, so each gets the same
+    unconstrained-value-is-a-CSS-injection-vector treatment. The much larger surface for the same risk is `layout` itself: every
     section/row/column/element prop (`El.props`/`Col.props`/`SectionProps` are all just
     `Record<string,string>`) ends up in a raw CSS string or attribute the same way, so
     `src/collections/validate-layout.ts`'s `validateLayout()` walks the whole tree in `pagesBeforeChange`

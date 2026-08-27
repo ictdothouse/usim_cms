@@ -77,6 +77,11 @@ interface Props {
   // Page-wide default column gap ([...slug].astro's page.settings.gap) — a
   // row's own `gap` (Row.gap, set in Designer.tsx) always wins over this.
   pageGap?: string;
+  // Same page-wide-default convention as pageGap, for this section's own
+  // width/paddingX — a section that sets its own `width`/`paddingX` always
+  // wins over these.
+  pageContentWidth?: string;
+  pagePaddingX?: string;
   // Threaded through for the "menu" element case below (MenuBlock needs both
   // to fetch/resolve the right tenant's menu in the requested language) — a
   // menu element is never nested any deeper than column.elements, all within
@@ -103,7 +108,7 @@ const {
   marginBottom,
   marginLeft,
   marginRight,
-  width = "contained",
+  width,
   border,
   borderWidth,
   borderColor,
@@ -122,6 +127,8 @@ const {
   designerEdit = false,
   blockIndex = 0,
   pageGap,
+  pageContentWidth,
+  pagePaddingX,
   hideDesktop,
   hideTablet,
   hideMobile,
@@ -790,9 +797,9 @@ function buildSectionStyle(p: Record<string, string>): string {
   // unset falls back to the shared axis (paddingY/paddingX) or single radius
   // preset, same fallback-chain convention Designer.tsx's fourSideValue() uses.
   const padTop = lengthValue(p.paddingTop || p.paddingY, PAD, PAD.md);
-  const padRight = lengthValue(p.paddingRight || p.paddingX, PAD, "1.5rem");
+  const padRight = lengthValue(p.paddingRight || p.paddingX || pagePaddingX, PAD, "1.5rem");
   const padBottom = lengthValue(p.paddingBottom || p.paddingY, PAD, PAD.md);
-  const padLeft = lengthValue(p.paddingLeft || p.paddingX, PAD, "1.5rem");
+  const padLeft = lengthValue(p.paddingLeft || p.paddingX || pagePaddingX, PAD, "1.5rem");
   // Margin has no X axis (block-flow spacing only) — top/bottom, each falling
   // back to the shared marginY value, same convention as padding above.
   const marginTopVal = lengthValue(p.marginTop || p.marginY, PAD, "0");
@@ -872,7 +879,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
   data-designer-path={designerEdit ? String(blockIndex) : undefined}
   data-vis={respId(`s${blockIndex}`, { hideDesktop, hideTablet, hideMobile }, sectionBp, baseSectionProps, buildSectionStyle)}
 >
-  <div class={width === "full" ? "ds-inner ds-full" : "ds-inner"}>
+  <div class={(width ?? pageContentWidth) === "full" ? "ds-inner ds-full" : "ds-inner"}>
     {rows.map((row, r) => (
       <div
         class="ds-row"

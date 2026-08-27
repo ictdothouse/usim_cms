@@ -1312,6 +1312,26 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
       if (err) throw Object.assign(new Error(err), { statusCode: 400 });
     }
   }
+  // Page settings — contentWidth/paddingX are page-wide defaults SectionBlock.astro
+  // falls back to (mirrors the existing `gap` default); `theme` is a snapshot copy of
+  // a saved theme preset, validated with the exact same rules `/api/theme` enforces on
+  // site_theme itself, since it lands in the same CSS-custom-property pipeline.
+  if (record.settings && typeof record.settings === "object") {
+    const settings = record.settings as Record<string, unknown>;
+    if (settings.contentWidth !== undefined && settings.contentWidth !== "contained" && settings.contentWidth !== "full") {
+      throw Object.assign(new Error("settings.contentWidth must be \"contained\" or \"full\""), { statusCode: 400 });
+    }
+    if (settings.paddingX !== undefined && (typeof settings.paddingX !== "string" || !new RegExp(GAP_PATTERN).test(settings.paddingX))) {
+      throw Object.assign(new Error("settings.paddingX must be a plain CSS length"), { statusCode: 400 });
+    }
+    if (settings.theme !== undefined) {
+      if (typeof settings.theme !== "object" || settings.theme === null) {
+        throw Object.assign(new Error("settings.theme must be an object"), { statusCode: 400 });
+      }
+      const err = validateThemeSettings(settings.theme as Record<string, unknown>);
+      if (err) throw Object.assign(new Error(`settings.theme: ${err}`), { statusCode: 400 });
+    }
+  }
   // i18n Phase 4 — same validation/thrown-.statusCode convention as
   // postsBeforeChange's own language check.
   if (typeof record.language === "string") {
@@ -1341,7 +1361,13 @@ const pagesCollection: CollectionConfig = {
       settings: {
         type: "object",
         additionalProperties: false,
-        properties: { gap: { type: "string", pattern: GAP_PATTERN } },
+        properties: {
+          gap: { type: "string", pattern: GAP_PATTERN },
+          contentWidth: { type: "string", enum: ["contained", "full"] },
+          paddingX: { type: "string", pattern: GAP_PATTERN },
+          theme: { type: "object" },
+          themePresetName: { type: "string" },
+        },
       },
       language: { type: ["string", "null"] },
       multilangEnabled: { type: "boolean" },
