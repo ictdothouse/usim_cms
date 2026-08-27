@@ -1370,6 +1370,26 @@ Any failure before promote succeeds leaves the previously-live color completely 
   `docker-compose.yml` — unaffected. A manual "Restart" on `api` restarts every replica of
   that service at once (coarser than `deploy.sh`'s health-checked one-color-at-a-time
   flip) — a quick fix-it action, not the zero-downtime deploy path.
+- **Test gate + rollback** (architecture-review follow-up): each app's own Dockerfile now
+  runs its typecheck/test step as a plain `RUN` line during the image build itself
+  (`apps/api/Dockerfile` → `pnpm --filter @ucms/api test`; `apps/admin/Dockerfile` →
+  `pnpm --filter @ucms/admin test`; `apps/frontend/Dockerfile` → `pnpm --filter
+  @ucms/frontend typecheck`, since `astro build` alone doesn't type-check the way the
+  other two's `tsc`-based builds already do) — a failing test/type error fails `docker
+  compose build`, which aborts `scripts/deploy.sh` (`set -e`) before any live container is
+  touched. No new host tooling, no separate CI step: the existing build IS the gate.
+  `deploy.sh` also stopped deleting the color it just replaced — a successful promote now
+  `docker compose ... stop`s the old color (kept, not removed) instead of `... down`, so
+  `scripts/deploy.sh rollback` can start it back up in seconds with **no rebuild**,
+  health-check it, and flip Caddy back — symmetric with a normal deploy (rolling back
+  itself just stops the color being replaced, so a bad rollback can be rolled forward
+  again the same way). The next normal deploy naturally overwrites that idle color's
+  containers, so there's no separate TTL/cleanup job. Reachable from the dashboard as a
+  "Rollback" button next to "Pull latest & deploy" (`monitor/server.js`'s
+  `handleRollback` → `POST /api/rollback`, reusing the same `deployState`/`.deploy.log`
+  polling `handlePull` already has) — refused with a clear message in systemd/bare-metal
+  mode (blue-green doesn't exist there) and while still in trial mode (nothing promoted
+  yet to roll back to).
 - **Going live on a box that already runs other apps' nginx on 80/443**: `docker-compose.yml`'s
   `proxy` service ports are `${PROXY_BIND_HTTP:-80:80}`/`${PROXY_BIND_HTTPS:-443:443}` — unset
   in `.env`, Caddy still owns 80/443 directly (the default, single-purpose-box path above).
