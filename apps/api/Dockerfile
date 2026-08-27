@@ -13,6 +13,10 @@ COPY apps/frontend/package.json apps/frontend/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/api apps/api
 RUN pnpm --filter @ucms/api build
+# Test gate: a failing test here fails this whole image build, which fails
+# `docker compose build` in scripts/deploy.sh (set -e) before any live
+# container is ever touched — see CLAUDE.md's Deployment section.
+RUN pnpm --filter @ucms/api test
 RUN pnpm --filter @ucms/api deploy --prod --legacy /app/deploy/api
 
 FROM base AS runtime

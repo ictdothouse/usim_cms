@@ -396,6 +396,43 @@ function handlePull(req, res) {
   sendJson(res, 202, { ok: true, started: true });
 }
 
+// Flips back to whichever color scripts/deploy.sh last left stopped-but-not-
+// removed (see that script's own comment) — no rebuild, just a health-check
+// + Caddy promote. Blue-green only exists in docker mode (systemd/bare-metal
+// has no color concept at all) and only once a box has actually gone live
+// (trial mode's single containers aren't blue-green either) — both refused
+// with a clear message rather than shelling out to something meaningless.
+function handleRollback(req, res) {
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, {
+      error: "rollback needs blue-green (docker mode), this box runs systemd mode",
+    });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/rollback is already running" });
+  isTrialModeActive((trial) => {
+    if (trial) {
+      return sendJson(res, 400, {
+        error: "still in trial mode (no blue-green deploy has run yet) — nothing to roll back to",
+      });
+    }
+    deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+    const logFd = fs.openSync(DEPLOY_LOG, "a");
+    fs.writeSync(logFd, `\n\n=== rollback started ${deployState.startedAt} ===\n`);
+    const child = spawn("bash", ["scripts/deploy.sh", "rollback"], {
+      cwd: REPO_DIR,
+      stdio: ["ignore", logFd, logFd],
+      detached: true,
+    });
+    child.unref();
+    child.on("exit", (code) => {
+      deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+      fs.appendFileSync(DEPLOY_LOG, `=== rollback finished, exit ${code} ===\n`);
+      fs.closeSync(logFd);
+    });
+    sendJson(res, 202, { ok: true, started: true });
+  });
+}
+
 function handlePullStatus(req, res) {
   sendJson(res, 200, deployState);
 }
@@ -512,6 +549,7 @@ const DASHBOARD_HTML = `<!doctype html>
 
 <div class="row">
   <button onclick="pull()">Pull latest &amp; deploy</button>
+  <button class="secondary" onclick="rollback()">Rollback</button>
   <button class="secondary" onclick="restartAll()">Restart all</button>
   <button class="secondary" onclick="refresh()">Refresh now</button>
 </div>
@@ -750,6 +788,17 @@ async function pull() {
   }
 }
 
+async function rollback() {
+  if (!confirm("Roll back to the previously deployed color? This flips live traffic to whatever was running before the last deploy.")) return;
+  try {
+    await api("/api/rollback", { method: "POST" });
+    pollDeployLog();
+    refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 let polling = false;
 async function pollDeployLog() {
   if (polling) return;
@@ -841,6 +890,8 @@ const server = http.createServer((req, res) => {
       handleDbRestart(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/pull") {
       handlePull(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/rollback") {
+      handleRollback(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/status") {
       handlePullStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/log") {

@@ -12,6 +12,11 @@ COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/frontend apps/frontend
+# Test gate — no test files here, but `astro build` alone doesn't fully
+# type-check (unlike api/admin's tsc-based builds), so run `astro check`
+# explicitly. See apps/api/Dockerfile's own comment for why this is enough
+# on its own to block a bad deploy.
+RUN pnpm --filter @ucms/frontend typecheck
 RUN pnpm --filter @ucms/frontend build
 RUN pnpm --filter @ucms/frontend deploy --prod --legacy /app/deploy/frontend
 

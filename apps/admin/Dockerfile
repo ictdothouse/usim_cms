@@ -16,6 +16,9 @@ ARG VITE_API_URL=http://localhost:3000
 ARG VITE_FRONTEND_URL=http://localhost:4321
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_FRONTEND_URL=$VITE_FRONTEND_URL
+# Test gate — see apps/api/Dockerfile's own comment for why this is enough
+# on its own to block a bad deploy, no separate CI step needed.
+RUN pnpm --filter @ucms/admin test
 RUN pnpm --filter @ucms/admin build
 
 FROM nginx:alpine AS runtime
