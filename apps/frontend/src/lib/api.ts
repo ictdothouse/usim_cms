@@ -79,8 +79,12 @@ async function apiGet<T>(path: string, tenantHost: string, token?: string): Prom
 }
 
 export async function getPageBySlug(tenantHost: string, slug: string, token?: string): Promise<Page | null> {
-  const { items } = await apiGet<{ items: Page[] }>("/api/pages", tenantHost, token);
-  return items.find((p) => p.slug === slug) ?? null;
+  // Filters straight to Postgres via generic-crud's buildListFilters (any
+  // column name is an exact-match query param) instead of fetching every
+  // page and searching in JS — same DB round-trip cost regardless of how
+  // many pages the tenant has.
+  const { items } = await apiGet<{ items: Page[] }>(`/api/pages?slug=${encodeURIComponent(slug)}`, tenantHost, token);
+  return items[0] ?? null;
 }
 
 export interface Post {
@@ -139,8 +143,8 @@ export function resolveCategoryName(post: Post, code: string | null): string | n
 // tag/authorId/authorEmail exact-match, from/to range on publishedAt) — see
 // generic-crud.ts's buildListFilters.
 export async function getPostBySlug(tenantHost: string, slug: string, token?: string): Promise<Post | null> {
-  const { items } = await apiGet<{ items: Post[] }>("/api/posts", tenantHost, token);
-  return items.find((p) => p.slug === slug) ?? null;
+  const { items } = await apiGet<{ items: Post[] }>(`/api/posts?slug=${encodeURIComponent(slug)}`, tenantHost, token);
+  return items[0] ?? null;
 }
 
 export async function listPosts(

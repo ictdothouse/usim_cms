@@ -2,6 +2,9 @@ import { pgTable, uuid, text, jsonb, timestamp, boolean, unique, integer } from 
 
 export const pages = pgTable("pages", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Uniqueness enforced by migrations/0019_content_slug_indexes.sql
+  // (CREATE UNIQUE INDEX, not a drizzle .unique() — that migration also
+  // dedupes any pre-existing duplicate slug rows first).
   slug: text("slug").notNull(),
   title: text("title").notNull(),
   // Dynamic block layout for the page, e.g. [{ type: "hero", props: {...} }, ...]
@@ -72,6 +75,8 @@ export const menus = pgTable("menus", {
 // publishedAt and a real history snapshot, unlike a draft.
 export const posts = pgTable("posts", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // Uniqueness enforced by migrations/0019_content_slug_indexes.sql (see
+  // pages.slug's own comment above).
   slug: text("slug").notNull(),
   title: text("title").notNull(),
   body: text("body").notNull().default(""),

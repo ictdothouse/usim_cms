@@ -41,8 +41,8 @@ PROJECT="ucms-$NEXT"
 
 echo "== usim_cms deploy: ${CURRENT:-<none yet>} -> $NEXT =="
 
-echo "-- ensuring base (db+proxy) is up --"
-docker compose up -d db proxy
+echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
+docker compose up -d db pgbouncer redis proxy
 
 # ucms-uploads (docker-compose.yml) isn't mounted by db/proxy, so the `up`
 # above never creates it — but docker-compose.release.yml's api service
