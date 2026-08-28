@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import * as api from "./lib/api";
 import { TemplatePreview } from "./designer/TemplatePreview";
 import { useT } from "./App";
+import { useConfirm } from "@/hooks/useConfirm";
 import type { Row } from "./designer/types";
 
 function blueprintRows(bp: api.PageBlueprint): Row[] {
@@ -25,13 +26,18 @@ export function BlueprintGallery({
   isSuper: boolean;
 }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const [blueprints, setBlueprints] = useState<api.PageBlueprint[]>([]);
   const [category, setCategory] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("");
 
   async function refresh() {
     try {
-      setBlueprints(await api.listBlueprints(tenantHost, token, category || undefined));
+      setBlueprints(await api.listBlueprints(tenantHost, token));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -41,9 +47,10 @@ export function BlueprintGallery({
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantHost, category]);
+  }, [tenantHost]);
 
   async function remove(id: string) {
+    if (!(await confirm(t("blueprints-delete-confirm")))) return;
     try {
       await api.deleteBlueprint(tenantHost, token, id);
       await refresh();
@@ -52,7 +59,29 @@ export function BlueprintGallery({
     }
   }
 
+  function startEdit(bp: api.PageBlueprint) {
+    setEditingId(bp.id);
+    setEditName(bp.name);
+    setEditDescription(bp.description ?? "");
+    setEditCategory(bp.category ?? "");
+  }
+
+  async function saveEdit(id: string) {
+    try {
+      await api.updateBlueprint(tenantHost, token, id, {
+        name: editName,
+        description: editDescription || undefined,
+        category: editCategory || undefined,
+      });
+      await refresh();
+      setEditingId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   const categories = Array.from(new Set(blueprints.map((b) => b.category).filter((c): c is string => Boolean(c))));
+  const visible = category ? blueprints.filter((b) => b.category === category) : blueprints;
 
   return (
     <div className="space-y-3">
@@ -77,18 +106,40 @@ export function BlueprintGallery({
         </div>
       )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {blueprints.map((bp) => (
+        {visible.map((bp) => (
           <div key={bp.id} className="space-y-2 rounded-lg border border-line/30 p-3">
             <TemplatePreview rows={blueprintRows(bp)} />
-            <div>
-              <p className="text-xs font-semibold text-ink">{bp.name}</p>
-              {bp.description && <p className="text-[11px] text-sub">{bp.description}</p>}
-              {bp.tenantHost === null && (
-                <span className="mt-1 inline-block rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
-                  {t("blueprints-system-badge")}
-                </span>
-              )}
-            </div>
+            {editingId === bp.id ? (
+              <div className="space-y-1">
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full rounded border border-line/30 bg-canvas px-2 py-1 text-xs text-ink"
+                />
+                <input
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder={t("blueprints-description-placeholder")}
+                  className="w-full rounded border border-line/30 bg-canvas px-2 py-1 text-xs text-ink"
+                />
+                <input
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value)}
+                  placeholder={t("blueprints-category-placeholder")}
+                  className="w-full rounded border border-line/30 bg-canvas px-2 py-1 text-xs text-ink"
+                />
+              </div>
+            ) : (
+              <div>
+                <p className="text-xs font-semibold text-ink">{bp.name}</p>
+                {bp.description && <p className="text-[11px] text-sub">{bp.description}</p>}
+                {bp.tenantHost === null && (
+                  <span className="mt-1 inline-block rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
+                    {t("blueprints-system-badge")}
+                  </span>
+                )}
+              </div>
+            )}
             {mode === "picker" ? (
               <button
                 onClick={() => onUse?.(bp)}
@@ -96,8 +147,30 @@ export function BlueprintGallery({
               >
                 {t("blueprints-use")}
               </button>
+            ) : editingId === bp.id ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void saveEdit(bp.id)}
+                  className="flex-1 rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+                >
+                  {t("blueprints-save")}
+                </button>
+                <button
+                  onClick={() => setEditingId(null)}
+                  className="flex-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-body"
+                >
+                  {t("designer-cancel")}
+                </button>
+              </div>
             ) : (
               <div className="flex gap-2">
+                <button
+                  onClick={() => startEdit(bp)}
+                  disabled={bp.tenantHost === null && !isSuper}
+                  className="flex-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-body disabled:opacity-40"
+                >
+                  {t("blueprints-edit")}
+                </button>
                 <button
                   onClick={() => void remove(bp.id)}
                   disabled={bp.tenantHost === null && !isSuper}
@@ -109,7 +182,7 @@ export function BlueprintGallery({
             )}
           </div>
         ))}
-        {blueprints.length === 0 && <p className="text-xs text-sub">{t("blueprints-empty")}</p>}
+        {visible.length === 0 && <p className="text-xs text-sub">{t("blueprints-empty")}</p>}
       </div>
     </div>
   );
