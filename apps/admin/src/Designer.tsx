@@ -147,6 +147,7 @@ import { moveSection, moveColumn } from "./designerTree";
 import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
+import { TemplatePreview } from "./designer/TemplatePreview";
 import { PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
 import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./designer/fields";
 import { BufferedInput, BpToggle } from "./designer/FieldControls";
@@ -797,12 +798,14 @@ export default function Designer({
   token,
   t,
   onClose,
+  isSuper,
 }: {
   page: Record<string, unknown>;
   tenantHost: string;
   token: string;
   t: (k: Key) => string;
   onClose: (saved: boolean) => void;
+  isSuper: boolean;
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
@@ -1110,6 +1113,13 @@ export default function Designer({
   // made a real save look like a dead button.
   const [pendingTemplate, setPendingTemplate] = useState<{ kind: string; value: unknown } | null>(null);
   const [templateName, setTemplateName] = useState("");
+  // "Save as blueprint" — same in-app-modal naming pattern as templates above.
+  const [showSaveBlueprint, setShowSaveBlueprint] = useState(false);
+  const [blueprintName, setBlueprintName] = useState("");
+  const [blueprintDescription, setBlueprintDescription] = useState("");
+  const [blueprintCategory, setBlueprintCategory] = useState("");
+  const [blueprintScope, setBlueprintScope] = useState<"system" | "tenant">("tenant");
+  const [blueprintBusy, setBlueprintBusy] = useState(false);
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateFilter, setTemplateFilter] = useState<"all" | "section" | "row" | "column" | "element">("all");
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
@@ -1762,6 +1772,30 @@ export default function Designer({
       setError((err as Error).message);
     } finally {
       setTemplatesBusy(false);
+    }
+  }
+
+  async function confirmSaveAsBlueprint() {
+    const name = blueprintName.trim();
+    if (!name) return;
+    setBlueprintBusy(true);
+    try {
+      await api.createBlueprint(tenantHost, token, {
+        name,
+        description: blueprintDescription.trim() || undefined,
+        category: blueprintCategory.trim() || undefined,
+        layout: blocks,
+        settings: pageSettings,
+        scope: blueprintScope,
+      });
+      setShowSaveBlueprint(false);
+      setBlueprintName("");
+      setBlueprintDescription("");
+      setBlueprintCategory("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBlueprintBusy(false);
     }
   }
 
@@ -2557,38 +2591,20 @@ export default function Designer({
           : t("designer-section");
   }
 
-  // Rough layout impression only ("shape2 susunan" — not a pixel-accurate
-  // render, no real colors/fonts/media) so a list of 100+ templates stays
-  // scannable without the cost/dependency of a real screenshot thumbnail
-  // (would need a headless-browser render pipeline just for this). Every
-  // kind normalizes to a rows[] shape so one render path covers all 4 —
-  // row/column/element templates are just a 1-row (and 1-column) section.
-  function TemplatePreview({ tpl }: { tpl: api.DesignTemplate }) {
+  // Normalizes a DesignTemplate's kind/value into TemplatePreview's rows[]
+  // shape — same normalization the old inline TemplatePreview used to do
+  // internally, now a plain call-site helper so the preview component itself
+  // stays templates-vs-blueprints agnostic.
+  function templateRows(tpl: api.DesignTemplate): Row[] {
     const kind = (tpl.data?.kind as string | undefined) ?? "section";
     const value = tpl.data?.kind ? tpl.data.value : tpl.data;
-    const rows: Row[] =
-      kind === "section"
-        ? ((value as SectionProps).rows ?? [])
-        : kind === "row"
-          ? [value as Row]
-          : kind === "column"
-            ? [{ columns: [value as Col] } as Row]
-            : [{ columns: [{ elements: [value as El] }] } as Row];
-    return (
-      <div className="flex h-14 flex-col gap-0.5 overflow-hidden rounded-md border border-line/30 bg-canvas/40 p-1">
-        {rows.slice(0, 4).map((row, i) => (
-          <div key={i} className="flex flex-1 gap-0.5">
-            {(row.columns ?? []).slice(0, 5).map((col, j) => (
-              <div key={j} className="flex flex-1 flex-col justify-center gap-[1px] rounded-sm bg-white/70 p-[1px]">
-                {(col.elements ?? []).slice(0, 3).map((_, k) => (
-                  <div key={k} className="h-[3px] w-full rounded-full bg-accent/40" />
-                ))}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
+    return kind === "section"
+      ? ((value as SectionProps).rows ?? [])
+      : kind === "row"
+        ? [value as Row]
+        : kind === "column"
+          ? [{ columns: [value as Col] } as Row]
+          : [{ columns: [{ elements: [value as El] }] } as Row];
   }
 
   function Breadcrumb() {
@@ -4577,6 +4593,12 @@ export default function Designer({
           <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates")}
         </button>
         <button
+          onClick={() => setShowSaveBlueprint(true)}
+          className="flex items-center gap-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
+        </button>
+        <button
           onClick={() => void toggleLive()}
           className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
             mode === "live" ? "bg-accent/15 text-accent" : "text-body"
@@ -5579,7 +5601,7 @@ export default function Designer({
                             const kind = (tpl.data?.kind as string | undefined) ?? "section";
                             return (
                               <div key={tpl.id} className="flex flex-col gap-1.5 rounded-lg border border-line/30 p-2">
-                                <TemplatePreview tpl={tpl} />
+                                <TemplatePreview rows={templateRows(tpl)} />
                                 <span className="truncate text-[11px] font-medium text-ink" title={tpl.name}>
                                   {tpl.name}
                                 </span>
@@ -5611,6 +5633,63 @@ export default function Designer({
             </div>
           );
         })()}
+
+      {showSaveBlueprint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSaveBlueprint(false)}>
+          <div className="w-[min(90vw,28rem)] rounded-xl bg-white p-4 shadow-xl" onClick={(ev) => ev.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-bold text-ink">{t("blueprints-save-as")}</p>
+              <button onClick={() => setShowSaveBlueprint(false)} aria-label={t("designer-close")}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                void confirmSaveAsBlueprint();
+              }}
+              className="space-y-2"
+            >
+              <input
+                autoFocus
+                value={blueprintName}
+                onChange={(ev) => setBlueprintName(ev.target.value)}
+                placeholder={t("blueprints-name-placeholder")}
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              <input
+                value={blueprintDescription}
+                onChange={(ev) => setBlueprintDescription(ev.target.value)}
+                placeholder={t("blueprints-description-placeholder")}
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              <input
+                value={blueprintCategory}
+                onChange={(ev) => setBlueprintCategory(ev.target.value)}
+                placeholder={t("blueprints-category-placeholder")}
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              {isSuper && (
+                <select
+                  value={blueprintScope}
+                  onChange={(ev) => setBlueprintScope(ev.target.value as "system" | "tenant")}
+                  className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs"
+                >
+                  <option value="tenant">{t("blueprints-scope-tenant")}</option>
+                  <option value="system">{t("blueprints-scope-system")}</option>
+                </select>
+              )}
+              <button
+                type="submit"
+                disabled={!blueprintName.trim() || blueprintBusy}
+                className="w-full rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                {t("blueprints-save-as")}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {ctxMenu &&
         (() => {

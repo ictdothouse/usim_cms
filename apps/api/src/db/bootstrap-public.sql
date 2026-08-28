@@ -147,3 +147,43 @@ ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "multilang_enab
 -- i18n Phase 5 follow-up: default language new posts/pages fall back to
 -- when their own Language field is unset. Nullable — no default set yet.
 ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "default_language" text;
+
+-- Page Blueprint (Sprint 5 sub-project 2). tenant_host NULL = system-wide.
+CREATE TABLE IF NOT EXISTS "public"."page_blueprints" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"tenant_host" text,
+	"name" text NOT NULL,
+	"description" text,
+	"category" text,
+	"layout" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"created_by" uuid REFERENCES "public"."users"("id") ON DELETE SET NULL,
+	"created_by_email" text,
+	"created_at" timestamp DEFAULT now() NOT NULL,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+-- Seed system blueprints (docs/laporan-audit-ui-ux.md §5.6's practical
+-- list), only ever using element types that already exist. Kept
+-- deliberately small — hero/text/cardgrid/ctabanner/postlist cover every
+-- seed without inventing new element types. Guard on name (no natural
+-- unique key on this table) so re-running this file stays idempotent.
+INSERT INTO "public"."page_blueprints" ("tenant_host", "name", "description", "category", "layout")
+SELECT NULL, v.name, v.description, v.category, v.layout::jsonb
+FROM (VALUES
+	('Landing page jabatan', 'Hero, quick links, statistik, highlight berita, CTA', 'Landing',
+		'[{"type":"section","props":{"paddingY":"4rem","rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"1","text":"Nama Jabatan"}}]}]}]}},{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"postlist","props":{"count":"3","columns":"3","postLayout":"grid"}}]}]}]}},{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"ctabanner","props":{"heading":"Hubungi Kami","button1Label":"Hubungi","button1Href":"/hubungi"}}]}]}]}}]'),
+	('About / profil', 'Hero ringkas, pengenalan, visi/misi, CTA', 'About',
+		'[{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"1","text":"Tentang Kami"}},{"type":"text","props":{"text":"Pengenalan ringkas organisasi."}}]}]}]}},{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"2","text":"Visi"}},{"type":"text","props":{"text":""}}]},{"span":1,"elements":[{"type":"heading","props":{"level":"2","text":"Misi"}},{"type":"text","props":{"text":""}}]}]}]}}]'),
+	('Program / perkhidmatan', 'Hero, overview, feature cards, CTA', 'Program',
+		'[{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"1","text":"Nama Program"}}]}]}]}},{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"cardgrid","props":{"cards":"[]","columns":"3"}}]}]}]}},{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"ctabanner","props":{"heading":"Mohon Sekarang","button1Label":"Mohon"}}]}]}]}}]'),
+	('News hub', 'Heading, post grid, CTA subscribe', 'News',
+		'[{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"1","text":"Berita & Pengumuman"}}]}]}]}},{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"postlist","props":{"count":"9","columns":"3","postLayout":"grid"}}]}]}]}}]'),
+	('Contact', 'Contact info, operating hours, location', 'Contact',
+		'[{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"1","text":"Hubungi Kami"}},{"type":"text","props":{"text":"Alamat, waktu operasi dan maklumat hubungan."}}]}]}]}}]'),
+	('Simple content page', 'Page heading, rich text, related links', 'Content',
+		'[{"type":"section","props":{"rows":[{"columns":[{"span":1,"elements":[{"type":"heading","props":{"level":"1","text":"Tajuk Halaman"}},{"type":"text","props":{"text":""}}]}]}]}}]')
+) AS v(name, description, category, layout)
+WHERE NOT EXISTS (
+	SELECT 1 FROM "public"."page_blueprints" pb WHERE pb.tenant_host IS NULL AND pb.name = v.name
+);
