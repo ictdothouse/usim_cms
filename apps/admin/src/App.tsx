@@ -722,7 +722,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   );
 }
 
-function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: string }) {
+function PageDesignerRoute({ tenantHost, token, isSuper }: { tenantHost: string; token: string; isSuper: boolean }) {
   const { t } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -739,6 +739,7 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
       token={token}
       t={t}
       onClose={() => navigate("/content/pages")}
+      isSuper={isSuper}
     />
   );
 }
@@ -3597,7 +3598,7 @@ function ContentManager({
           <Routes>
             <Route index element={<Navigate to="pages" replace />} />
             <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
-            <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} />} />
+            <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} isSuper={isSuper} />} />
             <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
             <Route path="posts/categories" element={<CategoriesPanel tenantHost={siteHost} token={token} />} />
             <Route path="posts/:id" element={<PostEditorPage tenantHost={siteHost} token={token} />} />
