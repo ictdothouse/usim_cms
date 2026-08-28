@@ -14,6 +14,7 @@ import {
   Languages,
   Layers,
   LayoutDashboard,
+  LayoutTemplate,
   ListTree,
   Loader2,
   LogOut,
@@ -3527,7 +3528,7 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   );
 }
 
-type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus";
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "blueprints";
 
 function ContentManager({
   isSuper,
@@ -3557,6 +3558,7 @@ function ContentManager({
           { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
           { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
           { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
+          { id: "blueprints" as const, labelKey: "blueprints-title" as const, icon: LayoutTemplate },
         ]
       : []),
   ];
@@ -3610,6 +3612,9 @@ function ContentManager({
             {isSuper && (
               <Route path="languages" element={<TenantLanguagesForm key={siteHost} tenantHost={siteHost} token={token} />} />
             )}
+            {isSuper && (
+              <Route path="blueprints" element={<BlueprintGallery key={siteHost} tenantHost={siteHost} token={token} mode="manage" isSuper />} />
+            )}
           </Routes>
         </>
       )}
@@ -3627,6 +3632,7 @@ type Tab =
   | "theme"
   | "languages"
   | "menus"
+  | "blueprints"
   | "global-theme"
   | "feed"
   | "settings"
@@ -3641,6 +3647,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   theme: { labelKey: "tab-theme", icon: Palette },
   languages: { labelKey: "tab-languages", icon: Globe },
   menus: { labelKey: "menus-title", icon: ListTree },
+  blueprints: { labelKey: "blueprints-title", icon: LayoutTemplate },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
@@ -4481,7 +4488,7 @@ function Shell({
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings", "security"] : ["dashboard", "security"];
-  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus"];
+  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus", "blueprints"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -4611,6 +4618,7 @@ function Shell({
                 <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="blueprints" element={!isSuper && session.tenantHost ? (<BlueprintGallery tenantHost={session.tenantHost} token={session.token} mode="manage" isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />
