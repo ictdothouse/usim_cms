@@ -169,6 +169,9 @@ export const media = pgTable("media", {
   sizeBytes: integer("size_bytes").notNull().default(0),
   folderId: uuid("folder_id").references(() => mediaFolders.id, { onDelete: "set null" }),
   altText: text("alt_text"),
+  // Sprint 4 UX audit: exempts this file from the admin's alt-text-required
+  // rule (a blank altText is then the correct, intentional state, not a gap).
+  isDecorative: boolean("is_decorative").notNull().default(false),
   description: text("description"),
   // Who uploaded this file, within the tenant. No FK: users live in the
   // control-plane database, media lives in the tenant's own database (DB-

@@ -151,6 +151,28 @@ export const getMe = (token: string) =>
 export const getPages = (tenantHost: string, token: string) =>
   request("/api/pages", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
 
+export interface ListParams {
+  search?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+// Sprint 4 UX audit: paginated/searchable variant, used only by the Pages/
+// Posts panel's own list view — every other caller of getPages/getPosts
+// (dashboard counts, MenuItemsEditor's picker, PostEditorPage's related-post
+// list) wants the plain unbounded array and is untouched.
+function toQuery(params?: ListParams): string {
+  if (!params) return "";
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== "");
+  if (entries.length === 0) return "";
+  return `?${new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString()}`;
+}
+export const listPagesPage = (tenantHost: string, token: string, params: ListParams) =>
+  request(`/api/pages${toQuery(params)}`, tenantHost, token).then((b) => ({
+    items: b.items as Array<Record<string, unknown>>,
+    total: (b.total as number | undefined) ?? (b.items as unknown[]).length,
+  }));
+
 export const createPage = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
   request("/api/pages", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then(
     (b) => b.item as Record<string, unknown>,
@@ -174,6 +196,12 @@ export const deletePage = (tenantHost: string, token: string, id: string) =>
 
 export const getPosts = (tenantHost: string, token: string) =>
   request("/api/posts", tenantHost, token).then((b) => b.items as Array<Record<string, unknown>>);
+
+export const listPostsPage = (tenantHost: string, token: string, params: ListParams) =>
+  request(`/api/posts${toQuery(params)}`, tenantHost, token).then((b) => ({
+    items: b.items as Array<Record<string, unknown>>,
+    total: (b.total as number | undefined) ?? (b.items as unknown[]).length,
+  }));
 
 // Returns the created row (unlike before) so the quick-create flow can jump
 // straight into the writing view for it, same pattern as createPage.
@@ -387,7 +415,13 @@ export const updateMedia = (
   tenantHost: string,
   token: string,
   id: string,
-  data: { originalName?: string; altText?: string | null; description?: string | null; folderId?: string | null },
+  data: {
+    originalName?: string;
+    altText?: string | null;
+    description?: string | null;
+    folderId?: string | null;
+    isDecorative?: boolean;
+  },
 ) => request(`/api/media/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
 
 export const deleteMedia = (tenantHost: string, token: string, id: string) =>

@@ -350,11 +350,32 @@ pnpm workspace monorepo with two apps:
     public list `GET` also applies generic query-string filters (`generic-crud.ts`'s
     `buildListFilters`) keyed off whichever columns a collection's table actually has: exact-match on any
     matching column name, `?tag=` as an array-contains against a `tags` column, `?from=`/`?to=` as a
-    range against `publishedAt` — a collection without those columns just ignores the params. RLS (the
+    range against `publishedAt` — a collection without those columns just ignores the params. Sprint 4 of
+    the UX audit (`docs/laporan-audit-ui-ux.md`) added `?search=` (`ilike` against a `title` column, same
+    ignore-if-absent shape as the others) for the admin's Pages/Posts list search box. The list route also
+    now returns a `total` count, but only when the request sent `?limit=` — an unbounded caller (every
+    existing one pre-Sprint-4, plus `apps/frontend`) pays no extra count query. `apps/admin/src/lib/api.ts`'s
+    `listPagesPage`/`listPostsPage` are the only callers that pass these — `getPages`/`getPosts` stay
+    unbounded/unfiltered for every other caller (dashboard counts, `MenuItemsEditor`'s picker,
+    `PostEditorPage`'s related-post list). RLS (the
     per-table `_select` policy) is still the real visibility gate; these filters only narrow within what
     RLS already allows the request to see. `POST /:id/publish` (the "Share to portal" route) refuses to
     share any row whose `status` isn't `"published"` — draft and `posts`' `"private"` are both blocked,
     generically, for any collection with a `status` column.
+  - Sprint 4 of the UX audit also touched `media` (`src/db/schema.ts`): a new `isDecorative` boolean
+    (`migrations/0020_media_decorative.sql`, default false) lets an image opt out of the admin's
+    alt-text-required rule — `MediaManager`'s edit form (`apps/admin/src/App.tsx`) disables/requires the alt
+    field accordingly and blocks Save while alt is required-but-empty; the read view shows a small "No alt
+    text" badge on any non-decorative image with a blank `altText`. `PATCH /api/media/:id` (hand-written,
+    `src/index.ts` — media has no `CollectionConfig`, unlike pages/posts) allowlists `isDecorative` the same
+    way it already allowlists `altText`/`description`/`folderId`. Separately, `PagesPanel`'s `setStatus` and
+    `PostEditorPage`'s `save()` both gained a client-side pre-publish warning gate (reusing the existing
+    `useConfirm()` dialog, no new DB/API): publishing a page with an empty block tree, or a post with a
+    near-empty body or blank excerpt, shows a warning the author can proceed past or cancel — never a hard
+    block, matching the audit's own "warn, don't gate" flow. `ListLoading`/`ListEmpty` (`App.tsx`) are the
+    new shared loading/empty-state components wired into Pages/Posts/Media — the audit's "standard loading,
+    empty dan error states" item; Categories/Menus panels were left as-is (small, unpaginated lists, judged
+    not worth the same treatment yet).
   - `posts` (`src/db/schema.ts`) has a real `categoryId` FK into a `categories` table (`name`+`slug`,
     both unique; its own `categoriesCollection` in `index.ts` is gated on `posts.update`, not a new
     `categories.*` permission, since managing categories is a sub-concern of managing posts) declared

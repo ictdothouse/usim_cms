@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, getTableColumns, sql, type SQL } from "drizzle-orm";
+import { and, getTableColumns, ilike, sql, type SQL } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
 import { verifySession } from "../db/auth.js";
@@ -64,7 +64,9 @@ function buildListFilters(table: CollectionConfig["table"], query: Record<string
   const conditions: SQL[] = [];
   for (const [key, raw] of Object.entries(query)) {
     if (typeof raw !== "string" || !raw) continue;
-    if (key === "tag" && "tags" in columns) {
+    if (key === "search" && "title" in columns) {
+      conditions.push(ilike(columns.title as never, `%${raw}%`));
+    } else if (key === "tag" && "tags" in columns) {
       conditions.push(sql`${columns.tags} @> ARRAY[${raw}]::text[]`);
     } else if (key === "from" && "publishedAt" in columns) {
       conditions.push(sql`${columns.publishedAt} >= ${raw}`);
@@ -105,7 +107,18 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
     if (limit !== undefined) query = query.limit(limit).offset(offset) as typeof query;
     let items: unknown[] = await query;
     if (config.hooks?.afterRead) items = await config.hooks.afterRead(items, req);
-    const result = { collection: config.slug, items };
+    // total is only worth a second query for a caller doing real pagination
+    // (one that already sent ?limit=) — every existing unbounded caller
+    // (admin panels pre-Sprint-4, apps/frontend) skips this extra query.
+    let total: number | undefined;
+    if (limit !== undefined) {
+      const countQuery = filters
+        ? req.db.select({ count: sql<number>`count(*)::int` }).from(table).where(filters)
+        : req.db.select({ count: sql<number>`count(*)::int` }).from(table);
+      const [row] = await countQuery;
+      total = row?.count ?? 0;
+    }
+    const result = { collection: config.slug, items, ...(total !== undefined ? { total } : {}) };
     if (cacheKey) await cacheSet(cacheKey, result);
     return result;
   });

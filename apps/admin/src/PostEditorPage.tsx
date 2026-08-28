@@ -225,6 +225,7 @@ function MetaSwitch({ label, checked, onChange }: { label: string; checked: bool
 
 export default function PostEditorPage({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
+  const confirm = useConfirm();
   const { id } = useParams();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Array<Record<string, unknown>> | null>(null);
@@ -422,6 +423,15 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
 
   async function save(nextStatus?: PostStatus) {
     if (!post) return;
+    if (nextStatus === "published") {
+      const draftHtml = await editor.blocksToHTMLLossy(editor.document);
+      const warnings: string[] = [];
+      if (autoExcerpt(draftHtml).length < 20) warnings.push(t("prepublish-empty-body"));
+      if (!excerpt.trim()) warnings.push(t("prepublish-no-excerpt"));
+      if (warnings.length > 0 && !(await confirm(`${t("prepublish-warning-title")}\n\n- ${warnings.join("\n- ")}`))) {
+        return;
+      }
+    }
     setSaving(true);
     try {
       const html = await editor.blocksToHTMLLossy(editor.document);
