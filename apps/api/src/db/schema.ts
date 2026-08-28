@@ -357,6 +357,28 @@ export const tenantLanguages = pgTable("tenant_languages", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Page Blueprint (Sprint 5 sub-project 2) — a ready-made section layout a
+// page can start from. Control-plane, not a tenant-DB table: a null
+// tenantHost means "system-wide, usable by every tenant" (mirrors how
+// `languages` is instance-wide), a set tenantHost scopes it to one tenant's
+// own library (mirrors tenantLanguages' bare tenant_host text column — not
+// a FK, tenants are looked up by host). See
+// docs/superpowers/specs/2026-08-28-page-blueprint-design.md for why this
+// lives here instead of in design_templates' per-tenant-DB table.
+export const pageBlueprints = pgTable("page_blueprints", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantHost: text("tenant_host"),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"),
+  layout: jsonb("layout").notNull().default([]),
+  settings: jsonb("settings").notNull().default({}),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdByEmail: text("created_by_email"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Named permission sets a superadmin defines and assigns to webmaster users
 // (public schema, like tenants/users). `permissions` is a fixed set of
 // "resource.action" strings (see PERMISSIONS in index.ts) — superadmin role
