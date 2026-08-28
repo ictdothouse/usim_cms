@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides } from "./parsers";
+import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards, stringifyCards } from "./parsers";
 
 test("parsePairs splits on the first pipe, defaults b to '', filters blank lines", () => {
   assert.deepEqual(parsePairs("Q1|A1\n\nno-pipe-line\n"), [{ a: "Q1", b: "A1" }, { a: "no-pipe-line", b: "" }]);
@@ -41,5 +41,24 @@ test("parseSlides accepts the JSON shape and the legacy pipe-line shape", () => 
 test("stringifySlides round-trips through parseSlides for the JSON shape", () => {
   const original = parseSlides(JSON.stringify([{ imageUrl: "x.jpg", heading: "H1", subtitle: "S1", buttons: [] }]));
   const roundTripped = parseSlides(stringifySlides(original));
+  assert.deepEqual(roundTripped, original);
+});
+
+test("parseCards fills defaults from a JSON array, rejects garbage/non-arrays", () => {
+  const [card] = parseCards(JSON.stringify([{ title: "T", href: "/x" }]));
+  assert.equal(card.title, "T");
+  assert.equal(card.href, "/x");
+  assert.equal(card.image, "");
+  assert.equal(card.description, "");
+  assert.equal(card.buttonLabel, "");
+
+  assert.deepEqual(parseCards(undefined), []);
+  assert.deepEqual(parseCards("not json"), []);
+  assert.deepEqual(parseCards(JSON.stringify({ not: "an array" })), []);
+});
+
+test("stringifyCards round-trips through parseCards", () => {
+  const original = parseCards(JSON.stringify([{ title: "A", image: "a.jpg", description: "D", href: "/a", buttonLabel: "Go" }]));
+  const roundTripped = parseCards(stringifyCards(original));
   assert.deepEqual(roundTripped, original);
 });

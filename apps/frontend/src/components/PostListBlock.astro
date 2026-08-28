@@ -1,0 +1,47 @@
+---
+// Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6, item 5) "post/news
+// listing block" — pulls from the tenant's own posts collection instead of
+// duplicating content manually, same "reference, not a copy" idea as
+// MenuBlock.astro's menuId. categoryId is optional: empty means latest
+// posts across every category.
+import { listPosts, resolvePostContent, type Post } from "../lib/api";
+
+interface Props {
+  categoryId?: string;
+  count?: string;
+  columns?: string;
+  postLayout?: "grid" | "list";
+  tenantHost: string;
+  lang: string | null;
+}
+const { categoryId = "", count = "3", columns = "3", postLayout = "grid", tenantHost, lang } = Astro.props;
+
+const query: Record<string, string> = { limit: count };
+if (categoryId) query.categoryId = categoryId;
+const posts: Post[] = await listPosts(tenantHost, query);
+---
+
+{posts.length > 0 && (
+  <div
+    class={`ds-postlist ds-postlist-${postLayout}`}
+    style={postLayout === "grid" ? `grid-template-columns:repeat(${columns},1fr)` : undefined}
+  >
+    {posts.map((post) => {
+      const content = resolvePostContent(post, lang);
+      return (
+        <a class="ds-postlist-card" href={`/posts/${post.slug}`}>
+          {post.bannerImageUrl && <img src={post.bannerImageUrl} alt="" loading="lazy" />}
+          <div class="ds-postlist-body">
+            <h3 class="ds-postlist-title">{content.title}</h3>
+            {content.excerpt && <p class="ds-postlist-excerpt">{content.excerpt}</p>}
+            {post.publishedAt && (
+              <time class="ds-postlist-date" datetime={post.publishedAt}>
+                {new Date(post.publishedAt).toLocaleDateString(lang ?? post.language ?? "ms", { year: "numeric", month: "long", day: "numeric" })}
+              </time>
+            )}
+          </div>
+        </a>
+      );
+    })}
+  </div>
+)}

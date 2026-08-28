@@ -1146,6 +1146,26 @@ pnpm workspace monorepo with two apps:
   would mean the same kind of per-node-type style-builder work `navStyle`/`dotsStyle`/`transition` above
   already opted out of for Element specifically; extending realness further is a distinct, larger,
   not-yet-scoped task if ever asked for.
+  Sprint 5 (`docs/laporan-audit-ui-ux.md` section 5.6's element-priority ranking) added 4 more
+  `ELS` entries: **card grid** (`cardgrid` — `cards` is a JSON array of `{image,title,description,href,
+  buttonLabel}`, `designer/parsers.ts`'s `parseCards`/`stringifyCards`, a brand new element with no legacy
+  delimited-line format to fall back to, unlike slider), **CTA banner** (`ctabanner` — flat heading/
+  description/up-to-2-buttons/bg props, no repeater), **announcement bar** (`announcementbar` — a
+  dismiss button that just removes the DOM node client-side, no cookie/localStorage persistence, reappears
+  on reload), and **post/news listing block** (`postlist` — `categoryId` is a reference only, like `menu`'s
+  `menuId`; real posts are fetched at render time by a new `apps/frontend/src/components/PostListBlock.astro`
+  via the existing `listPosts(tenantHost, {categoryId, limit})`, never duplicated content — the audit
+  report's own "guna content CMS sedia ada, bukan duplicate content manual" ask). `postlist`'s `categoryId`
+  picker needed a new live-fetched-once-per-tenant Inspector control mirroring `menu`'s own `menuId` picker
+  — `FieldInput.tsx` gained a `"category-select"` `FieldKind` plus an `availableCategories` prop threaded
+  through both call sites, fetched via the admin's existing `api.listCategories`. `cardgrid`'s repeater
+  needed a `"cards"` `FieldKind` too — a plain add/remove-card-with-5-inputs list, deliberately simpler than
+  slider's drag-to-position UI (no positioning system, just image/title/description/href/buttonLabel per
+  card). `validate-layout.ts` gained a matching `isSafeCards` (image/href checked via `isSafeUrl` since
+  they're bound through safe Astro attributes — `<img src>`/`<a href>` — not concatenated into a raw
+  `url(...)` CSS function the way `bgImage`/slide `imageUrl` are) plus the usual enum/free-text/attr-url key
+  additions, and a `categoryId` exemption identical to `menuId`'s (only ever used as a parameterized DB
+  lookup key, never interpolated).
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on

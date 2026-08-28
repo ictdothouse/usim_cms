@@ -64,6 +64,7 @@ import {
   Info,
   Laptop,
   Layers,
+  LayoutGrid,
   LayoutPanelTop,
   LayoutTemplate,
   Leaf,
@@ -73,6 +74,7 @@ import {
   Mail,
   Map,
   MapPin,
+  Megaphone,
   Menu,
   MessageCircle,
   MessageSquare,
@@ -83,6 +85,7 @@ import {
   MousePointerClick,
   MoveVertical,
   Music,
+  Newspaper,
   Package,
   Paintbrush,
   Pencil,
@@ -141,8 +144,8 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
-import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block } from "./designer/types";
-import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides } from "./designer/parsers";
+import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem } from "./designer/types";
+import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
 import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./designer/fields";
@@ -482,6 +485,97 @@ const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<s
       { key: "megaMenuWidth", labelKey: "designer-f-menu-width", kind: "select", options: ["contained", "full-width"] },
     ],
   },
+  // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) — most versatile
+  // content block per the audit's own ranking: news, quick links, services,
+  // programs. `cards` is a JSON array (CardItem[], see designer/parsers.ts's
+  // parseCards/stringifyCards) — a brand new element, unlike slider, so no
+  // legacy delimited-line format to support.
+  cardgrid: {
+    labelKey: "designer-el-cardgrid",
+    icon: LayoutGrid,
+    defaults: {
+      cards: JSON.stringify([
+        { image: "", title: "Card one", description: "Short description", href: "#", buttonLabel: "" },
+        { image: "", title: "Card two", description: "Short description", href: "#", buttonLabel: "" },
+        { image: "", title: "Card three", description: "Short description", href: "#", buttonLabel: "" },
+      ] satisfies CardItem[]),
+      columns: "3",
+      equalHeight: "true",
+    },
+    fields: [
+      { key: "cards", labelKey: "designer-f-cardgrid-items", kind: "cards" },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+      { key: "equalHeight", labelKey: "designer-f-cardgrid-equalheight", kind: "select", options: ["true", "false"] },
+    ],
+  },
+  // Conversion element — heading/description + up to 2 buttons + optional
+  // background color/image. Flat props (no repeater), unlike cardgrid.
+  ctabanner: {
+    labelKey: "designer-el-ctabanner",
+    icon: Megaphone,
+    defaults: {
+      heading: "Ready to get started?",
+      description: "",
+      button1Label: "Learn more",
+      button1Href: "#",
+      button2Label: "",
+      button2Href: "",
+      align: "center",
+      bgColor: "",
+      bgImage: "",
+    },
+    fields: [
+      { key: "heading", labelKey: "designer-f-ctabanner-heading", kind: "text" },
+      { key: "description", labelKey: "designer-f-text", kind: "textarea" },
+      { key: "button1Label", labelKey: "designer-f-ctabanner-btn1label", kind: "text" },
+      { key: "button1Href", labelKey: "designer-f-href", kind: "text" },
+      { key: "button2Label", labelKey: "designer-f-ctabanner-btn2label", kind: "text" },
+      { key: "button2Href", labelKey: "designer-f-href", kind: "text" },
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      { key: "bgColor", labelKey: "designer-s-bg", kind: "color" },
+      { key: "bgImage", labelKey: "designer-s-bgimage", kind: "image" },
+    ],
+  },
+  // Time-sensitive institutional notice, meant to sit at the very top of a
+  // page (audit report 5.6 item 4). Dismissible client-side only (no
+  // per-visitor persistence — reappears on reload, same as any static-site
+  // convention here: no cookie/localStorage plumbing for this one banner).
+  announcementbar: {
+    labelKey: "designer-el-announcementbar",
+    icon: Bell,
+    defaults: {
+      text: "Important announcement",
+      linkLabel: "",
+      linkHref: "",
+      bgColor: "#111827",
+      textColor: "#ffffff",
+      dismissible: "true",
+    },
+    fields: [
+      { key: "text", labelKey: "designer-f-text", kind: "text" },
+      { key: "linkLabel", labelKey: "designer-f-announcementbar-linklabel", kind: "text" },
+      { key: "linkHref", labelKey: "designer-f-href", kind: "text" },
+      { key: "bgColor", labelKey: "designer-s-bg", kind: "color" },
+      { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
+      { key: "dismissible", labelKey: "designer-f-announcementbar-dismissible", kind: "select", options: ["true", "false"] },
+    ],
+  },
+  // Pulls from the tenant's own posts collection (audit report 5.6 item 5 —
+  // "guna content CMS sedia ada, bukan duplicate content manual"), never
+  // duplicated content of its own. categoryId is a reference only (like
+  // menu's menuId) — the actual posts are fetched at render time
+  // (apps/frontend's PostListBlock.astro).
+  postlist: {
+    labelKey: "designer-el-postlist",
+    icon: Newspaper,
+    defaults: { categoryId: "", count: "3", columns: "3", postLayout: "grid" },
+    fields: [
+      { key: "categoryId", labelKey: "designer-f-postlist-category", kind: "category-select" },
+      { key: "count", labelKey: "designer-f-postlist-count", kind: "select", options: ["3", "4", "6", "9"] },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+      { key: "postLayout", labelKey: "designer-f-postlist-layout", kind: "select", options: ["grid", "list"] },
+    ],
+  },
 };
 
 // "Paste style" strips these before merging onto a target, so copying a
@@ -505,6 +599,10 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   tabs: ["items"],
   slider: ["slides"],
   menu: ["menuId"],
+  cardgrid: ["cards"],
+  ctabanner: ["heading", "description", "button1Label", "button2Label"],
+  announcementbar: ["text", "linkLabel"],
+  postlist: [],
 };
 // i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
 // a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through
@@ -519,6 +617,8 @@ const TRANSLATABLE_TEXT_KEYS: Partial<Record<ElType, string[]>> = {
   button: ["label"],
   image: ["alt"],
   infobox: ["heading", "text"],
+  ctabanner: ["heading", "description", "button1Label", "button2Label"],
+  announcementbar: ["text", "linkLabel"],
 };
 type ClipLevel = "section" | "row" | "column" | "element";
 const CLIP_KEYS: Record<ClipLevel, string> = {
@@ -1052,6 +1152,12 @@ export default function Designer({
   const [availableMenus, setAvailableMenus] = useState<api.Menu[]>([]);
   useEffect(() => {
     void api.listMenus(tenantHost, token).then(setAvailableMenus);
+  }, [tenantHost]);
+  // "postlist" element's categoryId picker (Sprint 5, docs/laporan-audit-ui-ux.md
+  // section 5.6) — same live-fetched-once-per-tenant shape as availableMenus.
+  const [availableCategories, setAvailableCategories] = useState<api.Category[]>([]);
+  useEffect(() => {
+    void api.listCategories(tenantHost, token).then(setAvailableCategories);
   }, [tenantHost]);
   // i18n Phase 5 — site-wide master switch, plus this page's own opt-in;
   // the Translations block below is only offered when both are true.
@@ -2738,6 +2844,7 @@ export default function Designer({
             toggleBpKeys={toggleBpKeys}
             bpKey={bpKey}
             availableMenus={availableMenus}
+            availableCategories={availableCategories}
             ICONS={ICONS}
           />
         </div>
@@ -2960,6 +3067,7 @@ export default function Designer({
             toggleBpKeys={toggleBpKeys}
             bpKey={bpKey}
             availableMenus={availableMenus}
+            availableCategories={availableCategories}
             ICONS={ICONS}
           />
           <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
@@ -4173,6 +4281,62 @@ export default function Designer({
           <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
             <Menu className="h-3.5 w-3.5" />
             {linked ? linked.name : t("designer-f-menu-none")}
+          </div>
+        );
+      }
+      case "cardgrid": {
+        const cards = parseCards(p.cards);
+        if (cards.length === 0) return <span className="text-xs opacity-40">{t("designer-f-cardgrid-items")}…</span>;
+        return (
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${p.columns ?? "3"}, 1fr)` }}>
+            {cards.map((c, i) => (
+              <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2 text-xs">
+                {c.image && <img src={c.image} alt="" className="aspect-video w-full rounded object-cover" />}
+                <div className="font-semibold">{c.title || `Card ${i + 1}`}</div>
+                {c.description && <div className="text-sub">{c.description}</div>}
+              </div>
+            ))}
+          </div>
+        );
+      }
+      case "ctabanner": {
+        return (
+          <div
+            className="space-y-2 rounded-lg p-4"
+            style={{
+              textAlign: (p.align as "left" | "center" | "right") || "center",
+              background: p.bgColor || undefined,
+              backgroundImage: p.bgImage ? `url(${p.bgImage})` : undefined,
+              backgroundSize: "cover",
+            }}
+          >
+            <div className="font-semibold">{p.heading || t("designer-f-ctabanner-heading")}</div>
+            {p.description && <div className="text-xs text-sub">{p.description}</div>}
+            <div className="flex justify-center gap-2">
+              {p.button1Label && <span className="rounded-full bg-accent px-3 py-1 text-xs text-white">{p.button1Label}</span>}
+              {p.button2Label && <span className="rounded-full border border-line/40 px-3 py-1 text-xs">{p.button2Label}</span>}
+            </div>
+          </div>
+        );
+      }
+      case "announcementbar": {
+        return (
+          <div
+            className="flex items-center justify-center gap-2 rounded px-3 py-2 text-xs"
+            style={{ background: p.bgColor || "#111827", color: p.textColor || "#ffffff" }}
+          >
+            <Bell className="h-3.5 w-3.5 shrink-0" />
+            <span>{p.text || t("designer-el-announcementbar")}</span>
+            {p.linkLabel && <span className="underline">{p.linkLabel}</span>}
+          </div>
+        );
+      }
+      case "postlist": {
+        const linked = availableCategories.find((c) => c.id === p.categoryId);
+        return (
+          <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
+            <Newspaper className="h-3.5 w-3.5" />
+            {linked ? linked.name : t("designer-f-category-none")} · {p.count ?? "3"}
           </div>
         );
       }
