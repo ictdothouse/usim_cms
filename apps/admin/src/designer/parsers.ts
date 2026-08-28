@@ -1,4 +1,4 @@
-import type { SlideButton, SlideItem, SlideText } from "./types";
+import type { CardItem, SlideButton, SlideItem, SlideText } from "./types";
 
 // Slide/pairs parsing + serialization helpers split out of Designer.tsx
 // (Layer 0 of the God Component refactor, see
@@ -158,5 +158,35 @@ export function parseSlides(raw: string | undefined): SlideItem[] {
 }
 
 export function stringifySlides(items: SlideItem[]): string {
+  return JSON.stringify(items);
+}
+
+// Card grid repeater (Sprint 5, docs/laporan-audit-ui-ux.md section 5.6) —
+// a brand new element, unlike slider, so there's no legacy delimited-line
+// format to fall back to; JSON array of CardItem is the only shape ever
+// written.
+export const CARD_DEFAULTS: CardItem = { image: "", title: "", description: "", href: "", buttonLabel: "" };
+
+export function parseCards(raw: string | undefined): CardItem[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => {
+      const c = (item ?? {}) as Record<string, unknown>;
+      return {
+        image: typeof c.image === "string" ? c.image : "",
+        title: typeof c.title === "string" ? c.title : "",
+        description: typeof c.description === "string" ? c.description : "",
+        href: typeof c.href === "string" ? c.href : "",
+        buttonLabel: typeof c.buttonLabel === "string" ? c.buttonLabel : "",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function stringifyCards(items: CardItem[]): string {
   return JSON.stringify(items);
 }

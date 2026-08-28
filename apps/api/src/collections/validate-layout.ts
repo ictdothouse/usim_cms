@@ -100,6 +100,13 @@ const ENUM_VALUES: Record<string, string[]> = {
   hideDesktop: ["true"],
   hideTablet: ["true"],
   hideMobile: ["true"],
+  // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) new elements —
+  // cardgrid/ctabanner/announcementbar/postlist (Designer.tsx's ELS
+  // registry). `columns`/`align` reuse the existing enums above.
+  equalHeight: ["true", "false"],
+  dismissible: ["true", "false"],
+  postLayout: ["grid", "list"],
+  count: ["3", "4", "6", "9"],
 };
 
 // Free-typed CSS lengths (each ends up as `key:value` in a raw style
@@ -115,15 +122,23 @@ const LENGTH_KEYS = new Set([
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
   "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
 ]);
-const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color"]);
+const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
 // only the URI-scheme check applies — bgImage is handled separately above
-// since it's concatenated into raw CSS instead.
-const ATTR_URL_KEYS = new Set(["href", "url", "src"]);
+// since it's concatenated into raw CSS instead. button1Href/button2Href/
+// linkHref are ctabanner/announcementbar's own attribute-bound hrefs (see
+// Designer.tsx's ELS.ctabanner/announcementbar) — distinct key names since
+// props is a flat bag and an element can have more than one link.
+const ATTR_URL_KEYS = new Set(["href", "url", "src", "button1Href", "button2Href", "linkHref"]);
 // Rendered as escaped text content (or, for `images`/`slides`, a safe URL
 // per line/field) — never concatenated into CSS/HTML unescaped, so no
 // pattern restriction beyond the per-line checks `images`/`slides` get below.
-const FREE_TEXT_KEYS = new Set(["text", "label", "alt", "items", "name", "heading"]);
+// description/button1Label/button2Label/linkLabel are ctabanner/
+// announcementbar's own free-text fields (Designer.tsx's ELS registry).
+const FREE_TEXT_KEYS = new Set([
+  "text", "label", "alt", "items", "name", "heading",
+  "description", "button1Label", "button2Label", "linkLabel",
+]);
 const SKIP_KEYS = new Set(["html"]);
 
 // slider's `slides` field: a JSON array (post-Embla-Carousel rewrite, see
@@ -237,6 +252,29 @@ function isSafeSlides(value: string): boolean {
   return true;
 }
 
+// cardgrid's `cards` field (Sprint 5) — a JSON array of {image, title,
+// description, href, buttonLabel}, a brand new element with no legacy
+// format to accept (unlike slides). image/href are bound through safe Astro
+// attributes on the render side (<img src>/<a href>, not a raw url(...) CSS
+// function the way bgImage/slide imageUrl are), so a plain scheme check
+// (isSafeUrl) is enough — no isSafeCssUrl needed here.
+function isSafeCard(c: unknown): boolean {
+  if (typeof c !== "object" || c === null) return false;
+  const o = c as Record<string, unknown>;
+  if (typeof o.title !== "string" || typeof o.description !== "string" || typeof o.buttonLabel !== "string") return false;
+  if (typeof o.image !== "string" || (o.image && !isSafeUrl(o.image))) return false;
+  if (typeof o.href !== "string" || (o.href && !isSafeUrl(o.href))) return false;
+  return true;
+}
+function isSafeCards(value: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every(isSafeCard);
+  } catch {
+    return false;
+  }
+}
+
 function validateValue(key: string, value: unknown): string | null {
   if (typeof value !== "string") return `${key} must be a string`;
   if (SKIP_KEYS.has(key) || value === "") return null;
@@ -247,6 +285,7 @@ function validateValue(key: string, value: unknown): string | null {
     return null;
   }
   if (key === "slides") return isSafeSlides(value) ? null : `${key} contains an unsafe URL`;
+  if (key === "cards") return isSafeCards(value) ? null : `${key} contains an unsafe URL`;
   if (FREE_TEXT_KEYS.has(key)) return null;
   if (key === "bgImage") return isSafeCssUrl(value) ? null : `${key} has an unsafe URL`;
   if (ATTR_URL_KEYS.has(key)) return isSafeUrl(value) ? null : `${key} has an unsafe URL scheme`;
@@ -254,7 +293,9 @@ function validateValue(key: string, value: unknown): string | null {
   if (key === "anchorId") return ID_RE.test(value) ? null : `anchorId has invalid characters`;
   if (key === "fontFamily") return FONT_FAMILY_RE.test(value) ? null : `fontFamily has invalid characters`;
   if (key === "shadow") return isSafeShadow(value) ? null : `shadow has an invalid format`;
-  if (key === "menuId") return null;
+  // menuId/categoryId are only ever used as parameterized DB lookup keys
+  // (getMenu/postlist's category filter), never interpolated into CSS/HTML.
+  if (key === "menuId" || key === "categoryId") return null;
   if (COLOR_KEYS.has(key)) return HEX_COLOR_RE.test(value) ? null : `${key} must be a hex color`;
   if (LENGTH_KEYS.has(key)) return LENGTH_RE.test(value) ? null : `${key} must be a plain CSS length`;
   if (ENUM_VALUES[key]) return ENUM_VALUES[key].includes(value) ? null : `${key} has an unrecognized value`;

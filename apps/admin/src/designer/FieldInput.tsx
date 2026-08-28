@@ -8,7 +8,7 @@
 // from inside a .map() the same way it always was inside Designer.tsx.
 
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Minus, Plus } from "lucide-react";
-import type { Menu } from "@/lib/api";
+import type { Menu, Category } from "@/lib/api";
 import type { Key } from "@/i18n";
 import { bestTextColor } from "@/lib/utils";
 import type { Field, Bp, Positionable, SlideItem, SlideButton, SlideText, Block, SectionProps } from "./types";
@@ -18,6 +18,9 @@ import {
   parsePairs,
   parseSlides,
   stringifySlides,
+  parseCards,
+  stringifyCards,
+  CARD_DEFAULTS,
   TEXT_DEFAULTS,
   SLIDE_DEFAULTS,
   BUTTON_DEFAULTS,
@@ -74,6 +77,9 @@ export interface FieldInputProps {
   toggleBpKeys: (bag: Record<string, string> | undefined, keys: string[]) => Record<string, string>;
   bpKey: (key: string) => string;
   availableMenus: Menu[];
+  // "postlist" element's categoryId picker (Sprint 5) — same live-fetched-
+  // once-per-tenant shape as availableMenus above, not a static enum.
+  availableCategories: Category[];
   ICONS: Record<string, typeof Check>;
 }
 
@@ -97,6 +103,7 @@ export function FieldInput({
   toggleBpKeys,
   bpKey,
   availableMenus,
+  availableCategories,
   ICONS,
 }: FieldInputProps) {
   // FieldInput calls itself recursively at 3 spots below (inside
@@ -124,6 +131,7 @@ export function FieldInput({
     toggleBpKeys,
     bpKey,
     availableMenus,
+    availableCategories,
     ICONS,
   };
   const base =
@@ -137,6 +145,18 @@ export function FieldInput({
         {availableMenus.map((m) => (
           <option key={m.id} value={m.id}>
             {m.name}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (field.kind === "category-select") {
+    return (
+      <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{t("designer-f-category-none")}</option>
+        {availableCategories.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
           </option>
         ))}
       </select>
@@ -406,6 +426,61 @@ export function FieldInput({
           onClick={() => setItems([...items, { a: "", b: "" }])}
           className="text-[11px] font-semibold text-accent"
         >
+          {t("designer-pairs-add")}
+        </button>
+      </div>
+    );
+  }
+  if (field.kind === "cards") {
+    const cards = parseCards(value);
+    const setCards = (next: typeof cards) => onChange(stringifyCards(next));
+    return (
+      <div className="space-y-2">
+        {cards.map((c, i) => (
+          <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+              <button
+                onClick={() => setCards(cards.filter((_, j) => j !== i))}
+                className="text-[10px] font-semibold text-red-500"
+              >
+                {t("designer-gallery-remove")}
+              </button>
+            </div>
+            <BufferedInput
+              className={base}
+              value={c.image}
+              placeholder="https://"
+              onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, image: v } : x)))}
+            />
+            <BufferedInput
+              className={base}
+              value={c.title}
+              placeholder={t("designer-f-cardgrid-title")}
+              onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, title: v } : x)))}
+            />
+            <BufferedTextarea
+              rows={2}
+              className={base}
+              value={c.description}
+              placeholder={t("designer-f-text")}
+              onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, description: v } : x)))}
+            />
+            <BufferedInput
+              className={base}
+              value={c.href}
+              placeholder={t("designer-f-href")}
+              onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, href: v } : x)))}
+            />
+            <BufferedInput
+              className={base}
+              value={c.buttonLabel}
+              placeholder={t("designer-f-cardgrid-buttonlabel")}
+              onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, buttonLabel: v } : x)))}
+            />
+          </div>
+        ))}
+        <button onClick={() => setCards([...cards, { ...CARD_DEFAULTS }])} className="text-[11px] font-semibold text-accent">
           {t("designer-pairs-add")}
         </button>
       </div>

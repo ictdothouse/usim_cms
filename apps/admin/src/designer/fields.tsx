@@ -78,7 +78,7 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   fontFamily: "typography", color: "typography", lineHeight: "typography",
   letterSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
   textTransform: "typography", fontStyle: "typography", textDecoration: "typography",
-  bg: "background", bgImage: "background", textColor: "background",
+  bg: "background", bgImage: "background", bgColor: "background", textColor: "background",
   paddingY: "spacing", paddingX: "spacing", padding: "spacing", marginY: "spacing",
   width: "size", valign: "size", height: "size", ratio: "size", columns: "size", size: "size",
   // Figma-style split: Appearance (opacity/shadow/radius — visual effects)

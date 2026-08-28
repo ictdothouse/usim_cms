@@ -5,6 +5,7 @@
 // the <script> at the bottom) — accordion stays zero-JS via native
 // <details>/<summary>.
 import MenuBlock from "./MenuBlock.astro";
+import PostListBlock from "./PostListBlock.astro";
 
 interface El {
   id?: string;
@@ -394,6 +395,36 @@ function parseSlides(raw: string | undefined): Slide[] {
         buttons: buttonLabel ? [{ ...BUTTON_DEFAULTS, label: buttonLabel, href: buttonHref }] : [],
       };
     });
+}
+// cardgrid element (Sprint 5) — mirrors Designer.tsx's designer/parsers.ts
+// parseCards, duplicated the same way parseSlides/parseSlideText are (no
+// shared package between the two apps). Brand new element, no legacy
+// format to fall back to.
+interface Card {
+  image: string;
+  title: string;
+  description: string;
+  href: string;
+  buttonLabel: string;
+}
+function parseCards(raw: string | undefined): Card[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => {
+      const c = (item ?? {}) as Record<string, unknown>;
+      return {
+        image: typeof c.image === "string" ? c.image : "",
+        title: typeof c.title === "string" ? c.title : "",
+        description: typeof c.description === "string" ? c.description : "",
+        href: typeof c.href === "string" ? c.href : "",
+        buttonLabel: typeof c.buttonLabel === "string" ? c.buttonLabel : "",
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
 // Legacy preset keywords (existing content saved before the custom shadow
@@ -1281,6 +1312,99 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       lang={requestedLang}
                     />
                   );
+                case "cardgrid": {
+                  const cards = parseCards(p.cards);
+                  if (cards.length === 0) return null;
+                  return (
+                    <div
+                      class={cls("ds-cardgrid", p.equalHeight === "false" ? undefined : "ds-cardgrid-equal", p.cssClass)}
+                      style={[`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`, marginStyle(p), paddingStyle(p)]
+                        .filter(Boolean)
+                        .join(";")}
+                    >
+                      {cards.map((c) => (
+                        <div class="ds-card">
+                          {c.image && safeUrl(c.image) && <img src={safeUrl(c.image)} alt="" loading="lazy" />}
+                          <div class="ds-card-body">
+                            {c.title && <h3 class="ds-card-title">{c.title}</h3>}
+                            {c.description && <p class="ds-card-desc">{c.description}</p>}
+                            {c.buttonLabel && c.href && (
+                              <a class="ds-btn ds-btn-primary ds-card-btn" href={safeUrl(c.href) ?? "#"}>
+                                {c.buttonLabel}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                case "ctabanner":
+                  if (!p.heading && !p.description) return null;
+                  return (
+                    <div
+                      class={cls("ds-ctabanner", p.cssClass)}
+                      style={[
+                        p.align ? `text-align:${p.align}` : null,
+                        p.bgColor ? `background-color:${p.bgColor}` : null,
+                        safeCssUrl(p.bgImage) ? `background-image:url('${safeCssUrl(p.bgImage)}');background-size:cover;background-position:center` : null,
+                        marginStyle(p),
+                        paddingStyle(p),
+                      ]
+                        .filter(Boolean)
+                        .join(";")}
+                    >
+                      {p.heading && <h2 class="ds-ctabanner-heading">{p.heading}</h2>}
+                      {p.description && <p class="ds-ctabanner-desc">{p.description}</p>}
+                      {(p.button1Label || p.button2Label) && (
+                        <div class="ds-ctabanner-actions">
+                          {p.button1Label && (
+                            <a class="ds-btn ds-btn-primary" href={safeUrl(p.button1Href) ?? "#"}>
+                              {p.button1Label}
+                            </a>
+                          )}
+                          {p.button2Label && (
+                            <a class="ds-btn ds-btn-outline" href={safeUrl(p.button2Href) ?? "#"}>
+                              {p.button2Label}
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                case "announcementbar":
+                  if (!p.text) return null;
+                  return (
+                    <div
+                      class={cls("ds-announcementbar", p.cssClass)}
+                      style={[`background:${p.bgColor || "#111827"}`, `color:${p.textColor || "#ffffff"}`]
+                        .filter(Boolean)
+                        .join(";")}
+                    >
+                      <span>{p.text}</span>
+                      {p.linkLabel && p.linkHref && (
+                        <a class="ds-announcementbar-link" href={safeUrl(p.linkHref) ?? "#"}>
+                          {p.linkLabel}
+                        </a>
+                      )}
+                      {p.dismissible !== "false" && (
+                        <button type="button" class="ds-announcementbar-close" aria-label="Dismiss">
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  );
+                case "postlist":
+                  return (
+                    <PostListBlock
+                      categoryId={p.categoryId ?? ""}
+                      count={p.count}
+                      columns={p.columns}
+                      postLayout={p.postLayout as "grid" | "list" | undefined}
+                      tenantHost={tenantHost}
+                      lang={requestedLang}
+                    />
+                  );
                 default:
                   return null;
               }
@@ -1677,6 +1801,139 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     opacity: 1;
     pointer-events: auto;
   }
+  /* Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) new elements */
+  .ds-cardgrid {
+    display: grid;
+    gap: 1.5rem;
+  }
+  .ds-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 0.75rem;
+    overflow: hidden;
+  }
+  .ds-cardgrid-equal .ds-card {
+    height: 100%;
+  }
+  .ds-card img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    display: block;
+  }
+  .ds-card-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+  }
+  .ds-card-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .ds-card-desc {
+    margin: 0;
+    line-height: 1.6;
+    opacity: 0.85;
+  }
+  .ds-card-btn {
+    align-self: flex-start;
+    margin-top: auto;
+  }
+  .ds-ctabanner {
+    padding: 3rem 2rem;
+    border-radius: 1rem;
+  }
+  .ds-ctabanner-heading {
+    margin: 0 0 0.75rem;
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+  }
+  .ds-ctabanner-desc {
+    margin: 0 0 1.5rem;
+    line-height: 1.6;
+  }
+  .ds-ctabanner-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: inherit;
+  }
+  .ds-announcementbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+    text-align: center;
+  }
+  .ds-announcementbar-link {
+    color: inherit;
+    text-decoration: underline;
+  }
+  .ds-announcementbar-close {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+  }
+  .ds-postlist-grid {
+    display: grid;
+    gap: 1.5rem;
+  }
+  .ds-postlist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .ds-postlist-card {
+    display: flex;
+    flex-direction: column;
+    color: inherit;
+    text-decoration: none;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 0.75rem;
+    overflow: hidden;
+  }
+  .ds-postlist-list .ds-postlist-card {
+    flex-direction: row;
+  }
+  .ds-postlist-card img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    display: block;
+  }
+  .ds-postlist-list .ds-postlist-card img {
+    width: 10rem;
+    aspect-ratio: 1 / 1;
+    flex-shrink: 0;
+  }
+  .ds-postlist-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .ds-postlist-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .ds-postlist-excerpt {
+    margin: 0;
+    line-height: 1.6;
+    opacity: 0.85;
+  }
+  .ds-postlist-date {
+    font-size: 0.8rem;
+    opacity: 0.6;
+  }
   @media (max-width: 768px) {
     .ds-row {
       grid-template-columns: 1fr !important;
@@ -1686,6 +1943,10 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     }
     .ds-infobox-left {
       flex-direction: column;
+    }
+    .ds-cardgrid,
+    .ds-postlist-grid {
+      grid-template-columns: 1fr !important;
     }
   }
 </style>
@@ -1708,6 +1969,15 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     tabs.querySelectorAll(".ds-tabs-panel").forEach((el) => el.classList.remove("is-active"));
     label.classList.add("is-active");
     tabs.querySelector(`.ds-tabs-panel[data-idx="${idx}"]`)?.classList.add("is-active");
+  });
+
+  // Announcement bar: dismiss button just hides the bar for this page view —
+  // no cookie/localStorage persistence (reappears on reload), same
+  // static-site-with-a-little-JS convention as tabs above.
+  document.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest(".ds-announcementbar-close") as HTMLElement | null;
+    if (!btn) return;
+    btn.closest(".ds-announcementbar")?.remove();
   });
 
   // Slider: Embla Carousel (headless, vanilla JS — see package.json) drives

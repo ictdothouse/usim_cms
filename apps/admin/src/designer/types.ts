@@ -113,9 +113,11 @@ export type FieldKind =
   | "shadow"
   | "pairs"
   | "slides"
+  | "cards"
   | "font"
   | "stepper"
-  | "menu-select";
+  | "menu-select"
+  | "category-select";
 
 export interface Field {
   key: string;
@@ -167,7 +169,24 @@ export type ElType =
   | "infobox"
   | "tabs"
   | "slider"
-  | "menu";
+  | "menu"
+  | "cardgrid"
+  | "ctabanner"
+  | "announcementbar"
+  | "postlist";
+
+// Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) "card grid" element —
+// items is a JSON array of these, stored as a string in El.props.cards (see
+// Designer.tsx's ELS.cardgrid). No legacy pipe-line format to fall back to
+// (brand new element, unlike slider), so parseCards/stringifyCards
+// (designer/parsers.ts) only ever need to handle this one shape.
+export interface CardItem {
+  image: string;
+  title: string;
+  description: string;
+  href: string;
+  buttonLabel: string;
+}
 
 export interface El {
   id: string;
