@@ -798,12 +798,14 @@ export default function Designer({
   token,
   t,
   onClose,
+  isSuper,
 }: {
   page: Record<string, unknown>;
   tenantHost: string;
   token: string;
   t: (k: Key) => string;
   onClose: (saved: boolean) => void;
+  isSuper: boolean;
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
@@ -1111,6 +1113,13 @@ export default function Designer({
   // made a real save look like a dead button.
   const [pendingTemplate, setPendingTemplate] = useState<{ kind: string; value: unknown } | null>(null);
   const [templateName, setTemplateName] = useState("");
+  // "Save as blueprint" — same in-app-modal naming pattern as templates above.
+  const [showSaveBlueprint, setShowSaveBlueprint] = useState(false);
+  const [blueprintName, setBlueprintName] = useState("");
+  const [blueprintDescription, setBlueprintDescription] = useState("");
+  const [blueprintCategory, setBlueprintCategory] = useState("");
+  const [blueprintScope, setBlueprintScope] = useState<"system" | "tenant">("tenant");
+  const [blueprintBusy, setBlueprintBusy] = useState(false);
   const [templateSearch, setTemplateSearch] = useState("");
   const [templateFilter, setTemplateFilter] = useState<"all" | "section" | "row" | "column" | "element">("all");
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
@@ -1763,6 +1772,30 @@ export default function Designer({
       setError((err as Error).message);
     } finally {
       setTemplatesBusy(false);
+    }
+  }
+
+  async function confirmSaveAsBlueprint() {
+    const name = blueprintName.trim();
+    if (!name) return;
+    setBlueprintBusy(true);
+    try {
+      await api.createBlueprint(tenantHost, token, {
+        name,
+        description: blueprintDescription.trim() || undefined,
+        category: blueprintCategory.trim() || undefined,
+        layout: blocks,
+        settings: pageSettings,
+        scope: blueprintScope,
+      });
+      setShowSaveBlueprint(false);
+      setBlueprintName("");
+      setBlueprintDescription("");
+      setBlueprintCategory("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBlueprintBusy(false);
     }
   }
 
@@ -4560,6 +4593,12 @@ export default function Designer({
           <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates")}
         </button>
         <button
+          onClick={() => setShowSaveBlueprint(true)}
+          className="flex items-center gap-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
+        </button>
+        <button
           onClick={() => void toggleLive()}
           className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
             mode === "live" ? "bg-accent/15 text-accent" : "text-body"
@@ -5594,6 +5633,63 @@ export default function Designer({
             </div>
           );
         })()}
+
+      {showSaveBlueprint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSaveBlueprint(false)}>
+          <div className="w-[min(90vw,28rem)] rounded-xl bg-white p-4 shadow-xl" onClick={(ev) => ev.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-bold text-ink">{t("blueprints-save-as")}</p>
+              <button onClick={() => setShowSaveBlueprint(false)} aria-label={t("designer-close")}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                void confirmSaveAsBlueprint();
+              }}
+              className="space-y-2"
+            >
+              <input
+                autoFocus
+                value={blueprintName}
+                onChange={(ev) => setBlueprintName(ev.target.value)}
+                placeholder={t("blueprints-name-placeholder")}
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              <input
+                value={blueprintDescription}
+                onChange={(ev) => setBlueprintDescription(ev.target.value)}
+                placeholder={t("blueprints-description-placeholder")}
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              <input
+                value={blueprintCategory}
+                onChange={(ev) => setBlueprintCategory(ev.target.value)}
+                placeholder={t("blueprints-category-placeholder")}
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+              />
+              {isSuper && (
+                <select
+                  value={blueprintScope}
+                  onChange={(ev) => setBlueprintScope(ev.target.value as "system" | "tenant")}
+                  className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs"
+                >
+                  <option value="tenant">{t("blueprints-scope-tenant")}</option>
+                  <option value="system">{t("blueprints-scope-system")}</option>
+                </select>
+              )}
+              <button
+                type="submit"
+                disabled={!blueprintName.trim() || blueprintBusy}
+                className="w-full rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              >
+                {t("blueprints-save-as")}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {ctxMenu &&
         (() => {
