@@ -147,6 +147,7 @@ import { moveSection, moveColumn } from "./designerTree";
 import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
+import { TemplatePreview } from "./designer/TemplatePreview";
 import { PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle } from "./designer/style";
 import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./designer/fields";
 import { BufferedInput, BpToggle } from "./designer/FieldControls";
@@ -2557,38 +2558,20 @@ export default function Designer({
           : t("designer-section");
   }
 
-  // Rough layout impression only ("shape2 susunan" — not a pixel-accurate
-  // render, no real colors/fonts/media) so a list of 100+ templates stays
-  // scannable without the cost/dependency of a real screenshot thumbnail
-  // (would need a headless-browser render pipeline just for this). Every
-  // kind normalizes to a rows[] shape so one render path covers all 4 —
-  // row/column/element templates are just a 1-row (and 1-column) section.
-  function TemplatePreview({ tpl }: { tpl: api.DesignTemplate }) {
+  // Normalizes a DesignTemplate's kind/value into TemplatePreview's rows[]
+  // shape — same normalization the old inline TemplatePreview used to do
+  // internally, now a plain call-site helper so the preview component itself
+  // stays templates-vs-blueprints agnostic.
+  function templateRows(tpl: api.DesignTemplate): Row[] {
     const kind = (tpl.data?.kind as string | undefined) ?? "section";
     const value = tpl.data?.kind ? tpl.data.value : tpl.data;
-    const rows: Row[] =
-      kind === "section"
-        ? ((value as SectionProps).rows ?? [])
-        : kind === "row"
-          ? [value as Row]
-          : kind === "column"
-            ? [{ columns: [value as Col] } as Row]
-            : [{ columns: [{ elements: [value as El] }] } as Row];
-    return (
-      <div className="flex h-14 flex-col gap-0.5 overflow-hidden rounded-md border border-line/30 bg-canvas/40 p-1">
-        {rows.slice(0, 4).map((row, i) => (
-          <div key={i} className="flex flex-1 gap-0.5">
-            {(row.columns ?? []).slice(0, 5).map((col, j) => (
-              <div key={j} className="flex flex-1 flex-col justify-center gap-[1px] rounded-sm bg-white/70 p-[1px]">
-                {(col.elements ?? []).slice(0, 3).map((_, k) => (
-                  <div key={k} className="h-[3px] w-full rounded-full bg-accent/40" />
-                ))}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
+    return kind === "section"
+      ? ((value as SectionProps).rows ?? [])
+      : kind === "row"
+        ? [value as Row]
+        : kind === "column"
+          ? [{ columns: [value as Col] } as Row]
+          : [{ columns: [{ elements: [value as El] }] } as Row];
   }
 
   function Breadcrumb() {
@@ -5579,7 +5562,7 @@ export default function Designer({
                             const kind = (tpl.data?.kind as string | undefined) ?? "section";
                             return (
                               <div key={tpl.id} className="flex flex-col gap-1.5 rounded-lg border border-line/30 p-2">
-                                <TemplatePreview tpl={tpl} />
+                                <TemplatePreview rows={templateRows(tpl)} />
                                 <span className="truncate text-[11px] font-medium text-ink" title={tpl.name}>
                                   {tpl.name}
                                 </span>
