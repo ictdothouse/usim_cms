@@ -14,6 +14,7 @@ import {
   Languages,
   Layers,
   LayoutDashboard,
+  LayoutTemplate,
   ListTree,
   Loader2,
   LogOut,
@@ -46,6 +47,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Designer from "@/Designer";
+import { BlueprintGallery } from "./BlueprintGallery";
 import CategoriesPanel from "./CategoriesPanel";
 import PostEditorPage from "./PostEditorPage";
 import MenusPanel from "./MenusPanel";
@@ -351,6 +353,38 @@ function pageHasContent(p: Record<string, unknown>): boolean {
   return layout.some((s) => s.rows?.some((r) => r.columns?.some((c) => (c.elements?.length ?? 0) > 0)));
 }
 
+// Same one-liner id generator Designer.tsx/MenuItemsEditor.tsx already each
+// have their own copy of (not importing Designer.tsx's module-private one).
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+// A blueprint's layout (system-seeded via bootstrap-public.sql, or
+// tenant-saved from a real page) carries its own element ids — cloning it
+// verbatim onto a brand new page risks id collisions with Designer's
+// id-keyed edit state (editingText/sliderPreviewRefs) the moment two pages
+// sourced from the same blueprint are open at once. Deep-clones the layout
+// and assigns every element a fresh id first. Section rows are checked in
+// both places they appear across this codebase's blueprint data (nested
+// under `props`, the shape Designer.tsx itself reads/writes, and as a
+// sibling of `props`, the shape the seed SQL/BlueprintGallery's own preview
+// already assume) so either source gets its ids refreshed correctly.
+function refreshBlueprintIds(layout: unknown[]): unknown[] {
+  const cloned = JSON.parse(JSON.stringify(layout ?? [])) as Array<Record<string, unknown>>;
+  for (const section of cloned) {
+    const props = section.props as Record<string, unknown> | undefined;
+    const rows = (section.rows ?? props?.rows ?? []) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      if (typeof row.id === "string") row.id = uid();
+      const columns = (row.columns ?? []) as Array<Record<string, unknown>>;
+      for (const col of columns) {
+        if (typeof col.id === "string") col.id = uid();
+        const elements = (col.elements ?? []) as Array<Record<string, unknown>>;
+        for (const el of elements) el.id = uid();
+      }
+    }
+  }
+  return cloned;
+}
+
 const PAGE_SIZE = 20;
 
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
@@ -363,6 +397,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const [statusFilter, setStatusFilter] = useState<"" | "draft" | "published">("");
   const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [showBlueprintPicker, setShowBlueprintPicker] = useState(false);
   const navigate = useNavigate();
   const form = useForm<PagesCreateForm>({ resolver: zodResolver(pagesCreateSchema), defaultValues: { title: "" } });
 
@@ -406,6 +441,31 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
     try {
       const item = await api.createPage(tenantHost, token, { slug: candidate, title: values.title });
       form.reset();
+      await refresh();
+      navigate(item.id as string);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // `window.prompt` is fine here: a single plain-text "what's the new page
+  // called" step, not the repeated-JS-dialog pattern the "don't use
+  // window.prompt" lesson elsewhere in this codebase actually concerns.
+  async function useBlueprint(bp: api.PageBlueprint) {
+    const title = window.prompt(t("blueprints-name-prompt"));
+    if (!title) return;
+    const base = slugify(title) || "page";
+    const existing = new Set(pages.map((p) => p.slug as string));
+    let candidate = base;
+    for (let n = 2; existing.has(candidate); n++) candidate = `${base}-${n}`;
+    try {
+      const item = await api.createPage(tenantHost, token, {
+        slug: candidate,
+        title,
+        layout: refreshBlueprintIds(bp.layout),
+        settings: bp.settings,
+      });
+      setShowBlueprintPicker(false);
       await refresh();
       navigate(item.id as string);
     } catch (err) {
@@ -491,6 +551,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   }
 
   return (
+    <>
     <section className="space-y-4">
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <FileText className="h-4 w-4 text-accent" /> {t("pages-title")}
@@ -515,6 +576,13 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
               <Button type="submit" disabled={form.formState.isSubmitting} className="shrink-0">
                 {form.formState.isSubmitting ? t("pages-creating") : t("pages-create")}
               </Button>
+              <button
+                type="button"
+                onClick={() => setShowBlueprintPicker(true)}
+                className="rounded-full border border-line/40 px-3 py-1.5 text-xs font-semibold text-ink hover:bg-canvas"
+              >
+                {t("blueprints-choose")}
+              </button>
             </form>
           </Form>
         </CardContent>
@@ -638,10 +706,24 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
         </div>
       )}
     </section>
+    {showBlueprintPicker && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowBlueprintPicker(false)}>
+        <div className="max-h-[85vh] w-[min(90vw,60rem)] overflow-y-auto rounded-xl bg-white p-4 shadow-xl" onClick={(ev) => ev.stopPropagation()}>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-bold text-ink">{t("blueprints-choose")}</p>
+            <button onClick={() => setShowBlueprintPicker(false)} aria-label={t("designer-close")}>
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <BlueprintGallery tenantHost={tenantHost} token={token} mode="picker" onUse={(bp) => void useBlueprint(bp)} isSuper={false} />
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
-function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: string }) {
+function PageDesignerRoute({ tenantHost, token, isSuper }: { tenantHost: string; token: string; isSuper: boolean }) {
   const { t } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
@@ -658,6 +740,7 @@ function PageDesignerRoute({ tenantHost, token }: { tenantHost: string; token: s
       token={token}
       t={t}
       onClose={() => navigate("/content/pages")}
+      isSuper={isSuper}
     />
   );
 }
@@ -2647,6 +2730,7 @@ const PERMISSIONS = [
   "sites.multi",
   "languages.write",
   "menus.write",
+  "blueprints.write",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -2662,6 +2746,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "sites.multi": "perm-sites-multi",
   "languages.write": "perm-languages-write",
   "menus.write": "perm-menus-write",
+  "blueprints.write": "perm-blueprints-write",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
@@ -3443,7 +3528,7 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   );
 }
 
-type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus";
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "blueprints";
 
 function ContentManager({
   isSuper,
@@ -3473,6 +3558,7 @@ function ContentManager({
           { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
           { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
           { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
+          { id: "blueprints" as const, labelKey: "blueprints-title" as const, icon: LayoutTemplate },
         ]
       : []),
   ];
@@ -3514,7 +3600,7 @@ function ContentManager({
           <Routes>
             <Route index element={<Navigate to="pages" replace />} />
             <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
-            <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} />} />
+            <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} isSuper={isSuper} />} />
             <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
             <Route path="posts/categories" element={<CategoriesPanel tenantHost={siteHost} token={token} />} />
             <Route path="posts/:id" element={<PostEditorPage tenantHost={siteHost} token={token} />} />
@@ -3525,6 +3611,9 @@ function ContentManager({
             )}
             {isSuper && (
               <Route path="languages" element={<TenantLanguagesForm key={siteHost} tenantHost={siteHost} token={token} />} />
+            )}
+            {isSuper && (
+              <Route path="blueprints" element={<BlueprintGallery key={siteHost} tenantHost={siteHost} token={token} mode="manage" isSuper />} />
             )}
           </Routes>
         </>
@@ -3543,6 +3632,7 @@ type Tab =
   | "theme"
   | "languages"
   | "menus"
+  | "blueprints"
   | "global-theme"
   | "feed"
   | "settings"
@@ -3557,6 +3647,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   theme: { labelKey: "tab-theme", icon: Palette },
   languages: { labelKey: "tab-languages", icon: Globe },
   menus: { labelKey: "menus-title", icon: ListTree },
+  blueprints: { labelKey: "blueprints-title", icon: LayoutTemplate },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
@@ -4397,7 +4488,7 @@ function Shell({
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings", "security"] : ["dashboard", "security"];
-  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus"];
+  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus", "blueprints"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -4527,6 +4618,7 @@ function Shell({
                 <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="blueprints" element={!isSuper && session.tenantHost ? (<BlueprintGallery tenantHost={session.tenantHost} token={session.token} mode="manage" isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />

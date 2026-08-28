@@ -1166,6 +1166,66 @@ pnpm workspace monorepo with two apps:
   `url(...)` CSS function the way `bgImage`/slide `imageUrl` are) plus the usual enum/free-text/attr-url key
   additions, and a `categoryId` exemption identical to `menuId`'s (only ever used as a parameterized DB
   lookup key, never interpolated).
+  Sprint 5 sub-project 2, **Page Blueprint** (`docs/laporan-audit-ui-ux.md` §5.6): a ready-made section
+  layout a page can start from instead of a blank canvas, plus letting a webmaster save a finished page as
+  a reusable starting point for future pages on their own tenant. `page_blueprints` (`apps/api/src/db/
+  schema.ts`) is a new **control-plane** table — `tenantHost` nullable (null = system-wide, seeded via
+  `bootstrap-public.sql` with 6 starter blueprints — Landing page jabatan, About/profil, Program/
+  perkhidmatan, News hub, Contact, Simple content page — each a small valid `layout` array using only
+  existing element types like hero/cardgrid/ctabanner/postlist), a set value scopes it to one tenant's own
+  library; `layout`/`settings` are the same jsonb shapes `pages.layout`/`pages.settings` already use. This
+  mirrors `theme_presets`/`tenant_languages`/`languages` — a small curated library resolved by a
+  `tenantHost` column read in code, no RLS, no per-tenant migration replay — **not** `design_templates`
+  (per-tenant-DB), which is real tenant CONTENT (section snippets authored and consumed entirely within one
+  tenant). A blueprint needs to be visible across every tenant when system-wide, which a per-tenant-DB
+  table can't do without a second cross-tenant mechanism; the control-plane table gives that for free, the
+  same way `languages` already is. No `thumbnailUrl` column — nothing populates a real screenshot (same
+  headless-render-pipeline gap already noted for `design_templates`), the gallery's rough layout-impression
+  preview (below) covers it. New `blueprints.write` permission (`PERMISSIONS` in `index.ts` **and** the
+  admin's client-side `PERMISSIONS`/`PERMISSION_LABEL_KEY` in `App.tsx` — both, per the i18n-phase-2 lesson
+  above: a permission only really exists once it's in both lists) covers create/update/delete as one
+  permission, matching the newer single-permission convention (`menus.write`/`languages.write`) rather than
+  pages/posts' older per-action split. Hand-written CRUD routes in `index.ts` (control-plane data via
+  `tenant-pool.ts`, not `req.db` — same reason `theme`/`tenant-languages`/`roles` are hand-written, not
+  generic-crud): `GET /api/blueprints` returns rows where `tenant_host IS NULL OR tenant_host =
+  req.tenantHost` (optional `?category=` filter), open to any authenticated tenant user, same read-open/
+  write-gated asymmetry as `theme.write`; `POST`/`PATCH /api/blueprints/:id`/`DELETE /api/blueprints/:id`
+  all route through a shared `canWriteBlueprint(req, targetTenantHost)` — superadmin may touch anything, a
+  webmaster needs `blueprints.write` AND the target row's `tenantHost` must equal their own (a `null`
+  system-scoped row is superadmin-only regardless of that permission, and nobody may touch another
+  tenant's row even by guessing its id, since PATCH/DELETE re-check against the EXISTING row's own
+  `tenantHost`, not a client-supplied one). `layout` is validated through the exact same `validateLayout()`
+  pages already use, no new validator; `createdBy`/`createdByEmail` stamped once on create, never
+  overwritten on update, same convention as `posts.authorId`. `apps/admin/src/designer/TemplatePreview.tsx`
+  was extracted out of `Designer.tsx` (the rows→columns→elements-bars rough layout impression the Templates
+  modal already rendered) into its own pure, prop-driven component — the Templates modal (existing) and a
+  new `apps/admin/src/BlueprintGallery.tsx` (new) both render from this one implementation, a small
+  in-scope step of the same God-Component extraction described in `Designer.tsx`'s own paragraph above
+  (`designer/types.ts`, `designer/parsers.ts`, etc.). `BlueprintGallery` takes `{tenantHost, token, mode:
+  "picker" | "manage", onUse?, isSuper}`: picker mode (a "Use this blueprint" button per card, calling
+  `onUse`) is used by the Create Page flow; manage mode (Edit fields + Delete-with-`useConfirm` per card,
+  both disabled — not hidden — on a system row unless `isSuper`) is the management screen, mounted the
+  same way `menus`/`languages` are — a superadmin-only `ContentManager` sub-tab (`"blueprints"`, site-picker
+  required first) and a webmaster top-level `Tab` (sibling of their own `theme`/`languages`/`menus` tabs,
+  since a webmaster has no site picker), both rendering `BlueprintGallery mode="manage"` and always visible
+  regardless of whether the account actually holds `blueprints.write` — same no-client-side-permission-
+  awareness convention as `TenantLanguagesForm`, Edit/Delete just surface the server's 403. **Create Page
+  entry point**: `PagesPanel`'s quick-create form gains a "Choose blueprint" button opening
+  `BlueprintGallery mode="picker"` in a modal; `useBlueprint(bp)` clones `bp.layout`/`bp.settings`
+  client-side through `refreshBlueprintIds()` (deep-clones the layout and regenerates every section/row/
+  column/element id, so two pages cloned from the same blueprint in the same session are never open with
+  colliding ids) and calls the SAME `POST /api/pages` create the "Blank page" path already uses — no
+  dedicated "use blueprint" backend route. The page title still comes from a plain `window.prompt` here
+  (commented inline as the deliberate exception to the "don't use `window.prompt`" lesson elsewhere in this
+  file: that lesson is about a *multi-dialog* flow silently no-oping once a browser mutes repeat JS
+  dialogs, not a single plain-text prompt like this one or the existing tenant-clone prompts). **Designer's
+  "Save as blueprint"** sits next to the existing "Save as Template" header action and opens a small named-
+  field in-app modal (name, description, category, and — superadmin only — a system/tenant scope radio),
+  the same `confirmSaveTemplate`-style pattern (never `window.prompt` here, since this one IS the
+  repeated-multi-field case that lesson actually concerns); submitting calls `POST /api/blueprints` with
+  the page's current in-memory `layout`/`settings` — again no dedicated backend route, both entry points are
+  pure client-side composition of the plain CRUD routes above. Section-lock (a superadmin-locked section
+  surviving clone uneditable) and real screenshot thumbnails are explicitly deferred, not built.
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on
