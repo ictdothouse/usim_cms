@@ -59,6 +59,11 @@ import {
   recordLoginAttempt,
   isLoginRateLimited,
   insertAuditLog,
+  listPageBlueprints,
+  getPageBlueprint,
+  createPageBlueprint,
+  updatePageBlueprint,
+  deletePageBlueprint,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import {
@@ -114,6 +119,7 @@ const PERMISSIONS = new Set([
   "sites.multi",
   "languages.write",
   "menus.write",
+  "blueprints.write",
 ]);
 
 // Superadmin bypasses every permission check — a role's permissions are only
@@ -2115,6 +2121,96 @@ await app.register(async (protectedScope) => {
     }
     await setTenantLanguageSelection(req.tenantHost, codes, Boolean(showHeaderSwitcher), Boolean(multilangEnabled), defaultLanguage ?? null);
     return { saved: true };
+  });
+
+  // Page Blueprint (Sprint 5 sub-project 2) — control-plane CRUD, hand-
+  // written for the same reason /api/tenant-languages is (control-plane
+  // data via tenant-pool.ts, not req.db — generic-crud.ts only ever
+  // operates on a tenant's own database connection).
+  function canWriteBlueprint(req: FastifyRequest, targetTenantHost: string | null): boolean {
+    if (req.user.role === "superadmin") return true;
+    if (targetTenantHost === null) return false; // only superadmin may touch a system blueprint
+    return targetTenantHost === req.tenantHost && hasPermission({ role: req.user.role, permissions: req.user.permissions }, "blueprints.write");
+  }
+
+  protectedScope.get("/api/blueprints", async (req) => {
+    const { category } = req.query as { category?: string };
+    const items = await listPageBlueprints(req.tenantHost, category || undefined);
+    return { items };
+  });
+
+  protectedScope.post("/api/blueprints", async (req, reply) => {
+    const body = req.body as {
+      name?: string;
+      description?: string | null;
+      category?: string | null;
+      layout?: unknown;
+      settings?: unknown;
+      scope?: "system" | "tenant";
+    };
+    if (!body.name || typeof body.name !== "string") {
+      reply.code(400);
+      return { error: "name is required" };
+    }
+    const targetTenantHost = body.scope === "system" ? null : req.tenantHost;
+    if (!canWriteBlueprint(req, targetTenantHost)) {
+      reply.code(403);
+      return { error: "missing blueprints.write permission" };
+    }
+    const layoutErr = validateLayout(body.layout ?? []);
+    if (layoutErr) {
+      reply.code(400);
+      return { error: layoutErr };
+    }
+    const row = await createPageBlueprint({
+      tenantHost: targetTenantHost,
+      name: body.name,
+      description: body.description ?? null,
+      category: body.category ?? null,
+      layout: body.layout ?? [],
+      settings: body.settings ?? {},
+      createdBy: req.user.userId,
+      createdByEmail: req.user.email,
+    });
+    return { item: row };
+  });
+
+  protectedScope.patch("/api/blueprints/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const existing = await getPageBlueprint(id);
+    if (!existing) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    if (!canWriteBlueprint(req, existing.tenantHost)) {
+      reply.code(403);
+      return { error: "missing blueprints.write permission" };
+    }
+    const body = req.body as { name?: string; description?: string | null; category?: string | null; layout?: unknown; settings?: unknown };
+    if (body.layout !== undefined) {
+      const layoutErr = validateLayout(body.layout);
+      if (layoutErr) {
+        reply.code(400);
+        return { error: layoutErr };
+      }
+    }
+    await updatePageBlueprint(id, body);
+    return { saved: true };
+  });
+
+  protectedScope.delete("/api/blueprints/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const existing = await getPageBlueprint(id);
+    if (!existing) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    if (!canWriteBlueprint(req, existing.tenantHost)) {
+      reply.code(403);
+      return { error: "missing blueprints.write permission" };
+    }
+    await deletePageBlueprint(id);
+    return { deleted: true };
   });
 });
 
