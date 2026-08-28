@@ -1953,7 +1953,12 @@ export default function Designer({
     setSel(null);
     bumpStructural();
   }
-  function moveColumn(b: number, r: number, c: number, dir: -1 | 1) {
+  // Named distinctly from designerTree.ts's imported `moveColumn` (a bulk
+  // from/to array-mutation helper) — this one is the arrow-button single-step
+  // nudge. They used to share a name, which let this local function
+  // declaration (hoisted) shadow the import for the whole component body,
+  // breaking the imported moveColumn's real call sites below.
+  function nudgeColumn(b: number, r: number, c: number, dir: -1 | 1) {
     const target = c + dir;
     if (target < 0 || target >= section(blocks, b).rows[r].columns.length) return;
     mutate((bs) => {
@@ -3073,7 +3078,7 @@ export default function Designer({
           <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
           <div className="flex gap-3">
             <button
-              onClick={() => moveColumn(b, r, c, -1)}
+              onClick={() => nudgeColumn(b, r, c, -1)}
               disabled={c === 0}
               className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
               aria-label={t("designer-move-column-up")}
@@ -3082,7 +3087,7 @@ export default function Designer({
               <ArrowUp className="h-3.5 w-3.5" />
             </button>
             <button
-              onClick={() => moveColumn(b, r, c, 1)}
+              onClick={() => nudgeColumn(b, r, c, 1)}
               disabled={c === sp.rows[r].columns.length - 1}
               className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
               aria-label={t("designer-move-column-down")}
@@ -3182,6 +3187,7 @@ export default function Designer({
         toggleBpKeys,
         bpKey,
         availableMenus,
+        availableCategories,
         ICONS,
       };
       return (
