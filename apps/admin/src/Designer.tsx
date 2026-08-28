@@ -4,8 +4,10 @@ import {
   AlertCircle,
   AlertTriangle,
   Archive,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   ArrowUpRight,
   AtSign,
   Award,
@@ -716,6 +718,10 @@ export default function Designer({
   }, [tenantHost, token]);
   const [sel, setSel] = useState<Sel>(null);
   const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
+  // Sprint 2: below `lg` the palette/inspector asides become off-canvas
+  // drawers (same pattern as Shell's mobile nav) instead of the fixed
+  // 3-column layout — `null` means both are closed.
+  const [mobilePanel, setMobilePanel] = useState<"palette" | "inspector" | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Grouped Styles panel: which Inspector field-groups are collapsed. Shared
   // across every selection (not reset per-select) — matches Framer/Webflow,
@@ -1841,6 +1847,16 @@ export default function Designer({
     setSel(null);
     bumpStructural();
   }
+  function moveColumn(b: number, r: number, c: number, dir: -1 | 1) {
+    const target = c + dir;
+    if (target < 0 || target >= section(blocks, b).rows[r].columns.length) return;
+    mutate((bs) => {
+      const cols = section(bs, b).rows[r].columns;
+      cols.splice(target, 0, cols.splice(c, 1)[0]);
+    });
+    setSel([b, r, target]);
+    bumpStructural();
+  }
   // A freshly added-row preset has columns but no elements in them yet — the
   // only way to remove it was previously to delete each of its columns one
   // at a time (deleteColumn only cascades to the row once its last column is
@@ -1848,6 +1864,16 @@ export default function Designer({
   function deleteRow(b: number, r: number) {
     mutate((bs) => section(bs, b).rows.splice(r, 1));
     setSel(null);
+    bumpStructural();
+  }
+  function moveRow(b: number, r: number, dir: -1 | 1) {
+    const target = r + dir;
+    if (target < 0 || target >= section(blocks, b).rows.length) return;
+    mutate((bs) => {
+      const rows = section(bs, b).rows;
+      rows.splice(target, 0, rows.splice(r, 1)[0]);
+    });
+    setSel([b, target]);
     bumpStructural();
   }
   function duplicateRow(b: number, r: number) {
@@ -1932,6 +1958,16 @@ export default function Designer({
       removeAt(bs, [b, r, c, e]);
     });
     setSel(null);
+    bumpStructural();
+  }
+  function moveElement(b: number, r: number, c: number, e: number, dir: -1 | 1) {
+    const target = e + dir;
+    if (target < 0 || target >= section(blocks, b).rows[r].columns[c].elements.length) return;
+    mutate((bs) => {
+      const els = section(bs, b).rows[r].columns[c].elements;
+      els.splice(target, 0, els.splice(e, 1)[0]);
+    });
+    setSel([b, r, c, target]);
     bumpStructural();
   }
 
@@ -2209,7 +2245,10 @@ export default function Designer({
                 onClick={(e) => pick(e, [b])}
                 {...rowDragProps("section", [b], key)}
               >
-                <button onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}
+                  aria-label={t(isOpen ? "designer-collapse" : "designer-expand")}
+                >
                   {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 </button>
                 <span className="truncate">{label}</span>
@@ -2235,7 +2274,10 @@ export default function Designer({
                             onClick={(e) => pick(e, [b, r, c])}
                             {...rowDragProps("column", [b, r, c], colKey)}
                           >
-                            <button onClick={(e) => { e.stopPropagation(); toggleExpand(colKey); }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleExpand(colKey); }}
+                              aria-label={t(colOpen ? "designer-collapse" : "designer-expand")}
+                            >
                               {colOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                             </button>
                             <span className="truncate">
@@ -2438,6 +2480,31 @@ export default function Designer({
     );
   }
 
+  function Breadcrumb() {
+    if (!sel || blocks[sel[0]]?.type !== "section") return null;
+    const crumbs: { label: string; path: number[] }[] = [{ label: t("designer-section"), path: [sel[0]] }];
+    if (sel.length >= 2) crumbs.push({ label: t("designer-row"), path: sel.slice(0, 2) });
+    if (sel.length >= 3) crumbs.push({ label: t("designer-column"), path: sel.slice(0, 3) });
+    if (sel.length >= 4) crumbs.push({ label: t("designer-element"), path: sel.slice(0, 4) });
+    return (
+      <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-sub">
+        {crumbs.map((crumb, i) => (
+          <span key={i} className="flex items-center gap-1">
+            {i > 0 && <span className="text-line">/</span>}
+            <button
+              type="button"
+              onClick={() => setSel(crumb.path)}
+              disabled={i === crumbs.length - 1}
+              className={i === crumbs.length - 1 ? "text-ink" : "text-accent hover:underline"}
+            >
+              {crumb.label}
+            </button>
+          </span>
+        ))}
+      </div>
+    );
+  }
+
   function Inspector() {
     if (!sel) {
       return (
@@ -2572,6 +2639,7 @@ export default function Designer({
     if (sel.length === 1) {
       return (
         <div className="space-y-3">
+          <Breadcrumb />
           <p className="text-xs font-bold text-ink">{t("designer-section")}</p>
           <VisibilityToggle
             get={(k) => (sp as unknown as Record<string, string>)[k] === "true"}
@@ -2684,6 +2752,7 @@ export default function Designer({
         });
       return (
         <div className="space-y-3">
+          <Breadcrumb />
           <p className="text-xs font-bold text-ink">{t("designer-row")}</p>
           <VisibilityToggle
             get={(k) => (row as unknown as Record<string, string>)[k] === "true"}
@@ -2720,6 +2789,27 @@ export default function Designer({
             bp={bp}
             t={t}
           />
+          <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
+          <div className="flex gap-3">
+            <button
+              onClick={() => moveRow(b, r, -1)}
+              disabled={r === 0}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-row-up")}
+              title={t("designer-move-row-up")}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => moveRow(b, r, 1)}
+              disabled={r === sp.rows.length - 1}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-row-down")}
+              title={t("designer-move-row-down")}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div className="flex gap-3">
             <button onClick={() => duplicateRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
@@ -2750,6 +2840,7 @@ export default function Designer({
           <button onClick={() => deleteRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
             <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete-row")}
           </button>
+          </div>
         </div>
       );
     }
@@ -2758,6 +2849,7 @@ export default function Designer({
       if (!col) return null;
       return (
         <div className="space-y-3">
+          <Breadcrumb />
           <p className="text-xs font-bold text-ink">{t("designer-column")}</p>
           <VisibilityToggle
             get={(k) => col.props?.[k] === "true"}
@@ -2870,6 +2962,27 @@ export default function Designer({
             availableMenus={availableMenus}
             ICONS={ICONS}
           />
+          <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
+          <div className="flex gap-3">
+            <button
+              onClick={() => moveColumn(b, r, c, -1)}
+              disabled={c === 0}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-column-up")}
+              title={t("designer-move-column-up")}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => moveColumn(b, r, c, 1)}
+              disabled={c === sp.rows[r].columns.length - 1}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-column-down")}
+              title={t("designer-move-column-down")}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div className="flex gap-3">
             <button onClick={() => copyColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
@@ -2901,6 +3014,7 @@ export default function Designer({
           <button onClick={() => deleteColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
             <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
           </button>
+          </div>
         </div>
       );
     }
@@ -2964,6 +3078,7 @@ export default function Designer({
       };
       return (
         <div className="space-y-3">
+          <Breadcrumb />
           <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
           <VisibilityToggle
             get={(k) => el.props[k] === "true"}
@@ -3047,6 +3162,27 @@ export default function Designer({
             </>
           )}
           {hasContentFields && inspectorTab === "content" && <FieldGroups {...fieldGroupsProps} only="content" />}
+          <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => moveElement(b, r, c, e, -1)}
+              disabled={e === 0}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-element-up")}
+              title={t("designer-move-element-up")}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => moveElement(b, r, c, e, 1)}
+              disabled={e === sp.rows[r].columns[c].elements.length - 1}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-element-down")}
+              title={t("designer-move-element-down")}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div className="flex flex-wrap gap-3">
             <button onClick={() => copyElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
               <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
@@ -3076,6 +3212,7 @@ export default function Designer({
             <button onClick={() => deleteElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
               <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
             </button>
+          </div>
           </div>
         </div>
       );
@@ -4050,6 +4187,8 @@ export default function Designer({
           onClick={() => b > 0 && mutate((bs) => bs.splice(b - 1, 0, bs.splice(b, 1)[0]))}
           disabled={b === 0}
           className="px-0.5 font-bold text-accent disabled:opacity-30"
+          aria-label={t("designer-move-section-up")}
+          title={t("designer-move-section-up")}
         >
           ↑
         </button>
@@ -4057,6 +4196,8 @@ export default function Designer({
           onClick={() => b < blocks.length - 1 && mutate((bs) => bs.splice(b + 1, 0, bs.splice(b, 1)[0]))}
           disabled={b === blocks.length - 1}
           className="px-0.5 font-bold text-accent disabled:opacity-30"
+          aria-label={t("designer-move-section-down")}
+          title={t("designer-move-section-down")}
         >
           ↓
         </button>
@@ -4186,6 +4327,22 @@ export default function Designer({
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas font-sans text-ink antialiased">
       {/* top bar */}
       <header className="flex items-center gap-3 border-b border-line/30 bg-white px-4 py-2.5">
+        <button
+          onClick={() => setMobilePanel(mobilePanel === "palette" ? null : "palette")}
+          className={`rounded-full p-1.5 lg:hidden ${mobilePanel === "palette" ? "bg-accent/15 text-accent" : "text-body hover:bg-canvas"}`}
+          aria-label={t("designer-tab-elements")}
+          title={t("designer-tab-elements")}
+        >
+          <Menu className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => setMobilePanel(mobilePanel === "inspector" ? null : "inspector")}
+          className={`rounded-full p-1.5 lg:hidden ${mobilePanel === "inspector" ? "bg-accent/15 text-accent" : "text-body hover:bg-canvas"}`}
+          aria-label={t("designer-inspector")}
+          title={t("designer-inspector")}
+        >
+          <Settings className="h-4 w-4" />
+        </button>
         <span className="text-xs font-bold text-ink">{page.title as string}</span>
         {editingSlug ? (
           <span className="flex items-center gap-1">
@@ -4312,9 +4469,17 @@ export default function Designer({
         </button>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* Mobile-only backdrop for the off-canvas palette/inspector drawers */}
+        {mobilePanel && (
+          <div className="absolute inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMobilePanel(null)} aria-hidden="true" />
+        )}
         {/* palette */}
-        <aside className="w-44 shrink-0 overflow-y-auto border-r border-line/30 bg-white p-3">
+        <aside
+          className={`absolute inset-y-0 left-0 z-40 w-64 transform overflow-y-auto border-r border-line/30 bg-white p-3 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-44 lg:translate-x-0 ${
+            mobilePanel === "palette" ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
           <div className="mb-2 flex gap-1 rounded-lg bg-canvas p-0.5 text-[10px] font-semibold">
             <button
               onClick={() => setActiveLeftTab("elements")}
@@ -5124,7 +5289,11 @@ export default function Designer({
         </main>
 
         {/* inspector */}
-        <aside className="w-64 shrink-0 overflow-y-auto border-l border-line/30 bg-white p-4">
+        <aside
+          className={`absolute inset-y-0 right-0 z-40 w-72 transform overflow-y-auto border-l border-line/30 bg-white p-4 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-64 lg:translate-x-0 ${
+            mobilePanel === "inspector" ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
           <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
           {Inspector()}
         </aside>
@@ -5158,6 +5327,8 @@ export default function Designer({
                       setPendingTemplate(null);
                     }}
                     className="text-body hover:text-ink"
+                    aria-label={t("designer-close")}
+                    title={t("designer-close")}
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -5184,7 +5355,13 @@ export default function Designer({
                     >
                       {t("designer-templates-save")}
                     </button>
-                    <button type="button" onClick={() => setPendingTemplate(null)} className="text-body hover:text-ink">
+                    <button
+                      type="button"
+                      onClick={() => setPendingTemplate(null)}
+                      className="text-body hover:text-ink"
+                      aria-label={t("designer-cancel")}
+                      title={t("designer-cancel")}
+                    >
                       <X className="h-4 w-4" />
                     </button>
                   </form>
@@ -5245,6 +5422,8 @@ export default function Designer({
                                     <button
                                       onClick={() => void deleteTemplateHandler(tpl.id)}
                                       className="text-red-500"
+                                      aria-label={t("designer-templates-delete")}
+                                      title={t("designer-templates-delete")}
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </button>

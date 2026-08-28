@@ -9,12 +9,15 @@ import {
   Folder,
   Globe,
   Image as ImageIcon,
+  Inbox,
   KeyRound,
   Languages,
   Layers,
   LayoutDashboard,
   ListTree,
+  Loader2,
   LogOut,
+  Menu,
   Newspaper,
   Palette,
   Pencil,
@@ -74,6 +77,39 @@ export const btnGhost =
   "rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink transition-colors hover:bg-[#e8e8ed]";
 export const card = "rounded-xl border border-line/40 bg-white";
 
+// Standardized form error — role="alert"/aria-live so a screen reader
+// announces it the moment it appears, not just when focus happens to land
+// on it. Replaces the same hand-repeated <p className="text-xs text-red-600">
+// pattern that was duplicated across every panel's own error state.
+export function FormError({ children }: { children?: React.ReactNode }) {
+  if (!children) return null;
+  return (
+    <p role="alert" aria-live="assertive" className="text-xs text-red-600">
+      {children}
+    </p>
+  );
+}
+
+// Sprint 4 UX audit: standard loading/empty states, reused across the
+// Pages/Posts/Media list panels instead of each rolling its own.
+export function ListLoading() {
+  const { t } = useT();
+  return (
+    <div className="flex items-center justify-center gap-2 py-8 text-xs text-sub">
+      <Loader2 className="h-4 w-4 animate-spin" /> {t("list-loading")}
+    </div>
+  );
+}
+
+export function ListEmpty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-sub">
+      <Inbox className="h-6 w-6 text-line" />
+      <p>{children}</p>
+    </div>
+  );
+}
+
 // ---------- Setup wizard (first-run only, see /api/setup) ----------
 function SetupWizard({ onDone }: { onDone: (s: Session) => void }) {
   const { t } = useT();
@@ -117,41 +153,55 @@ function SetupWizard({ onDone }: { onDone: (s: Session) => void }) {
           </div>
         </div>
         <p className="text-xs text-sub">{t("setup-desc")}</p>
+        <label className="sr-only" htmlFor="setup-email">{t("login-email")}</label>
         <input
+          id="setup-email"
           className={inputCls}
           type="email"
+          autoComplete="email"
           placeholder={t("login-email")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
         />
+        <label className="sr-only" htmlFor="setup-password">{t("login-password")}</label>
         <input
+          id="setup-password"
           className={inputCls}
           type="password"
+          autoComplete="new-password"
           placeholder={t("login-password")}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={8}
         />
+        <label className="sr-only" htmlFor="setup-host">{t("setup-host")}</label>
         <input
+          id="setup-host"
           className={inputCls}
           type="text"
+          autoComplete="off"
           placeholder={t("setup-host")}
           value={host}
           onChange={(e) => setHost(e.target.value)}
         />
         {host && (
-          <input
-            className={inputCls}
-            type="text"
-            placeholder={t("setup-department")}
-            value={departmentName}
-            onChange={(e) => setDepartmentName(e.target.value)}
-            required
-          />
+          <>
+            <label className="sr-only" htmlFor="setup-department">{t("setup-department")}</label>
+            <input
+              id="setup-department"
+              className={inputCls}
+              type="text"
+              autoComplete="organization"
+              placeholder={t("setup-department")}
+              value={departmentName}
+              onChange={(e) => setDepartmentName(e.target.value)}
+              required
+            />
+          </>
         )}
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        <FormError>{error}</FormError>
         <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>
           {busy ? t("setup-busy") : t("setup-submit")}
         </button>
@@ -224,18 +274,21 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
         {pendingToken ? (
           <>
             <p className="text-xs text-sub">{t("login-mfa-desc")}</p>
+            <label className="sr-only" htmlFor="login-mfa-code">{t("login-mfa-code")}</label>
             <input
+              id="login-mfa-code"
               className={inputCls}
               inputMode="numeric"
               pattern="[0-9]{6}"
               maxLength={6}
+              autoComplete="one-time-code"
               placeholder="000000"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               autoFocus
               required
             />
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            <FormError>{error}</FormError>
             <button type="submit" disabled={busy || code.length !== 6} className={`${btnPrimary} w-full`}>
               {busy ? t("login-busy") : t("login-mfa-submit")}
             </button>
@@ -254,23 +307,29 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
         ) : (
           <>
             <p className="text-xs text-sub">{t("login-desc")}</p>
+            <label className="sr-only" htmlFor="login-email">{t("login-email")}</label>
             <input
+              id="login-email"
               className={inputCls}
               type="email"
+              autoComplete="email"
               placeholder={t("login-email")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
+            <label className="sr-only" htmlFor="login-password">{t("login-password")}</label>
             <input
+              id="login-password"
               className={inputCls}
               type="password"
+              autoComplete="current-password"
               placeholder={t("login-password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            {error && <p className="text-xs text-red-600">{error}</p>}
+            <FormError>{error}</FormError>
             <button type="submit" disabled={busy} className={`${btnPrimary} w-full`}>
               {busy ? t("login-busy") : t("login-submit")}
             </button>
@@ -285,26 +344,56 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
 const pagesCreateSchema = z.object({ title: z.string().trim().min(1, { message: "Required" }) });
 type PagesCreateForm = z.infer<typeof pagesCreateSchema>;
 
+// Sprint 4 UX audit: cheap pre-publish check — true once at least one
+// element exists anywhere in the section/row/column tree.
+function pageHasContent(p: Record<string, unknown>): boolean {
+  const layout = (p.layout as Array<{ rows?: Array<{ columns?: Array<{ elements?: unknown[] }> }> }>) ?? [];
+  return layout.some((s) => s.rows?.some((r) => r.columns?.some((c) => (c.elements?.length ?? 0) > 0)));
+}
+
+const PAGE_SIZE = 20;
+
 function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }) {
   const { t } = useT();
   const confirm = useConfirm();
   const [pages, setPages] = useState<Array<Record<string, unknown>>>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "draft" | "published">("");
+  const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const form = useForm<PagesCreateForm>({ resolver: zodResolver(pagesCreateSchema), defaultValues: { title: "" } });
 
   async function refresh() {
     try {
-      setPages(await api.getPages(tenantHost, token));
+      const { items, total: t2 } = await api.listPagesPage(tenantHost, token, {
+        search, status: statusFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE,
+      });
+      setPages(items);
+      setTotal(t2);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoading(false);
     }
   }
 
+  // Debounced: a search keystroke shouldn't fire a request per character.
   useEffect(() => {
-    void refresh();
-  }, [tenantHost]);
+    setLoading(true);
+    const timer = setTimeout(() => void refresh(), search ? 300 : 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantHost, search, statusFilter, page]);
+
+  // A new search/filter invalidates the current page offset.
+  useEffect(() => {
+    setPage(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter]);
 
   // Quick-create: title only, straight into Designer — slug is auto-derived
   // (de-duplicated against existing slugs) and stays editable there
@@ -328,6 +417,9 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
   // migrations/0007_pages_status.sql) — distinct from share(), which copies
   // the page into the cross-department portal pool.
   async function setStatus(p: Record<string, unknown>, status: "draft" | "published") {
+    if (status === "published" && !pageHasContent(p)) {
+      if (!(await confirm(t("prepublish-empty-page")))) return;
+    }
     try {
       await api.updatePage(tenantHost, token, p.id as string, {
         status,
@@ -403,7 +495,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <FileText className="h-4 w-4 text-accent" /> {t("pages-title")}
       </h2>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       <Card>
         <CardContent className="p-4">
           <Form {...form}>
@@ -427,6 +519,32 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
           </Form>
         </CardContent>
       </Card>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sub" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("pages-search-placeholder")}
+            className={`${inputCls} py-1.5 pl-8`}
+          />
+        </div>
+        <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : (v as "draft" | "published"))}>
+          <SelectTrigger className="w-40 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t("status-filter-all")}</SelectItem>
+            <SelectItem value="draft">{t("pages-draft")}</SelectItem>
+            <SelectItem value="published">{t("pages-published")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {loading ? (
+        <ListLoading />
+      ) : pages.length === 0 ? (
+        <ListEmpty>{t("pages-empty")}</ListEmpty>
+      ) : (
       <ul className={`${card} divide-y divide-line/20`}>
         {pages.map((p) => {
           const published = p.status === "published";
@@ -491,6 +609,7 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
                   onClick={() => remove(p.id as string)}
                   className="rounded p-1 text-red-500 hover:bg-red-50"
                   title={t("pages-delete")}
+                  aria-label={t("pages-delete")}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -499,8 +618,25 @@ function PagesPanel({ tenantHost, token }: { tenantHost: string; token: string }
           </li>
           );
         })}
-        {pages.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("pages-empty")}</li>}
       </ul>
+      )}
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-xs text-sub">
+          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className={`${btnGhost} disabled:opacity-40`}>
+            {t("pagination-prev")}
+          </button>
+          <span>
+            {page + 1} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+          </span>
+          <button
+            onClick={() => setPage((p) => (p + 1) * PAGE_SIZE < total ? p + 1 : p)}
+            disabled={(page + 1) * PAGE_SIZE >= total}
+            className={`${btnGhost} disabled:opacity-40`}
+          >
+            {t("pagination-next")}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -536,6 +672,11 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
   const { t } = useT();
   const confirm = useConfirm();
   const [posts, setPosts] = useState<Array<Record<string, unknown>>>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | PostStatus>("");
+  const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const form = useForm<PostsCreateForm>({ resolver: zodResolver(postsCreateSchema), defaultValues: { title: "" } });
@@ -545,16 +686,30 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
 
   async function refresh() {
     try {
-      setPosts(await api.getPosts(tenantHost, token));
+      const { items, total: t2 } = await api.listPostsPage(tenantHost, token, {
+        search, status: statusFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE,
+      });
+      setPosts(items);
+      setTotal(t2);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    void refresh();
-  }, [tenantHost]);
+    setLoading(true);
+    const timer = setTimeout(() => void refresh(), search ? 300 : 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantHost, search, statusFilter, page]);
+
+  useEffect(() => {
+    setPage(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter]);
 
   // Quick-create: title only, straight into the writing view — slug is
   // auto-derived (de-duplicated against existing slugs), same pattern as
@@ -613,7 +768,7 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
         </h2>
         <Link to="categories" className="text-xs font-semibold text-accent hover:underline">{t("categories-title")}</Link>
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       <Card>
         <CardContent className="p-4">
           <Form {...form}>
@@ -637,6 +792,33 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
           </Form>
         </CardContent>
       </Card>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sub" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("posts-search-placeholder")}
+            className={`${inputCls} py-1.5 pl-8`}
+          />
+        </div>
+        <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : (v as PostStatus))}>
+          <SelectTrigger className="w-40 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t("status-filter-all")}</SelectItem>
+            <SelectItem value="draft">{t("posts-draft")}</SelectItem>
+            <SelectItem value="published">{t("posts-published")}</SelectItem>
+            <SelectItem value="private">{t("posts-private")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {loading ? (
+        <ListLoading />
+      ) : posts.length === 0 ? (
+        <ListEmpty>{t("posts-empty")}</ListEmpty>
+      ) : (
       <ul className={`${card} divide-y divide-line/20`}>
         {posts.map((p) => {
           const status = (p.status as PostStatus) || "draft";
@@ -664,7 +846,7 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
                       {t("posts-share")}
                     </button>
                   )}
-                  <button onClick={() => remove(p.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50" title={t("pages-delete")}>
+                  <button onClick={() => remove(p.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50" title={t("pages-delete")} aria-label={t("pages-delete")}>
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </span>
@@ -672,8 +854,25 @@ function PostsPanel({ tenantHost, token }: { tenantHost: string; token: string }
             </li>
           );
         })}
-        {posts.length === 0 && <li className="px-4 py-3 text-xs text-sub">{t("posts-empty")}</li>}
       </ul>
+      )}
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-xs text-sub">
+          <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className={`${btnGhost} disabled:opacity-40`}>
+            {t("pagination-prev")}
+          </button>
+          <span>
+            {page + 1} / {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+          </span>
+          <button
+            onClick={() => setPage((p) => (p + 1) * PAGE_SIZE < total ? p + 1 : p)}
+            disabled={(page + 1) * PAGE_SIZE >= total}
+            className={`${btnGhost} disabled:opacity-40`}
+          >
+            {t("pagination-next")}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -692,7 +891,8 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   const [uploading, setUploading] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ originalName: "", altText: "", description: "", folderId: "" });
+  const [editForm, setEditForm] = useState({ originalName: "", altText: "", description: "", folderId: "", isDecorative: false });
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -719,8 +919,8 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   useEffect(() => {
-    void refreshFolders();
-    void refreshItems();
+    setLoading(true);
+    void Promise.all([refreshFolders(), refreshItems()]).finally(() => setLoading(false));
   }, [tenantHost]);
 
   const folderCounts = useMemo(() => {
@@ -858,16 +1058,23 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
       altText: (m.altText as string) ?? "",
       description: (m.description as string) ?? "",
       folderId: (m.folderId as string) ?? "",
+      isDecorative: (m.isDecorative as boolean) ?? false,
     });
   }
 
+  // Sprint 4 UX audit: alt text is required unless the image is explicitly
+  // marked decorative — a blank alt is then a deliberate choice, not a gap.
+  const altRequired = !editForm.isDecorative && !editForm.altText.trim();
+
   async function saveEdit(id: string) {
+    if (altRequired) return;
     try {
       await api.updateMedia(tenantHost, token, id, {
         originalName: editForm.originalName,
         altText: editForm.altText || null,
         description: editForm.description || null,
         folderId: editForm.folderId || null,
+        isDecorative: editForm.isDecorative,
       });
       setEditingId(null);
       await refreshItems();
@@ -883,7 +1090,7 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <ImageIcon className="h-4 w-4 text-accent" /> {t("media-title")}
       </h2>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs">
@@ -1050,6 +1257,11 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
           </div>
         )}
 
+        {loading ? (
+          <ListLoading />
+        ) : visibleItems.length === 0 ? (
+          <ListEmpty>{t("media-empty")}</ListEmpty>
+        ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {visibleItems.map((m) => (
             <div key={m.id as string} className={`${card} group relative overflow-hidden`}>
@@ -1073,11 +1285,21 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
                     onChange={(e) => setEditForm({ ...editForm, originalName: e.target.value })}
                   />
                   <input
-                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    className={`w-full rounded border px-1.5 py-1 text-[10px] ${altRequired ? "border-red-400" : "border-line"}`}
                     placeholder={t("media-alt-label")}
                     value={editForm.altText}
+                    disabled={editForm.isDecorative}
                     onChange={(e) => setEditForm({ ...editForm, altText: e.target.value })}
                   />
+                  {altRequired && <p className="text-[9px] text-red-600">{t("media-alt-required-hint")}</p>}
+                  <label className="flex items-center gap-1.5 text-[10px] text-sub">
+                    <input
+                      type="checkbox"
+                      checked={editForm.isDecorative}
+                      onChange={(e) => setEditForm({ ...editForm, isDecorative: e.target.checked })}
+                    />
+                    {t("media-decorative-label")}
+                  </label>
                   <textarea
                     className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
                     placeholder={t("media-description-label")}
@@ -1101,7 +1323,11 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
                     <button onClick={() => setEditingId(null)} className="text-[10px] text-sub hover:underline">
                       {t("media-cancel")}
                     </button>
-                    <button onClick={() => saveEdit(m.id as string)} className="text-[10px] font-semibold text-accent hover:underline">
+                    <button
+                      onClick={() => saveEdit(m.id as string)}
+                      disabled={altRequired}
+                      className="text-[10px] font-semibold text-accent hover:underline disabled:opacity-40"
+                    >
                       {t("media-save")}
                     </button>
                   </div>
@@ -1111,6 +1337,9 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
                   <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
                     {m.originalName as string}
                   </p>
+                  {!m.isDecorative && !m.altText && (
+                    <p className="text-[9px] font-semibold text-warn">{t("media-no-alt-badge")}</p>
+                  )}
                   <p className="text-[10px] text-sub">
                     {Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB ·{" "}
                     {new Date(m.createdAt as string).toLocaleDateString()}
@@ -1133,7 +1362,7 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
             </div>
           ))}
         </div>
-        {visibleItems.length === 0 && <p className="text-xs text-sub">{t("media-empty")}</p>}
+        )}
       </div>
     </section>
   );
@@ -1719,6 +1948,7 @@ function ThemeForm({
               <button
                 type="button"
                 title={t("theme-generate")}
+                aria-label={t("theme-generate")}
                 onClick={() => applyPalette(randomTheme())}
                 className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
               >
@@ -1788,7 +2018,7 @@ function ThemeForm({
             {t("theme-save")}
           </button>
           {saved && <span className="ml-2 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          <FormError>{error}</FormError>
         </form>
 
         {/* Live preview — reflects the form's current (unsaved) state, not
@@ -1917,6 +2147,7 @@ function ThemeForm({
                   size="icon"
                   className="text-red-500 hover:text-red-700"
                   title={t("theme-preset-delete")}
+                  aria-label={t("theme-preset-delete")}
                   onClick={async () => {
                     if (!(await confirm(t("theme-preset-delete-confirm")))) return;
                     void deletePreset(p.id);
@@ -2004,7 +2235,7 @@ function TenantsPanel({ token }: { token: string }) {
         <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
           <Globe className="h-4 w-4 text-accent" /> {t("tenants-manage-title")}: {managed.departmentName as string}
         </h2>
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        <FormError>{error}</FormError>
         {msg && <p className="text-xs text-green-700">{msg}</p>}
         <div className={`${card} space-y-2 p-5`}>
           <p className="font-mono text-xs text-sub">{managed.host as string}</p>
@@ -2047,7 +2278,7 @@ function TenantsPanel({ token }: { token: string }) {
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <Globe className="h-4 w-4 text-accent" /> {t("tenants-title")}
       </h2>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       {msg && <p className="text-xs text-green-700">{msg}</p>}
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onCreate)} className="flex flex-col gap-2 sm:flex-row">
@@ -2220,7 +2451,7 @@ function DangerZone({ token, host, onDeleted }: { token: string; host: string; o
         value={confirmText}
         onChange={(e) => setConfirmText(e.target.value)}
       />
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       <button
         disabled={confirmText !== host || busy}
         onClick={() => void del()}
@@ -2295,7 +2526,7 @@ function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost:
   return (
     <div className={`${card} space-y-3 p-5`}>
       <h3 className="text-xs font-bold text-ink">{t("tenants-clone-box-title")}</h3>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       {msg && <p className="text-xs text-green-700">{msg}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Select value={type} onValueChange={(v) => setType(v as "full" | "design")}>
@@ -2559,7 +2790,7 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <UsersIcon className="h-4 w-4 text-accent" /> {t("users-title")}
       </h2>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       <form onSubmit={create} className="flex flex-wrap gap-2">
         <input
           className={`${inputCls} w-auto flex-1`}
@@ -2750,6 +2981,7 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                           }}
                           className="text-sub hover:text-ink"
                           title={t("media-edit")}
+                          aria-label={t("media-edit")}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
@@ -2767,6 +2999,7 @@ function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s
                       onClick={() => (editUserId === (u.id as string) ? setEditUserId(null) : openEditUser(u))}
                       className="text-sub hover:text-ink"
                       title={t("users-edit")}
+                      aria-label={t("users-edit")}
                     >
                       <Pencil className="h-3 w-3" />
                     </button>
@@ -2913,7 +3146,7 @@ function RolesPanel({ token }: { token: string }) {
       <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
         <ShieldCheck className="h-4 w-4 text-accent" /> {t("roles-title")}
       </h2>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      <FormError>{error}</FormError>
       <form onSubmit={create} className={`${card} max-w-xl space-y-3 p-4`}>
         <input
           className={inputCls}
@@ -2974,6 +3207,7 @@ function RolesPanel({ token }: { token: string }) {
                     }}
                     className="text-sub hover:text-ink"
                     title={t("media-edit")}
+                    aria-label={t("media-edit")}
                   >
                     <Pencil className="h-3 w-3" />
                   </button>
@@ -2983,6 +3217,7 @@ function RolesPanel({ token }: { token: string }) {
                 onClick={() => remove(r.id as string)}
                 className="rounded p-1 text-red-500 hover:bg-red-50"
                 title={t("roles-delete")}
+                aria-label={t("roles-delete")}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -3672,6 +3907,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                       <button
                         onClick={() => void saveLanguageLabel(l.id, draft)}
                         title={t("settings-languages-save-btn")}
+                        aria-label={t("settings-languages-save-btn")}
                         className="shrink-0 text-accent hover:text-ink"
                       >
                         <Check className="h-3.5 w-3.5" />
@@ -3955,6 +4191,7 @@ function NavButton({ tab, active, onClick }: { tab: Tab; active: boolean; onClic
   return (
     <button
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
         active ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
       }`}
@@ -4136,6 +4373,13 @@ function Shell({
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab = (location.pathname.split("/")[1] || "dashboard") as Tab;
+  // Sidebar is a fixed off-canvas drawer below md (Sprint 2: responsive admin
+  // shell), static in-flow at md+ — see the `aside`/backdrop classes below.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const goTo = (tb: Tab) => {
+    navigate(`/${tb}`);
+    setMobileNavOpen(false);
+  };
   // superadmin picks which site to manage in the content tab; webmaster is locked to theirs
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [siteHost, setSiteHost] = useState<string>(session.tenantHost ?? "");
@@ -4174,8 +4418,20 @@ function Shell({
           </div>
         )}
         <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="flex h-full w-64 shrink-0 flex-col border-r border-line/50 bg-white">
+        {/* Mobile-only backdrop, closes the drawer on outside tap */}
+        {mobileNavOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/40 md:hidden"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+        {/* Sidebar: fixed off-canvas drawer below md, static in-flow at md+ */}
+        <aside
+          className={`fixed inset-y-0 left-0 z-40 flex h-full w-64 shrink-0 transform flex-col border-r border-line/50 bg-white transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
+            mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
           <div className="flex items-center gap-3 border-b border-line/30 p-6">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-accent to-[#00c6ff] text-sm font-bold text-white shadow-sm">
               U
@@ -4184,15 +4440,23 @@ function Shell({
               <h1 className="font-display text-sm font-bold tracking-tight text-ink">USIM CMS</h1>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
             </div>
+            <button
+              onClick={() => setMobileNavOpen(false)}
+              className="ml-auto rounded-full p-1.5 text-sub hover:bg-canvas hover:text-ink md:hidden"
+              aria-label={t("nav-close")}
+              title={t("nav-close")}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
           <nav className="flex-1 space-y-1.5 overflow-y-auto p-4">
             <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-main")}</div>
             {mainTabs.map((tb) => (
-              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => navigate(`/${tb}`)} />
+              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
             ))}
             <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-content")}</div>
             {contentTabs.map((tb) => (
-              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => navigate(`/${tb}`)} />
+              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
             ))}
           </nav>
           <div className="flex items-center gap-3 border-t border-line/30 bg-canvas/30 p-4">
@@ -4207,6 +4471,7 @@ function Shell({
               onClick={onLogout}
               className="rounded-full p-1.5 text-sub transition-colors hover:bg-canvas hover:text-ink"
               title={t("logout")}
+              aria-label={t("logout")}
             >
               <LogOut className="h-4 w-4" />
             </button>
@@ -4215,15 +4480,23 @@ function Shell({
 
         {/* Main */}
         <div className="flex flex-1 flex-col overflow-hidden bg-white">
-          <header className="flex shrink-0 items-center justify-between border-b border-line/40 bg-white px-8 py-4">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold uppercase tracking-wider text-sub">{t("header-workspace")}</span>
-              <ChevronRight className="h-3.5 w-3.5 text-line" />
-              <span className="flex items-center gap-1.5 rounded-full border border-line/30 bg-canvas px-2.5 py-0.5 text-xs font-bold text-ink">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                {t(TAB_META[activeTab].labelKey)}
+          <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line/40 bg-white px-4 py-4 sm:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                onClick={() => setMobileNavOpen(true)}
+                className="shrink-0 rounded-full p-1.5 text-sub hover:bg-canvas hover:text-ink md:hidden"
+                aria-label={t("nav-open")}
+                title={t("nav-open")}
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              <span className="hidden text-xs font-bold uppercase tracking-wider text-sub sm:inline">{t("header-workspace")}</span>
+              <ChevronRight className="hidden h-3.5 w-3.5 text-line sm:inline" />
+              <span className="flex items-center gap-1.5 truncate rounded-full border border-line/30 bg-canvas px-2.5 py-0.5 text-xs font-bold text-ink">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                <span className="truncate">{t(TAB_META[activeTab].labelKey)}</span>
               </span>
-              <span className="rounded-full bg-accent/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-accent">
+              <span className="hidden shrink-0 rounded-full bg-accent/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-accent sm:inline">
                 {session.role}
               </span>
             </div>
@@ -4242,7 +4515,7 @@ function Shell({
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto bg-white p-8">
+          <main className="flex-1 overflow-y-auto bg-white p-4 sm:p-8">
             <div className="mx-auto max-w-7xl space-y-6 pb-10">
               <Routes>
                 <Route index element={<Navigate to="dashboard" replace />} />

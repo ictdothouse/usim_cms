@@ -1,5 +1,6 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import HeroBlock from "../../components/HeroBlock.astro";
 import { getPostBySlug, getTheme, getLanguages, resolvePostContent, resolveCategoryName } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro (see its comment for why this
@@ -17,26 +18,30 @@ const tenantHost =
 const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 
 const post = await getPostBySlug(tenantHost, Astro.params.slug!, previewToken);
-if (!post) {
-  return new Response("Not found", { status: 404 });
-}
 const theme = await getTheme(tenantHost);
+// Branded 404 instead of a raw text Response — mirrors [...slug].astro's own
+// "missing page" branch (HeroBlock inside the real BaseLayout/theme) so a
+// missing post doesn't look like a broken server, and still gives a real
+// navigable page instead of a dead end.
+if (!post) {
+  Astro.response.status = 404;
+}
 
 // i18n Phase 5 — every language's content now lives on this SAME post row
 // (post.translations), so switching language means re-rendering this same
 // row under a `?lang=` query param, not linking to a different slug/row.
 const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
-const content = resolvePostContent(post, requestedLang);
+const content = post ? resolvePostContent(post, requestedLang) : null;
 // Bare language codes (e.g. "ar", "zh") work fine as Intl locales — no need
 // for a code->region mapping table just to format a date in the currently
 // viewed language.
-const dateLocale = requestedLang ?? post.language ?? "ms";
-const categoryName = resolveCategoryName(post, requestedLang);
+const dateLocale = requestedLang ?? post?.language ?? "ms";
+const categoryName = post ? resolveCategoryName(post, requestedLang) : null;
 const langLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
-const availableCodes = [post.language, ...Object.keys(post.translations)].filter((c): c is string => Boolean(c));
+const availableCodes = post ? [post.language, ...Object.keys(post.translations)].filter((c): c is string => Boolean(c)) : [];
 const langSwitcher =
-  showHeaderSwitcher && availableCodes.length > 1
+  post && showHeaderSwitcher && availableCodes.length > 1
     ? {
         current: requestedLang ?? post.language,
         options: availableCodes.map((code) => ({
@@ -51,45 +56,51 @@ const langSwitcher =
 // is a "true"/"false" string default (absent/"" also means "show") — see
 // apps/api's validateThemeSettings and this repo's design spec
 // docs/superpowers/specs/2026-07-23-post-metadata-links-and-theme-controls-design.md.
-const showTags = post.showTags ?? (theme.showPostTags !== "false");
-const showCategory = post.showCategory ?? (theme.showPostCategory !== "false");
-const showAuthor = post.showAuthor ?? (theme.showPostAuthor !== "false");
-const showDate = post.showPublishedDate ?? (theme.showPostDate !== "false");
+const showTags = post ? (post.showTags ?? (theme.showPostTags !== "false")) : false;
+const showCategory = post ? (post.showCategory ?? (theme.showPostCategory !== "false")) : false;
+const showAuthor = post ? (post.showAuthor ?? (theme.showPostAuthor !== "false")) : false;
+const showDate = post ? (post.showPublishedDate ?? (theme.showPostDate !== "false")) : false;
 ---
-<BaseLayout title={content.title} ogImage={post.bannerImageUrl} theme={theme} langSwitcher={langSwitcher}>
-  {post.status !== "published" && (
-    <span style="position:fixed;top:0.6rem;right:0.6rem;z-index:50;padding:0.2rem 0.55rem;border-radius:999px;background:#fff3cd;color:#7a5c00;font-size:0.65rem;font-weight:700;letter-spacing:0.02em;box-shadow:0 1px 3px rgba(0,0,0,0.15);">
-      {post.status === "private" ? "PRIVATE" : "DRAFT"}
-    </span>
+<BaseLayout title={content?.title ?? "Artikel tidak dijumpai"} ogImage={post?.bannerImageUrl} theme={theme} langSwitcher={langSwitcher}>
+  {!post || !content ? (
+    <HeroBlock title="Artikel tidak dijumpai" subtitle="Artikel ini belum tersedia atau telah dialihkan." />
+  ) : (
+    <>
+      {post.status !== "published" && (
+        <span style="position:fixed;top:0.6rem;right:0.6rem;z-index:50;padding:0.2rem 0.55rem;border-radius:999px;background:#fff3cd;color:#7a5c00;font-size:0.65rem;font-weight:700;letter-spacing:0.02em;box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+          {post.status === "private" ? "PRIVATE" : "DRAFT"}
+        </span>
+      )}
+      <article style="max-width:44rem;margin:0 auto;padding:2rem 1rem;">
+        {post.bannerImageUrl && (
+          <img src={post.bannerImageUrl} alt="" style="width:100%;border-radius:0.75rem;margin-bottom:1.5rem;" />
+        )}
+        <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));font-size:var(--font-post-title-size,2rem);">{content.title}</h1>
+        <p style="color:#86868b;font-size:0.85rem;">
+          {showDate && post.publishedAt &&
+            new Date(post.publishedAt).toLocaleDateString(dateLocale, { day: "numeric", month: "long", year: "numeric" })}
+          {showCategory && categoryName && post.categorySlug && (
+            <span> · <a href={`/category/${encodeURIComponent(post.categorySlug)}`} style="color:inherit;">{categoryName}</a></span>
+          )}
+          {showAuthor && post.authorEmail && (
+            <span> · <a href={`/author/${encodeURIComponent(post.authorEmail)}`} style="color:inherit;">{post.authorEmail}</a></span>
+          )}
+        </p>
+        {showTags && post.tags.length > 0 && (
+          <p style="margin:0.5rem 0 1rem;">
+            {post.tags.map((tag) => (
+              <a
+                href={`/tag/${encodeURIComponent(tag)}`}
+                style="display:inline-block;margin:0 0.4rem 0.4rem 0;padding:0.15rem 0.6rem;border-radius:999px;background:#f2f2f2;font-size:0.75rem;color:#555;text-decoration:none;"
+              >
+                {tag}
+              </a>
+            ))}
+          </p>
+        )}
+        {/* body is sanitized server-side on every write (apps/api posts beforeChange) */}
+        <div set:html={content.body} />
+      </article>
+    </>
   )}
-  <article style="max-width:44rem;margin:0 auto;padding:2rem 1rem;">
-    {post.bannerImageUrl && (
-      <img src={post.bannerImageUrl} alt="" style="width:100%;border-radius:0.75rem;margin-bottom:1.5rem;" />
-    )}
-    <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));font-size:var(--font-post-title-size,2rem);">{content.title}</h1>
-    <p style="color:#86868b;font-size:0.85rem;">
-      {showDate && post.publishedAt &&
-        new Date(post.publishedAt).toLocaleDateString(dateLocale, { day: "numeric", month: "long", year: "numeric" })}
-      {showCategory && categoryName && post.categorySlug && (
-        <span> · <a href={`/category/${encodeURIComponent(post.categorySlug)}`} style="color:inherit;">{categoryName}</a></span>
-      )}
-      {showAuthor && post.authorEmail && (
-        <span> · <a href={`/author/${encodeURIComponent(post.authorEmail)}`} style="color:inherit;">{post.authorEmail}</a></span>
-      )}
-    </p>
-    {showTags && post.tags.length > 0 && (
-      <p style="margin:0.5rem 0 1rem;">
-        {post.tags.map((tag) => (
-          <a
-            href={`/tag/${encodeURIComponent(tag)}`}
-            style="display:inline-block;margin:0 0.4rem 0.4rem 0;padding:0.15rem 0.6rem;border-radius:999px;background:#f2f2f2;font-size:0.75rem;color:#555;text-decoration:none;"
-          >
-            {tag}
-          </a>
-        ))}
-      </p>
-    )}
-    {/* body is sanitized server-side on every write (apps/api posts beforeChange) */}
-    <div set:html={content.body} />
-  </article>
 </BaseLayout>

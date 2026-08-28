@@ -1956,6 +1956,7 @@ await app.register(async (protectedScope) => {
       altText?: string | null;
       description?: string | null;
       folderId?: string | null;
+      isDecorative?: boolean;
     };
     const idFilter = ownershipFilter(req);
     // Allowlist fields explicitly — body is only TS-cast, not runtime
@@ -1966,6 +1967,7 @@ await app.register(async (protectedScope) => {
     if (body.altText !== undefined) updates.altText = body.altText;
     if (body.description !== undefined) updates.description = body.description;
     if (body.folderId !== undefined) updates.folderId = body.folderId;
+    if (body.isDecorative !== undefined) updates.isDecorative = body.isDecorative;
     const [item] = await req.db
       .update(schema.media)
       .set(updates)
