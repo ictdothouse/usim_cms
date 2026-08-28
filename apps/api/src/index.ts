@@ -2194,7 +2194,17 @@ await app.register(async (protectedScope) => {
         return { error: layoutErr };
       }
     }
-    await updatePageBlueprint(id, body);
+    // Allowlist fields explicitly — body is only TS-cast, not runtime
+    // validated, so passing it straight through would let a caller overwrite
+    // any column (tenantHost, createdBy, createdByEmail, id, ...) via extra
+    // JSON fields, e.g. escalating a tenant-scoped blueprint to system-wide.
+    const updates: { name?: string; description?: string | null; category?: string | null; layout?: unknown; settings?: unknown } = {};
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.category !== undefined) updates.category = body.category;
+    if (body.layout !== undefined) updates.layout = body.layout;
+    if (body.settings !== undefined) updates.settings = body.settings;
+    await updatePageBlueprint(id, updates);
     return { saved: true };
   });
 

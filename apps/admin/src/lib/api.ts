@@ -377,7 +377,7 @@ export const updateBlueprint = (
   tenantHost: string,
   token: string,
   id: string,
-  patch: { name?: string; description?: string; category?: string },
+  patch: { name?: string; description?: string | null; category?: string | null },
 ) => request(`/api/blueprints/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) });
 
 export const deleteBlueprint = (tenantHost: string, token: string, id: string) =>
