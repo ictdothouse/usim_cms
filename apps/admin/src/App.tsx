@@ -2647,6 +2647,7 @@ const PERMISSIONS = [
   "sites.multi",
   "languages.write",
   "menus.write",
+  "blueprints.write",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
