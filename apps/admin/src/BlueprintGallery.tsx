@@ -7,9 +7,10 @@ import type { Row } from "./designer/types";
 
 function blueprintRows(bp: api.PageBlueprint): Row[] {
   // A blueprint's layout is a whole page's Block[] (section blocks only) —
-  // flatten every section's own rows into one preview strip.
-  const sections = (bp.layout ?? []) as Array<{ rows?: Row[] }>;
-  return sections.flatMap((s) => s.rows ?? []);
+  // flatten every section's own rows into one preview strip. Rows live at
+  // section.props.rows, not section.rows (see Designer.tsx's templateRows).
+  const sections = (bp.layout ?? []) as Array<{ props?: { rows?: Row[] } }>;
+  return sections.flatMap((s) => s.props?.rows ?? []);
 }
 
 export function BlueprintGallery({
@@ -70,8 +71,8 @@ export function BlueprintGallery({
     try {
       await api.updateBlueprint(tenantHost, token, id, {
         name: editName,
-        description: editDescription || undefined,
-        category: editCategory || undefined,
+        description: editDescription.trim() || null,
+        category: editCategory.trim() || null,
       });
       await refresh();
       setEditingId(null);
