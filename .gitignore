@@ -11,3 +11,6 @@ apps/api/uploads/
 .astro/
 .deploy-color
 .deploy.log
+.playwright-mcp/
+.superpowers/
+slider-canvas.png
