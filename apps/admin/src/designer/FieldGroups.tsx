@@ -16,7 +16,7 @@
 // field/value/onChange, which it supplies itself per-field below) since it's
 // the one place that actually calls FieldInput.
 import { type Check, ChevronDown, ChevronRight } from "lucide-react";
-import type { Menu } from "@/lib/api";
+import type { Menu, Category } from "@/lib/api";
 import type { Key } from "@/i18n";
 import type { Field, FieldGroupKey, Bp, Block } from "./types";
 import { FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./fields";
@@ -58,6 +58,7 @@ export interface FieldGroupsProps {
   toggleBpKeys: (bag: Record<string, string> | undefined, keys: string[]) => Record<string, string>;
   bpKey: (key: string) => string;
   availableMenus: Menu[];
+  availableCategories: Category[];
   ICONS: Record<string, typeof Check>;
 }
 
@@ -68,7 +69,7 @@ export function FieldGroups({
   fields, getValue, setValue, only, hasOverride, onToggleOverride,
   collapsedGroups, toggleGroup, bp, t,
   iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
-  uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey, availableMenus, ICONS,
+  uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey, availableMenus, availableCategories, ICONS,
 }: FieldGroupsProps) {
   const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
   for (const f of fields) {
@@ -108,7 +109,7 @@ export function FieldGroups({
                         field: f, value: getValue(f), onChange: (v) => setValue(f, v),
                         iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
                         bp, t, uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
-                        availableMenus, ICONS,
+                        availableMenus, availableCategories, ICONS,
                       })}
                     </div>
                   </label>
