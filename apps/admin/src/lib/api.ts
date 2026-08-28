@@ -173,7 +173,11 @@ export const listPagesPage = (tenantHost: string, token: string, params: ListPar
     total: (b.total as number | undefined) ?? (b.items as unknown[]).length,
   }));
 
-export const createPage = (tenantHost: string, token: string, data: { slug: string; title: string }) =>
+export const createPage = (
+  tenantHost: string,
+  token: string,
+  data: { slug: string; title: string; layout?: unknown; settings?: unknown },
+) =>
   request("/api/pages", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then(
     (b) => b.item as Record<string, unknown>,
   );
@@ -344,6 +348,40 @@ export const createTemplate = (tenantHost: string, token: string, name: string, 
 
 export const deleteTemplate = (tenantHost: string, token: string, id: string) =>
   request(`/api/templates/${id}`, tenantHost, token, { method: "DELETE" });
+
+export interface PageBlueprint {
+  id: string;
+  tenantHost: string | null;
+  name: string;
+  description: string | null;
+  category: string | null;
+  layout: unknown[];
+  settings: Record<string, unknown>;
+  createdByEmail: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listBlueprints = (tenantHost: string, token: string, category?: string) =>
+  request(`/api/blueprints${category ? `?category=${encodeURIComponent(category)}` : ""}`, tenantHost, token).then(
+    (b) => b.items as PageBlueprint[],
+  );
+
+export const createBlueprint = (
+  tenantHost: string,
+  token: string,
+  data: { name: string; description?: string; category?: string; layout: unknown; settings?: unknown; scope?: "system" | "tenant" },
+) => request("/api/blueprints", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then((b) => b.item as PageBlueprint);
+
+export const updateBlueprint = (
+  tenantHost: string,
+  token: string,
+  id: string,
+  patch: { name?: string; description?: string; category?: string },
+) => request(`/api/blueprints/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) });
+
+export const deleteBlueprint = (tenantHost: string, token: string, id: string) =>
+  request(`/api/blueprints/${id}`, tenantHost, token, { method: "DELETE" });
 
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);

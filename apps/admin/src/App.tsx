@@ -2662,6 +2662,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "sites.multi": "perm-sites-multi",
   "languages.write": "perm-languages-write",
   "menus.write": "perm-menus-write",
+  "blueprints.write": "perm-blueprints-write",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
