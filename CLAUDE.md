@@ -1259,6 +1259,29 @@ pnpm workspace monorepo with two apps:
   `CONTENT_KEYS` (the "paste style" content-key strip-list) gained an entry per new element so
   copy-style/paste-style can't leak one element's content onto another's the way every other element type
   already guards against.
+  **Event listing** (the other half of the audit's deferred "Event listing/Contact form" pair — Contact
+  form still needs its own design, not attempted here): a new `events` table (control-plane-shaped but
+  actually tenant-scoped, migration `0021_events.sql`, RLS mirroring `posts` — `status='published' OR
+  authenticated`) with `title`/`description` (plain text, not sanitized HTML — rendered as a safe text
+  node, unlike `posts.body`)/`startDate`/`endDate`/`location`/`imageUrl`/`registrationUrl`/`status`. Its
+  own `events.write` permission (not `posts.*`/`pages.*`, same reasoning as `menus.write` — managing the
+  events calendar is its own concern), added to both `PERMISSIONS` lists (server `index.ts` AND admin
+  `App.tsx`, per the i18n-phase-2 lesson above). `registrationUrl`/`imageUrl` are scheme-checked with the
+  same `isSafeUrl` every other author-supplied URL in this codebase goes through (`eventsBeforeChange`) —
+  both render as a real `href`/`src`, not sanitized HTML, so a `javascript:` value would execute on click
+  same as anywhere else. `EventsPanel.tsx` (new, mirrors `MenusPanel`'s quick-create-then-expand-to-edit
+  shape, not a full routed editor like posts/pages since an event has few fields) is mounted the same way
+  `menus`/`blueprints` are — a superadmin-only `ContentManager` sub-tab and a webmaster top-level `Tab`.
+  The `"eventlist"` Designer element is a thin reference, same "reference, not a copy" idea as `postlist`
+  — only `count`/`columns`/`eventLayout` live in `El.props`, the real events are fetched at render time by
+  a new `apps/frontend/src/components/EventListBlock.astro` via `listEvents(tenantHost)`
+  (`GET /api/events?status=published`), which filters to `startDate >= now` and sorts upcoming-first
+  client-side in the component — the events table is small enough per tenant that a dedicated
+  `?upcoming=` API filter wasn't worth adding (`generic-crud.ts`'s `buildListFilters` only knows a
+  `publishedAt` range, not `startDate`, and extending it generically for one collection's own column
+  wasn't warranted). `count`/`columns`/`eventLayout` validate through the same generic `ENUM_VALUES`
+  buckets `postlist`'s `count`/`columns`/`postLayout` already use (`packages/element-schema`) — no new
+  validator code needed since eventlist carries no risky (URL/HTML) props of its own.
   Sprint 5 sub-project 2, **Page Blueprint** (`docs/laporan-audit-ui-ux.md` §5.6): a ready-made section
   layout a page can start from instead of a blank canvas, plus letting a webmaster save a finished page as
   a reusable starting point for future pages on their own tenant. `page_blueprints` (`apps/api/src/db/
@@ -1317,8 +1340,29 @@ pnpm workspace monorepo with two apps:
   the same `confirmSaveTemplate`-style pattern (never `window.prompt` here, since this one IS the
   repeated-multi-field case that lesson actually concerns); submitting calls `POST /api/blueprints` with
   the page's current in-memory `layout`/`settings` — again no dedicated backend route, both entry points are
-  pure client-side composition of the plain CRUD routes above. Section-lock (a superadmin-locked section
-  surviving clone uneditable) and real screenshot thumbnails are explicitly deferred, not built.
+  pure client-side composition of the plain CRUD routes above. Real screenshot thumbnails are still
+  explicitly deferred (needs a headless-render pipeline — a real new dependency this codebase deliberately
+  avoids elsewhere per its own "avoid heavy dependencies" constraint — not attempted without being asked
+  specifically). **Section-lock** (built): a superadmin can mark a Section `locked` (props.locked ===
+  "true", a checkbox in Designer's Section Inspector, gated on the `isSuper` prop Designer already receives
+  — `DesignerCtx` gained `isSuper`/`isSectionLocked(b)` for this, `designer/context.ts`) so it survives
+  edits by a non-superadmin unchanged — e.g. a blueprint's mandated footer/CTA section that shouldn't be
+  removable once cloned into a real page (it just travels with the layout JSON through
+  `refreshBlueprintIds()`/"Save as blueprint" like any other prop, no special-casing needed there). Sections
+  have no stable id of their own (only rows/columns/elements do, see `designer/types.ts`), so the real
+  enforcement — `apps/api`'s `pagesBeforeChange` (`lockedSectionViolation`/`findLockedSections`) — matches a
+  locked section by an exact deep-equal copy existing SOMEWHERE in the new layout, not by array position:
+  this blocks every real edit (delete, content change, style change) while tolerating reordering/insertion
+  of unrelated sections around it, and rejects with 403 (not 400 — this is an authorization failure, not a
+  malformed request) when the requester isn't superadmin. Only `deleteSection`/`pasteStyleSection` actually
+  mutate a locked section's own content (duplicate-after/copy/paste-after/move/save-as-template all leave it
+  untouched, so those stay enabled even on a locked section) — Designer.tsx guards both functions
+  client-side too (a `toast.error` + disabled Delete/Paste-style buttons in `BlockControls`), but this is UX
+  only, not the security boundary. Selecting anything under a locked section (Row/Column/Element, not just
+  the Section itself) shows one shared read-only notice in `Inspector.tsx` instead of editable fields, since
+  mutating any of them would mutate the same locked section subtree and get rejected on Save anyway — simpler
+  and clearer than disabling each nested field individually. `locked` is validated the same generic
+  `ENUM_VALUES` way as `hideDesktop`/`hideTablet`/`hideMobile` (`packages/element-schema`).
 
 - **`apps/frontend`** — Astro 7, `output: "server"` with the `@astrojs/node` adapter in `"middleware"`
   mode (not `"standalone"`: `server.mjs` owns the `http.Server` so it can close it gracefully on

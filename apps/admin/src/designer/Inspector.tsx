@@ -15,6 +15,7 @@ import {
   Frame,
   LayoutTemplate,
   Link2,
+  Lock,
   Monitor,
   Paintbrush,
   RefreshCw,
@@ -160,6 +161,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     setRowGap, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow, clipHas, styleHas,
     nudgeColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, saveAsTemplate,
     moveElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, duplicateElement, deleteElement,
+    isSuper, isSectionLocked,
   } = ctx;
 
   function Breadcrumb() {
@@ -317,11 +319,45 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
   const [b, r, c, e] = sel;
   const sp = blocks[b].props as unknown as SectionProps;
 
+  // Section lock (Page Blueprint deferred item) — a non-superadmin gets a
+  // read-only notice instead of editable fields at every level under a
+  // locked section (Section/Row/Column/Element all share this one gate,
+  // since editing any of them mutates the same locked section subtree). The
+  // real enforcement is server-side (apps/api's pagesBeforeChange); this
+  // just avoids presenting fields whose Save would be silently rejected.
+  if (isSectionLocked(b)) {
+    return (
+      <div className="space-y-3">
+        <Breadcrumb />
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-800">
+          <div className="flex items-center gap-1.5 font-semibold">
+            <Lock className="h-3.5 w-3.5" /> {t("designer-section-locked-title")}
+          </div>
+          <p className="mt-1">{t("designer-section-locked-body")}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (sel.length === 1) {
     return (
       <div className="space-y-3">
         <Breadcrumb />
         <p className="text-xs font-bold text-ink">{t("designer-section")}</p>
+        {isSuper && (
+          <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+            <input
+              type="checkbox"
+              checked={sp.locked === "true"}
+              onChange={(e) =>
+                mutate((bs) => {
+                  (bs[b].props as Record<string, string>).locked = e.target.checked ? "true" : "";
+                })
+              }
+            />
+            <Lock className="h-3.5 w-3.5" /> {t("designer-section-lock-toggle")}
+          </label>
+        )}
         <VisibilityToggle
           t={t}
           get={(k) => (sp as unknown as Record<string, string>)[k] === "true"}

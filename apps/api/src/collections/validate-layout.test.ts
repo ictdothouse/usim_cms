@@ -83,6 +83,20 @@ test("rejects a javascript: URL smuggled into a repeater's image field", () => {
   assert.match(validateLayout(layout) ?? "", /unsafe value/);
 });
 
+test("accepts a locked section", () => {
+  const layout = [
+    { type: "section", props: { locked: "true", rows: [] } },
+  ];
+  assert.equal(validateLayout(layout), null);
+});
+
+test("rejects an invalid locked value", () => {
+  const layout = [
+    { type: "section", props: { locked: "yes", rows: [] } },
+  ];
+  assert.match(validateLayout(layout) ?? "", /unrecognized/);
+});
+
 test("rejects a repeater item with an unrecognized key", () => {
   const layout = [
     {

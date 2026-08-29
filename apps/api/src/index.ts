@@ -13,7 +13,7 @@ import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/au
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
-import { validateLayout } from "./collections/validate-layout.js";
+import { validateLayout, isSafeUrl } from "./collections/validate-layout.js";
 import { validateMenuItems } from "./collections/validate-menu.js";
 import * as schema from "./db/schema.js";
 import {
@@ -120,6 +120,7 @@ const PERMISSIONS = new Set([
   "languages.write",
   "menus.write",
   "blueprints.write",
+  "events.write",
 ]);
 
 // Superadmin bypasses every permission check — a role's permissions are only
@@ -1295,6 +1296,34 @@ app.get("/api/portal/tenants/:host/static-export", async (req, reply) => {
   }
 });
 
+// Section lock (Page Blueprint deferred item): a superadmin can mark a
+// section `locked` (props.locked === "true", Designer.tsx's Section
+// Inspector) so it survives edits by a non-superadmin unchanged — e.g. a
+// blueprint's mandated footer/CTA section that shouldn't be removable once
+// cloned into a real page. Sections have no stable id of their own (only
+// rows/columns/elements do, see designer/types.ts), so a locked section is
+// matched by an exact deep-equal copy existing SOMEWHERE in the new layout,
+// not by array position — this still blocks every real edit (delete,
+// content change, style change) while tolerating reordering/insertion of
+// unrelated sections around it. This is the real enforcement point;
+// Designer.tsx's own disabled buttons/read-only Inspector notice are UX only.
+function findLockedSections(layout: unknown[]): unknown[] {
+  return layout.filter((block) => {
+    if (typeof block !== "object" || block === null) return false;
+    const b = block as Record<string, unknown>;
+    const props = b.props as Record<string, unknown> | undefined;
+    return b.type === "section" && props?.locked === "true";
+  });
+}
+
+function lockedSectionViolation(oldLayout: unknown[], newLayout: unknown[]): string | null {
+  for (const oldBlock of findLockedSections(oldLayout)) {
+    const stillPresent = newLayout.some((b) => JSON.stringify(b) === JSON.stringify(oldBlock));
+    if (!stillPresent) return "a locked section was removed or modified — only a superadmin can change it";
+  }
+  return null;
+}
+
 // publishedAt arrives as an ISO string over JSON; Drizzle's timestamp column
 // needs a Date. Same conversion as sanitizePostBody, plus the updatedAt bump
 // posts already gets and pages never did.
@@ -1308,6 +1337,16 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
     // handler honors `.statusCode` on a thrown Error, giving a clean 400
     // instead of the 500 an unannotated throw would produce.
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+    if (req.method === "PATCH" && req.user.role !== "superadmin") {
+      const { id } = req.params as { id?: string };
+      if (id) {
+        const [existing] = await req.db.select({ layout: schema.pages.layout }).from(schema.pages).where(eq(schema.pages.id, id));
+        if (existing) {
+          const lockErr = lockedSectionViolation(existing.layout as unknown[], record.layout as unknown[]);
+          if (lockErr) throw Object.assign(new Error(lockErr), { statusCode: 403 });
+        }
+      }
+    }
   }
   // i18n Phase 5 — each translations[code].layout is just as much a raw
   // layout tree as the top-level one above, and gets the exact same check.
@@ -1654,6 +1693,54 @@ const menusCollection: CollectionConfig = {
   hooks: { beforeChange: menusBeforeChange },
 };
 
+// Events calendar. Own events.write permission (not posts.*/pages.*, same
+// reasoning as menus.write) — managing the events calendar is its own
+// concern. registrationUrl/imageUrl are scheme-checked the same way any
+// other author-supplied URL in this codebase is (isSafeUrl) since both
+// render as a real href/src, not sanitized HTML.
+const eventsBeforeChange = (data: unknown) => {
+  const record = data as Record<string, unknown>;
+  if (typeof record.registrationUrl === "string" && record.registrationUrl !== "" && !isSafeUrl(record.registrationUrl)) {
+    throw Object.assign(new Error("registrationUrl has an unsafe URL scheme"), { statusCode: 400 });
+  }
+  if (typeof record.imageUrl === "string" && record.imageUrl !== "" && !isSafeUrl(record.imageUrl)) {
+    throw Object.assign(new Error("imageUrl has an unsafe URL scheme"), { statusCode: 400 });
+  }
+  if (typeof record.startDate === "string") record.startDate = new Date(record.startDate);
+  if (typeof record.endDate === "string") record.endDate = new Date(record.endDate);
+  record.updatedAt = new Date();
+  return record;
+};
+
+const eventsCollection: CollectionConfig = {
+  slug: "events",
+  table: schema.events,
+  createSchema: {
+    type: "object",
+    required: ["title", "startDate"],
+    additionalProperties: false,
+    properties: {
+      title: { type: "string", minLength: 1 },
+      description: { type: "string" },
+      startDate: { type: "string" },
+      endDate: { type: ["string", "null"] },
+      location: { type: ["string", "null"] },
+      imageUrl: { type: ["string", "null"] },
+      registrationUrl: { type: ["string", "null"] },
+      status: { type: "string", enum: ["draft", "published"] },
+    },
+  },
+  // No `shareable` — events have no dedicated public detail page to link to
+  // (unlike posts/pages), so "Share to portal" wouldn't have a real URL.
+  access: {
+    read: () => true,
+    create: (a) => hasPermission(a, "events.write"),
+    update: (a) => hasPermission(a, "events.write"),
+    delete: (a) => hasPermission(a, "events.write"),
+  },
+  hooks: { beforeChange: eventsBeforeChange },
+};
+
 // Reusable Designer section blocks. Protected-scope only (see registration
 // below) — no `access.update` since there's no PATCH route (replacing a
 // template is delete-and-recreate), and no `shareable` since these aren't
@@ -1689,6 +1776,7 @@ await app.register(async (publicScope) => {
   registerPublicCollectionRoutes(publicScope, postsCollection);
   registerPublicCollectionRoutes(publicScope, categoriesCollection);
   registerPublicCollectionRoutes(publicScope, menusCollection);
+  registerPublicCollectionRoutes(publicScope, eventsCollection);
   // Theme lives in the control-plane DB, not the tenant DB — req.db's own
   // site_theme copy is always empty under DB-per-tenant. A theme-preview
   // Bearer token (ThemeForm's "Test" button) overlays its not-yet-saved
@@ -1766,6 +1854,7 @@ await app.register(async (protectedScope) => {
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
   registerProtectedCollectionRoutes(protectedScope, menusCollection);
+  registerProtectedCollectionRoutes(protectedScope, eventsCollection);
 
   // History/restore — a post-specific feature the generic CRUD mechanism
   // doesn't cover (same reasoning as the preview-token route above), so

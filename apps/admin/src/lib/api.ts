@@ -333,6 +333,32 @@ export const updateMenu = (tenantHost: string, token: string, id: string, patch:
 export const deleteMenu = (tenantHost: string, token: string, id: string) =>
   request(`/api/menus/${id}`, tenantHost, token, { method: "DELETE" });
 
+export interface EventItem {
+  id: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string | null;
+  location: string | null;
+  imageUrl: string | null;
+  registrationUrl: string | null;
+  status: "draft" | "published";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listEvents = (tenantHost: string, token: string) =>
+  request("/api/events", tenantHost, token).then((b) => b.items as EventItem[]);
+
+export const createEvent = (tenantHost: string, token: string, data: Partial<EventItem>) =>
+  request("/api/events", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then((b) => b.item as EventItem);
+
+export const updateEvent = (tenantHost: string, token: string, id: string, patch: Partial<EventItem>) =>
+  request(`/api/events/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) }).then((b) => b.item as EventItem);
+
+export const deleteEvent = (tenantHost: string, token: string, id: string) =>
+  request(`/api/events/${id}`, tenantHost, token, { method: "DELETE" });
+
 export interface DesignTemplate {
   id: string;
   name: string;
