@@ -147,6 +147,7 @@ import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
 import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem, Sel, PageSettings } from "./designer/types";
 import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
+import { section, removeAt, insertEl } from "./designer/blockPath";
 import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
 import { TemplatePreview } from "./designer/TemplatePreview";
 import {
@@ -1381,19 +1382,6 @@ export default function Designer({
       document.head.appendChild(link);
     });
   }, [blocks]);
-
-  const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionProps;
-
-  function removeAt(bs: Block[], path: number[]): El {
-    const [b, r, c, e] = path;
-    return section(bs, b).rows[r].columns[c].elements.splice(e, 1)[0];
-  }
-
-  function insertEl(bs: Block[], colPath: number[], el: El, index?: number) {
-    const [b, r, c] = colPath;
-    const list = section(bs, b).rows[r].columns[c].elements;
-    list.splice(index ?? list.length, 0, el);
-  }
 
   // Extracted from BlockControls/Inspector's inline closures so both those
   // and LiveEditToolbar (Live Edit mode) call one shared implementation per
