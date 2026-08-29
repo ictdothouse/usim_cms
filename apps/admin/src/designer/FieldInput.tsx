@@ -20,6 +20,8 @@ import {
   stringifySlides,
   parseCards,
   stringifyCards,
+  parseRepeaterItems,
+  stringifyRepeaterItems,
   CARD_DEFAULTS,
   TEXT_DEFAULTS,
   SLIDE_DEFAULTS,
@@ -481,6 +483,74 @@ export function FieldInput({
           </div>
         ))}
         <button onClick={() => setCards([...cards, { ...CARD_DEFAULTS }])} className="text-[11px] font-semibold text-accent">
+          {t("designer-pairs-add")}
+        </button>
+      </div>
+    );
+  }
+  if (field.kind === "repeater") {
+    const itemFields = field.itemFields ?? [];
+    const items = parseRepeaterItems(value);
+    const setItems = (next: typeof items) => onChange(stringifyRepeaterItems(next));
+    return (
+      <div className="space-y-2">
+        {items.map((it, i) => (
+          <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+              <button
+                onClick={() => setItems(items.filter((_, j) => j !== i))}
+                className="text-[10px] font-semibold text-red-500"
+              >
+                {t("designer-gallery-remove")}
+              </button>
+            </div>
+            {itemFields.map((f) => {
+              const v = it[f.key] ?? "";
+              const commit = (nv: string) => setItems(items.map((x, j) => (j === i ? { ...x, [f.key]: nv } : x)));
+              if (f.type === "image") {
+                return (
+                  <div key={f.key} className="flex items-center gap-2">
+                    {v && <img src={v} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />}
+                    <BufferedInput className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />
+                    <label className="shrink-0 cursor-pointer text-[10px] font-semibold text-accent">
+                      {uploading ? t("designer-uploading") : t("designer-upload")}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void uploadImage(file, commit);
+                        }}
+                      />
+                    </label>
+                  </div>
+                );
+              }
+              if (f.type === "icon") {
+                return (
+                  <div key={f.key} className="space-y-0.5">
+                    <span className="text-[9px] text-sub">{t(f.labelKey)}</span>
+                    {FieldInput({
+                      ...passthroughProps,
+                      field: { key: f.key, labelKey: f.labelKey, kind: "icon", options: Object.keys(ICONS) },
+                      value: v,
+                      onChange: commit,
+                    })}
+                  </div>
+                );
+              }
+              if (f.type === "textarea")
+                return <BufferedTextarea key={f.key} rows={2} className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />;
+              return <BufferedInput key={f.key} className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />;
+            })}
+          </div>
+        ))}
+        <button
+          onClick={() => setItems([...items, Object.fromEntries(itemFields.map((f) => [f.key, ""]))])}
+          className="text-[11px] font-semibold text-accent"
+        >
           {t("designer-pairs-add")}
         </button>
       </div>

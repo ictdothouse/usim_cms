@@ -189,6 +189,15 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   ctabanner: ["heading", "description", "button1Label", "button2Label"],
   announcementbar: ["text", "linkLabel"],
   postlist: [],
+  testimonial: ["testimonials"],
+  statscounter: ["stats"],
+  peoplegrid: ["people"],
+  socialicons: ["socials"],
+  logocloud: ["logos"],
+  timeline: ["timelineItems"],
+  documentdownload: ["documents"],
+  googlemap: ["embedUrl", "address"],
+  announcementticker: ["tickerItems"],
 };
 // i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
 // a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through

@@ -117,7 +117,23 @@ export type FieldKind =
   | "font"
   | "stepper"
   | "menu-select"
-  | "category-select";
+  | "category-select"
+  | "repeater";
+
+// One sub-field of a "repeater" kind item — deliberately a small fixed set
+// (not every FieldKind): a generic add/remove-cards editor only needs a
+// plain text row, a multi-line text row, an image picker, or an icon
+// picker per item, covering every repeater element added so far
+// (testimonial/statscounter/peoplegrid/socialicons/logocloud/timeline/
+// documentdownload) without a bespoke hand-written UI per element the way
+// "cards" (cardgrid's own repeater) is. `type` also tells
+// packages/element-schema which check to run on that key at write time
+// (see REPEATER_SCHEMAS there) — keep both in sync when adding a field.
+export interface RepeaterItemField {
+  key: string;
+  labelKey: Key;
+  type: "text" | "textarea" | "image" | "icon";
+}
 
 export interface Field {
   key: string;
@@ -128,6 +144,8 @@ export interface Field {
   subLabels?: [Key, Key];
   // "stepper" kind only: +/- nudge amount (default 1 if omitted).
   step?: number;
+  // "repeater" kind only: the per-item sub-field schema.
+  itemFields?: RepeaterItemField[];
 }
 
 // Grouped Styles panel (Framer/Webflow-style) bucket key — keyed by
@@ -173,7 +191,19 @@ export type ElType =
   | "cardgrid"
   | "ctabanner"
   | "announcementbar"
-  | "postlist";
+  | "postlist"
+  // Batch of simple, no-backend Designer elements (audit report sections
+  // 5.2/5.7) — each a repeater of small items (see FieldKind "repeater"
+  // below) except googlemap/announcementticker, which are flat props.
+  | "testimonial"
+  | "statscounter"
+  | "peoplegrid"
+  | "socialicons"
+  | "logocloud"
+  | "timeline"
+  | "documentdownload"
+  | "googlemap"
+  | "announcementticker";
 
 // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) "card grid" element —
 // items is a JSON array of these, stored as a string in El.props.cards (see

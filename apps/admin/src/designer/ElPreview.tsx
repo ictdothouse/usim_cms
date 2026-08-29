@@ -9,22 +9,30 @@
 // state it reads/writes comes from `ctx`), so it's safe to call directly as
 // a plain function, same as FieldGroups/FieldInput/Inspector already are.
 import {
+  BarChart3,
   Bell,
+  Building2,
   Check,
   ChevronsUpDown,
   Code2,
+  FileText,
   Image as ImageIcon,
   Images,
+  MapPin,
   Menu,
   Newspaper,
+  Quote,
+  Radio,
+  Share2,
   Star,
+  Users,
   Video,
 } from "lucide-react";
 import type { Block, El, SlideButton, SlideText, EdgeRect, GapMark, Sel } from "./types";
 import type { DesignerCtx } from "./context";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
-import { parseCards, parsePairs, parseSlides, stringifySlides } from "./parsers";
+import { parseCards, parsePairs, parseRepeaterItems, parseSlides, stringifySlides } from "./parsers";
 import { edgeGap, fitTextBox, fluidPreviewPx, nudgePosition } from "./geometry";
 import {
   H_SIZE, ICON_SIZE, SIZE_PX, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
@@ -86,6 +94,40 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           return p.heading ?? "";
         case "menu":
           return availableMenus.find((m) => m.id === p.menuId)?.name ?? "";
+        case "testimonial": {
+          const n = parseRepeaterItems(p.testimonials).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "statscounter": {
+          const n = parseRepeaterItems(p.stats).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "peoplegrid": {
+          const n = parseRepeaterItems(p.people).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "socialicons": {
+          const n = parseRepeaterItems(p.socials).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "logocloud": {
+          const n = parseRepeaterItems(p.logos).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "timeline": {
+          const n = parseRepeaterItems(p.timelineItems).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "documentdownload": {
+          const n = parseRepeaterItems(p.documents).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
+        case "googlemap":
+          return p.address ?? "";
+        case "announcementticker": {
+          const n = parseRepeaterItems(p.tickerItems).length;
+          return n ? `${n} item${n === 1 ? "" : "s"}` : "";
+        }
         default:
           return "";
       }
@@ -1040,6 +1082,148 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
           <Newspaper className="h-3.5 w-3.5" />
           {linked ? linked.name : t("designer-f-category-none")} · {p.count ?? "3"}
+        </div>
+      );
+    }
+    case "testimonial": {
+      const items = parseRepeaterItems(p.testimonials);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-testimonial-items")}…</span>;
+      return (
+        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${p.columns ?? "2"}, 1fr)` }}>
+          {items.map((it, i) => (
+            <div key={i} className="space-y-2 rounded-lg border border-line/30 p-3 text-xs">
+              <Quote className="h-4 w-4 text-accent/60" />
+              {it.quote && <p className="text-sub">{it.quote}</p>}
+              <div className="flex items-center gap-2">
+                {it.avatar && <img src={it.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />}
+                <div>
+                  <div className="font-semibold">{it.name || "Name"}</div>
+                  {it.role && <div className="text-[10px] text-sub">{it.role}</div>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "statscounter": {
+      const items = parseRepeaterItems(p.stats);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-statscounter-items")}…</span>;
+      return (
+        <div className="grid gap-3 text-center" style={{ gridTemplateColumns: `repeat(${p.columns ?? "3"}, 1fr)` }}>
+          {items.map((it, i) => {
+            const Icon = ICONS[it.icon ?? ""] ?? BarChart3;
+            return (
+              <div key={i} className="space-y-1">
+                <Icon className="mx-auto h-5 w-5 text-accent" />
+                <div className="text-lg font-bold">{it.number || "0"}</div>
+                <div className="text-[10px] text-sub">{it.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    case "peoplegrid": {
+      const items = parseRepeaterItems(p.people);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-peoplegrid-items")}…</span>;
+      return (
+        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${p.columns ?? "3"}, 1fr)` }}>
+          {items.map((it, i) => (
+            <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2 text-center text-xs">
+              {it.photo ? (
+                <img src={it.photo} alt="" className="mx-auto h-14 w-14 rounded-full object-cover" />
+              ) : (
+                <Users className="mx-auto h-14 w-14 rounded-full bg-canvas/50 p-3 text-sub" />
+              )}
+              <div className="font-semibold">{it.name || "Name"}</div>
+              {it.role && <div className="text-sub">{it.role}</div>}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "socialicons": {
+      const items = parseRepeaterItems(p.socials);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-socialicons-items")}…</span>;
+      return (
+        <div className="flex gap-2" style={{ justifyContent: p.align === "center" ? "center" : p.align === "right" ? "flex-end" : "flex-start" }}>
+          {items.map((it, i) => {
+            const Icon = ICONS[it.platform ?? ""] ?? Share2;
+            return (
+              <div key={i} className="flex h-8 w-8 items-center justify-center rounded-full border border-line/30">
+                <Icon className="h-4 w-4" />
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    case "logocloud": {
+      const items = parseRepeaterItems(p.logos);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-logocloud-items")}…</span>;
+      return (
+        <div className="grid items-center gap-3" style={{ gridTemplateColumns: `repeat(${p.columns ?? "4"}, 1fr)` }}>
+          {items.map((it, i) =>
+            it.image ? (
+              <img key={i} src={it.image} alt={it.alt ?? ""} className="h-10 w-full object-contain grayscale" />
+            ) : (
+              <div key={i} className="flex h-10 items-center justify-center rounded border border-dashed border-line/40">
+                <Building2 className="h-4 w-4 text-sub" />
+              </div>
+            ),
+          )}
+        </div>
+      );
+    }
+    case "timeline": {
+      const items = parseRepeaterItems(p.timelineItems);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-timeline-items")}…</span>;
+      return (
+        <div className="space-y-3 border-l-2 border-line/30 pl-3 text-xs">
+          {items.map((it, i) => (
+            <div key={i}>
+              <div className="text-[10px] font-semibold text-accent">{it.date}</div>
+              <div className="font-semibold">{it.title}</div>
+              {it.description && <div className="text-sub">{it.description}</div>}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "documentdownload": {
+      const items = parseRepeaterItems(p.documents);
+      if (items.length === 0) return <span className="text-xs opacity-40">{t("designer-f-docdownload-items")}…</span>;
+      return (
+        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${p.columns ?? "2"}, 1fr)` }}>
+          {items.map((it, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg border border-line/30 p-2 text-xs">
+              <FileText className="h-5 w-5 shrink-0 text-accent" />
+              <div className="min-w-0">
+                <div className="truncate font-semibold">{it.label || "Document"}</div>
+                <div className="text-[10px] text-sub">{[it.fileType, it.fileSize].filter(Boolean).join(" · ")}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "googlemap":
+      return (
+        <div className="flex h-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line/40 bg-canvas/40 text-xs text-sub">
+          <MapPin className="h-5 w-5" />
+          <span>{p.address || t("designer-f-googlemap-address")}</span>
+        </div>
+      );
+    case "announcementticker": {
+      const items = parseRepeaterItems(p.tickerItems);
+      return (
+        <div
+          className="flex items-center gap-2 overflow-hidden whitespace-nowrap rounded px-3 py-2 text-xs"
+          style={{ background: p.bgColor || "#111827", color: p.textColor || "#ffffff" }}
+        >
+          <Radio className="h-3.5 w-3.5 shrink-0" />
+          <span>{items.map((it) => it.text).join(" • ") || t("designer-el-announcementticker")}</span>
         </div>
       );
     }
