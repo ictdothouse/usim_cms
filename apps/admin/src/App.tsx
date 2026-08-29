@@ -4652,10 +4652,13 @@ export default function App() {
   // Set only while a superadmin is "viewing as" a webmaster — the stashed
   // superadmin session to restore on exit. Persisted so a page refresh
   // mid-impersonation doesn't strand the admin in the webmaster's view.
-  const [adminSession, setAdminSession] = useState<Session | null>(() => {
-    const raw = localStorage.getItem(IMPERSONATOR_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  });
+  // Only a UI flag (banner + exit button) now — the superadmin's original
+  // session cannot be restored from a value stashed in localStorage anymore
+  // (the real session is an httpOnly cookie the impersonate call overwrote,
+  // unreadable by JS even before that). exitImpersonation() below gets it
+  // back via a real server round-trip instead. See POST
+  // /api/portal/exit-impersonation.
+  const [impersonating, setImpersonating] = useState<boolean>(() => localStorage.getItem(IMPERSONATOR_KEY) === "1");
   // null = still checking; a fresh install has zero users, so the wizard
   // must win the race against LoginForm rather than flash it on load.
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
@@ -4664,28 +4667,36 @@ export default function App() {
     if (!session) api.getSetupStatus().then(setNeedsSetup).catch(() => setNeedsSetup(false));
   }, [session]);
 
-  function logout() {
+  async function logout() {
+    const t = session?.token ?? null;
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(IMPERSONATOR_KEY);
     setSession(null);
-    setAdminSession(null);
+    setImpersonating(false);
+    try {
+      await api.logout(t);
+    } catch {
+      // Clearing the local session already logs the user out of the UI;
+      // the server-side cookie clear is best-effort (e.g. already expired).
+    }
   }
 
   function impersonate(target: Session) {
     if (session) {
-      localStorage.setItem(IMPERSONATOR_KEY, JSON.stringify(session));
-      setAdminSession(session);
+      localStorage.setItem(IMPERSONATOR_KEY, "1");
+      setImpersonating(true);
     }
     localStorage.setItem(SESSION_KEY, JSON.stringify(target));
     setSession(target);
   }
 
-  function exitImpersonation() {
-    if (!adminSession) return;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(adminSession));
+  async function exitImpersonation() {
+    if (!session) return;
+    const restored = await api.exitImpersonation(session.token);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(restored));
     localStorage.removeItem(IMPERSONATOR_KEY);
-    setSession(adminSession);
-    setAdminSession(null);
+    setSession(restored);
+    setImpersonating(false);
   }
 
   if (!session) {
@@ -4708,7 +4719,7 @@ export default function App() {
               session={session}
               onLogout={logout}
               onImpersonate={impersonate}
-              impersonating={adminSession !== null}
+              impersonating={impersonating}
               onExitImpersonation={exitImpersonation}
             />
           }

@@ -16,6 +16,7 @@
 "use strict";
 
 const http = require("http");
+const https = require("https");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -34,6 +35,13 @@ const NODE_BIN = process.env.NODE_BIN || "node";
 const API_PORT = process.env.API_PORT || "3000";
 const FRONTEND_PORT = process.env.FRONTEND_PORT || "4321";
 const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
+// Alerting is opt-in — unset means no-op, same convention as REDIS_URL/
+// PGBOUNCER elsewhere in this project. ALERT_WEBHOOK_URL takes any plain
+// HTTP(S) webhook that accepts a JSON POST (Slack/Discord/Teams incoming
+// webhooks, or a custom endpoint) — no email/SMTP client here, this file's
+// whole point is staying dependency-free (see the header comment).
+const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || "";
+const ALERT_POLL_INTERVAL_MS = Number(process.env.ALERT_POLL_INTERVAL_MS) || 60_000;
 
 // Whitelisted so a service name never reaches child_process from raw user
 // input — every route validates against this array before shelling out.
@@ -230,6 +238,74 @@ function getHostStats(cb) {
       cb({ raw, uptime, disk, mem });
     },
   );
+}
+
+// Posts a plain JSON body to an operator-configured webhook. `content` is
+// included alongside `text` so a Discord webhook (which reads `content`)
+// and a Slack/Teams-style one (which reads `text`) both work unconfigured.
+function postJson(urlStr, obj, cb) {
+  let target;
+  try {
+    target = new URL(urlStr);
+  } catch {
+    return cb(new Error("invalid webhook URL"));
+  }
+  const lib = target.protocol === "https:" ? https : http;
+  const data = Buffer.from(JSON.stringify(obj));
+  const req = lib.request(
+    {
+      hostname: target.hostname,
+      port: target.port || (target.protocol === "https:" ? 443 : 80),
+      path: target.pathname + target.search,
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": data.length },
+      timeout: 10_000,
+    },
+    (res) => {
+      res.resume();
+      cb(null, res.statusCode);
+    },
+  );
+  req.on("error", cb);
+  req.on("timeout", () => req.destroy(new Error("webhook request timed out")));
+  req.write(data);
+  req.end();
+}
+
+function sendAlert(text) {
+  if (!ALERT_WEBHOOK_URL) return;
+  postJson(ALERT_WEBHOOK_URL, { text, content: text }, (err) => {
+    if (err) console.error("alert webhook failed:", err.message);
+  });
+}
+
+// Edge-triggered against getStatus()'s own up/down test (same regex the
+// dashboard already renders with, see the `up` const further below) —
+// `lastKnownUp[name] === undefined` on the very first poll means "just
+// observed, nothing to compare against yet," so a fresh process start never
+// fires a false "recovered" alert.
+let lastKnownUp = {};
+function pollForAlerts() {
+  getStatus((err, services) => {
+    if (err) return; // transient poll failure — not itself alert-worthy
+    for (const name of SERVICES) {
+      const s = (services || []).find((x) => (x.Service || x.Name) === name);
+      const up = !!s && /running|healthy|active/i.test(s.State || s.Health || "");
+      const prev = lastKnownUp[name];
+      if (prev !== undefined && prev !== up) {
+        sendAlert(`[usim_cms/${PUBLIC_HOST}] ${name} is ${up ? "back UP" : "DOWN"}`);
+      }
+      lastKnownUp[name] = up;
+    }
+  });
+}
+
+function handleAlertTest(req, res) {
+  if (!ALERT_WEBHOOK_URL) return sendJson(res, 400, { error: "ALERT_WEBHOOK_URL is not set" });
+  postJson(ALERT_WEBHOOK_URL, { text: `[usim_cms/${PUBLIC_HOST}] test alert`, content: `[usim_cms/${PUBLIC_HOST}] test alert` }, (err, status) => {
+    if (err) return sendJson(res, 500, { error: err.message });
+    sendJson(res, 200, { ok: true, status });
+  });
 }
 
 function handleConfig(req, res) {
@@ -898,6 +974,8 @@ const server = http.createServer((req, res) => {
       handlePullLog(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/ssl/issue") {
       handleSslIssue(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/alerts/test") {
+      handleAlertTest(req, res);
     } else {
       sendJson(res, 404, { error: "not found" });
     }
@@ -909,3 +987,9 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`usim_cms monitor listening on :${PORT} (repo: ${REPO_DIR}, mode: ${DEPLOY_MODE})`);
 });
+
+if (ALERT_WEBHOOK_URL) {
+  console.log(`alerting enabled: polling every ${ALERT_POLL_INTERVAL_MS}ms`);
+  setInterval(pollForAlerts, ALERT_POLL_INTERVAL_MS);
+  pollForAlerts();
+}

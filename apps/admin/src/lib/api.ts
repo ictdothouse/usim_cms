@@ -49,14 +49,22 @@ async function request(path: string, tenantHost: string | null, token: string | 
   // (sharePage and any future bodyless call has none).
   if (init?.body) headers["Content-Type"] = "application/json";
   if (tenantHost) headers["x-tenant-host"] = tenantHost;
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
-  // A 401 here always means the bearer we sent is missing/expired/signature-
-  // mismatched (see requireTenantAuth/verifySuperadmin/verifyAnyUser in
-  // apps/api) — never a permission problem (that's 403). Clearing the stored
-  // session and reloading immediately avoids the confusing state of every
-  // panel silently failing with "Invalid or expired token" while the UI
-  // still looks logged in.
+  // The real session lives in an httpOnly cookie (see apps/api's
+  // lib/cookies.ts) — `credentials: "include"` is what makes the browser
+  // actually attach/accept it. `token` here is the CSRF token from Session
+  // (still named `token` to avoid touching every one of this app's ~100
+  // callers, but it's never a bearer secret since the auth migration — see
+  // apps/api/src/plugins/auth.ts's checkCsrf), echoed back so the server
+  // can tell this request was built by the admin's own JS and not just
+  // riding the ambient cookie from somewhere else.
+  if (token) headers["x-csrf-token"] = token;
+  const res = await fetch(`${API_URL}${path}`, { ...init, credentials: "include", headers: { ...headers, ...init?.headers } });
+  // A 401 here always means the session cookie is missing/expired/invalid
+  // (see requireTenantAuth/verifySuperadmin/verifyAnyUser in apps/api) —
+  // never a permission problem (that's 403). Clearing the stored session
+  // and reloading immediately avoids the confusing state of every panel
+  // silently failing with "Invalid or expired session" while the UI still
+  // looks logged in.
   if (token && res.status === 401) {
     localStorage.removeItem("usim_cms_session");
     window.location.reload();
@@ -83,7 +91,7 @@ export async function setup(input: {
   departmentName?: string;
 }): Promise<Session> {
   const body = await request("/api/setup", null, null, { method: "POST", body: JSON.stringify(input) });
-  return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHost ? [body.tenantHost] : [] };
+  return { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHost ? [body.tenantHost] : [] };
 }
 
 // Superadmin "view as" — swaps in the target webmaster's real session
@@ -93,7 +101,19 @@ export async function impersonateUser(token: string, userId: string): Promise<Se
     method: "POST",
     body: JSON.stringify({ userId }),
   });
-  return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
+  return { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
+}
+
+// Reverses impersonateUser() — see apps/api's POST /api/portal/exit-
+// impersonation for why this must be a real server round-trip rather than
+// a client-side restore of the superadmin's old Session object.
+export async function exitImpersonation(token: string): Promise<Session> {
+  const body = await request("/api/portal/exit-impersonation", null, token, { method: "POST" });
+  return { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
+}
+
+export async function logout(token: string | null): Promise<void> {
+  await request("/api/auth/logout", null, token, { method: "POST" });
 }
 
 export interface LoginResult {
@@ -110,7 +130,7 @@ export async function login(email: string, password: string): Promise<LoginResul
     body: JSON.stringify({ email, password }),
   });
   if (body.mfaRequired) return { mfaRequired: true, pendingToken: body.pendingToken };
-  return { session: { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] } };
+  return { session: { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] } };
 }
 
 export async function verifyTotp(pendingToken: string, code: string): Promise<Session> {
@@ -118,7 +138,7 @@ export async function verifyTotp(pendingToken: string, code: string): Promise<Se
     method: "POST",
     body: JSON.stringify({ pendingToken, code }),
   });
-  return { token: body.token, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
+  return { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
 }
 
 export interface LoginSettings {
@@ -462,7 +482,8 @@ export async function uploadMedia(tenantHost: string, token: string, file: File,
   form.append("file", file);
   const res = await fetch(`${API_URL}/api/media`, {
     method: "POST",
-    headers: { "x-tenant-host": tenantHost, Authorization: `Bearer ${token}` },
+    credentials: "include",
+    headers: { "x-tenant-host": tenantHost, "x-csrf-token": token },
     body: form,
   });
   const body = await res.json();
@@ -563,7 +584,8 @@ export async function uploadTenantCert(token: string, host: string, cert: File, 
   form.append("key", key);
   const res = await fetch(`${API_URL}/api/portal/tenants/${host}/cert`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
+    headers: { "x-csrf-token": token },
     body: form,
   });
   const body = await res.json();
@@ -618,10 +640,13 @@ export const updatePortalUserTenantHosts = (token: string, id: string, tenantHos
 export const deletePortalUser = (token: string, id: string) =>
   request(`/api/portal/users/${id}`, null, token, { method: "DELETE" });
 
-// Binary downloads (backup / static export) — plain <a href> can't carry the
-// Authorization header, so fetch to a blob and click a synthetic link.
+// Binary downloads (backup / static export) — a GET carries no CSRF risk
+// (no state change), but the route still requires a valid session cookie
+// (verifySuperadmin), so this still needs credentials: "include"; kept as a
+// blob-fetch + synthetic link (rather than a plain <a href>) so a failed
+// request surfaces its real error instead of silently navigating to a 401.
 async function downloadZip(path: string, token: string, fallbackName: string) {
-  const res = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(`${API_URL}${path}`, { credentials: "include", headers: { "x-csrf-token": token } });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string });
     throw new Error((body as { error?: string }).error ?? `Request failed (${res.status})`);
@@ -685,7 +710,8 @@ export async function restoreTenantBackup(token: string, host: string, file: Fil
   form.append("file", file);
   const res = await fetch(`${API_URL}/api/portal/tenants/${host}/restore`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
+    headers: { "x-csrf-token": token },
     body: form,
   });
   const body = await res.json();

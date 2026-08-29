@@ -84,7 +84,9 @@ import {
   generateTotpSecret,
   verifyTotpCode,
   totpAuthUri,
+  generateCsrfToken,
 } from "./db/auth.js";
+import { setSessionCookie, clearSessionCookie } from "./lib/cookies.js";
 import {
   exportTenantBackup,
   importTenantBackup,
@@ -240,7 +242,10 @@ if (process.env.NODE_ENV === "production" && !adminOrigins?.length) {
 await app.register(cors, {
   origin: adminOrigins?.length ? adminOrigins : true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-tenant-host"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-tenant-host", "x-csrf-token"],
+  // The session cookie (see lib/cookies.ts) needs the browser to actually
+  // send/accept it cross-origin between the admin panel and this API.
+  credentials: true,
 });
 // contentSecurityPolicy off: this API only ever returns JSON, never HTML it
 // renders itself, so a CSP here has nothing to protect — apps/frontend's
@@ -292,15 +297,18 @@ app.post("/api/setup", async (req, reply) => {
   if (host) {
     await createTenant(host, departmentName!, null);
   }
+  const csrfToken = generateCsrfToken();
   const token = signSession({
     userId: (await findUserByEmail(email))!.id,
     email,
     role: "superadmin",
     tenantHost: null,
     permissions: [],
+    csrfToken,
     exp: Date.now() + SESSION_TTL_MS,
   });
-  return { token, role: "superadmin", tenantHost: null };
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  return { csrfToken, role: "superadmin", tenantHost: null };
 });
 
 app.post("/api/auth/login", async (req, reply) => {
@@ -341,8 +349,10 @@ app.post("/api/auth/login", async (req, reply) => {
     const pendingToken = signSession({ ...basePayload, pendingMfa: true, exp: Date.now() + 5 * 60 * 1000 });
     return { mfaRequired: true, pendingToken };
   }
-  const token = signSession({ ...basePayload, exp: Date.now() + SESSION_TTL_MS });
-  return { token, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
+  const csrfToken = generateCsrfToken();
+  const token = signSession({ ...basePayload, csrfToken, exp: Date.now() + SESSION_TTL_MS });
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  return { csrfToken, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
 });
 
 app.post("/api/auth/totp-verify", async (req, reply) => {
@@ -376,6 +386,7 @@ app.post("/api/auth/totp-verify", async (req, reply) => {
     return { error: "invalid code" };
   }
   const tenantHosts = pending.tenantHosts ?? [];
+  const csrfToken = generateCsrfToken();
   const token = signSession({
     userId: pending.userId,
     email: pending.email,
@@ -383,9 +394,16 @@ app.post("/api/auth/totp-verify", async (req, reply) => {
     tenantHost: pending.tenantHost,
     tenantHosts,
     permissions: pending.permissions,
+    csrfToken,
     exp: Date.now() + SESSION_TTL_MS,
   });
-  return { token, role: pending.role, tenantHost: pending.tenantHost, tenantHosts };
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  return { csrfToken, role: pending.role, tenantHost: pending.tenantHost, tenantHosts };
+});
+
+app.post("/api/auth/logout", async (_req, reply) => {
+  clearSessionCookie(reply);
+  return { loggedOut: true };
 });
 
 // Personal MFA enrollment — any logged-in user, only reachable while the
@@ -1133,6 +1151,7 @@ app.post("/api/portal/impersonate", async (req, reply) => {
     await getRolePermissions(target.roleId as string | null),
     target.extraPermissions as string[] | null,
   );
+  const csrfToken = generateCsrfToken();
   const token = signSession({
     userId: target.id as string,
     email: target.email as string,
@@ -1141,14 +1160,52 @@ app.post("/api/portal/impersonate", async (req, reply) => {
     tenantHosts: (target.tenantHosts as string[] | null) ?? [],
     permissions,
     impersonatedBy: admin.email,
+    csrfToken,
     exp: Date.now() + SESSION_TTL_MS,
   });
+  // Overwrites the superadmin's own session cookie with the target's — see
+  // exit-impersonation below for how the admin gets their own session back
+  // (the old cookie's raw value is gone the moment this response lands, so
+  // it can't just be restored client-side the way a bearer-token model
+  // could).
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
   return {
-    token,
+    csrfToken,
     role: "webmaster" as const,
     tenantHost: target.tenantHost as string | null,
     tenantHosts: (target.tenantHosts as string[] | null) ?? [],
   };
+});
+
+// Reverses /api/portal/impersonate: re-signs the original superadmin's own
+// session from the impersonatedBy email the impersonation token carries, and
+// overwrites the cookie back to it. Must be a real server round-trip, not a
+// client-side restore — the superadmin's original cookie value was already
+// overwritten by impersonate above and was never readable by JS anyway.
+app.post("/api/portal/exit-impersonation", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  if (!session.impersonatedBy) {
+    reply.code(400);
+    return { error: "not currently impersonating" };
+  }
+  const admin = await findUserByEmail(session.impersonatedBy);
+  if (!admin || admin.role !== "superadmin") {
+    reply.code(404);
+    return { error: "original superadmin account not found" };
+  }
+  const csrfToken = generateCsrfToken();
+  const token = signSession({
+    userId: admin.id,
+    email: admin.email,
+    role: "superadmin",
+    tenantHost: null,
+    permissions: [],
+    csrfToken,
+    exp: Date.now() + SESSION_TTL_MS,
+  });
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  return { csrfToken, role: "superadmin" as const, tenantHost: null, tenantHosts: [] };
 });
 
 // Backup / restore / static export — superadmin-only, root scope like the

@@ -116,6 +116,18 @@ export interface SessionPayload {
   // signSession call today sets it, whether SESSION_TTL_MS (login/setup/
   // impersonate) or a preview token's own short TTL.
   exp?: number;
+  // Set only on a real login session (never on a preview/pendingMfa token,
+  // which can't reach a write route anyway). The session itself now travels
+  // as an httpOnly cookie, unreadable by JS — this is the one piece the
+  // client CAN read/hold and must echo back as an `x-csrf-token` header on
+  // every mutating request, since a cookie alone is sent automatically by
+  // the browser and proves nothing about which site's JS actually initiated
+  // the request. See plugins/auth.ts's CSRF check.
+  csrfToken?: string;
+}
+
+export function generateCsrfToken(): string {
+  return randomBytes(24).toString("base64url");
 }
 
 // Simple HMAC-signed session token — no JWT library needed for a same-app

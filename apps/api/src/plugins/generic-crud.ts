@@ -3,6 +3,7 @@ import { and, getTableColumns, ilike, sql, type SQL } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
 import { verifySession } from "../db/auth.js";
+import { getSessionCookie } from "../lib/cookies.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "../cache.js";
 
 // Registers generic CRUD routes for a collection under /api/:collectionSlug,
@@ -40,10 +41,20 @@ async function applyBeforeChange(config: CollectionConfig, req: FastifyRequest):
 // its own — see the RLS comment on posts_select in
 // migrations/0003_create_posts.sql: one shared read path, draft visibility
 // keyed off whether the request carries a valid matching bearer token).
-async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
+// A Bearer header carries a one-off preview token forwarded server-to-server
+// by apps/frontend (see auth.ts's previewOnly); the admin panel's own real
+// session travels as an httpOnly cookie instead (see plugins/auth.ts) — both
+// are checked here since either may elevate this same public read route.
+function elevatingCredential(req: FastifyRequest): string | undefined {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) return;
-  const session = verifySession(header.slice("Bearer ".length));
+  if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length);
+  return getSessionCookie(req);
+}
+
+async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
+  const credential = elevatingCredential(req);
+  if (!credential) return;
+  const session = verifySession(credential);
   if (!session) return;
   if (session.role === "webmaster" && session.tenantHost !== req.tenantHost) return;
   await req.db.execute(sql`SET SESSION app.authenticated = 'true'`);
@@ -85,10 +96,11 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
 
   app.get(base, async (req) => {
     if (!table) return { collection: config.slug, items: [] };
-    // A Bearer header (even an invalid one) may elevate visibility below —
-    // never cache/serve that response to a different, anonymous caller. Same
-    // token-bearing exclusion apps/frontend's own cache already uses.
-    const cacheKey = req.headers.authorization
+    // A Bearer header or session cookie (even an invalid one) may elevate
+    // visibility below — never cache/serve that response to a different,
+    // anonymous caller. Same token-bearing exclusion apps/frontend's own
+    // cache already uses.
+    const cacheKey = elevatingCredential(req)
       ? undefined
       : `ucms:cache:${req.tenantHost}:${config.slug}:list:${JSON.stringify(req.query)}`;
     if (cacheKey) {
@@ -126,7 +138,7 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
   app.get(`${base}/:id`, async (req) => {
     const { id } = req.params as { id: string };
     if (!table) return { collection: config.slug, id, item: null };
-    const cacheKey = req.headers.authorization ? undefined : `ucms:cache:${req.tenantHost}:${config.slug}:item:${id}`;
+    const cacheKey = elevatingCredential(req) ? undefined : `ucms:cache:${req.tenantHost}:${config.slug}:item:${id}`;
     if (cacheKey) {
       const cached = await cacheGet<{ collection: string; id: string; item: unknown }>(cacheKey);
       if (cached) return cached;
