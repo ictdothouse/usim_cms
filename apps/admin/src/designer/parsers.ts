@@ -190,3 +190,32 @@ export function parseCards(raw: string | undefined): CardItem[] {
 export function stringifyCards(items: CardItem[]): string {
   return JSON.stringify(items);
 }
+
+// Generic repeater (testimonial/statscounter/peoplegrid/socialicons/
+// logocloud/timeline/documentdownload — see types.ts's FieldKind
+// "repeater") — unlike cardgrid's own fixed CardItem shape, each of these
+// elements has its own field list (RepeaterItemField[] on the Field), so
+// the stored shape is just a plain string bag per item rather than a typed
+// interface. Every value is coerced to a string (or "" when absent/non-
+// string) the same way parseCards does per field.
+export function parseRepeaterItems(raw: string | undefined): Record<string, string>[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      const out: Record<string, string> = {};
+      for (const k of Object.keys(o)) {
+        if (typeof o[k] === "string") out[k] = o[k] as string;
+      }
+      return out;
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function stringifyRepeaterItems(items: Record<string, string>[]): string {
+  return JSON.stringify(items);
+}

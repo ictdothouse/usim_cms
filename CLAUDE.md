@@ -1221,6 +1221,44 @@ pnpm workspace monorepo with two apps:
   `url(...)` CSS function the way `bgImage`/slide `imageUrl` are) plus the usual enum/free-text/attr-url key
   additions, and a `categoryId` exemption identical to `menuId`'s (only ever used as a parameterized DB
   lookup key, never interpolated).
+  A later batch (same audit report, sections 5.2/5.7's remaining "no-backend" element list, minus a
+  Contact form/Event listing that need real backend work first, deferred) added 9 more `ELS` entries:
+  **testimonial**, **stats counter**, **peoplegrid** (consolidates the report's separate "Team card" and
+  "People/directory card" — both structurally photo+name+role+contact, so one element with optional
+  fields covers both rather than a duplicate touchpoint set), **social icons**, **logo cloud**,
+  **timeline**, **document download**, **Google Map embed**, and **announcement ticker** (distinct from
+  the existing `announcementbar` — a continuously-scrolling marquee, never dismissed, vs. a single
+  dismissible message). 6 of these (testimonial/statscounter/peoplegrid/socialicons/logocloud/timeline)
+  plus documentdownload are repeaters — rather than a bespoke `FieldKind` + hand-written add/remove UI per
+  element the way `cardgrid`'s own `"cards"` kind is, `types.ts` gained one generic `"repeater"` `FieldKind`
+  driven by a small `itemFields: RepeaterItemField[]` schema on the `Field` (each sub-field just
+  `"text"|"textarea"|"image"|"icon"`), with one shared render branch in `FieldInput.tsx` and one shared
+  `parseRepeaterItems`/`stringifyRepeaterItems` pair in `parsers.ts` (mirrored, as always, in
+  `SectionBlock.astro` — no shared package between the two apps for render code). Each repeater's own prop
+  key is its own name (`testimonials`/`stats`/`people`/`socials`/`logos`/`timelineItems`/`documents`),
+  deliberately NOT `"items"` — that key already belongs to accordion/tabs' own free-text pipe-line field,
+  and `packages/element-schema`'s `validateValue` dispatches purely by prop key name; reusing it would have
+  let a repeater's JSON array (containing image/url values that need real checks) through that free-text
+  branch completely unvalidated. The validator gained a matching generic `REPEATER_SCHEMAS` table +
+  `isSafeRepeaterItem(s)` (image/url fields through `isSafeUrl`, an `icon` field through a plain slug
+  pattern since it's only ever a lookup key into `ICONS`/`ICON_PATHS`, never interpolated — same treatment
+  `menuId`/`categoryId` already get; any key not in that item's own schema is rejected outright, same
+  strict-shape convention `isSafeCard` already uses) — covered by real test cases in
+  `validate-layout.test.ts` (accepts a valid testimonial, rejects a `javascript:` URL smuggled into a
+  repeater's image field, rejects an item with an unrecognized key), not just the existing menu-only
+  coverage. `socialicons`' `platform` field reuses the existing generic icon picker (`Object.keys(ICONS)`)
+  rather than a dedicated brand-logo set — lucide-react ships no Facebook/Instagram/etc marks, and adding a
+  new icon dependency or hand-drawn brand SVGs for this alone wasn't worth it; an author picks any lucide
+  icon + sets the item's own link. `googlemap`'s `requireConsent` (audit report 5.3: map embeds need
+  "consent/cookie policy dan fallback address text") gates the real `<iframe>` behind a click-to-load
+  placeholder — the real embed URL sits in a `data-map-src` attribute until a delegated click handler
+  (`SectionBlock.astro`'s bottom `<script>`, same event-delegation convention as every other zero-framework
+  interaction here) swaps it in; no cookie/localStorage, same reappears-on-reload convention as
+  `announcementbar`'s own dismiss. `address` always renders alongside the map (or alone, if `embedUrl` is
+  unset) so the map is never a page's only location info, per the same audit note. `Designer.tsx`'s
+  `CONTENT_KEYS` (the "paste style" content-key strip-list) gained an entry per new element so
+  copy-style/paste-style can't leak one element's content onto another's the way every other element type
+  already guards against.
   Sprint 5 sub-project 2, **Page Blueprint** (`docs/laporan-audit-ui-ux.md` §5.6): a ready-made section
   layout a page can start from instead of a blank canvas, plus letting a webmaster save a finished page as
   a reusable starting point for future pages on their own tenant. `page_blueprints` (`apps/api/src/db/

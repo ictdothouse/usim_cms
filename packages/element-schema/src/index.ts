@@ -118,6 +118,10 @@ const ENUM_VALUES: Record<string, string[]> = {
   dismissible: ["true", "false"],
   postLayout: ["grid", "list"],
   count: ["3", "4", "6", "9"],
+  // Batch of simple no-backend elements (Designer.tsx's ELS registry) —
+  // googlemap/announcementticker's own enum fields.
+  requireConsent: ["true", "false"],
+  speed: ["slow", "normal", "fast"],
 };
 
 // Free-typed CSS lengths (each ends up as `key:value` in a raw style
@@ -140,7 +144,10 @@ const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"
 // linkHref are ctabanner/announcementbar's own attribute-bound hrefs (see
 // Designer.tsx's ELS.ctabanner/announcementbar) — distinct key names since
 // props is a flat bag and an element can have more than one link.
-const ATTR_URL_KEYS = new Set(["href", "url", "src", "button1Href", "button2Href", "linkHref"]);
+// embedUrl is googlemap's own top-level flat prop (address/height/
+// requireConsent below it); bound through an <iframe src> the same way
+// embed's own `url` already is, so the same plain scheme check applies.
+const ATTR_URL_KEYS = new Set(["href", "url", "src", "button1Href", "button2Href", "linkHref", "embedUrl"]);
 // Rendered as escaped text content (or, for `images`/`slides`, a safe URL
 // per line/field) — never concatenated into CSS/HTML unescaped, so no
 // pattern restriction beyond the per-line checks `images`/`slides` get below.
@@ -149,6 +156,9 @@ const ATTR_URL_KEYS = new Set(["href", "url", "src", "button1Href", "button2Href
 const FREE_TEXT_KEYS = new Set([
   "text", "label", "alt", "items", "name", "heading",
   "description", "button1Label", "button2Label", "linkLabel",
+  // googlemap's own fallback location text (audit report 5.3: "jangan
+  // jadikan peta satu-satunya maklumat lokasi").
+  "address",
 ]);
 const SKIP_KEYS = new Set(["html"]);
 
@@ -286,6 +296,91 @@ function isSafeCards(value: string): boolean {
   }
 }
 
+// Batch of simple no-backend elements (Designer.tsx's ELS registry,
+// designer/parsers.ts's parseRepeaterItems) — each a JSON array of small
+// item objects, generic across all 8 repeater elements rather than one
+// isSafeX per element (unlike isSafeCard above, which predates this and is
+// left as-is). Keyed by the element's own prop key (testimonials/stats/
+// people/socials/logos/timelineItems/documents/tickerItems) — deliberately
+// NOT "items", which is already accordion/tabs' own free-text field; reusing
+// that name would let a repeater's JSON array (containing image/url values
+// that need real checks) through the FREE_TEXT_KEYS branch unvalidated.
+// "icon" values are only ever used as a lookup key into a fixed client-side
+// icon table (ICONS/ICON_PATHS, both defaulting safely on an unknown name),
+// never interpolated into CSS/HTML — a plain slug pattern is enough,
+// mirroring menuId/categoryId's own "lookup key, not rendered" treatment
+// above, rather than duplicating that whole icon-name list here.
+const ICON_SLUG_RE = /^[a-z0-9-]*$/;
+const REPEATER_SCHEMAS: Record<string, { key: string; type: "text" | "image" | "url" | "icon" }[]> = {
+  testimonials: [
+    { key: "avatar", type: "image" },
+    { key: "quote", type: "text" },
+    { key: "name", type: "text" },
+    { key: "role", type: "text" },
+    { key: "meta", type: "text" },
+  ],
+  stats: [
+    { key: "number", type: "text" },
+    { key: "label", type: "text" },
+    { key: "icon", type: "icon" },
+  ],
+  people: [
+    { key: "photo", type: "image" },
+    { key: "name", type: "text" },
+    { key: "role", type: "text" },
+    { key: "department", type: "text" },
+    { key: "email", type: "text" },
+    { key: "phone", type: "text" },
+    { key: "href", type: "url" },
+  ],
+  socials: [
+    { key: "platform", type: "icon" },
+    { key: "url", type: "url" },
+  ],
+  logos: [
+    { key: "image", type: "image" },
+    { key: "href", type: "url" },
+    { key: "alt", type: "text" },
+  ],
+  timelineItems: [
+    { key: "date", type: "text" },
+    { key: "title", type: "text" },
+    { key: "description", type: "text" },
+  ],
+  documents: [
+    { key: "fileUrl", type: "url" },
+    { key: "label", type: "text" },
+    { key: "fileType", type: "text" },
+    { key: "fileSize", type: "text" },
+  ],
+  tickerItems: [
+    { key: "text", type: "text" },
+    { key: "href", type: "url" },
+  ],
+};
+function isSafeRepeaterItem(item: unknown, schema: { key: string; type: string }[]): boolean {
+  if (typeof item !== "object" || item === null) return false;
+  for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+    const field = schema.find((f) => f.key === key);
+    if (!field) return false;
+    if (typeof value !== "string") return false;
+    if (value === "") continue;
+    if ((field.type === "image" || field.type === "url") && !isSafeUrl(value)) return false;
+    if (field.type === "icon" && !ICON_SLUG_RE.test(value)) return false;
+  }
+  return true;
+}
+function isSafeRepeaterItems(value: string, schemaKey: string): boolean {
+  const schema = REPEATER_SCHEMAS[schemaKey];
+  if (!schema) return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((item) => isSafeRepeaterItem(item, schema));
+  } catch {
+    return false;
+  }
+}
+
 function validateValue(key: string, value: unknown): string | null {
   if (typeof value !== "string") return `${key} must be a string`;
   if (SKIP_KEYS.has(key) || value === "") return null;
@@ -297,6 +392,7 @@ function validateValue(key: string, value: unknown): string | null {
   }
   if (key === "slides") return isSafeSlides(value) ? null : `${key} contains an unsafe URL`;
   if (key === "cards") return isSafeCards(value) ? null : `${key} contains an unsafe URL`;
+  if (REPEATER_SCHEMAS[key]) return isSafeRepeaterItems(value, key) ? null : `${key} contains an unsafe value`;
   if (FREE_TEXT_KEYS.has(key)) return null;
   if (key === "bgImage") return isSafeCssUrl(value) ? null : `${key} has an unsafe URL`;
   if (ATTR_URL_KEYS.has(key)) return isSafeUrl(value) ? null : `${key} has an unsafe URL scheme`;

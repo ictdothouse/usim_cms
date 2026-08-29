@@ -15,24 +15,33 @@
 // bigger, separate design question, not attempted here.
 import {
   Bell,
+  BarChart3,
+  Building2,
   ChevronsUpDown,
   Code2,
+  FileText,
   GalleryHorizontal,
   Heading1,
+  History,
   Image as ImageIcon,
   Images,
   Info,
   LayoutGrid,
   LayoutPanelTop,
   List,
+  MapPin,
   Megaphone,
   Menu,
   Minus,
   MousePointerClick,
   MoveVertical,
   Newspaper,
+  Quote,
+  Radio,
+  Share2,
   Star,
   Type,
+  Users,
   Video,
 } from "lucide-react";
 import type { Key } from "@/i18n";
@@ -341,6 +350,231 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "count", labelKey: "designer-f-postlist-count", kind: "select", options: ["3", "4", "6", "9"] },
       { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
       { key: "postLayout", labelKey: "designer-f-postlist-layout", kind: "select", options: ["grid", "list"] },
+    ],
+  },
+  // Batch of simple, no-backend elements (audit report 5.2/5.7) — each a
+  // repeater (see FieldKind "repeater") except googlemap/announcementticker.
+  // Each repeater's own prop key (testimonials/stats/people/socials/logos/
+  // timelineItems/documents/tickerItems) is deliberately NOT "items" — that
+  // name is already accordion/tabs' own free-text pipe-line field, and
+  // packages/element-schema's validateValue dispatches purely by key name;
+  // reusing "items" would have let a repeater's JSON array (containing
+  // image/url fields that need real checks) through that free-text branch
+  // completely unvalidated. Own key per element also matches the existing
+  // cardgrid ("cards") / slider ("slides") convention.
+  testimonial: {
+    labelKey: "designer-el-testimonial",
+    icon: Quote,
+    defaults: {
+      testimonials: JSON.stringify([
+        { avatar: "", quote: "Great programme, helped me grow professionally.", name: "Jane Doe", role: "Alumni", meta: "" },
+        { avatar: "", quote: "Excellent collaboration and support.", name: "John Smith", role: "Industry Partner", meta: "" },
+      ]),
+      columns: "2",
+    },
+    fields: [
+      {
+        key: "testimonials",
+        labelKey: "designer-f-testimonial-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "avatar", labelKey: "designer-f-testimonial-avatar", type: "image" },
+          { key: "quote", labelKey: "designer-f-testimonial-quote", type: "textarea" },
+          { key: "name", labelKey: "designer-f-testimonial-name", type: "text" },
+          { key: "role", labelKey: "designer-f-testimonial-role", type: "text" },
+          { key: "meta", labelKey: "designer-f-testimonial-meta", type: "text" },
+        ],
+      },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3"] },
+    ],
+  },
+  statscounter: {
+    labelKey: "designer-el-statscounter",
+    icon: BarChart3,
+    defaults: {
+      stats: JSON.stringify([
+        { number: "1200+", label: "Students", icon: "graduation-cap" },
+        { number: "50+", label: "Programmes", icon: "book-open" },
+        { number: "10", label: "Years", icon: "award" },
+      ]),
+      columns: "3",
+    },
+    fields: [
+      {
+        key: "stats",
+        labelKey: "designer-f-statscounter-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "number", labelKey: "designer-f-statscounter-number", type: "text" },
+          { key: "label", labelKey: "designer-f-label", type: "text" },
+          { key: "icon", labelKey: "designer-f-icon-name", type: "icon" },
+        ],
+      },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+    ],
+  },
+  // Consolidates "Team card" and "People/directory card" (both structurally
+  // photo+name+role+contact) into one element — see CLAUDE.md's Page
+  // Blueprint/element-registry note for this decision.
+  peoplegrid: {
+    labelKey: "designer-el-peoplegrid",
+    icon: Users,
+    defaults: {
+      people: JSON.stringify([
+        { photo: "", name: "Full Name", role: "Job Title", department: "", email: "", phone: "", href: "" },
+      ]),
+      columns: "3",
+    },
+    fields: [
+      {
+        key: "people",
+        labelKey: "designer-f-peoplegrid-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "photo", labelKey: "designer-f-peoplegrid-photo", type: "image" },
+          { key: "name", labelKey: "designer-f-peoplegrid-name", type: "text" },
+          { key: "role", labelKey: "designer-f-peoplegrid-role", type: "text" },
+          { key: "department", labelKey: "designer-f-peoplegrid-department", type: "text" },
+          { key: "email", labelKey: "designer-f-peoplegrid-email", type: "text" },
+          { key: "phone", labelKey: "designer-f-peoplegrid-phone", type: "text" },
+          { key: "href", labelKey: "designer-f-href", type: "text" },
+        ],
+      },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+    ],
+  },
+  socialicons: {
+    labelKey: "designer-el-socialicons",
+    icon: Share2,
+    defaults: {
+      socials: JSON.stringify([
+        { platform: "globe", url: "#" },
+        { platform: "mail", url: "#" },
+      ]),
+      align: "left",
+    },
+    fields: [
+      {
+        key: "socials",
+        labelKey: "designer-f-socialicons-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "platform", labelKey: "designer-f-socialicons-platform", type: "icon" },
+          { key: "url", labelKey: "designer-f-href", type: "text" },
+        ],
+      },
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+    ],
+  },
+  logocloud: {
+    labelKey: "designer-el-logocloud",
+    icon: Building2,
+    defaults: {
+      logos: JSON.stringify([
+        { image: "", href: "", alt: "" },
+        { image: "", href: "", alt: "" },
+      ]),
+      columns: "4",
+    },
+    fields: [
+      {
+        key: "logos",
+        labelKey: "designer-f-logocloud-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "image", labelKey: "designer-f-src", type: "image" },
+          { key: "href", labelKey: "designer-f-href", type: "text" },
+          { key: "alt", labelKey: "designer-f-logocloud-alt", type: "text" },
+        ],
+      },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+    ],
+  },
+  timeline: {
+    labelKey: "designer-el-timeline",
+    icon: History,
+    defaults: {
+      timelineItems: JSON.stringify([
+        { date: "2020", title: "Founded", description: "" },
+        { date: "2024", title: "Milestone", description: "" },
+      ]),
+    },
+    fields: [
+      {
+        key: "timelineItems",
+        labelKey: "designer-f-timeline-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "date", labelKey: "designer-f-timeline-date", type: "text" },
+          { key: "title", labelKey: "designer-f-cardgrid-title", type: "text" },
+          { key: "description", labelKey: "designer-f-timeline-desc", type: "textarea" },
+        ],
+      },
+    ],
+  },
+  documentdownload: {
+    labelKey: "designer-el-documentdownload",
+    icon: FileText,
+    defaults: {
+      documents: JSON.stringify([{ fileUrl: "", label: "Document.pdf", fileType: "PDF", fileSize: "" }]),
+      columns: "2",
+    },
+    fields: [
+      {
+        key: "documents",
+        labelKey: "designer-f-docdownload-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "fileUrl", labelKey: "designer-f-docdownload-fileurl", type: "text" },
+          { key: "label", labelKey: "designer-f-label", type: "text" },
+          { key: "fileType", labelKey: "designer-f-docdownload-filetype", type: "text" },
+          { key: "fileSize", labelKey: "designer-f-docdownload-filesize", type: "text" },
+        ],
+      },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["1", "2", "3"] },
+    ],
+  },
+  // Audit report 5.3 flags map embeds as needing "consent/cookie policy dan
+  // fallback address text" — requireConsent gates the iframe behind a
+  // click-to-load placeholder (no cookie/localStorage, same reappears-on-
+  // reload convention as announcementbar's own dismiss), and address is
+  // always rendered so the map is never the page's only location info.
+  googlemap: {
+    labelKey: "designer-el-googlemap",
+    icon: MapPin,
+    defaults: { embedUrl: "", address: "", height: "24rem", requireConsent: "false" },
+    fields: [
+      { key: "embedUrl", labelKey: "designer-f-googlemap-embedurl", kind: "text" },
+      { key: "address", labelKey: "designer-f-googlemap-address", kind: "text" },
+      { key: "height", labelKey: "designer-f-height", kind: "length" },
+      { key: "requireConsent", labelKey: "designer-f-googlemap-consent", kind: "select", options: ["false", "true"] },
+    ],
+  },
+  // Distinct from announcementbar (dismissible, single message, sits above
+  // the page) — a continuously-scrolling marquee of one or more messages,
+  // never dismissed.
+  announcementticker: {
+    labelKey: "designer-el-announcementticker",
+    icon: Radio,
+    defaults: {
+      tickerItems: JSON.stringify([{ text: "Important notice", href: "" }]),
+      speed: "normal",
+      bgColor: "#111827",
+      textColor: "#ffffff",
+    },
+    fields: [
+      {
+        key: "tickerItems",
+        labelKey: "designer-f-ticker-items",
+        kind: "repeater",
+        itemFields: [
+          { key: "text", labelKey: "designer-f-text", type: "text" },
+          { key: "href", labelKey: "designer-f-href", type: "text" },
+        ],
+      },
+      { key: "speed", labelKey: "designer-f-ticker-speed", kind: "select", options: ["slow", "normal", "fast"] },
+      { key: "bgColor", labelKey: "designer-s-bg", kind: "color" },
+      { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
     ],
   },
 };
