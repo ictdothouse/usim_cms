@@ -284,3 +284,33 @@ export interface Block {
   type: string;
   props: Record<string, unknown>;
 }
+
+// selection path: [block] | [block,row] | [block,row,col] | [block,row,col,el]
+// Moved here from Designer.tsx (Layer 1b, Inspector/ElPreview extraction) —
+// designer/Inspector.tsx and designer/ElPreview.tsx both need this type and
+// can never import it back from Designer.tsx.
+export type Sel = number[] | null;
+
+// Page-wide Designer defaults (pages.settings JSONB), read by Inspector's
+// "nothing selected" panel. Moved here alongside Sel for the same reason.
+export interface PageSettings {
+  gap?: string;
+  contentWidth?: "contained" | "full";
+  paddingX?: string;
+  theme?: Record<string, string>;
+  themePresetName?: string;
+}
+
+// ElPreview's canvas smart-guide state (slider heading/subtitle/button drag)
+// — moved here alongside Sel/PageSettings for the same reason.
+export type SliderGuide = {
+  elId: string;
+  vCenter: boolean;
+  hCenter: boolean;
+  vGap: GapMark | null;
+  hGap: GapMark | null;
+  vGapMatches: GapMark[];
+  hGapMatches: GapMark[];
+  alignX: number | null;
+  alignY: number | null;
+} | null;

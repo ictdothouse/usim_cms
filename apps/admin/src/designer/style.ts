@@ -1,12 +1,45 @@
+import type { SlideButton } from "./types";
 import { bestTextColor } from "@/lib/utils";
 
 // Style-computation pure helpers split out of Designer.tsx (Layer 0 of the
 // God Component refactor, see
 // docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md).
+// The size/side-key tables below were moved here from Designer.tsx as part
+// of Layer 1b (Inspector/ElPreview extraction) — zero closure dependency on
+// Designer() state, but ElPreview.tsx/Inspector.tsx (designer/ files) can
+// never import back from Designer.tsx (see designer/types.ts's own note),
+// so anything a designer/ file needs has to live in designer/ too.
 
 export const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
 export const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 export const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
+
+export const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
+export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
+export const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
+export const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
+// Baseline px used as the resize-handle drag's starting point when a slider
+// button has no explicit fontSize yet — purely a UI convenience, not stored.
+export const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
+// Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
+// before the height field became free-form ("length" kind) still store one of
+// these keywords; resolving it here lets the canvas preview show the real
+// height for those too, not just newly-typed literal values.
+export const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
+
+// Four-side padding/radius/margin field-name maps — shared by Inspector's
+// FourSideControl panels and the canvas's own bp*Style resolution. Plain
+// literal maps, zero closure dependency.
+export const PADDING_SIDE_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" } as const;
+export const PADDING_SIDE_FALLBACK = { top: "paddingY", right: "paddingX", bottom: "paddingY", left: "paddingX" } as const;
+export const MARGIN_SIDE_KEYS = { top: "marginTop", right: "marginRight", bottom: "marginBottom", left: "marginLeft" } as const;
+export const MARGIN_SIDE_FALLBACK = { top: "marginY", right: "marginX", bottom: "marginY", left: "marginX" } as const;
+export const RADIUS_CORNER_KEYS = {
+  top: "radiusTopLeft",
+  right: "radiusTopRight",
+  bottom: "radiusBottomRight",
+  left: "radiusBottomLeft",
+} as const;
 // Legacy preset keywords (existing pages' saved shadow="sm"/"md"/"lg" values)
 // still resolve via this table. New edits store a pipe-delimited custom
 // shadow instead — see shadowToCss() — no presets, a real X/Y/blur/spread/
@@ -106,4 +139,40 @@ export function colStyle(cp?: Record<string, string>): React.CSSProperties {
 export function elRadius(p: Record<string, string>): string {
   const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.md);
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
+}
+
+export function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }) as Record<string, string>)[c]);
+}
+export function safeHref(u: string) {
+  // Browsers discard ASCII control/space chars (0x00-0x20) from anywhere in
+  // a URL before parsing its scheme, not just the ends — a bare .trim()
+  // left "java\tscript:alert(1)" able to slip past the scheme regex below
+  // while still executing as javascript: once rendered. Stripping them from
+  // the whole string (not just trimming) closes that, and also means the
+  // href we actually emit can't still be smuggling one.
+  const v = u.replace(/[\x00-\x20]+/g, "");
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : "#";
+  return v;
+}
+// Small inline-markdown subset for heading/text: **bold**, *italic*, [label](url).
+// Duplicated (not shared) in SectionBlock.astro's own renderInline — same
+// convention as this file's PAD/RADIUS tables mirroring the frontend's.
+// ponytail: link regex stops at the first ")" in the URL, so a raw
+// unescaped "(" / ")" inside the URL itself truncates it — fine for normal
+// links/anchors, encode the parens if it ever matters.
+export function renderInline(text: string): string {
+  return escapeHtml(text)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, url) => `<a href="${safeHref(url)}">${label}</a>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+// Matches apps/frontend/global.css's h1 vs h2-h6 rule: h1 reads the theme's
+// heading font, everything smaller reads subheading (falling back to heading,
+// then the body font).
+export function headingFontFamily(level: string | undefined): string {
+  return level === "1"
+    ? "var(--font-heading, var(--font-family, inherit))"
+    : "var(--font-subheading, var(--font-heading, var(--font-family, inherit)))";
 }

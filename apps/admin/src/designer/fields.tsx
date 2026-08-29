@@ -40,6 +40,50 @@ import type { Field, FieldGroupKey } from "./types";
 // Shared across heading/text/list — full typography control. fontFamily is
 // any Google Font name; see the useEffect near Designer()'s own body that
 // keeps a matching <link> synced into document.head for canvas preview.
+export const SECTION_FIELDS: Field[] = [
+  { key: "bg", labelKey: "designer-s-bg", kind: "color" },
+  { key: "bgImage", labelKey: "designer-s-bgimage", kind: "image" },
+  { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
+  // paddingY/paddingX/radius/marginY are edited via the FourSideControl
+  // composites (top-level "Padding"/"Border Radius"/"Margin" panels) instead
+  // of a plain row here.
+  { key: "width", labelKey: "designer-s-width", kind: "select", options: ["contained", "full"] },
+  { key: "opacity", labelKey: "designer-s-opacity", kind: "text" },
+  { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+  { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+  { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+  { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+  { key: "anchorId", labelKey: "designer-f-anchorid", kind: "text" },
+  { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+];
+
+// Column-level style escape hatch (see Col.props) — a column becomes a
+// themeable "card" once bg/padding/border/shadow/radius are set, covering
+// what would otherwise need a dedicated Card/Testimonial element.
+export const COLUMN_FIELDS: Field[] = [
+  { key: "bg", labelKey: "designer-s-bg", kind: "color" },
+  // padding/radius/marginY are edited via the FourSideControl composites
+  // (same as SECTION_FIELDS) instead of a plain row here.
+  { key: "valign", labelKey: "designer-f-valign", kind: "select", options: ["top", "center", "bottom"] },
+  { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
+  { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+  { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+];
+// Bp-merge list for bpColStyle() — covers the base padding/radius fields plus
+// their per-side/per-corner overrides, none of which are in COLUMN_FIELDS
+// (they're edited via FourSideControl, not the flat Inspector list).
+export const COLUMN_SPACING_KEYS = [
+  "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
+  "marginY", "marginX", "marginTop", "marginRight", "marginBottom", "marginLeft",
+];
+
+// Standalone field appended to every element's own type-specific fields
+// (matches the two <label> blocks the flat Inspector used to hard-code after
+// def.fields — hoisted so the grouped Inspector can bucket them like any
+// other field instead of rendering them as a special tail case).
+export const CSS_CLASS_FIELD: Field = { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" };
+
 export const TYPOGRAPHY_FIELDS: Field[] = [
   { key: "fontFamily", labelKey: "designer-f-fontfamily", kind: "font" },
   { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
