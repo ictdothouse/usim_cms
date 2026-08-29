@@ -10,6 +10,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
+COPY packages/element-schema/package.json packages/element-schema/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/admin apps/admin
 ARG VITE_API_URL=http://localhost:3000
