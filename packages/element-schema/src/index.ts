@@ -78,7 +78,7 @@ function isSafeShadow(v: string): boolean {
 // arrays exactly (SECTION_FIELDS, COLUMN_FIELDS, TYPOGRAPHY_FIELDS,
 // ELS[type].fields). A closed enum gets an exact allowlist rather than a
 // pattern — strictly tighter, and there's no room for injection at all.
-const ENUM_VALUES: Record<string, string[]> = {
+export const ENUM_VALUES: Record<string, string[]> = {
   level: ["1", "2", "3", "4"],
   align: ["left", "center", "right"],
   fontWeight: ["400", "500", "600", "700", "800"],
@@ -92,7 +92,9 @@ const ENUM_VALUES: Record<string, string[]> = {
   variant: ["primary", "outline"],
   ratio: ["16:9", "4:3", "1:1"],
   style: ["bullet", "numbered", "none"],
-  columns: ["2", "3", "4"],
+  // documentdownload is the one element offering a 1-column layout
+  // (Designer.tsx's ELS.documentdownload) alongside 2/3/4 everyone else uses.
+  columns: ["1", "2", "3", "4"],
   // accordion/infobox/slider (see Designer.tsx's ELS registry additions).
   exclusive: ["false", "true"],
   iconPosition: ["top", "left"],
@@ -133,7 +135,13 @@ const ENUM_VALUES: Record<string, string[]> = {
 // string) — accepts a bare number or number+unit, same shape as index.ts's
 // GAP_PATTERN. Covers every padding/margin/radius side + shorthand, plus
 // borderWidth/opacity/lineHeight/letterSpacing/size/height/gap.
-const LENGTH_KEYS = new Set([
+// Exported (not just module-local) so apps/admin can assert its own ELS
+// field-kind tags ("length"/"color"/"select") actually land in the matching
+// bucket here — a field added to the admin schema with the WRONG or no
+// matching bucket entry silently fails every save (see the LENGTH_KEYS
+// "padding" omission incident in CLAUDE.md's slider-work paragraph, which
+// this cross-check exists to catch at test time instead of first-save time).
+export const LENGTH_KEYS = new Set([
   // "padding" (bare, no Y/X) is Column/Element's own legacy fallback key —
   // see Designer.tsx's COLUMN_SPACING_KEYS and every sideValue(..., "padding")
   // call — distinct from Section's paddingY/paddingX split below.
@@ -142,7 +150,7 @@ const LENGTH_KEYS = new Set([
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
   "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
 ]);
-const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
+export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
 // only the URI-scheme check applies — bgImage is handled separately above
 // since it's concatenated into raw CSS instead. button1Href/button2Href/
@@ -152,13 +160,13 @@ const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"
 // embedUrl is googlemap's own top-level flat prop (address/height/
 // requireConsent below it); bound through an <iframe src> the same way
 // embed's own `url` already is, so the same plain scheme check applies.
-const ATTR_URL_KEYS = new Set(["href", "url", "src", "button1Href", "button2Href", "linkHref", "embedUrl"]);
+export const ATTR_URL_KEYS = new Set(["href", "url", "src", "button1Href", "button2Href", "linkHref", "embedUrl"]);
 // Rendered as escaped text content (or, for `images`/`slides`, a safe URL
 // per line/field) — never concatenated into CSS/HTML unescaped, so no
 // pattern restriction beyond the per-line checks `images`/`slides` get below.
 // description/button1Label/button2Label/linkLabel are ctabanner/
 // announcementbar's own free-text fields (Designer.tsx's ELS registry).
-const FREE_TEXT_KEYS = new Set([
+export const FREE_TEXT_KEYS = new Set([
   "text", "label", "alt", "items", "name", "heading",
   "description", "button1Label", "button2Label", "linkLabel",
   // googlemap's own fallback location text (audit report 5.3: "jangan
@@ -316,7 +324,7 @@ function isSafeCards(value: string): boolean {
 // mirroring menuId/categoryId's own "lookup key, not rendered" treatment
 // above, rather than duplicating that whole icon-name list here.
 const ICON_SLUG_RE = /^[a-z0-9-]*$/;
-const REPEATER_SCHEMAS: Record<string, { key: string; type: "text" | "image" | "url" | "icon" }[]> = {
+export const REPEATER_SCHEMAS: Record<string, { key: string; type: "text" | "image" | "url" | "icon" }[]> = {
   testimonials: [
     { key: "avatar", type: "image" },
     { key: "quote", type: "text" },

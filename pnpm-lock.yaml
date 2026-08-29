@@ -104,6 +104,9 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.2.16
         version: 1.2.16(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@ucms/element-schema':
+        specifier: workspace:*
+        version: link:../../packages/element-schema
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
