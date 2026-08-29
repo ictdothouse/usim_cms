@@ -195,6 +195,9 @@ importers:
       '@fastify/static':
         specifier: ^9.3.0
         version: 9.3.0
+      '@ucms/element-schema':
+        specifier: workspace:*
+        version: link:../../packages/element-schema
       drizzle-orm:
         specifier: ^0.36.4
         version: 0.36.4(@types/pg@8.20.0)(@types/react@18.3.31)(pg@8.22.0)(react@19.2.7)
@@ -262,6 +265,18 @@ importers:
         version: 0.9.9(prettier@3.9.5)(typescript@5.9.3)
       typescript:
         specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/element-schema:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.0
+      typescript:
+        specifier: ^5.7.2
         version: 5.9.3
 
 packages:

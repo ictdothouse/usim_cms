@@ -866,10 +866,10 @@ pnpm workspace monorepo with two apps:
   did for Layer 0/1a's exports. `ELS` living in its own module is this
   codebase's closest thing today to an element-plugin registry — the field-
   schema/defaults/label live in one place now, though a NEW element type
-  still means separately touching `ElPreview.tsx`'s render switch, apps/api's
-  `validate-layout.ts`, and `SectionBlock.astro`'s own render switch; a single
-  `ElementDefinition` uniting schema+canvas-render+site-render+validator is a
-  bigger, separate design question, not attempted here. No Playwright/React-
+  still means separately touching `ElPreview.tsx`'s render switch, the
+  shared validator (below), and `SectionBlock.astro`'s own render switch; a
+  single `ElementDefinition` uniting schema+canvas-render+site-render+
+  validator is a bigger, separate design question, not attempted here. No Playwright/React-
   Testing-Library harness was added as the spec's own pre-Layer-1 "testing
   gap" section asked for — this repo has neither installed and standing one
   up needs a live api+db, a heavier lift than this pass's actual risk
@@ -883,6 +883,30 @@ pnpm workspace monorepo with two apps:
   is the next layer in the same design doc, not yet started. See
   `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md` and
   `docs/superpowers/plans/2026-08-21-designer-layer1a-field-controls.md`.
+  **`packages/element-schema`** (new pnpm workspace package, `pnpm-workspace.yaml` gained a
+  `packages/*` glob for it) is a follow-up extraction, done separately from the Layer 1b
+  work above: the `pages.layout` XSS/CSS-injection validator (`validateLayout`/`isSafeUrl`/
+  `isSafeCssUrl`, previously `apps/api/src/collections/validate-layout.ts` in full) moved
+  here byte-identical (mechanical relocation, not a rewrite — same regexes, same per-key
+  `ENUM_VALUES`/`LENGTH_KEYS`/etc tables, same `isSafeSlide*`/`isSafeCard*` JSON checks).
+  `apps/api/src/collections/validate-layout.ts` is now a one-line `export * from
+  "@ucms/element-schema"` so its 3 existing relative importers (`index.ts`, `validate-menu.ts`,
+  its own `.test.ts`) needed no changes. Why: this validator is pure logic with no framework
+  dependency (no React, no Fastify) — the one piece of the 4-touchpoint element-registry
+  puzzle (schema/`ELS` in apps/admin, this validator, canvas render in `ElPreview.tsx`, site
+  render in `SectionBlock.astro`) that COULD be a real shared module instead of a
+  hand-duplicated table, so it's the one that moved. `ELS`/`ElPreview.tsx`/`SectionBlock.astro`
+  were deliberately left untouched this round — merging `ELS`'s field schema into the same
+  package would also require resolving its `labelKey` (bound to apps/admin's own `Key` union
+  type) and `icon` (a `lucide-react` component, React-only) fields, real design work with real
+  regression risk across 20+ element types for marginal benefit right now; a bigger design
+  question, not attempted here, same as the `ElementDefinition`-unification note above.
+  `apps/api`'s Dockerfile now also `COPY`s and `pnpm --filter @ucms/element-schema build`s
+  this package before building `apps/api` itself — `apps/api`'s own `dist/` has no compiled
+  copy of it, only a `workspace:*` dependency on its `dist/` output, so skipping this step
+  would ship a broken image. Local `pnpm build`/`pnpm typecheck` at the repo root already
+  handled this correctly for free (`pnpm -r` respects the workspace dependency graph); only
+  the Dockerfile's single-package `--filter` build needed the explicit extra step.
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
