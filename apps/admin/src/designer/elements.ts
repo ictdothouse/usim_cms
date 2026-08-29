@@ -17,6 +17,7 @@ import {
   Bell,
   BarChart3,
   Building2,
+  CalendarDays,
   ChevronsUpDown,
   Code2,
   FileText,
@@ -350,6 +351,22 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "count", labelKey: "designer-f-postlist-count", kind: "select", options: ["3", "4", "6", "9"] },
       { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
       { key: "postLayout", labelKey: "designer-f-postlist-layout", kind: "select", options: ["grid", "list"] },
+    ],
+  },
+  // Event listing (UX audit backlog, deferred alongside Contact form) — same
+  // "reference, not a copy" idea as postlist/menu: only a count/layout
+  // config lives here, the actual events are fetched at render time
+  // (apps/frontend's EventListBlock.astro) from the events collection
+  // (EventsPanel/CategoriesPanel-style admin CRUD, superadmin ContentManager
+  // sub-tab + webmaster top-level Tab, see App.tsx).
+  eventlist: {
+    labelKey: "designer-el-eventlist",
+    icon: CalendarDays,
+    defaults: { count: "3", columns: "3", eventLayout: "grid" },
+    fields: [
+      { key: "count", labelKey: "designer-f-eventlist-count", kind: "select", options: ["3", "4", "6", "9"] },
+      { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
+      { key: "eventLayout", labelKey: "designer-f-eventlist-layout", kind: "select", options: ["grid", "list"] },
     ],
   },
   // Batch of simple, no-backend elements (audit report 5.2/5.7) — each a

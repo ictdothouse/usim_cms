@@ -1,6 +1,7 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import {
+  CalendarDays,
   Check,
   ChevronRight,
   Copy,
@@ -51,6 +52,7 @@ import { BlueprintGallery } from "./BlueprintGallery";
 import CategoriesPanel from "./CategoriesPanel";
 import PostEditorPage from "./PostEditorPage";
 import MenusPanel from "./MenusPanel";
+import EventsPanel from "./EventsPanel";
 
 const SESSION_KEY = "usim_cms_session";
 
@@ -2731,6 +2733,7 @@ const PERMISSIONS = [
   "languages.write",
   "menus.write",
   "blueprints.write",
+  "events.write",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -2747,6 +2750,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "languages.write": "perm-languages-write",
   "menus.write": "perm-menus-write",
   "blueprints.write": "perm-blueprints-write",
+  "events.write": "perm-events-write",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
@@ -3528,7 +3532,7 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   );
 }
 
-type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "blueprints";
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "blueprints" | "events";
 
 function ContentManager({
   isSuper,
@@ -3559,6 +3563,7 @@ function ContentManager({
           { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
           { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
           { id: "blueprints" as const, labelKey: "blueprints-title" as const, icon: LayoutTemplate },
+          { id: "events" as const, labelKey: "events-title" as const, icon: CalendarDays },
         ]
       : []),
   ];
@@ -3615,6 +3620,9 @@ function ContentManager({
             {isSuper && (
               <Route path="blueprints" element={<BlueprintGallery key={siteHost} tenantHost={siteHost} token={token} mode="manage" isSuper />} />
             )}
+            {isSuper && (
+              <Route path="events" element={<EventsPanel key={`events-${siteHost}`} tenantHost={siteHost} token={token} />} />
+            )}
           </Routes>
         </>
       )}
@@ -3633,6 +3641,7 @@ type Tab =
   | "languages"
   | "menus"
   | "blueprints"
+  | "events"
   | "global-theme"
   | "feed"
   | "settings"
@@ -3648,6 +3657,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   languages: { labelKey: "tab-languages", icon: Globe },
   menus: { labelKey: "menus-title", icon: ListTree },
   blueprints: { labelKey: "blueprints-title", icon: LayoutTemplate },
+  events: { labelKey: "events-title", icon: CalendarDays },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
@@ -4488,7 +4498,7 @@ function Shell({
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings", "security"] : ["dashboard", "security"];
-  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus", "blueprints"];
+  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus", "blueprints", "events"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -4619,6 +4629,7 @@ function Shell({
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="blueprints" element={!isSuper && session.tenantHost ? (<BlueprintGallery tenantHost={session.tenantHost} token={session.token} mode="manage" isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="events" element={!isSuper && session.tenantHost ? (<EventsPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />

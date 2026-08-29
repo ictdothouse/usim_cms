@@ -34,6 +34,15 @@ export interface DesignerCtx {
   blocks: Block[];
   mutate: (fn: (next: Block[]) => void) => void;
 
+  // Section lock (Page Blueprint deferred item) — a superadmin-only toggle
+  // (props.locked === "true") that a non-superadmin can view but not edit.
+  // isSuper gates the Inspector's own lock checkbox; isSectionLocked is the
+  // read-only check every level below Section consults so nested Row/Column/
+  // Element controls know to disable themselves too. The real enforcement is
+  // server-side (apps/api's pagesBeforeChange) — this is UX only.
+  isSuper: boolean;
+  isSectionLocked: (b: number) => boolean;
+
   // bp-override helpers (Section/Column/Element style-override bag)
   bpKey: (key: string) => string;
   bpGetValue: (base: string | undefined, overrides: Record<string, string> | undefined, key: string) => string;

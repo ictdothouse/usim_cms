@@ -111,12 +111,17 @@ const ENUM_VALUES: Record<string, string[]> = {
   hideDesktop: ["true"],
   hideTablet: ["true"],
   hideMobile: ["true"],
+  // Section lock (Page Blueprint deferred item) — superadmin-only toggle,
+  // see apps/admin's designer/context.ts isSectionLocked and apps/api's
+  // pagesBeforeChange (the real enforcement point).
+  locked: ["true"],
   // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) new elements —
   // cardgrid/ctabanner/announcementbar/postlist (Designer.tsx's ELS
   // registry). `columns`/`align` reuse the existing enums above.
   equalHeight: ["true", "false"],
   dismissible: ["true", "false"],
   postLayout: ["grid", "list"],
+  eventLayout: ["grid", "list"],
   count: ["3", "4", "6", "9"],
   // Batch of simple no-backend elements (Designer.tsx's ELS registry) —
   // googlemap/announcementticker's own enum fields.

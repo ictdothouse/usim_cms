@@ -1,0 +1,49 @@
+---
+// UX audit backlog "Event listing" element — pulls from the tenant's own
+// events collection instead of duplicating content manually, same
+// reference-not-a-copy idea as PostListBlock.astro. listEvents already
+// filters to status=published server-side; upcoming-first sort and the
+// count cap both happen here since the events table is small enough per
+// tenant that a second API param wasn't worth adding (see generic-crud.ts's
+// buildListFilters, which only knows publishedAt ranges, not startDate).
+import { listEvents } from "../lib/api";
+
+interface Props {
+  count?: string;
+  columns?: string;
+  eventLayout?: "grid" | "list";
+  tenantHost: string;
+}
+const { count = "3", columns = "3", eventLayout = "grid", tenantHost } = Astro.props;
+
+const all = await listEvents(tenantHost);
+const now = Date.now();
+const events = all
+  .filter((e) => new Date(e.startDate).getTime() >= now)
+  .sort((a, b) => a.startDate.localeCompare(b.startDate))
+  .slice(0, parseInt(count, 10) || 3);
+---
+
+{events.length > 0 && (
+  <div
+    class={`ds-eventlist ds-eventlist-${eventLayout}`}
+    style={eventLayout === "grid" ? `grid-template-columns:repeat(${columns},1fr)` : undefined}
+  >
+    {events.map((ev) => (
+      <div class="ds-eventlist-card">
+        {ev.imageUrl && <img src={ev.imageUrl} alt="" loading="lazy" />}
+        <div class="ds-eventlist-body">
+          <time class="ds-eventlist-date" datetime={ev.startDate}>
+            {new Date(ev.startDate).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
+          </time>
+          <h3 class="ds-eventlist-title">{ev.title}</h3>
+          {ev.location && <p class="ds-eventlist-location">{ev.location}</p>}
+          {ev.description && <p class="ds-eventlist-excerpt">{ev.description}</p>}
+          {ev.registrationUrl && (
+            <a class="ds-eventlist-register" href={ev.registrationUrl}>Register</a>
+          )}
+        </div>
+      </div>
+    ))}
+  </div>
+)}

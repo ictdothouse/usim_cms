@@ -67,6 +67,32 @@ export const menus = pgTable("menus", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Events (UX audit backlog, deferred alongside Contact form — this is the
+// "Event listing" half; Contact form still needs its own design). A small,
+// flat collection (no category/tags) referenced by the "eventlist" Designer
+// element the same way postlist references posts — apps/frontend fetches
+// and filters/sorts (upcoming-first) at render time, never duplicated into
+// page content. Own `events.write` permission (not posts.*/pages.*, same
+// reasoning as menus.write) since managing the events calendar is its own
+// concern. `description` is plain text (unlike posts.body), rendered as a
+// safe text node, not raw HTML — no sanitizeHtml pipeline needed for it.
+export const events = pgTable("events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date"),
+  location: text("location"),
+  imageUrl: text("image_url"),
+  // Scheme-checked in eventsBeforeChange (isSafeUrl) — rendered as a real
+  // <a href>, so a javascript: value would execute on click same as any
+  // other author-supplied URL in this codebase.
+  registrationUrl: text("registration_url"),
+  status: text("status").notNull().default("draft"), // "draft" | "published"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Post/Article content per tenant. body is sanitized HTML from the admin
 // rich-text editor (see the posts collection's beforeChange hook). Public
 // visibility is enforced by RLS: anonymous SELECT only sees status='published'

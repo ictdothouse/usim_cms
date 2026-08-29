@@ -12,6 +12,7 @@ import {
   BarChart3,
   Bell,
   Building2,
+  CalendarDays,
   Check,
   ChevronsUpDown,
   Code2,
@@ -1082,6 +1083,14 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
           <Newspaper className="h-3.5 w-3.5" />
           {linked ? linked.name : t("designer-f-category-none")} · {p.count ?? "3"}
+        </div>
+      );
+    }
+    case "eventlist": {
+      return (
+        <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
+          <CalendarDays className="h-3.5 w-3.5" />
+          {t("designer-el-eventlist")} · {p.count ?? "3"}
         </div>
       );
     }

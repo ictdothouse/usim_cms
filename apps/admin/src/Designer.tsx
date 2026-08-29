@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Activity,
   AlertCircle,
@@ -189,6 +190,7 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   ctabanner: ["heading", "description", "button1Label", "button2Label"],
   announcementbar: ["text", "linkLabel"],
   postlist: [],
+  eventlist: [],
   testimonial: ["testimonials"],
   statscounter: ["stats"],
   peoplegrid: ["people"],
@@ -1396,6 +1398,18 @@ export default function Designer({
   // Extracted from BlockControls/Inspector's inline closures so both those
   // and LiveEditToolbar (Live Edit mode) call one shared implementation per
   // action+level instead of re-deriving the same splice/clip logic.
+  // Section lock (Page Blueprint deferred item) — a superadmin can mark a
+  // section `locked` (props.locked === "true", toggled in the Inspector) so
+  // a non-superadmin can view it but never mutate it. Only delete and
+  // paste-style actually overwrite the locked section's own content (every
+  // other section action — duplicate, copy, paste-after, move, save-as-
+  // template — leaves it untouched, so those stay enabled). This is UX
+  // only: the real gate is apps/api's pagesBeforeChange, which rejects any
+  // save that changes or removes a locked section regardless of what the
+  // client sends.
+  function isSectionLocked(b: number): boolean {
+    return !isSuper && (blocks[b]?.props as unknown as SectionProps | undefined)?.locked === "true";
+  }
   function duplicateSection(b: number) {
     mutate((bs) => bs.splice(b + 1, 0, clone(bs[b])));
     bumpStructural();
@@ -1417,10 +1431,18 @@ export default function Designer({
     styleCopy("section", styleProps as unknown as Record<string, string>);
   }
   function pasteStyleSection(b: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const style = styleRead("section");
     if (style) mutate((bs) => Object.assign(bs[b].props, style));
   }
   function deleteSection(b: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => {
       bs.splice(b, 1);
     });
@@ -1971,8 +1993,14 @@ export default function Designer({
 
   // section/legacy-block level controls: move up/down, duplicate, delete
   function BlockControls({ b }: { b: number }) {
+    const locked = isSectionLocked(b);
     return (
       <span className="flex items-center gap-1" onClick={(ev) => ev.stopPropagation()}>
+        {locked && (
+          <span title={t("designer-section-locked-title")}>
+            <Lock className="h-3 w-3 text-amber-500" />
+          </span>
+        )}
         <button
           onClick={() => b > 0 && mutate((bs) => bs.splice(b - 1, 0, bs.splice(b, 1)[0]))}
           disabled={b === 0}
@@ -2010,7 +2038,7 @@ export default function Designer({
         </button>
         <button
           onClick={() => pasteStyleSection(b)}
-          disabled={!styleHas("section")}
+          disabled={!styleHas("section") || locked}
           className="px-0.5 text-accent disabled:opacity-30"
           title={t("designer-paste-style")}
         >
@@ -2019,7 +2047,7 @@ export default function Designer({
         <button onClick={() => saveAsTemplate([b])} className="px-0.5 text-accent" title={t("designer-templates-save")}>
           <LayoutTemplate className="h-3 w-3" />
         </button>
-        <button onClick={() => deleteSection(b)} className="px-0.5 text-red-500" title={t("designer-delete")}>
+        <button onClick={() => deleteSection(b)} disabled={locked} className="px-0.5 text-red-500 disabled:opacity-30" title={locked ? t("designer-section-locked-title") : t("designer-delete")}>
           <Trash2 className="h-3 w-3" />
         </button>
       </span>
@@ -2119,6 +2147,7 @@ export default function Designer({
   // call site.
   const designerCtx: DesignerCtx = {
     t, bp, mode, sel, setSel, blocks, mutate,
+    isSuper, isSectionLocked,
     bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
     setFourSideValue, setColSideValue, setElSideValue,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,

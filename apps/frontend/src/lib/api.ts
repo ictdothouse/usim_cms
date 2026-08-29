@@ -172,6 +172,25 @@ export async function listCategories(tenantHost: string): Promise<Category[]> {
   return items;
 }
 
+// Events calendar (UX audit backlog "Event listing" element) — referenced,
+// not copied, the same way listPosts backs postlist: EventListBlock.astro
+// fetches and filters/sorts (upcoming-first) at render time.
+export interface EventItem {
+  id: string;
+  title: string;
+  description: string;
+  startDate: string;
+  endDate: string | null;
+  location: string | null;
+  imageUrl: string | null;
+  registrationUrl: string | null;
+}
+
+export async function listEvents(tenantHost: string): Promise<EventItem[]> {
+  const { items } = await apiGet<{ items: EventItem[] }>("/api/events?status=published", tenantHost);
+  return items;
+}
+
 // i18n Phase 3 — whether/what the site's header language switcher offers.
 // Not cached through apiGet's stale-while-revalidate path (deliberately
 // simple): this is a small, rarely-changing settings fetch, not core page

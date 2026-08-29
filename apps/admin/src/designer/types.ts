@@ -203,7 +203,8 @@ export type ElType =
   | "timeline"
   | "documentdownload"
   | "googlemap"
-  | "announcementticker";
+  | "announcementticker"
+  | "eventlist";
 
 // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) "card grid" element —
 // items is a JSON array of these, stored as a string in El.props.cards (see
@@ -309,6 +310,11 @@ export interface SectionProps {
   hideDesktop?: string;
   hideTablet?: string;
   hideMobile?: string;
+  // Section lock (Page Blueprint deferred item) — superadmin-only toggle,
+  // see designer/context.ts's isSectionLocked. Enforced server-side too
+  // (apps/api's pagesBeforeChange rejects any save that changes or removes
+  // a locked section, regardless of this client-side check).
+  locked?: string;
 }
 export interface Block {
   type: string;
