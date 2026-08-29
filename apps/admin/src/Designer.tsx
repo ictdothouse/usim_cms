@@ -163,6 +163,7 @@ import { ELS } from "./designer/elements";
 import { ICONS } from "./designer/icons";
 import { BASE_LANG, type DesignerCtx } from "./designer/context";
 import { useClipboard, type ClipLevel } from "./designer/hooks/useClipboard";
+import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -253,7 +254,6 @@ export default function Designer({
 }) {
   const clipboard = useClipboard();
   const { clipCopy, clipRead, clipHas, styleCopy, styleRead, styleHas } = clipboard;
-  const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
   // it always showed the tenant's actual theme colors/fonts. Once that became
   // an in-app canvas (see mode === "live" below), it lost that for-free theme
@@ -682,10 +682,9 @@ export default function Designer({
       }
     }
     setContent((prev) => ({ ...prev, [activeLang]: leaving, [target]: targetLayout! }));
-    setBlocks(clone(targetLayout));
+    setBlocksDirectly(clone(targetLayout));
     setSel(null);
-    history.current = [];
-    future.current = [];
+    resetHistory();
     setActiveLang(target);
   }
   function clickPageLanguagePill(code: string) {
@@ -707,7 +706,7 @@ export default function Designer({
     try {
       const fresh = await translateLayoutBlocks(base, code, pageLanguage || undefined);
       setContent((prev) => ({ ...prev, [code]: fresh }));
-      if (activeLang === code) setBlocks(clone(fresh));
+      if (activeLang === code) setBlocksDirectly(clone(fresh));
       setDirty(true);
     } finally {
       setTranslating(false);
@@ -719,13 +718,6 @@ export default function Designer({
   // selection was too visually noisy (user feedback). The small "Npx" badge
   // itself still always shows once selected; only the colored band is gated.
   const [hoverBand, setHoverBand] = useState<string | null>(null);
-  // A drag in progress must keep its band shown even once the mouse leaves
-  // the small handle it started on — dragging moves the cursor away from
-  // that ~20px hit target almost immediately, which used to fire
-  // onMouseLeave and clear hoverBand right as the drag began (the band
-  // would then only reappear if the cursor happened to re-enter a handle).
-  // startSpacingDrag sets this before the first onMouseLeave can fire.
-  const draggingBand = useRef(false);
   // When the four/two sides are linked (dragging one moves them all), a
   // single shared key for the whole group means hovering/dragging any one
   // handle shows every linked side's band together, not just the one edge
@@ -738,8 +730,6 @@ export default function Designer({
       if (!draggingBand.current) setHoverBand((k) => (k === key ? null : k));
     },
   });
-  const history = useRef<Block[][]>([]);
-  const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
   // Same stable-snapshot-while-typing pattern as editingText above, but for
@@ -798,86 +788,18 @@ export default function Designer({
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
 
-  // Uses the functional setState form so multiple mutate() calls fired
-  // synchronously in the same tick each build on the PREVIOUS call's result
-  // instead of all cloning the same pre-edit `blocks` closure value and
-  // racing to overwrite each other. This came up for real: a "linked"
-  // FourSideControl commit calls setSide once per side (sides.forEach) — 4
-  // separate mutate() calls back to back — and with a plain `const next =
-  // clone(blocks)` here, all 4 cloned the same stale snapshot and only the
-  // LAST call's single-side change actually stuck (every other side's
-  // change was silently discarded), even though the linked value looked
-  // right in the input itself.
-  function mutate(fn: (next: Block[]) => void) {
-    history.current.push(clone(blocks));
-    if (history.current.length > 50) history.current.shift();
-    future.current = [];
-    setBlocks((prev) => {
-      const next = clone(prev);
-      fn(next);
-      return next;
-    });
-    setDirty(true);
-  }
-
-  // Figma-style drag-to-resize for the spacing-overlay badges: one history
-  // entry for the whole drag (pushed once, up front) instead of one per
-  // mousemove — every subsequent move re-derives the full next value from
-  // the drag's start snapshot and overwrites, rather than accumulating.
-  function startSpacingDrag(
-    e: React.MouseEvent,
-    startPx: number,
-    axis: "x" | "y",
-    sign: 1 | -1,
-    apply: (next: Block[], px: number) => void,
-    bandKey?: string,
-  ) {
-    e.stopPropagation();
-    e.preventDefault();
-    const startPos = axis === "x" ? e.clientX : e.clientY;
-    const base = clone(blocks);
-    history.current.push(clone(blocks));
-    if (history.current.length > 50) history.current.shift();
-    future.current = [];
-    draggingBand.current = true;
-    if (bandKey) setHoverBand(bandKey);
-    function onMove(ev: MouseEvent) {
-      const pos = axis === "x" ? ev.clientX : ev.clientY;
-      const px = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
-      const next = clone(base);
-      apply(next, px);
-      setBlocks(next);
-      setDirty(true);
-    }
-    function onUp() {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      draggingBand.current = false;
-      if (bandKey) setHoverBand((k) => (k === bandKey ? null : k));
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
-
-  function undo() {
-    const prev = history.current.pop();
-    if (!prev) return;
-    future.current.push(clone(blocks));
-    setBlocks(prev);
-    setSel(null);
-    setDirty(true);
-    bumpStructural();
-  }
-
-  function redo() {
-    const next = future.current.pop();
-    if (!next) return;
-    history.current.push(clone(blocks));
-    setBlocks(next);
-    setSel(null);
-    setDirty(true);
-    bumpStructural();
-  }
+  // blocks/mutate/startSpacingDrag/undo/redo/resetHistory extracted to
+  // designer/hooks/useUndoRedo.ts — see that file for the mutate()
+  // functional-setState-form rationale (a documented historical bug fix)
+  // and startSpacingDrag's drag-to-resize behavior. `draggingBand` is
+  // returned so bandHoverProps above (still local to Designer()) can keep
+  // reading it directly.
+  const { blocks, setBlocksDirectly, mutate, startSpacingDrag, undo, redo, resetHistory, draggingBand } = useUndoRedo(
+    () => clone((page.layout as Block[] | undefined) ?? []),
+    setDirty,
+    setSel,
+    bumpStructural,
+  );
 
   useEffect(() => {
     setSelectedRect(null);
@@ -2402,6 +2324,7 @@ export default function Designer({
                                   "y",
                                   edge === "top" ? 1 : -1,
                                   (next, px) => applyDrag(key, px)(next),
+                                  setHoverBand,
                                   bandKey(`sec.${b}.padding`, edge, linkedPadding),
                                 );
                               }}
@@ -2430,6 +2353,7 @@ export default function Designer({
                                   "x",
                                   edge === "left" ? 1 : -1,
                                   (next, px) => applyDrag(key, px)(next),
+                                  setHoverBand,
                                   bandKey(`sec.${b}.padding`, edge, linkedPadding),
                                 );
                               }}
@@ -2482,7 +2406,7 @@ export default function Designer({
                             <span
                               key={edge}
                               onMouseDown={(ev) => {
-                                startSpacingDrag(ev, pxOf[edge], "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), k(edge));
+                                startSpacingDrag(ev, pxOf[edge], "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), setHoverBand, k(edge));
                               }}
                               {...bandHoverProps(k(edge))}
                               className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
@@ -2496,7 +2420,7 @@ export default function Designer({
                             <span
                               key={edge}
                               onMouseDown={(ev) => {
-                                startSpacingDrag(ev, pxOf[edge], "x", edge === "left" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), k(edge));
+                                startSpacingDrag(ev, pxOf[edge], "x", edge === "left" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), setHoverBand, k(edge));
                               }}
                               {...bandHoverProps(k(edge))}
                               className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
@@ -2682,6 +2606,7 @@ export default function Designer({
                                                   linkedPadding,
                                                 );
                                               },
+                                              setHoverBand,
                                               k(edge),
                                             );
                                           }}
@@ -2717,6 +2642,7 @@ export default function Designer({
                                                   linkedPadding,
                                                 );
                                               },
+                                              setHoverBand,
                                               k(edge),
                                             );
                                           }}
@@ -2758,6 +2684,7 @@ export default function Designer({
                                         const target = section(next, b).rows[r].columns[c];
                                         writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
                                       },
+                                      setHoverBand,
                                       k(edge),
                                     );
                                   };
@@ -2875,6 +2802,7 @@ export default function Designer({
                                             const target = section(next, b).rows[r].columns[c].elements[e];
                                             writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
                                           },
+                                          setHoverBand,
                                           k(edge),
                                         );
                                       };
@@ -2947,6 +2875,7 @@ export default function Designer({
                                                     const target = section(next, b).rows[r].columns[c].elements[e];
                                                     writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
                                                   },
+                                                  setHoverBand,
                                                   k(edge),
                                                 );
                                               }}
@@ -2977,6 +2906,7 @@ export default function Designer({
                                                     const target = section(next, b).rows[r].columns[c].elements[e];
                                                     writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
                                                   },
+                                                  setHoverBand,
                                                   k(edge),
                                                 );
                                               }}
