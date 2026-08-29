@@ -293,11 +293,33 @@ callouts before assuming any of this is speculative hardening.
   never HTML it renders itself — apps/frontend's own headers are the real CSP surface, out of scope
   here) and `crossOriginResourcePolicy: false` (media/uploads are deliberately fetched cross-origin by
   the tenant frontend and Live Edit's iframe).
-- **Deliberately not done in this pass** (flagged, not forgotten): session tokens still live in
-  `localStorage`, not an `httpOnly` cookie — that migration touches every single admin request and
-  needs its own CSRF strategy, kept separate rather than rushed into the same change as the above.
-  Postgres HA/replication, monitoring/alerting, and auto-rollback-after-promote all need real VPS
-  topology decisions this repo can't make blind — see the audit's own phased roadmap.
+- **Session cookie + CSRF migration** (the item above marked "deliberately not done" is now done):
+  the admin's real session no longer lives in `localStorage` as a bearer token — `POST /api/auth/login`/
+  `/api/auth/totp-verify`/`/api/setup`/`/api/portal/impersonate` set it as an `httpOnly` cookie
+  (`apps/api/src/lib/cookies.ts`'s `SESSION_COOKIE_NAME`, no `@fastify/cookie` dependency — a ~20-line
+  manual parse/serialize was enough for the one cookie this app sets, per this project's "avoid heavy
+  dependencies" constraint) instead of returning it in the response body. `requireTenantAuth`/
+  `verifySuperadmin`/`verifyAnyUser` (`plugins/auth.ts`) read the cookie instead of an `Authorization`
+  header now. Since a cookie is sent automatically by the browser (unlike a header the client had to
+  build), every mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) additionally requires an `x-csrf-token`
+  header matching a `csrfToken` claim embedded in the signed session itself (`checkCsrf` in
+  `plugins/auth.ts`) — a synchronizer-token-in-session pattern, not a second cookie, since the admin
+  panel and API can be on different subdomains where JS on one origin can't read a cookie scoped to the
+  other. `Session.token` (`apps/admin/src/lib/api.ts`) is now this CSRF token, not a bearer secret — kept
+  under the same field name deliberately, since renaming it would have touched the ~100 call sites that
+  pass `session.token` down to every panel; only `request()`'s transport (now `credentials: "include"` +
+  `x-csrf-token` header) and the login/setup/impersonate response-mapping actually changed.
+  `elevateIfAuthenticated` (`generic-crud.ts`, the public-route draft-visibility elevation) now accepts
+  either the cookie OR a forwarded `Authorization: Bearer` header — the latter is unchanged/still used by
+  apps/frontend forwarding a preview/theme-preview token server-to-server, a completely different
+  credential from the admin's own session that was never affected by this migration. **Impersonation**
+  (`POST /api/portal/impersonate`) now overwrites the superadmin's own session cookie with the target
+  webmaster's — exiting impersonation can no longer be a client-side restore of a stashed old token
+  (there's nothing left to restore; the old cookie's raw value was never JS-readable to begin with), so
+  a new `POST /api/portal/exit-impersonation` route re-signs the original superadmin's session from the
+  `impersonatedBy` email the impersonation token carries and re-sets the cookie — a real server
+  round-trip, not a localStorage trick. Postgres HA/replication and auto-rollback-after-promote still
+  need real VPS topology decisions this repo can't make blind — see the audit's own phased roadmap.
 
 ## Architecture
 
@@ -907,6 +929,27 @@ pnpm workspace monorepo with two apps:
   would ship a broken image. Local `pnpm build`/`pnpm typecheck` at the repo root already
   handled this correctly for free (`pnpm -r` respects the workspace dependency graph); only
   the Dockerfile's single-package `--filter` build needed the explicit extra step.
+  **Follow-up (same 4-touchpoint gap, next practical slice):** `ELS`'s field schema and
+  `ElPreview.tsx`/`SectionBlock.astro`'s render switches are still NOT unified — that remains the
+  bigger, cross-framework design question above (a real shared `ElementDefinition` would need one
+  render implementation both React's canvas and Astro's SSR output could consume, which the two
+  frameworks don't share). What WAS closed: `@ucms/element-schema` now also exports its
+  classification buckets (`LENGTH_KEYS`/`COLOR_KEYS`/`ENUM_VALUES`/`REPEATER_SCHEMAS`, previously
+  module-local), and `apps/admin` (now a real `@ucms/element-schema` dependency, not just a
+  comment referencing it) has a new `designer/elements.test.ts` that walks every `ELS[type].fields`
+  entry and asserts its `kind` actually lands in the matching bucket — `"length"` keys must be in
+  `LENGTH_KEYS`, `"color"` in `COLOR_KEYS`, `"select"` options must be a subset of `ENUM_VALUES`,
+  `"repeater"` itemFields keys must match `REPEATER_SCHEMAS`. This is the automated version of the
+  exact incident already documented above (`LENGTH_KEYS` missing `"padding"` 400'd on first
+  save) — it turns that class of drift into a red test instead of a live 400. Running it
+  immediately caught one real instance: `documentdownload`'s `columns` field offers a `"1"` option
+  (1-column layout) that `ENUM_VALUES.columns` didn't allow, which would have 400'd on save; fixed
+  by adding `"1"` to that enum. Whether to go further and derive admin's per-field `options` arrays
+  from these same exported buckets (removing the *other* direction of duplication) is a separate,
+  lower-value follow-up — those arrays are small/static and rarely drift, and several fields
+  deliberately narrow the shared set (`infobox`'s `align` offers only `left`/`center`, not the
+  3-value global enum), so a blind swap risks silently widening a field's real options; the test
+  above already catches the direction that has actually broken production.
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
@@ -1519,9 +1562,18 @@ pnpm workspace monorepo with two apps:
   `--diagnose` (Docker Desktop's own networking backend doesn't hit the iptables-FORWARD
   class of bug `install.sh` diagnoses — only `docker compose ps` output). Uses
   `execFileSync` with argv arrays (never a shell string) for every Docker CLI call.
-- Monitoring/alerting is not implemented — known gap. `restart: unless-stopped` +
-  compose healthchecks only cover crash-restart, not metrics or alerting; revisit if/when
-  the instance carries enough tenants that a silent outage would go unnoticed.
+- Basic alerting is implemented in `monitor/server.js`, opt-in via `ALERT_WEBHOOK_URL` (unset = no-op,
+  same convention as `REDIS_URL`/PgBouncer): a `setInterval` poll (`ALERT_POLL_INTERVAL_MS`, default 60s)
+  reads the same `getStatus()` the dashboard itself renders from and edge-triggers a plain JSON webhook
+  POST (`{text, content}` — works unconfigured with a Slack/Discord/Teams incoming webhook, or a custom
+  endpoint) whenever a monitored service (db/api/frontend/admin) flips up↔down. `POST /api/alerts/test`
+  (same basic-auth as every other monitor route) fires a one-off test message to verify wiring without
+  waiting for a real outage. Deliberately no email/SMTP client — this file's whole point is staying
+  dependency-free (`node monitor/server.js`, no `npm install`), and a webhook covers the same "someone
+  gets pinged" need without one. Still a gap: no real metrics/dashboards (CPU/memory/request-rate time
+  series) — this is service-up/down alerting only, `restart: unless-stopped` + compose healthchecks
+  still do the actual crash-recovery; revisit with a real metrics stack if/when the instance carries
+  enough tenants that this coarse a signal stops being enough.
 
 ### Blue-green zero-downtime deploys (docker mode only)
 
