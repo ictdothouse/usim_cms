@@ -162,6 +162,7 @@ import { ElPreview } from "./designer/ElPreview";
 import { ELS } from "./designer/elements";
 import { ICONS } from "./designer/icons";
 import { BASE_LANG, type DesignerCtx } from "./designer/context";
+import { useClipboard, type ClipLevel } from "./designer/hooks/useClipboard";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -218,20 +219,6 @@ const TRANSLATABLE_TEXT_KEYS: Partial<Record<ElType, string[]>> = {
   ctabanner: ["heading", "description", "button1Label", "button2Label"],
   announcementbar: ["text", "linkLabel"],
 };
-type ClipLevel = "section" | "row" | "column" | "element";
-const CLIP_KEYS: Record<ClipLevel, string> = {
-  section: "designer:clip:section",
-  row: "designer:clip:row",
-  column: "designer:clip:column",
-  element: "designer:clip:element",
-};
-const CLIPSTYLE_KEYS: Record<ClipLevel, string> = {
-  section: "designer:clipstyle:section",
-  row: "designer:clipstyle:row",
-  column: "designer:clipstyle:column",
-  element: "designer:clipstyle:element",
-};
-
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
 // "0") into the rounded px number shown on the badge. rem assumed at the
 // browser default 16px root — this editor doesn't let authors change that.
@@ -300,6 +287,8 @@ export default function Designer({
   onClose: (saved: boolean) => void;
   isSuper: boolean;
 }) {
+  const clipboard = useClipboard();
+  const { clipCopy, clipRead, clipHas, styleCopy, styleRead, styleHas } = clipboard;
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
   // it always showed the tenant's actual theme colors/fonts. Once that became
@@ -581,7 +570,6 @@ export default function Designer({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
-  const [clipTick, setClipTick] = useState(0); // bumped on every clipboard write, to re-render Paste button enabled-state
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
@@ -969,41 +957,6 @@ export default function Designer({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structuralTick]);
-
-  // localStorage-backed clipboard (survives reload/switching pages), namespaced
-  // per level so copying a section doesn't clobber a copied element.
-  function clipCopy(level: ClipLevel, data: unknown) {
-    localStorage.setItem(CLIP_KEYS[level], JSON.stringify(data));
-    setClipTick((x) => x + 1);
-  }
-  function clipRead<T = unknown>(level: ClipLevel): T | null {
-    const raw = localStorage.getItem(CLIP_KEYS[level]);
-    return raw ? (JSON.parse(raw) as T) : null;
-  }
-  function clipHas(level: ClipLevel) {
-    void clipTick;
-    return localStorage.getItem(CLIP_KEYS[level]) !== null;
-  }
-  function styleCopy(level: ClipLevel, props: Record<string, string>, elType?: ElType) {
-    const clean = { ...props };
-    (elType ? CONTENT_KEYS[elType] : []).forEach((k) => delete clean[k]);
-    localStorage.setItem(CLIPSTYLE_KEYS[level], JSON.stringify(clean));
-    setClipTick((x) => x + 1);
-  }
-  function styleRead(level: ClipLevel): Record<string, string> | null {
-    const raw = localStorage.getItem(CLIPSTYLE_KEYS[level]);
-    return raw ? (JSON.parse(raw) as Record<string, string>) : null;
-  }
-  function styleHas(level: ClipLevel) {
-    void clipTick;
-    return localStorage.getItem(CLIPSTYLE_KEYS[level]) !== null;
-  }
-
-  useEffect(() => {
-    const onStorage = () => setClipTick((x) => x + 1);
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
 
   useEffect(() => {
     if (!ctxMenu) return;
