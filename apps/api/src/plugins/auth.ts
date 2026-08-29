@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { sql } from "drizzle-orm";
 import { verifySession, type SessionPayload } from "../db/auth.js";
+import { getSessionCookie } from "../lib/cookies.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -8,18 +9,38 @@ declare module "fastify" {
   }
 }
 
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// The session itself lives in an httpOnly cookie (unreadable by JS, so an
+// XSS bug can't exfiltrate it) — but that means the browser now attaches it
+// automatically to ANY request to this origin, cross-site included, which is
+// exactly the CSRF threat model. session.csrfToken (echoed by the admin as
+// an x-csrf-token header on every mutating request, see lib/api.ts's
+// request()) proves the request was actually built by JS running on the
+// admin's own origin, not just riding the ambient cookie from somewhere
+// else. GET/HEAD are exempt — they don't change state.
+function checkCsrf(req: FastifyRequest, reply: FastifyReply, session: SessionPayload): boolean {
+  if (!MUTATING_METHODS.has(req.method)) return true;
+  const header = req.headers["x-csrf-token"];
+  if (!session.csrfToken || header !== session.csrfToken) {
+    reply.code(403).send({ error: "Missing or invalid CSRF token" });
+    return false;
+  }
+  return true;
+}
+
 // Runs after tenantPlugin (needs req.tenantHost already set): validates the
-// bearer token, then locks a webmaster to exactly the tenant on their
+// session cookie, then locks a webmaster to exactly the tenant on their
 // session — the actual enforcement of "webmaster hanya untuk web dia je".
 export async function requireTenantAuth(app: FastifyInstance) {
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
-    const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
-      return reply.code(401).send({ error: "Missing bearer token" });
+    const cookie = getSessionCookie(req);
+    if (!cookie) {
+      return reply.code(401).send({ error: "Missing session" });
     }
-    const session = verifySession(header.slice("Bearer ".length));
+    const session = verifySession(cookie);
     if (!session) {
-      return reply.code(401).send({ error: "Invalid or expired token" });
+      return reply.code(401).send({ error: "Invalid or expired session" });
     }
     // A preview token (see /api/pages/:id/preview-token) is read-only by
     // design — it must never reach a write/protected route, even though it
@@ -31,6 +52,7 @@ export async function requireTenantAuth(app: FastifyInstance) {
     if (session.pendingMfa) {
       return reply.code(403).send({ error: "Complete MFA verification first" });
     }
+    if (!checkCsrf(req, reply, session)) return;
     const allowedHosts = session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []);
     if (session.role === "webmaster" && !allowedHosts.includes(req.tenantHost)) {
       return reply.code(403).send({ error: "Not authorized for this tenant" });
@@ -45,14 +67,14 @@ export async function requireTenantAuth(app: FastifyInstance) {
 // For root-level (non-tenant-scoped) superadmin-only routes: manage
 // tenants/users/global theme. No x-tenant-host involved here at all.
 export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): SessionPayload | null {
-  const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
-    reply.code(401).send({ error: "Missing bearer token" });
+  const cookie = getSessionCookie(req);
+  if (!cookie) {
+    reply.code(401).send({ error: "Missing session" });
     return null;
   }
-  const session = verifySession(header.slice("Bearer ".length));
+  const session = verifySession(cookie);
   if (!session) {
-    reply.code(401).send({ error: "Invalid or expired token" });
+    reply.code(401).send({ error: "Invalid or expired session" });
     return null;
   }
   if (session.previewOnly) {
@@ -67,6 +89,7 @@ export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): Sess
     reply.code(403).send({ error: "Superadmin only" });
     return null;
   }
+  if (!checkCsrf(req, reply, session)) return null;
   return session;
 }
 
@@ -74,14 +97,14 @@ export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): Sess
 // call, keyed by their own userId — theme-preset favourites, not
 // tenant-scoped content, so no x-tenant-host/tenantPlugin involved.
 export function verifyAnyUser(req: FastifyRequest, reply: FastifyReply): SessionPayload | null {
-  const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
-    reply.code(401).send({ error: "Missing bearer token" });
+  const cookie = getSessionCookie(req);
+  if (!cookie) {
+    reply.code(401).send({ error: "Missing session" });
     return null;
   }
-  const session = verifySession(header.slice("Bearer ".length));
+  const session = verifySession(cookie);
   if (!session) {
-    reply.code(401).send({ error: "Invalid or expired token" });
+    reply.code(401).send({ error: "Invalid or expired session" });
     return null;
   }
   if (session.previewOnly) {
@@ -92,5 +115,6 @@ export function verifyAnyUser(req: FastifyRequest, reply: FastifyReply): Session
     reply.code(403).send({ error: "Complete MFA verification first" });
     return null;
   }
+  if (!checkCsrf(req, reply, session)) return null;
   return session;
 }
