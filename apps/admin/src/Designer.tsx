@@ -167,42 +167,6 @@ import { useClipboard, type ClipLevel } from "./designer/hooks/useClipboard";
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-// "Paste style" strips these before merging onto a target, so copying a
-// heading's style and pasting it onto a button can't leak the heading's
-// actual text — only the type's own content field(s) need stripping;
-// section/column props are already style-only.
-const CONTENT_KEYS: Record<ElType, string[]> = {
-  heading: ["text"],
-  text: ["text"],
-  image: ["src", "alt"],
-  button: ["label", "href"],
-  icon: ["name"],
-  list: ["items"],
-  html: ["html"],
-  gallery: ["images"],
-  embed: ["url"],
-  spacer: [],
-  divider: [],
-  accordion: ["items"],
-  infobox: ["name", "heading", "text"],
-  tabs: ["items"],
-  slider: ["slides"],
-  menu: ["menuId"],
-  cardgrid: ["cards"],
-  ctabanner: ["heading", "description", "button1Label", "button2Label"],
-  announcementbar: ["text", "linkLabel"],
-  postlist: [],
-  eventlist: [],
-  testimonial: ["testimonials"],
-  statscounter: ["stats"],
-  peoplegrid: ["people"],
-  socialicons: ["socials"],
-  logocloud: ["logos"],
-  timeline: ["timelineItems"],
-  documentdownload: ["documents"],
-  googlemap: ["embedUrl", "address"],
-  announcementticker: ["tickerItems"],
-};
 // i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
 // a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through
 // /api/translate as a plain string. Everything else (accordion/tabs' `items`,
