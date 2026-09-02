@@ -166,6 +166,7 @@ import { useClipboard, type ClipLevel } from "./designer/hooks/useClipboard";
 import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import { useBpStyle } from "./designer/hooks/useBpStyle";
 import { useLiveEditBridge } from "./designer/hooks/useLiveEditBridge";
+import { useBlockOps } from "./designer/hooks/useBlockOps";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -616,6 +617,16 @@ export default function Designer({
   });
   const { mode, liveSrc, frameARef, frameBRef, liveFrame, selectedRect, reloading, enterLive, handleFrameLoad, toggleLive } = liveEdit;
 
+  // designer/hooks/useBlockOps.ts — section/row/column/element duplicate/
+  // copy/paste/copy-style/paste-style/delete/move/nudge actions.
+  const blockOps = useBlockOps({ blocks, mutate, setSel, clipboard, bumpStructural, isSuper, t });
+  const {
+    isSectionLocked, duplicateSection, copySection, pasteSection, copyStyleSection, pasteStyleSection, deleteSection,
+    duplicateColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, nudgeColumn,
+    deleteRow, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, setRowGap,
+    duplicateElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, deleteElement, moveElement,
+  } = blockOps;
+
   // Auto-expand the Layers tree around the current selection so switching to
   // the tab, or changing selection via the canvas/Live Edit, always reveals
   // the selected row without requiring a manual expand-click first.
@@ -857,156 +868,9 @@ export default function Designer({
     });
   }, [blocks]);
 
-  // Extracted from BlockControls/Inspector's inline closures so both those
-  // and LiveEditToolbar (Live Edit mode) call one shared implementation per
-  // action+level instead of re-deriving the same splice/clip logic.
-  // Section lock (Page Blueprint deferred item) — a superadmin can mark a
-  // section `locked` (props.locked === "true", toggled in the Inspector) so
-  // a non-superadmin can view it but never mutate it. Only delete and
-  // paste-style actually overwrite the locked section's own content (every
-  // other section action — duplicate, copy, paste-after, move, save-as-
-  // template — leaves it untouched, so those stay enabled). This is UX
-  // only: the real gate is apps/api's pagesBeforeChange, which rejects any
-  // save that changes or removes a locked section regardless of what the
-  // client sends.
-  function isSectionLocked(b: number): boolean {
-    return !isSuper && (blocks[b]?.props as unknown as SectionProps | undefined)?.locked === "true";
-  }
-  function duplicateSection(b: number) {
-    mutate((bs) => bs.splice(b + 1, 0, clone(bs[b])));
-    bumpStructural();
-  }
-  function copySection(b: number) {
-    clipCopy("section", blocks[b]);
-  }
-  function pasteSection(b: number) {
-    const data = clipRead<Block>("section");
-    if (data) {
-      mutate((bs) => bs.splice(b + 1, 0, clone(data)));
-      bumpStructural();
-    }
-  }
-  function copyStyleSection(b: number) {
-    // rows is the section's content (children), never its "style" —
-    // stripped so pasting style elsewhere can't overwrite content.
-    const { rows: _rows, ...styleProps } = blocks[b].props as unknown as SectionProps;
-    styleCopy("section", styleProps as unknown as Record<string, string>);
-  }
-  function pasteStyleSection(b: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const style = styleRead("section");
-    if (style) mutate((bs) => Object.assign(bs[b].props, style));
-  }
-  function deleteSection(b: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => {
-      bs.splice(b, 1);
-    });
-    setSel(null);
-    bumpStructural();
-  }
-
-  function duplicateColumn(b: number, r: number, c: number) {
-    mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(section(bs, b).rows[r].columns[c])));
-    bumpStructural();
-  }
-  function copyColumn(b: number, r: number, c: number) {
-    clipCopy("column", section(blocks, b).rows[r].columns[c]);
-  }
-  function pasteColumn(b: number, r: number, c: number) {
-    const data = clipRead<Col>("column");
-    if (data) {
-      mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
-      bumpStructural();
-    }
-  }
-  function copyStyleColumn(b: number, r: number, c: number) {
-    styleCopy("column", section(blocks, b).rows[r].columns[c].props ?? {});
-  }
-  function pasteStyleColumn(b: number, r: number, c: number) {
-    const style = styleRead("column");
-    if (style)
-      mutate((bs) => {
-        const target = section(bs, b).rows[r].columns[c];
-        target.props = { ...(target.props ?? {}), ...style };
-      });
-  }
-  function deleteColumn(b: number, r: number, c: number) {
-    mutate((bs) => {
-      const row = section(bs, b).rows[r];
-      row.columns.splice(c, 1);
-      if (row.columns.length === 0) section(bs, b).rows.splice(r, 1);
-    });
-    setSel(null);
-    bumpStructural();
-  }
-  // Named distinctly from designerTree.ts's imported `moveColumn` (a bulk
-  // from/to array-mutation helper) — this one is the arrow-button single-step
-  // nudge. They used to share a name, which let this local function
-  // declaration (hoisted) shadow the import for the whole component body,
-  // breaking the imported moveColumn's real call sites below.
-  function nudgeColumn(b: number, r: number, c: number, dir: -1 | 1) {
-    const target = c + dir;
-    if (target < 0 || target >= section(blocks, b).rows[r].columns.length) return;
-    mutate((bs) => {
-      const cols = section(bs, b).rows[r].columns;
-      cols.splice(target, 0, cols.splice(c, 1)[0]);
-    });
-    setSel([b, r, target]);
-    bumpStructural();
-  }
-  // A freshly added-row preset has columns but no elements in them yet — the
-  // only way to remove it was previously to delete each of its columns one
-  // at a time (deleteColumn only cascades to the row once its last column is
-  // gone). This is the direct one-click equivalent.
-  function deleteRow(b: number, r: number) {
-    mutate((bs) => section(bs, b).rows.splice(r, 1));
-    setSel(null);
-    bumpStructural();
-  }
-  function moveRow(b: number, r: number, dir: -1 | 1) {
-    const target = r + dir;
-    if (target < 0 || target >= section(blocks, b).rows.length) return;
-    mutate((bs) => {
-      const rows = section(bs, b).rows;
-      rows.splice(target, 0, rows.splice(r, 1)[0]);
-    });
-    setSel([b, target]);
-    bumpStructural();
-  }
-  function duplicateRow(b: number, r: number) {
-    mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(section(bs, b).rows[r])));
-    bumpStructural();
-  }
-  function copyRow(b: number, r: number) {
-    clipCopy("row", section(blocks, b).rows[r]);
-  }
-  function pasteRow(b: number, r: number) {
-    const data = clipRead<Row>("row");
-    if (data) {
-      mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(data)));
-      bumpStructural();
-    }
-  }
-  function copyStyleRow(b: number, r: number) {
-    const { columns: _columns, ...styleProps } = section(blocks, b).rows[r];
-    styleCopy("row", styleProps as unknown as Record<string, string>);
-  }
-  function pasteStyleRow(b: number, r: number) {
-    const style = styleRead("row");
-    if (style) mutate((bs) => Object.assign(section(bs, b).rows[r], style));
-  }
-  function setRowGap(b: number, r: number, gap: string | undefined) {
-    mutate((bs) => {
-      section(bs, b).rows[r].gap = gap;
-    });
-  }
+  // Section/row/column/element duplicate/copy/paste/copy-style/paste-style/
+  // delete/move/nudge actions moved to designer/hooks/useBlockOps.ts — see
+  // `blockOps` below.
   function setPageGap(gap: string | undefined) {
     setPageSettings((s) => ({ ...s, gap }));
     setDirty(true);
@@ -1026,53 +890,6 @@ export default function Designer({
   function setPageThemePreset(preset: api.ThemePreset | null) {
     setPageSettings((s) => (preset ? { ...s, theme: preset.settings, themePresetName: preset.name } : { ...s, theme: undefined, themePresetName: undefined }));
     setDirty(true);
-  }
-
-  function duplicateElement(b: number, r: number, c: number, e: number) {
-    mutate((bs) => {
-      const src = section(bs, b).rows[r].columns[c].elements[e];
-      section(bs, b).rows[r].columns[c].elements.splice(e + 1, 0, { ...clone(src), id: uid() });
-    });
-    bumpStructural();
-  }
-  function copyElement(b: number, r: number, c: number, e: number) {
-    clipCopy("element", section(blocks, b).rows[r].columns[c].elements[e]);
-  }
-  function pasteElement(b: number, r: number, c: number, e: number) {
-    const data = clipRead<El>("element");
-    if (data) {
-      mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
-      bumpStructural();
-    }
-  }
-  function copyStyleElement(b: number, r: number, c: number, e: number) {
-    const el = section(blocks, b).rows[r].columns[c].elements[e];
-    styleCopy("element", el.props, el.type);
-  }
-  function pasteStyleElement(b: number, r: number, c: number, e: number) {
-    const style = styleRead("element");
-    if (style)
-      mutate((bs) => {
-        const target = section(bs, b).rows[r].columns[c].elements[e];
-        target.props = { ...target.props, ...style };
-      });
-  }
-  function deleteElement(b: number, r: number, c: number, e: number) {
-    mutate((bs) => {
-      removeAt(bs, [b, r, c, e]);
-    });
-    setSel(null);
-    bumpStructural();
-  }
-  function moveElement(b: number, r: number, c: number, e: number, dir: -1 | 1) {
-    const target = e + dir;
-    if (target < 0 || target >= section(blocks, b).rows[r].columns[c].elements.length) return;
-    mutate((bs) => {
-      const els = section(bs, b).rows[r].columns[c].elements;
-      els.splice(target, 0, els.splice(e, 1)[0]);
-    });
-    setSel([b, r, c, target]);
-    bumpStructural();
   }
 
   function dropIntoColumn(colPath: number[], index?: number) {
