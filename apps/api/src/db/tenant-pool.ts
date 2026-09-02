@@ -18,11 +18,19 @@ export class UnknownTenantError extends Error {
 // tables (tenants/users/roles/site_theme/shared_content). Tenant content
 // does NOT live here — each tenant has its own database (see below).
 // max/timeouts stop one slow/stuck query from starving everything else.
+// statement_timeout is NOT passed as a Pool constructor option here: pg sends
+// that one as a Postgres startup-packet parameter, which PgBouncer (sits in
+// front in deploys, see pgbouncer.ini) rejects with "unsupported startup
+// parameter" unless explicitly allowlisted. Setting it via a real SET on
+// each new connection works through PgBouncer's session pool_mode the same
+// way plugins/tenant.ts's own SET SESSION app.authenticated already does.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
-  statement_timeout: 10_000,
   idleTimeoutMillis: 30_000,
+});
+pool.on("connect", (client) => {
+  client.query("SET statement_timeout = 10000").catch(() => {});
 });
 
 const dbDir = path.dirname(fileURLToPath(import.meta.url));
@@ -63,8 +71,10 @@ function getTenantPool(connectionString: string): Pool {
     tp = new Pool({
       connectionString,
       max: 5,
-      statement_timeout: 10_000,
       idleTimeoutMillis: 30_000,
+    });
+    tp.on("connect", (client) => {
+      client.query("SET statement_timeout = 10000").catch(() => {});
     });
     tenantPools.set(connectionString, tp);
   }
