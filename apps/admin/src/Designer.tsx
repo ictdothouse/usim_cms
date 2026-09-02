@@ -152,9 +152,9 @@ import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/g
 import { TemplatePreview } from "./designer/TemplatePreview";
 import {
   PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle,
-  SPACE, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK, RADIUS_CORNER_KEYS,
+  SPACE, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK,
 } from "./designer/style";
-import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel, SECTION_FIELDS, COLUMN_FIELDS, COLUMN_SPACING_KEYS, CSS_CLASS_FIELD } from "./designer/fields";
+import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel, SECTION_FIELDS, CSS_CLASS_FIELD } from "./designer/fields";
 import { BufferedInput, BpToggle } from "./designer/FieldControls";
 import { FieldGroups } from "./designer/FieldGroups";
 import { Inspector } from "./designer/Inspector";
@@ -164,6 +164,7 @@ import { ICONS } from "./designer/icons";
 import { BASE_LANG, type DesignerCtx } from "./designer/context";
 import { useClipboard, type ClipLevel } from "./designer/hooks/useClipboard";
 import { useUndoRedo } from "./designer/hooks/useUndoRedo";
+import { useBpStyle } from "./designer/hooks/useBpStyle";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -281,13 +282,6 @@ export default function Designer({
   // like Heading doesn't force scrolling past Padding/Margin/Typography just
   // to reach the Text field, or vice versa.
   const [inspectorTab, setInspectorTab] = useState<"content" | "style">("content");
-  // Four-side padding/radius controls (section Inspector): linked = one input
-  // sets all 4 sides/corners equal; unlinked = Top/Right/Bottom/Left edited
-  // independently. UI-only toggle, not persisted — doesn't change what's
-  // already stored, only which input(s) are shown.
-  const [linkedPadding, setLinkedPadding] = useState(true);
-  const [linkedRadius, setLinkedRadius] = useState(true);
-  const [linkedMargin, setLinkedMargin] = useState(true);
   function toggleGroup(g: FieldGroupKey) {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -297,49 +291,11 @@ export default function Designer({
     });
   }
 
-  // Breakpoint edit mode — admin-preview only (Framer-style Desktop/Tablet/
-  // Mobile toggle). Narrows the canvas width and routes Inspector field
-  // edits into each node's `bp` override bag instead of its base props.
-  // apps/frontend never reads `bp` — the real site is unaffected, this is
-  // purely how the page looks/edits inside this Designer session.
-  const [bp, setBp] = useState<"desktop" | "tablet" | "mobile">("desktop");
-  function bpKey(key: string) {
-    return `${bp}:${key}`;
-  }
-  // Whether ANY of `keys` has an override at the CURRENT bp — a FourSideControl
-  // covers several side keys (paddingTop/Right/Bottom/Left) at once, so its own
-  // toggle icon represents the group, not one key.
-  function bpKeysOverridden(bag: Record<string, string> | undefined, keys: string[]): boolean {
-    return !!bag && keys.some((k) => bag[bpKey(k)] !== undefined);
-  }
-  // Enabling an override seeds it at "" (falls through lengthValue's own
-  // default-preset resolution until the author actually types a value) rather
-  // than copying the resolved desktop value — simpler, and "no override yet
-  // but the icon is now active" is itself a real, distinct state worth
-  // showing. Disabling removes every one of `keys`' override entries.
-  function toggleBpKeys(bag: Record<string, string> | undefined, keys: string[]): Record<string, string> {
-    const has = bpKeysOverridden(bag, keys);
-    const next = { ...(bag ?? {}) };
-    for (const k of keys) {
-      if (has) delete next[bpKey(k)];
-      else next[bpKey(k)] = "";
-    }
-    return next;
-  }
-  // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
-  // — this is real (SectionBlock.astro renders the matching @media rule on
-  // the published site), so the Blocks canvas ghosting it here isn't just
-  // cosmetic, it's telling the truth about what a visitor at this breakpoint
-  // would see. Never actually removed from the canvas though (best practice,
-  // matches Elementor/Webflow): still fully visible-enough-to-click/edit,
-  // just faded + labeled, since hiding it outright would make an author
-  // unable to ever reach an element hidden on the bp they're currently
-  // previewing.
-  function hiddenAtBp(props: { hideDesktop?: string; hideTablet?: string; hideMobile?: string } | undefined): boolean {
-    if (!props) return false;
-    const key = bp === "desktop" ? "hideDesktop" : bp === "tablet" ? "hideTablet" : "hideMobile";
-    return props[key] === "true";
-  }
+  // Breakpoint edit mode + four-side linked-input toggles + all bp-aware
+  // style resolution/mutation helpers — see designer/hooks/useBpStyle.ts.
+  // (useBpStyle() itself is called further below, once `mutate` exists —
+  // this component's own function declarations below just close over the
+  // `bp`/etc bindings, which is fine regardless of declaration order.)
   function HiddenAtBpBadge({ hidden }: { hidden: boolean }) {
     if (!hidden) return null;
     const Icon = bp === "tablet" ? Tablet : Smartphone;
@@ -348,158 +304,6 @@ export default function Designer({
         <Icon className="h-2.5 w-2.5" /> {t("designer-hidden-at-bp")}
       </span>
     );
-  }
-  function bpGetValue(base: string | undefined, overrides: Record<string, string> | undefined, key: string) {
-    if (bp !== "desktop") {
-      const ov = overrides?.[bpKey(key)];
-      if (ov !== undefined) return ov;
-    }
-    return base ?? "";
-  }
-  // Canvas-preview equivalents of bpGetValue — resolve the active
-  // breakpoint's overrides into the same style objects colStyle()/the
-  // section wrapper/element margin already compute from desktop props.
-  // Resolves one side/corner of a four-side control: its own override (bp-
-  // aware) if set, else the shared axis/preset field's value (also bp-aware).
-  // Generic version of fourSideValue()/setFourSideValue() below — same
-  // fallback-chain resolution, but for any props/bp bag (Section, Column, or
-  // Element), not just SectionProps.
-  function sideValue(props: Record<string, string> | undefined, bpBag: Record<string, string> | undefined, perSideKey: string, fallbackKey: string): string {
-    const raw = bpGetValue(props?.[perSideKey], bpBag, perSideKey);
-    return raw || bpGetValue(props?.[fallbackKey], bpBag, fallbackKey);
-  }
-  function fourSideValue(sp: SectionProps, perSideKey: string, fallbackKey: string): string {
-    return sideValue(sp as unknown as Record<string, string>, sp.bp, perSideKey, fallbackKey);
-  }
-  function setFourSideValue(b: number, perSideKey: string, value: string) {
-    mutate((bs) => {
-      const block = bs[b];
-      if (bp === "desktop") {
-        (block.props as Record<string, unknown>)[perSideKey] = value;
-      } else {
-        const props = block.props as unknown as SectionProps;
-        props.bp = { ...(props.bp ?? {}), [bpKey(perSideKey)]: value };
-      }
-    });
-  }
-  function setColSideValue(b: number, r: number, c: number, perSideKey: string, value: string) {
-    mutate((bs) => {
-      const target = section(bs, b).rows[r].columns[c];
-      if (bp === "desktop") target.props = { ...(target.props ?? {}), [perSideKey]: value };
-      else target.bp = { ...(target.bp ?? {}), [bpKey(perSideKey)]: value };
-    });
-  }
-  function setElSideValue(b: number, r: number, c: number, e: number, perSideKey: string, value: string) {
-    mutate((bs) => {
-      const target = section(bs, b).rows[r].columns[c].elements[e];
-      if (bp === "desktop") target.props[perSideKey] = value;
-      else target.bp = { ...(target.bp ?? {}), [bpKey(perSideKey)]: value };
-    });
-  }
-  // Canvas drag-to-resize write for a four-side control: when `linked` is on
-  // (the chain-icon toggle), one dragged handle must move all sides together
-  // — same rule as the Inspector's linked input, which fans the same value
-  // out to every side key. `target` is already the cloned-next-state node
-  // (from startSpacingDrag's `apply` callback), mutated in place.
-  function writeDragSideKeys(
-    target: { props?: Record<string, string>; bp?: Record<string, string> },
-    keys: readonly string[],
-    activeKey: string,
-    px: number,
-    linked: boolean,
-  ) {
-    const touched = linked ? keys : [activeKey];
-    if (bp === "desktop") {
-      const patch: Record<string, string> = {};
-      for (const k of touched) patch[k] = `${px}px`;
-      target.props = { ...(target.props ?? {}), ...patch };
-    } else {
-      const patch: Record<string, string> = {};
-      for (const k of touched) patch[bpKey(k)] = `${px}px`;
-      target.bp = { ...(target.bp ?? {}), ...patch };
-    }
-  }
-  function sectionBpStyle(sp: SectionProps): React.CSSProperties {
-    const v = (key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
-    const bgImage = v("bgImage");
-    const border = v("border");
-    const borderWidth = v("borderWidth");
-    const borderColor = v("borderColor");
-    const borderStyle = v("borderStyle");
-    const shadow = v("shadow");
-    const opacity = v("opacity");
-    const side = (side: keyof typeof PADDING_SIDE_KEYS) =>
-      lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]), PAD, side === "top" || side === "bottom" ? PAD.md : "1.5rem");
-    const corner = (side: keyof typeof RADIUS_CORNER_KEYS) => {
-      const raw = fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius");
-      return lengthValue(raw, RADIUS, RADIUS.none);
-    };
-    const marginSide = (side: keyof typeof MARGIN_SIDE_KEYS) =>
-      lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0");
-    return {
-      background: bgImage ? `url(${bgImage}) center/cover` : v("bg") || "var(--color-bg, #ffffff)",
-      color: v("textColor") || "inherit",
-      padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}`,
-      margin: `${marginSide("top")} ${marginSide("right")} ${marginSide("bottom")} ${marginSide("left")}`,
-      // borderWidth set = the new real stroke fields win; otherwise fall
-      // back to the legacy none/thin/thick preset so old pages don't move.
-      ...(borderWidth
-        ? { border: `${borderWidth}px ${borderStyle || "solid"} ${borderColor || "currentColor"}` }
-        : border
-          ? { border: BORDER[border] }
-          : {}),
-      boxShadow: shadowToCss(shadow),
-      borderRadius: `${corner("top")} ${corner("right")} ${corner("bottom")} ${corner("left")}`,
-      opacity: opacity ? Math.max(0, Math.min(100, Number(opacity))) / 100 : undefined,
-    };
-  }
-  function bpColStyle(col: Col): React.CSSProperties {
-    if (bp === "desktop" || !col.bp) return colStyle(col.props);
-    const merged: Record<string, string> = { ...(col.props ?? {}) };
-    for (const key of [...COLUMN_FIELDS.map((f) => f.key), ...COLUMN_SPACING_KEYS]) {
-      const ov = col.bp[bpKey(key)];
-      if (ov !== undefined) merged[key] = ov;
-    }
-    return colStyle(merged);
-  }
-  function bpMarginStyle(el: El): React.CSSProperties | undefined {
-    const side = (s: keyof typeof MARGIN_SIDE_KEYS) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[s], MARGIN_SIDE_FALLBACK[s]);
-    const top = side("top");
-    const right = side("right");
-    const bottom = side("bottom");
-    const left = side("left");
-    if (!top && !right && !bottom && !left) return undefined;
-    return {
-      margin: `${lengthValue(top, SPACE, "0")} ${lengthValue(right, SPACE, "0")} ${lengthValue(bottom, SPACE, "0")} ${lengthValue(left, SPACE, "0")}`,
-    };
-  }
-  // Universal per-element padding — every element type gets it (unlike
-  // radius, which only makes visual sense on image/embed/gallery), same
-  // per-side/fallback convention as Column's padding.
-  function bpPaddingStyle(el: El): React.CSSProperties | undefined {
-    const has = (k: string) => bpGetValue(el.props[k], el.bp, k);
-    if (!has("padding") && !has("paddingTop") && !has("paddingRight") && !has("paddingBottom") && !has("paddingLeft")) {
-      return undefined;
-    }
-    const side = (s: keyof typeof PADDING_SIDE_KEYS) => lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[s], "padding"), PAD, "0");
-    return { padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}` };
-  }
-  // Row's own margin/padding — no `bp` breakpoint bag on Row (desktop-only
-  // for now, unlike Section/Column/Element), so this skips bpGetValue's
-  // fallback chain and reads row.marginTop/paddingTop etc directly.
-  // marginTop's default replaces the old fixed space-y-* gap between rows
-  // (see the rows container below) — row 0 never got a leading gap under
-  // that either, so it defaults to "0" instead.
-  function rowMarginStyle(row: Row, isFirst: boolean): React.CSSProperties {
-    return {
-      marginTop: lengthValue(row.marginTop, SPACE, isFirst ? "0" : mode === "live" ? "2.5rem" : "1.25rem"),
-      marginBottom: lengthValue(row.marginBottom, SPACE, "0"),
-    };
-  }
-  function rowPaddingStyle(row: Row): React.CSSProperties | undefined {
-    if (!row.paddingTop && !row.paddingRight && !row.paddingBottom && !row.paddingLeft) return undefined;
-    const v = (x?: string) => lengthValue(x, PAD, "0");
-    return { padding: `${v(row.paddingTop)} ${v(row.paddingRight)} ${v(row.paddingBottom)} ${v(row.paddingLeft)}` };
   }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
@@ -800,6 +604,20 @@ export default function Designer({
     setSel,
     bumpStructural,
   );
+
+  // designer/hooks/useBpStyle.ts — breakpoint edit mode, four-side
+  // linked-input toggles, and every bp-aware style resolution/mutation
+  // helper. Called here (not up where the old inline `bp` state used to
+  // live) because it needs `mutate`, which useUndoRedo() only just defined
+  // above — HiddenAtBpBadge and the rest of this component's own function
+  // declarations that close over `bp`/etc are unaffected by where in the
+  // function body this runs, since none of them are invoked until render.
+  const {
+    bp, setBp, bpKey, bpKeysOverridden, toggleBpKeys, hiddenAtBp, bpGetValue, sideValue, fourSideValue,
+    setFourSideValue, setColSideValue, setElSideValue, writeDragSideKeys,
+    sectionBpStyle, bpColStyle, bpMarginStyle, bpPaddingStyle, rowMarginStyle, rowPaddingStyle,
+    linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
+  } = useBpStyle(mutate);
 
   useEffect(() => {
     setSelectedRect(null);
@@ -2484,7 +2302,7 @@ export default function Designer({
                         <div
                           key={r}
                           className="group/row relative"
-                          style={{ ...rowMarginStyle(row, r === 0), opacity: rowHiddenAtBp ? 0.35 : undefined }}
+                          style={{ ...rowMarginStyle(row, r === 0, mode), opacity: rowHiddenAtBp ? 0.35 : undefined }}
                         >
                           <HiddenAtBpBadge hidden={rowHiddenAtBp} />
                           {mode !== "live" && (
