@@ -40,6 +40,22 @@ function serveStatic(req, res) {
   return true;
 }
 
+// Every tenant page renders whatever Designer HTML/CSS/layout a webmaster
+// authored, including the deliberately-unsanitized Custom HTML element
+// (see SectionBlock.astro) — these headers are defense-in-depth around that
+// documented trust boundary, not a substitute for it. frame-ancestors only
+// allows the one legitimate cross-origin iframe consumer (the admin panel's
+// Live Edit preview, ADMIN_ORIGIN below) instead of the default "any site
+// may iframe this page" — omitted (no clickjacking restriction) until
+// ADMIN_ORIGIN is actually set, so an install that hasn't wired it yet sees
+// no behavior change.
+const frameAncestors = process.env.ADMIN_ORIGIN ? `'self' ${process.env.ADMIN_ORIGIN}` : null;
+function setSecurityHeaders(res) {
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("referrer-policy", "strict-origin-when-cross-origin");
+  if (frameAncestors) res.setHeader("content-security-policy", `frame-ancestors ${frameAncestors}`);
+}
+
 const server = http.createServer((req, res) => {
   // Plain liveness probe for Docker's own healthcheck (docker-compose.
   // release.yml) and scripts/deploy.sh's blue-green promotion gate — must
@@ -50,6 +66,7 @@ const server = http.createServer((req, res) => {
     res.end('{"status":"ok"}');
     return;
   }
+  setSecurityHeaders(res);
   if (serveStatic(req, res)) return;
   handler(req, res);
 });
