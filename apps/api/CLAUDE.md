@@ -199,6 +199,16 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   on top of the RLS `app.authenticated` session-variable gate already enforced per connection.
 - The one sanctioned cross-tenant path is `publishSharedContent`/`listSharedContent` — an explicit
   author opt-in into the control-plane `shared_content` table, not a general query capability.
+- **Tenant-host validation lives in `createTenant()` itself** (`tenant-pool.ts`'s `assertValidTenantHost`),
+  not in each calling route — a security-audit finding caught the original DNS-resolve check (added to
+  stop a made-up host like `hkhkfjhxkjhvxkjchgkjx.com` from registering successfully and only failing
+  with `ERR_NAME_NOT_RESOLVED` on a visitor's first request) only covering `POST /api/portal/tenants`,
+  leaving `/api/setup`, clone stage, and clone promote free to register an unvalidated host and still
+  push a live Caddy route for it. Every `createTenant()` call now gets the same bare-hostname-shape +
+  DNS-resolves check by default; the one opt-out is `{ skipDnsCheck: true }`, used only for the
+  auto-derived `staging-<id>.<sourceHost>` clone-preview subdomain (no DNS record of its own — relies on
+  the parent domain's own routing, if any). A real custom label typed into the clone-stage form still
+  gets the full check.
 
 ## Auth hardening (rate limiting, audit log, MFA)
 
@@ -254,6 +264,15 @@ callouts before assuming any of this is speculative hardening.
   "Microsoft Entra ID / SSO — coming soon" (shown, not wired) — `signSession`/`SessionPayload` already
   don't care how a session was established, only that it ends up with the right shape, so a future SSO
   login route can issue the exact same token shape through a completely different first step.
+  **`pendingMfa` must be rejected by every route that accepts a session-shaped credential, not just the
+  three auth guards.** `elevateIfAuthenticated` (`generic-crud.ts`, the public-route draft-visibility
+  elevation — see its own paragraph above) was missed when `pendingMfa` was introduced: it checked
+  `role`/`tenantHost` but not the flag itself, so a password-verified-but-not-yet-2FA'd token could read
+  a tenant's draft/private pages/posts without ever calling `totp-verify`. Fixed by adding the same
+  `session.pendingMfa` check `requireTenantAuth`/`verifySuperadmin`/`verifyAnyUser` already had. A
+  security-audit finding, and the reason a future new credential-accepting path should centralize this
+  check (an `assertUsableSession(session)` helper covering `previewOnly`/`pendingMfa`/`exp`) rather than
+  repeat it inline each time.
 - **Security tab** (`SecurityPanel`, a new top-level `Tab` reachable by both superadmin and webmaster —
   unlike Settings, which only a superadmin can reach) is where a user manages their OWN MFA
   enrollment, independent of the instance-wide switch's location.

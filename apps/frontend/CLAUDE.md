@@ -13,3 +13,12 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   (`astro.config.mjs`) and one global stylesheet (`src/styles/global.css`) imported by
   `BaseLayout.astro` — compile-time only, no client-side JS added, consistent with this project's
   "avoid heavy dependencies" constraint.
+- **Security response headers** (`server.mjs`'s `setSecurityHeaders`, added after a security audit
+  found none set anywhere): `X-Content-Type-Options: nosniff` and `Referrer-Policy:
+  strict-origin-when-cross-origin` on every response — defense-in-depth around the Custom HTML
+  element's documented raw-HTML trust boundary, not a substitute for it. `frame-ancestors` (clickjacking
+  protection) is only emitted once `ADMIN_ORIGIN` is set on this container (wired through both
+  docker-compose.release.yml and docker-compose.trial.yml, empty-default) — it scopes framing to the
+  admin panel's own origin, the one legitimate consumer (Designer's Live Edit preview iframe), instead of
+  leaving every tenant page framable by any site. An install that hasn't set `ADMIN_ORIGIN` on the
+  frontend container yet sees no behavior change.
