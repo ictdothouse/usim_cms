@@ -577,6 +577,10 @@ install_docker_mode() {
     echo "Creating .env from .env.example..."
     cp .env.example .env
   fi
+  # Holds POSTGRES_SUPERUSER_PASSWORD/SESSION_SECRET/DEPLOY_SECRET/
+  # MONITOR_PASSWORD — same treatment /etc/ucms-monitor.env already gets
+  # right after it's written, so no other local account on the box can read it.
+  chmod 600 .env
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
   set_env_kv .env VITE_API_URL "http://${public_host}:${api_port}"
@@ -827,6 +831,10 @@ install_production_mode() {
     echo "Creating .env from .env.example..."
     cp .env.example .env
   fi
+  # Holds POSTGRES_SUPERUSER_PASSWORD/SESSION_SECRET/DEPLOY_SECRET/
+  # MONITOR_PASSWORD — same treatment /etc/ucms-monitor.env already gets
+  # right after it's written, so no other local account on the box can read it.
+  chmod 600 .env
   ensure_caddy_bind_ports
   prompt_domains
 
@@ -969,6 +977,7 @@ install_baremetal_mode() {
 
   ensure_postgres
   cp -n apps/api/.env.example apps/api/.env 2>/dev/null || true
+  chmod 600 apps/api/.env
   ensure_app_database
 
   local api_port frontend_port admin_port monitor_port public_host
