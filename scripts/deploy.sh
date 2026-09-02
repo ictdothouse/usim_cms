@@ -110,17 +110,26 @@ fetch("http://127.0.0.1:3000/internal/deploy/promote", {
 '
 
 # $1: project to promote (e.g. "ucms-green"), $2: JSON dial-list body
+#
+# Retries: the promote endpoint's own Caddy /load push is idempotent (same
+# desired-state config every attempt, see proxy-sync.ts's syncCaddy), so a
+# transient "Caddy admin request timed out" (seen twice now — recurs when
+# Caddy is briefly busy, e.g. reloading TLS state for tenant domains) is safe
+# to retry rather than rolling the whole deploy back on the first flake.
 promote() {
-  local project="$1" body="$2" resp
-  if ! resp=$(docker compose -p "$project" -f "$RELEASE_FILE" exec -T \
-    -e "DEPLOY_SECRET=$DEPLOY_SECRET" -e "PROMOTE_BODY=$body" \
-    api node -e "$PROMOTE_SCRIPT" 2>&1); then
-    echo "Promote request failed:" >&2
+  local project="$1" body="$2" resp attempt
+  for attempt in 1 2 3; do
+    if resp=$(docker compose -p "$project" -f "$RELEASE_FILE" exec -T \
+      -e "DEPLOY_SECRET=$DEPLOY_SECRET" -e "PROMOTE_BODY=$body" \
+      api node -e "$PROMOTE_SCRIPT" 2>&1) && echo "$resp" | grep -q '"promoted":true'; then
+      echo "$resp"
+      return 0
+    fi
+    echo "Promote attempt $attempt/3 failed:" >&2
     echo "$resp" >&2
-    return 1
-  fi
-  echo "$resp"
-  echo "$resp" | grep -q '"promoted":true'
+    [ "$attempt" -lt 3 ] && sleep 5
+  done
+  return 1
 }
 
 do_deploy() {

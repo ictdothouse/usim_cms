@@ -10,7 +10,12 @@ import http from "node:http";
 const CADDY_ADMIN_URL = process.env.CADDY_ADMIN_URL;
 const ADMIN_DOMAIN = process.env.ADMIN_DOMAIN ?? "admin.localhost";
 const API_DOMAIN = process.env.API_DOMAIN ?? "api.localhost";
-const TIMEOUT_MS = 5000;
+// 5s was too tight for /load specifically — pushing a full config makes Caddy
+// synchronously validate/apply it (and reload TLS state for every tenant
+// domain), which can legitimately run past 5s under load; deploy.sh's own
+// promote() now also retries on top of this, but a config push shouldn't
+// fail on ordinary momentary slowness in the first place.
+const TIMEOUT_MS = 15000;
 
 // Fallback dial targets for the plain single-stack setup (no blue-green
 // deploy in use) — one container each, matching docker-compose.yml's
