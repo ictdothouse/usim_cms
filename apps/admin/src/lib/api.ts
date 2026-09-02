@@ -1,11 +1,15 @@
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+// `?.` guards a plain `node:test` run (tsx, no Vite) where `import.meta.env`
+// itself is undefined — Vite always defines it for the real dev/build, so
+// this is a no-op there. Needed once a designer/hooks/*.ts file under test
+// started importing this module transitively (useLiveEditBridge.ts).
+export const API_URL = import.meta.env?.VITE_API_URL ?? "http://localhost:3000";
 
 // Base for the "View" link on a page/post. In production each tenant IS its
 // own real domain (tenantHost), so no separate frontend URL is needed there.
 // Locally there's one shared `astro dev` server, so this points at it with
 // a `?__tenant=` override (see apps/frontend's [...slug].astro) letting the
 // admin preview any local tenant, not just whichever one DEV_TENANT_HOST names.
-const FRONTEND_DEV_URL = import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:4321";
+const FRONTEND_DEV_URL = import.meta.env?.VITE_FRONTEND_URL ?? "http://localhost:4321";
 // previewToken is optional — a short-lived, read-only token minted by
 // getPagePreviewToken() (never the admin's real session bearer, which
 // doesn't expire — see apps/api's auth.ts) to preview a draft page before

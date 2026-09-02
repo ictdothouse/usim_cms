@@ -165,6 +165,7 @@ import { BASE_LANG, type DesignerCtx } from "./designer/context";
 import { useClipboard, type ClipLevel } from "./designer/hooks/useClipboard";
 import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import { useBpStyle } from "./designer/hooks/useBpStyle";
+import { useLiveEditBridge } from "./designer/hooks/useLiveEditBridge";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -306,31 +307,26 @@ export default function Designer({
     );
   }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
-  // Reported by BaseLayout.astro's designer:selectedRect message — the
-  // selected node's on-screen box inside the iframe, used to position
-  // LiveEditToolbar. Cleared below whenever `sel` itself changes so a stale
-  // rect never positions the toolbar over the wrong element while the new
-  // one's first report is in flight.
-  const [selectedRect, setSelectedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   // Bumped by every structural (shape/order-changing) mutate() call reachable
   // from Live Edit — duplicate/paste/delete at any level, plus the iframe's
   // own drag-reorder. Live Edit's iframe is a real server-rendered page, not
   // a local render of `blocks`, so unlike a prop/style edit (already synced
-  // live via the designer:style postMessage effect below) a shape change
-  // needs an actual reload to become visible — debounced further down so a
-  // burst of edits reloads once, not per action.
+  // live via the designer:style postMessage effect in useLiveEditBridge) a
+  // shape change needs an actual reload to become visible — debounced inside
+  // that hook so a burst of edits reloads once, not per action.
+  //
+  // Kept local here (not moved into useLiveEditBridge) rather than owned by
+  // that hook: useUndoRedo() below takes bumpStructural as its own
+  // onStructuralChange constructor arg (undo()/redo() call it too), so
+  // useUndoRedo() must run before useLiveEditBridge() — but useLiveEditBridge
+  // itself consumes useUndoRedo's blocks/mutate/undo/redo output. Two hooks
+  // can't each need the other's return value first; keeping this bit of
+  // state here (as it already was) breaks that cycle. structuralTick/
+  // bumpStructural are passed into useLiveEditBridge as plain params instead.
   const [structuralTick, setStructuralTick] = useState(0);
   function bumpStructural() {
     setStructuralTick((n) => n + 1);
   }
-  const lastScrollY = useRef(0);
-  const pendingScrollRestore = useRef<number | null>(null);
-  const lastNonTextSig = useRef<string | null>(null);
-  // True from the moment any iframe (re)load starts (initial open, mode
-  // toggle back into Live, or a debounced structural/style reload) until
-  // its onLoad fires — covers the skeleton overlay below so a reload never
-  // shows the browser's own blank-frame flash, however brief.
-  const [reloading, setReloading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -359,18 +355,6 @@ export default function Designer({
   const [templateFilter, setTemplateFilter] = useState<"all" | "section" | "row" | "column" | "element">("all");
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
-  const [mode, setMode] = useState<"blocks" | "live">("blocks");
-  // Double-buffered iframe pair: the inactive slot loads a reload's new
-  // content off-screen (opacity 0, pointer-events none) and only swaps to
-  // visible once its onLoad fires, so the visible iframe is never mid-
-  // navigation — that's the actual source of any reload "blink", not skeleton
-  // speed. swapPending names which slot a hot-swap (not a cold mount) is
-  // waiting on; handleFrameLoad() below is the single place that resolves it.
-  const [liveSrcA, setLiveSrcA] = useState<string | null>(null);
-  const [liveSrcB, setLiveSrcB] = useState<string | null>(null);
-  const [activeSlot, setActiveSlot] = useState<"a" | "b">("a");
-  const swapPending = useRef<"a" | "b" | null>(null);
-  const liveSrc = activeSlot === "a" ? liveSrcA : liveSrcB;
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -588,9 +572,6 @@ export default function Designer({
     alignX: number | null;
     alignY: number | null;
   } | null>(null);
-  const frameARef = useRef<HTMLIFrameElement>(null);
-  const frameBRef = useRef<HTMLIFrameElement>(null);
-  const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
 
   // blocks/mutate/startSpacingDrag/undo/redo/resetHistory extracted to
   // designer/hooks/useUndoRedo.ts — see that file for the mutate()
@@ -619,9 +600,21 @@ export default function Designer({
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
   } = useBpStyle(mutate);
 
-  useEffect(() => {
-    setSelectedRect(null);
-  }, [sel]);
+  // designer/hooks/useLiveEditBridge.ts — the Live Edit iframe bridge: mode/
+  // double-buffered iframe state, both postMessage-sync effects, and
+  // enterLive/handleFrameLoad/toggleLive. Called here (after useUndoRedo) so
+  // blocks/mutate/undo/redo already exist — see structuralTick/bumpStructural's
+  // own comment above for why this hook takes those as params instead of
+  // owning them itself. `save` (declared later via a hoisted `function`
+  // statement) is a stable reference by the time this hook's effects/
+  // callbacks actually run, even though its own declaration is textually
+  // below this call.
+  const liveEdit = useLiveEditBridge({
+    blocks, mutate, sel, setSel, setCtxMenu, undo, redo, dirty, save,
+    tenantHost, token, pageId: page.id as string, pageSlug: page.slug as string,
+    structuralTick, bumpStructural, onError: setError,
+  });
+  const { mode, liveSrc, frameARef, frameBRef, liveFrame, selectedRect, reloading, enterLive, handleFrameLoad, toggleLive } = liveEdit;
 
   // Auto-expand the Layers tree around the current selection so switching to
   // the tab, or changing selection via the canvas/Live Edit, always reveals
@@ -646,22 +639,6 @@ export default function Designer({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Debounced reload for structural Live Edit changes (see bumpStructural
-  // above) — waits for a pause in activity so a fast burst (e.g. several
-  // deletes in a row) reloads once. enterLive() already saves when dirty and
-  // mints a fresh preview token, which is what actually forces the iframe to
-  // reload; the scroll position is restored once the reloaded iframe reports
-  // back in (see the iframe's onLoad handler further down).
-  useEffect(() => {
-    if (structuralTick === 0 || mode !== "live") return;
-    const timer = setTimeout(() => {
-      pendingScrollRestore.current = lastScrollY.current;
-      void enterLive().catch((err) => setError((err as Error).message));
-    }, 500);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [structuralTick]);
-
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
@@ -676,168 +653,8 @@ export default function Designer({
     };
   }, [ctxMenu]);
 
-  // Live-view bridge: the iframe's window posts these (see BaseLayout.astro's
-  // inline script) — a click there selects exactly like a click in the block
-  // canvas (same `sel`, same Inspector), and typing in an editable text node
-  // there commits through the same mutate() path the Inspector textarea uses.
-  useEffect(() => {
-    function onMessage(e: MessageEvent) {
-      if (!liveFrame.current || e.source !== liveFrame.current.contentWindow) return;
-      if (e.data?.type === "designer:selectedRect") {
-        setSelectedRect(e.data.rect ?? null);
-        return;
-      }
-      if (e.data?.type === "designer:iframeClick") {
-        setCtxMenu(null);
-        return;
-      }
-      if (e.data?.type === "designer:scroll") {
-        lastScrollY.current = Number(e.data.y ?? 0);
-        return;
-      }
-      if (e.data?.type === "designer:undo") {
-        undo();
-        return;
-      }
-      if (e.data?.type === "designer:redo") {
-        redo();
-        return;
-      }
-      if (e.data?.type === "designer:contextmenu") {
-        const p = String(e.data.path ?? "")
-          .split(".")
-          .map(Number);
-        // Row has no data-designer-path of its own in SectionBlock.astro (only
-        // section/column/element do), so a live-mode right-click can only ever
-        // resolve to one of those 3 depths — 2 (row) is unreachable here, Row
-        // right-click only works in Blocks mode.
-        if (![1, 3, 4].includes(p.length) || !liveFrame.current) return;
-        const rect = liveFrame.current.getBoundingClientRect();
-        setSel(p);
-        setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0), y: rect.top + Number(e.data.y ?? 0) });
-        return;
-      }
-      const path = String(e.data?.path ?? "")
-        .split(".")
-        .map(Number);
-      if (e.data?.type === "designer:select" && path.length >= 1) {
-        setSel(path);
-      } else if (e.data?.type === "designer:textInput" && path.length === 4) {
-        const [b, r, c, el] = path;
-        mutate((bs) => {
-          section(bs, b).rows[r].columns[c].elements[el].props.text = e.data.value ?? "";
-        });
-      } else if (e.data?.type === "designer:reorder") {
-        const from = String(e.data.from).split(".").map(Number);
-        const to = String(e.data.to).split(".").map(Number);
-        // Path depth is the drag's kind (1=section, 3=column, 4=element) — a
-        // drag can only ever hover a same-depth target (BaseLayout.astro's
-        // pointermove only sets hoverPath when the target's depth matches
-        // dragState's), so a mismatch here means a stale/cross-kind message
-        // and must be a no-op, never a guess at which branch to take.
-        if (from.length !== to.length) return;
-        if (from.length === 4) {
-          mutate((bs) => {
-            const [tb, tr, tc, te] = to;
-            let idx = te + (e.data.position === "after" ? 1 : 0);
-            // same-column move: removing the source first shifts later indexes
-            // down — same adjustment dropIntoColumn already makes for the
-            // block-canvas drag.
-            if (from[0] === tb && from[1] === tr && from[2] === tc && from[3] < idx) idx--;
-            const el = removeAt(bs, from);
-            insertEl(bs, [tb, tr, tc], el, idx);
-          });
-        } else if (from.length === 3) {
-          // Column reorder is scoped to within its own row — a row's
-          // grid-template-columns and each column's span are only meaningful
-          // there, same restriction the Layers tree's drag-reorder applies.
-          if (from[0] !== to[0] || from[1] !== to[1]) return;
-          let idx = to[2] + (e.data.position === "after" ? 1 : 0);
-          if (from[2] < idx) idx--;
-          mutate((bs) => moveColumn(bs, from[0], from[1], from[2], idx));
-        } else if (from.length === 1) {
-          let idx = to[0] + (e.data.position === "after" ? 1 : 0);
-          if (from[0] < idx) idx--;
-          mutate((bs) => moveSection(bs, from[0], idx));
-        } else {
-          return;
-        }
-        setSel(null);
-        bumpStructural();
-      }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  });
-
-  // Keeps the live iframe's selection highlight/editability/inline style in
-  // sync with the Inspector — reuses the exact same style helpers the block
-  // canvas preview uses (typoStyle/colStyle/lengthValue), so style logic
-  // isn't computed a third time.
-  useEffect(() => {
-    if (mode !== "live" || !liveSrc || !liveFrame.current?.contentWindow) return;
-    const win = liveFrame.current.contentWindow;
-    const targetOrigin = new URL(liveSrc, window.location.href).origin;
-    // Right after a reload/slot-swap sets a new src, this iframe's
-    // contentWindow briefly still belongs to the admin's own origin (the
-    // navigation to targetOrigin hasn't completed yet) — postMessage throws
-    // synchronously on that transient mismatch instead of silently no-op'ing.
-    // Harmless to skip: the next render (once navigation completes, or once
-    // sel/blocks changes again) re-sends the same sync.
-    const post = (msg: unknown) => {
-      try {
-        win.postMessage(msg, targetOrigin);
-      } catch {
-        /* transient cross-origin mismatch during reload — see comment above */
-      }
-    };
-    post({ type: "designer:selected", path: sel?.join(".") ?? null });
-    if (!sel) return;
-    const path = sel.join(".");
-    if (sel.length === 4) {
-      const [b, r, c, e] = sel;
-      const el = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c]?.elements?.[e];
-      if (!el) return;
-      const textLike = el.type === "heading" || el.type === "text" || el.type === "list";
-      if (!textLike) {
-        // Non-text element types (button/image/icon/spacer/...) each render
-        // bespoke CSS in ElPreview/SectionBlock.astro — there's no single
-        // props-to-CSS mapping to reuse here, so a style change (paste
-        // style, or an Inspector field edit) falls back to the same
-        // debounced reload structural edits use instead of silently posting
-        // no visible change. Guarded by a signature so the reload this
-        // itself triggers (liveSrc changing re-runs this effect against the
-        // same still-selected element) doesn't bump again and loop forever.
-        const sig = `${path}:${JSON.stringify(el.props)}`;
-        if (lastNonTextSig.current !== sig) {
-          lastNonTextSig.current = sig;
-          bumpStructural();
-        }
-        return;
-      }
-      const style = typoStyle(el.props);
-      post({ type: "designer:style", path, style });
-      post({ type: "designer:text", path, editable: el.type === "heading" || el.type === "text" });
-    } else if (sel.length === 3) {
-      const [b, r, c] = sel;
-      const col = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c];
-      if (!col) return;
-      post({ type: "designer:style", path, style: colStyle(col.props) });
-    } else if (sel.length === 1) {
-      const sp = blocks[sel[0]]?.props as unknown as SectionProps;
-      if (!sp) return;
-      const style: React.CSSProperties = {
-        background: sp.bgImage ? undefined : sp.bg || undefined,
-        color: sp.textColor || undefined,
-        padding: `${lengthValue(sp.paddingY, PAD, PAD.md)} ${lengthValue(sp.paddingX, PAD, "1.5rem")}`,
-        margin: `${lengthValue(sp.marginY, PAD, "0")} 0`,
-        ...(sp.border ? { border: BORDER[sp.border] } : {}),
-        boxShadow: shadowToCss(sp.shadow),
-        ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
-      };
-      post({ type: "designer:style", path, style });
-    }
-  }, [mode, sel, blocks, liveSrc]);
+  // Live Edit's postMessage sync (both directions) lives in
+  // designer/hooks/useLiveEditBridge.ts now — see `liveEdit` above.
 
   async function openTemplates() {
     setShowTemplates(true);
@@ -1366,79 +1183,13 @@ export default function Designer({
     }
   }
 
-  // "Live Edit": same real-render iframe the Preview button opens in a new
-  // tab, but embedded and augmented with a designerEdit=1 flag so
-  // BaseLayout.astro's bridge script + SectionBlock.astro's
-  // data-designer-path attributes activate (see apps/frontend) — clicking an
-  // element there sets `sel` exactly like clicking in the block canvas, so
-  // the existing Inspector sidebar keeps working unmodified.
-  //
-  // Always mints a preview token, even for an already-published page: a
-  // published page's public GET already includes the content, but
-  // [...slug].astro only turns designerEdit on when a token is present (see
-  // its comment) — skipping the mint for "published" used to leave the
-  // bridge script/data-designer-path attributes never activated, so clicks
-  // in Live Edit silently did nothing.
-  // cold=true means the live iframes were just unmounted (switching in from
-  // Blocks mode) or this is the very first load — nothing is on screen to
-  // keep showing, so skeleton + a fresh mount into slot "a" is correct.
-  // cold=false (the debounced structural/style reload path, mode already
-  // "live") loads into the *inactive* slot and hands off the actual swap to
-  // handleFrameLoad, so the visible iframe never sees its own navigation.
-  async function enterLive(cold = false) {
-    if (dirty) await save();
-    const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
-    const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
-    const src = `${base}${base.includes("?") ? "&" : "?"}designerEdit=1`;
-    if (cold || (liveSrcA === null && liveSrcB === null)) {
-      setReloading(true);
-      swapPending.current = null;
-      setActiveSlot("a");
-      setLiveSrcA(src);
-      setLiveSrcB(null);
-      setMode("live");
-      return;
-    }
-    const targetSlot = activeSlot === "a" ? "b" : "a";
-    swapPending.current = targetSlot;
-    if (targetSlot === "a") setLiveSrcA(src);
-    else setLiveSrcB(src);
-    setMode("live");
-  }
-
-  // Resolves both reload paths' onLoad: a pending hot-swap for this exact
-  // slot flips it to active (the actual, blink-free "reveal"); a cold mount
-  // just clears the skeleton once its own slot (already active) has painted.
-  function handleFrameLoad(slot: "a" | "b") {
-    if (swapPending.current === slot) {
-      swapPending.current = null;
-      setActiveSlot(slot);
-      setReloading(false);
-      const frame = (slot === "a" ? frameARef : frameBRef).current;
-      const src = slot === "a" ? liveSrcA : liveSrcB;
-      if (pendingScrollRestore.current != null && frame?.contentWindow && src) {
-        const targetOrigin = new URL(src, window.location.href).origin;
-        frame.contentWindow.postMessage(
-          { type: "designer:restoreScroll", y: pendingScrollRestore.current },
-          targetOrigin,
-        );
-        pendingScrollRestore.current = null;
-      }
-      return;
-    }
-    if (slot === activeSlot) setReloading(false);
-  }
-
-  function toggleLive() {
-    setMode(mode === "live" ? "blocks" : "live");
-  }
-
-  // Opens straight into the Blocks canvas by default — same-document
-  // React state + native drag/drop, no iframe/postMessage bridge to break.
-  // The old iframe-based "Live Edit" (enterLive/toggleLive, the double-
-  // buffered iframe JSX, BaseLayout.astro's designerEdit bridge) is kept
-  // intact and still reachable via the mode toggle button below, not
-  // deleted — just no longer the default on open.
+  // enterLive/handleFrameLoad/toggleLive (the double-buffered Live Edit
+  // iframe bridge) moved to designer/hooks/useLiveEditBridge.ts — see
+  // `liveEdit` above. Opens straight into the Blocks canvas by default —
+  // same-document React state + native drag/drop, no iframe/postMessage
+  // bridge to break. The iframe-based Live Edit is kept intact and still
+  // reachable via the mode toggle button below, not deleted — just no
+  // longer the default on open.
 
   function close() {
     if (dirty && !confirm(t("designer-unsaved"))) return;
