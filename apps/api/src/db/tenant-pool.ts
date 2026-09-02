@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { resolve as dnsResolve } from "node:dns/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
@@ -247,7 +248,38 @@ export async function getTenantDbSizeBytes(host: string): Promise<number | null>
   }
 }
 
-export async function createTenant(host: string, departmentName: string, dbUrl: string | null = null) {
+// Centralized here (not left to each caller in index.ts) so every path that
+// registers a live Caddy route for a host — /api/setup, the normal register
+// route, and clone stage/promote — gets the same guarantee: a real,
+// bare-hostname shape, and (unless explicitly opted out, for the
+// auto-derived staging subdomain below) a DNS record actually pointing
+// somewhere, so a typo'd/unowned domain fails loudly here instead of
+// registering successfully and only breaking once a visitor's browser hits
+// ERR_NAME_NOT_RESOLVED.
+async function assertValidTenantHost(host: string, opts: { requireDns?: boolean } = {}): Promise<void> {
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host.trim())) {
+    throw Object.assign(new Error("host must be a bare hostname (e.g. site.example.com), not a full URL"), {
+      statusCode: 400,
+    });
+  }
+  if (opts.requireDns ?? true) {
+    try {
+      await dnsResolve(host);
+    } catch {
+      throw Object.assign(new Error(`"${host}" has no DNS record — point it at this server before registering`), {
+        statusCode: 400,
+      });
+    }
+  }
+}
+
+export async function createTenant(
+  host: string,
+  departmentName: string,
+  dbUrl: string | null = null,
+  opts: { skipDnsCheck?: boolean } = {},
+) {
+  await assertValidTenantHost(host, { requireDns: !opts.skipDnsCheck });
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
