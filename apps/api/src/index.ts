@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { resolve as dnsResolve } from "node:dns/promises";
 import path from "node:path";
 import { rm, readdir, stat } from "node:fs/promises";
 import Fastify from "fastify";
@@ -711,6 +712,12 @@ app.post("/api/portal/tenants", async (req, reply) => {
   if (!looksLikeDomain(host)) {
     reply.code(400);
     return { error: "host must be a bare hostname (e.g. site.example.com), not a full URL" };
+  }
+  try {
+    await dnsResolve(host);
+  } catch {
+    reply.code(400);
+    return { error: `"${host}" has no DNS record — point it at this server before registering` };
   }
   await createTenant(host, departmentName, dbUrl || null);
   await maybeSyncCaddy();
