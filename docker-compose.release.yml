@@ -85,6 +85,11 @@ services:
     environment:
       API_URL: http://api:3000
       PORT: 4321
+      # Only used to scope the response's frame-ancestors CSP (server.mjs)
+      # to the admin panel's own origin — the one legitimate consumer of the
+      # Live Edit preview iframe. Empty/unset = no frame-ancestors directive
+      # emitted at all, zero behavior change from before this was added.
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4321/health"]
       interval: 10s

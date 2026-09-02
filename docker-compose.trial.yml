@@ -72,6 +72,8 @@ services:
     environment:
       API_URL: http://api:3000
       PORT: 4321
+      # See docker-compose.release.yml's own comment on this same key.
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-}
     ports:
       - "${FRONTEND_PORT:-4321}:4321"
 
