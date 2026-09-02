@@ -55,7 +55,7 @@ async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
   const credential = elevatingCredential(req);
   if (!credential) return;
   const session = verifySession(credential);
-  if (!session) return;
+  if (!session || session.pendingMfa) return;
   if (session.role === "webmaster" && session.tenantHost !== req.tenantHost) return;
   await req.db.execute(sql`SET SESSION app.authenticated = 'true'`);
 }
