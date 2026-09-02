@@ -224,10 +224,19 @@ for (const event of ["uncaughtException", "unhandledRejection"] as const) {
   });
 }
 
+// Guards against a second SIGTERM/SIGINT (Docker's own stop-then-kill
+// escalation, or two different signals arriving close together) re-entering
+// this handler — pg's Pool#end() throws "Called end on pool more than once"
+// on a second call, which without this guard became a second unhandled
+// rejection and crashed the process a second time, right as it was trying to
+// shut down cleanly.
+let shuttingDown = false;
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     await app.close();
-    await closePool();
+    await closePool().catch((err) => app.log.error({ err }, "closePool failed during shutdown"));
     process.exit(0);
   });
 }
