@@ -1,5 +1,4 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { resolve as dnsResolve } from "node:dns/promises";
 import path from "node:path";
 import { rm, readdir, stat } from "node:fs/promises";
 import Fastify from "fastify";
@@ -194,8 +193,9 @@ function validateThemeSettings(settings: Record<string, unknown>): string | null
       return `${key} must contain only letters, digits, and spaces`;
     }
   }
-  if (settings.logoUrl !== undefined && typeof settings.logoUrl !== "string") {
-    return "logoUrl must be a string";
+  if (settings.logoUrl !== undefined && settings.logoUrl !== "") {
+    if (typeof settings.logoUrl !== "string") return "logoUrl must be a string";
+    if (!isSafeUrl(settings.logoUrl)) return "logoUrl has an unsafe URL scheme";
   }
   const fontSize = settings.postTitleFontSize;
   if (fontSize !== undefined && fontSize !== "") {
@@ -708,16 +708,6 @@ app.post("/api/portal/tenants", async (req, reply) => {
   if (!host || !departmentName) {
     reply.code(400);
     return { error: "host and departmentName required" };
-  }
-  if (!looksLikeDomain(host)) {
-    reply.code(400);
-    return { error: "host must be a bare hostname (e.g. site.example.com), not a full URL" };
-  }
-  try {
-    await dnsResolve(host);
-  } catch {
-    reply.code(400);
-    return { error: `"${host}" has no DNS record — point it at this server before registering` };
   }
   await createTenant(host, departmentName, dbUrl || null);
   await maybeSyncCaddy();
@@ -1302,14 +1292,19 @@ app.post("/api/portal/clones/:id/stage", async (req, reply) => {
     reply.code(404);
     return { error: "clone not found" };
   }
-  const stagingHost =
-    entry.meta.label && looksLikeDomain(entry.meta.label) ? entry.meta.label : `staging-${id.slice(0, 8)}.${entry.meta.sourceHost}`;
+  const usingCustomLabel = Boolean(entry.meta.label && looksLikeDomain(entry.meta.label));
+  const stagingHost = usingCustomLabel ? (entry.meta.label as string) : `staging-${id.slice(0, 8)}.${entry.meta.sourceHost}`;
   if ((await listTenants()).some((t) => t.host === stagingHost)) {
     reply.code(409);
     return { error: `tenant ${stagingHost} already exists` };
   }
   const source = (await listTenants()).find((t) => t.host === entry.meta.sourceHost);
-  await createTenant(stagingHost, `${(source?.departmentName as string) ?? entry.meta.sourceHost} (Staging)`, null);
+  await createTenant(stagingHost, `${(source?.departmentName as string) ?? entry.meta.sourceHost} (Staging)`, null, {
+    // The auto-derived staging-<id>.<sourceHost> subdomain has no DNS record
+    // of its own (relies on the parent domain's own wildcard/routing, if
+    // any) — only require DNS when the operator typed a real custom label.
+    skipDnsCheck: !usingCustomLabel,
+  });
   await maybeSyncCaddy();
   await importTenantBackup(stagingHost, entry.zip);
   markCloneStaged(id, stagingHost);
