@@ -1025,6 +1025,7 @@ export default function Designer({
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       if (!liveFrame.current || e.source !== liveFrame.current.contentWindow) return;
+      if (!liveSrc || e.origin !== new URL(liveSrc, window.location.href).origin) return;
       if (e.data?.type === "designer:selectedRect") {
         setSelectedRect(e.data.rect ?? null);
         return;
