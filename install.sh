@@ -672,6 +672,18 @@ ensure_caddy_bind_ports() {
   else
     CADDY_HTTP_PORT="80"
     NEEDS_NGINX_SNIPPET="false"
+    # Clear any loopback bind left over from an EARLIER run where 80/443
+    # were taken — docker-compose.yml's ${PROXY_BIND_HTTP:-80:80} only falls
+    # back to the real default when the var is unset OR empty, so a stale
+    # value here would keep Caddy on loopback forever even after whatever
+    # was using 80/443 before is gone.
+    set_env_kv .env PROXY_BIND_HTTP ""
+    set_env_kv .env PROXY_BIND_HTTPS ""
+    # Revert Caddyfile's auto_https toggle too, if an earlier run turned it
+    # off — Caddy owns 80/443 for real now and can prove domain ownership.
+    if grep -qE '^\s*auto_https off' Caddyfile; then
+      sed -i.bak -E 's/^(\s*)auto_https off/\1# auto_https off/' Caddyfile && rm -f Caddyfile.bak
+    fi
   fi
 }
 
