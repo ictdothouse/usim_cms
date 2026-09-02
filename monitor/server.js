@@ -45,7 +45,12 @@ const ALERT_POLL_INTERVAL_MS = Number(process.env.ALERT_POLL_INTERVAL_MS) || 60_
 
 // Whitelisted so a service name never reaches child_process from raw user
 // input — every route validates against this array before shelling out.
-const SERVICES = DEPLOY_MODE === "docker" ? ["db", "api", "frontend", "admin"] : ["api", "frontend", "admin"];
+// "proxy" (Caddy) went missing on a live VPS with zero visibility here —
+// nothing on the dashboard tracked it, so the outage was invisible until
+// scripts/deploy.sh's promote step failed with DNS errors. Tracked the same
+// generic way "db" already is (composeArgsFor falls back to base-compose for
+// any name not in RELEASE_SERVICES).
+const SERVICES = DEPLOY_MODE === "docker" ? ["db", "proxy", "api", "frontend", "admin"] : ["api", "frontend", "admin"];
 const UNIT_MAP = { api: "ucms-api", frontend: "ucms-frontend", admin: "ucms-admin" };
 
 // api/frontend/admin were split out of docker-compose.yml into

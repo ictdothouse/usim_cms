@@ -4,12 +4,22 @@
 # (AlmaLinux/Rocky/RHEL/CentOS Stream, dnf/firewalld) hosts — detected
 # automatically from /etc/os-release, no flag needed.
 #
-# Two modes, chosen with --mode=docker|bare-metal, $INSTALL_MODE, or (if
-# neither is set and this is an interactive terminal) a prompt:
+# Three modes, chosen with --mode=docker|production|bare-metal, $INSTALL_MODE,
+# or (if neither is set and this is an interactive terminal) a prompt:
 #
-#   docker      Everything in containers (db/api/frontend/admin). Nothing
-#               touches the host besides Docker itself. Recommended default
-#               — total isolation from whatever else runs on this VPS.
+#   docker      Trial/quick-test stack: db+api+frontend+admin in containers,
+#               published on auto-picked host ports (http://<ip>:<port>), no
+#               Caddy, no zero-downtime deploys. Good for kicking the tires;
+#               not the production topology — see "production" below.
+#
+#   production  The real, zero-downtime topology this repo is built around:
+#               db+pgbouncer+redis+proxy(Caddy) as an always-on base, api/
+#               frontend/admin blue-green deployed on top via scripts/
+#               deploy.sh, routed by real domains through Caddy (auto-HTTPS
+#               unless port 80/443 already belongs to another app on this
+#               VPS, detected automatically — see ensure_caddy_bind_ports).
+#               Nothing except 80/443 (or nothing at all, if those are
+#               shared) and the monitor port ever gets published to the host.
 #
 #   bare-metal  Native Node processes + a native/reused PostgreSQL cluster,
 #               for orgs that don't want Docker at all. Still fully
@@ -21,22 +31,22 @@
 #               inside it — this is exactly the same "one Postgres server,
 #               many databases" model apps/api already uses per tenant).
 #
-# Both modes: auto-pick free host ports, detect the public IP so the admin
-# build's baked-in API URL is actually reachable from a browser, and install
-# the ops monitor (monitor/server.js) as a systemd service. Both also ask for
-# a superadmin email/password up front and create that account directly
-# against the running API's own /api/setup route (the same self-disabling
-# first-run endpoint the admin's Setup Wizard uses) once the stack is
-# healthy — so login works without ever depending on the admin UI reaching
-# the API from a browser first.
+# All modes: detect the public IP so the admin build's baked-in API URL is
+# actually reachable from a browser, and install the ops monitor
+# (monitor/server.js) as a systemd service. All also ask for a superadmin
+# email/password up front and create that account directly against the
+# running API's own /api/setup route (the same self-disabling first-run
+# endpoint the admin's Setup Wizard uses) once the stack is healthy — so
+# login works without ever depending on the admin UI reaching the API from a
+# browser first.
 #
-# Both modes also verify the stack is reachable from OUTSIDE its own
+# All modes also verify the stack is reachable from OUTSIDE its own
 # container/process — not just "healthy" from its own internal healthcheck —
 # before declaring success: a container can report itself perfectly healthy
 # while its published port is unreachable from a real browser (see
 # diagnose_reachability below for the two ways this actually happened).
 #
-# Run: sudo ./install.sh [--mode=docker|bare-metal]
+# Run: sudo ./install.sh [--mode=docker|production|bare-metal]
 #      [--admin-email=<email>] [--admin-password=<password>]
 #      [--admin-only]   Skip the install entirely — just (re)run the
 #                        superadmin-creation step against an already-running
@@ -67,6 +77,7 @@ SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-}"
 for arg in "$@"; do
   case "$arg" in
     --mode=docker) MODE="docker" ;;
+    --mode=production) MODE="production" ;;
     --mode=bare-metal|--mode=baremetal) MODE="bare-metal" ;;
     --admin-only) ADMIN_ONLY="true" ;;
     --diagnose) DIAGNOSE_ONLY="true" ;;
@@ -77,17 +88,20 @@ done
 if [ -z "$MODE" ]; then
   if [ -t 0 ]; then
     echo "How should this be installed?"
-    echo "  1) Docker (recommended) — everything in containers, nothing touches the host"
-    echo "  2) Bare-metal — native Node + Postgres, no Docker"
-    read -r -p "Choose [1/2] (default 1): " choice
+    echo "  1) Docker trial — quick test, containers, host-published ports, no Caddy"
+    echo "  2) Production (recommended) — blue-green + Caddy, real domains, zero-downtime deploys"
+    echo "  3) Bare-metal — native Node + Postgres, no Docker"
+    read -r -p "Choose [1/2/3] (default 2): " choice
     case "$choice" in
-      2) MODE="bare-metal" ;;
-      *) MODE="docker" ;;
+      1) MODE="docker" ;;
+      3) MODE="bare-metal" ;;
+      *) MODE="production" ;;
     esac
   else
     MODE="docker"
-    echo "No --mode given and not an interactive terminal — defaulting to docker." >&2
-    echo "(pass --mode=bare-metal to pick the native path instead)" >&2
+    echo "No --mode given and not an interactive terminal — defaulting to docker (trial)." >&2
+    echo "(pass --mode=production for the real blue-green+Caddy topology, or" >&2
+    echo " --mode=bare-metal for the native path instead)" >&2
   fi
 fi
 echo "== usim_cms installer — mode: $MODE =="
@@ -604,6 +618,257 @@ install_docker_mode() {
 }
 
 # ---------------------------------------------------------------------------
+# Production mode (blue-green + Caddy) — docker-compose.yml (base) +
+# docker-compose.release.yml (blue/green app tier, via scripts/deploy.sh)
+# ---------------------------------------------------------------------------
+
+# Set by ensure_caddy_bind_ports — read by the reachability check below.
+CADDY_HTTP_PORT="80"
+NEEDS_NGINX_SNIPPET="false"
+
+# Detects whether 80/443 already belong to another app on this shared VPS —
+# never assumes. Free: Caddy binds them directly and keeps auto-HTTPS. Taken:
+# Caddy moves to loopback-only ports (never touches the real 80/443 another
+# app owns) and this box needs one manual nginx vhost added afterward (see
+# print_nginx_snippet) — install.sh never edits another app's nginx config
+# itself, that's too blind an action to automate on a shared box.
+ensure_caddy_bind_ports() {
+  if port_in_use 80 || port_in_use 443; then
+    echo ""
+    echo "Port 80 and/or 443 already in use by another app on this VPS."
+    echo "Binding Caddy to loopback-only ports instead — you'll add one nginx"
+    echo "vhost yourself afterward (exact snippet printed at the end)."
+    CADDY_HTTP_PORT=$(find_free_port 8090)
+    local https_port
+    https_port=$(find_free_port 8091)
+    set_env_kv .env PROXY_BIND_HTTP "127.0.0.1:${CADDY_HTTP_PORT}:80"
+    set_env_kv .env PROXY_BIND_HTTPS "127.0.0.1:${https_port}:443"
+    # Caddy can't prove domain ownership (ACME) on a port it doesn't really
+    # own — auto-HTTPS must be off; whatever already holds 80/443 terminates
+    # TLS instead. Idempotent: only touches the line if still commented.
+    if grep -qE '^\s*# auto_https off' Caddyfile; then
+      sed -i.bak -E 's/^(\s*)# auto_https off/\1auto_https off/' Caddyfile && rm -f Caddyfile.bak
+    fi
+    NEEDS_NGINX_SNIPPET="true"
+  else
+    CADDY_HTTP_PORT="80"
+    NEEDS_NGINX_SNIPPET="false"
+  fi
+}
+
+print_nginx_snippet() {
+  echo ""
+  echo "---- add this to your existing nginx config, then: nginx -t && systemctl reload nginx ----"
+  for domain in "$ADMIN_DOMAIN" "$API_DOMAIN" $TENANT_DOMAINS; do
+    cat <<EOF
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name ${domain};
+    # ... your existing ssl_certificate/ssl_certificate_key lines for this domain ...
+    location / {
+        proxy_pass http://127.0.0.1:${CADDY_HTTP_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+  done
+  echo "-------------------------------------------------------------------------------------------"
+}
+
+prompt_domains() {
+  if [ -z "${ADMIN_DOMAIN:-}" ] && [ -t 0 ]; then
+    read -r -p "Admin panel domain (blank = admin.localhost, test-only): " ADMIN_DOMAIN
+  fi
+  if [ -z "${API_DOMAIN:-}" ] && [ -t 0 ]; then
+    read -r -p "API domain (blank = api.localhost, test-only): " API_DOMAIN
+  fi
+  if [ -z "${TENANT_DOMAINS:-}" ] && [ -t 0 ]; then
+    read -r -p "Tenant site domain(s), space-separated (blank = tenant.localhost, test-only): " TENANT_DOMAINS
+  fi
+  ADMIN_DOMAIN="${ADMIN_DOMAIN:-admin.localhost}"
+  API_DOMAIN="${API_DOMAIN:-api.localhost}"
+  TENANT_DOMAINS="${TENANT_DOMAINS:-tenant.localhost}"
+  case "$ADMIN_DOMAIN $API_DOMAIN" in
+    *.localhost*)
+      echo "" >&2
+      echo "Warning: using a *.localhost placeholder domain — Caddy's automatic" >&2
+      echo "HTTPS needs a real domain with DNS already pointed at this VPS to" >&2
+      echo "work. Fine for internal testing only." >&2
+      ;;
+  esac
+}
+
+# Blue-green never publishes api to the host (see docker-compose.release.yml)
+# — reaches it the same way scripts/deploy.sh's own promote() does, via
+# `docker compose exec` into the currently-live color. The JSON body goes
+# over stdin into the node process (never argv/-e env vars) for the same
+# reason the trial-mode create_superadmin() above already avoids that: a
+# password on this process's own command line would be readable via `ps` by
+# any local user for as long as the request is in flight.
+SETUP_SCRIPT_PRODUCTION='
+let body = "";
+process.stdin.on("data", (c) => (body += c));
+process.stdin.on("end", () => {
+  fetch("http://127.0.0.1:3000/api/setup/status")
+    .then((r) => r.json())
+    .then((status) => {
+      if (!status.needsSetup) { console.log("ALREADY_SETUP"); return; }
+      return fetch("http://127.0.0.1:3000/api/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).then((r) => r.text()).then((t) => console.log(t.includes("token") ? "CREATED" : "FAILED:" + t));
+    })
+    .catch((e) => { console.error(String(e)); process.exit(1); });
+});
+'
+create_superadmin_production() {
+  echo ""
+  echo "Creating superadmin account..."
+  local color resp
+  color="$(cat .deploy-color 2>/dev/null || echo blue)"
+  if ! resp=$(printf '{"email":"%s","password":"%s"}' \
+      "$(json_escape "$SUPERADMIN_EMAIL")" "$(json_escape "$SUPERADMIN_PASSWORD")" \
+    | docker compose -p "ucms-${color}" -f docker-compose.release.yml exec -T api node -e "$SETUP_SCRIPT_PRODUCTION" 2>&1); then
+    echo "Warning: could not reach the API container to create superadmin —" >&2
+    echo "  create one later from the admin's Setup Wizard, or re-run with --admin-only." >&2
+    return
+  fi
+  case "$resp" in
+    *ALREADY_SETUP*) echo "Setup already completed — skipping (log in with the existing account)." ;;
+    *CREATED*) echo "Superadmin created: ${SUPERADMIN_EMAIL}" ;;
+    *) echo "Warning: superadmin creation failed — create one later from the admin's Setup Wizard." >&2
+       echo "  Response: ${resp}" >&2 ;;
+  esac
+}
+
+# Caddy routes by Host header, so this checks routing works — not just "port
+# 80 accepts connections" — the same reasoning verify_external_reachability
+# (trial mode) already applies to raw ports. Doesn't depend on public DNS
+# actually pointing here yet, unlike hitting the real domain would.
+verify_production_reachability() {
+  local ok="true" domain
+  echo ""
+  echo "Verifying the stack is reachable through Caddy (Host-based routing)..."
+  for domain in "$ADMIN_DOMAIN" "$API_DOMAIN" ${TENANT_DOMAINS%% *}; do
+    if curl_reachable_host "$domain" "$CADDY_HTTP_PORT"; then
+      echo "  ${domain} — reachable"
+    else
+      echo "  ${domain} — NOT reachable" >&2
+      ok="false"
+    fi
+  done
+  [ "$ok" = "true" ]
+}
+curl_reachable_host() {
+  local domain="$1" port="$2" code
+  code=$(curl -s -o /dev/null --max-time 5 -H "Host: ${domain}" "http://127.0.0.1:${port}/" -w '%{http_code}' 2>/dev/null || true)
+  [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+install_production_mode() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker not found — installing via get.docker.com (adds its own repo for this distro only)..."
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable --now docker
+  else
+    echo "Docker already installed: $(docker --version)"
+  fi
+  if ! docker compose version >/dev/null 2>&1; then
+    echo "Docker is installed but the 'compose' plugin is missing." >&2
+    echo "Install it: https://docs.docker.com/compose/install/" >&2
+    exit 1
+  fi
+
+  local monitor_port public_host
+  monitor_port=$(find_free_port 5555)
+  public_host=$(detect_public_host)
+  echo "Public host: $public_host"
+
+  if [ ! -f .env ]; then
+    echo "Creating .env from .env.example..."
+    cp .env.example .env
+  fi
+  ensure_caddy_bind_ports
+  prompt_domains
+
+  fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
+  fill_env_if_blank .env SESSION_SECRET
+  fill_env_if_blank .env DEPLOY_SECRET
+  set_env_kv .env ADMIN_DOMAIN "$ADMIN_DOMAIN"
+  set_env_kv .env API_DOMAIN "$API_DOMAIN"
+  set_env_kv .env TENANT_DOMAINS "$TENANT_DOMAINS"
+  set_env_kv .env ADMIN_ORIGIN "https://${ADMIN_DOMAIN}"
+  set_env_kv .env VITE_API_URL "https://${API_DOMAIN}"
+  set_env_kv .env VITE_FRONTEND_URL "https://${TENANT_DOMAINS%% *}"
+  # Default to 1 replica each, but never clobber a value from a previous
+  # install/re-run — unlike the secrets above, this isn't meant to reset.
+  grep -qE '^API_REPLICAS=.+' .env || set_env_kv .env API_REPLICAS "1"
+  grep -qE '^FRONTEND_REPLICAS=.+' .env || set_env_kv .env FRONTEND_REPLICAS "1"
+  grep -qE '^ADMIN_REPLICAS=.+' .env || set_env_kv .env ADMIN_REPLICAS "1"
+
+  echo ""
+  echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
+  docker compose up -d db pgbouncer redis proxy
+  docker volume create ucms-uploads >/dev/null
+
+  echo ""
+  echo "-- first deploy (build+test+health-check+promote, see scripts/deploy.sh) --"
+  if ! bash scripts/deploy.sh; then
+    echo "" >&2
+    echo "Aborting — the first deploy failed. Nothing was live before this run," >&2
+    echo "so there's nothing to roll back; fix the error above and re-run" >&2
+    echo "sudo ./install.sh --mode=production (safe to re-run)." >&2
+    exit 1
+  fi
+
+  verify_production_reachability || echo "  (continuing anyway — deploy.sh's own health-check already gated success; see above for what's not reachable yet)" >&2
+
+  create_superadmin_production
+
+  local node_bin
+  node_bin=$(ensure_private_node)
+  install_monitor "$node_bin" "docker" "$monitor_port"
+
+  if [ "$NEEDS_NGINX_SNIPPET" = "true" ]; then
+    open_firewall_ports "$monitor_port"
+  else
+    open_firewall_ports "80" "443" "$monitor_port"
+  fi
+
+  echo ""
+  echo "================================================================"
+  echo " Done (production mode)."
+  echo "   Admin panel:  https://${ADMIN_DOMAIN}"
+  echo "   Public site:  https://${TENANT_DOMAINS%% *}"
+  echo "   API:          https://${API_DOMAIN}"
+  echo "   Ops monitor:  http://${public_host}:${monitor_port}"
+  echo "     user: admin"
+  echo "     pass: ${MONITOR_PASSWORD}"
+  echo "     (also saved in /etc/ucms-monitor.env on this VPS)"
+  if [ "$NEEDS_NGINX_SNIPPET" = "true" ]; then
+    print_nginx_snippet
+    echo ""
+    echo " Note: the Caddyfile edit above (auto_https off) lives in a tracked repo"
+    echo " file. A future 'git reset --hard origin/main' (Monitor's own 'Pull latest"
+    echo " & rebuild', or scripts/deploy.sh's own pull step) will silently revert it"
+    echo " next time the proxy container gets recreated. If Caddy starts trying (and"
+    echo " failing) to auto-issue certs again after a future pull, re-run:"
+    echo "   sudo ./install.sh --mode=production"
+  fi
+  echo ""
+  echo " First time here? Open the admin panel URL above — with zero users"
+  echo " in the database it shows a setup wizard automatically."
+  echo " Future deploys: bash scripts/deploy.sh (zero-downtime) or the Monitor's"
+  echo " own 'Pull latest & rebuild' button."
+  echo "================================================================"
+}
+
+# ---------------------------------------------------------------------------
 # Bare-metal mode
 # ---------------------------------------------------------------------------
 ensure_postgres() {
@@ -826,7 +1091,34 @@ resolve_running_ports() {
   fi
 }
 
+# Production mode has no fixed API/admin/frontend ports to resolve (nothing
+# is host-published — see docker-compose.release.yml) — re-derives what it
+# needs straight from .env instead of resolve_running_ports's port-file
+# lookups, which only apply to the trial/bare-metal port-publishing modes.
+resolve_production_env() {
+  if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+  fi
+  ADMIN_DOMAIN="${ADMIN_DOMAIN:-admin.localhost}"
+  API_DOMAIN="${API_DOMAIN:-api.localhost}"
+  TENANT_DOMAINS="${TENANT_DOMAINS:-tenant.localhost}"
+  CADDY_HTTP_PORT="80"
+  [ -n "${PROXY_BIND_HTTP:-}" ] && CADDY_HTTP_PORT="$(echo "$PROXY_BIND_HTTP" | cut -d: -f2)"
+}
+
 if [ "$DIAGNOSE_ONLY" = "true" ]; then
+  if [ "$MODE" = "production" ]; then
+    resolve_production_env
+    if verify_production_reachability; then
+      echo ""
+      echo "Everything's reachable from outside — no problem found."
+      exit 0
+    fi
+    exit 1
+  fi
   resolve_running_ports
   if verify_external_reachability "$API_PORT_VAL" "$ADMIN_PORT_VAL" "$FRONTEND_PORT_VAL"; then
     echo ""
@@ -838,6 +1130,11 @@ if [ "$DIAGNOSE_ONLY" = "true" ]; then
 fi
 
 if [ "$ADMIN_ONLY" = "true" ]; then
+  if [ "$MODE" = "production" ]; then
+    resolve_production_env
+    create_superadmin_production
+    exit 0
+  fi
   resolve_running_ports
   echo "Waiting for the API to become healthy..."
   wait_for_api_health "$API_PORT_VAL" 30 || true
@@ -848,6 +1145,8 @@ fi
 detect_os_family
 if [ "$MODE" = "docker" ]; then
   install_docker_mode
+elif [ "$MODE" = "production" ]; then
+  install_production_mode
 else
   install_baremetal_mode
 fi

@@ -32,6 +32,14 @@ const pool = new Pool({
 pool.on("connect", (client) => {
   client.query("SET statement_timeout = 10000").catch(() => {});
 });
+// Without this, an idle client's own background error (e.g. Postgres
+// administratively killing the connection — "terminating connection due to
+// administrator command", seen crash-looping the VPS process this listener
+// was added for) has nowhere to go and surfaces as an uncaughtException,
+// taking the whole process down instead of just losing that one connection.
+pool.on("error", (err) => {
+  console.error("control-plane pool: idle client error", err);
+});
 
 const dbDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationFiles = readdirSync(path.join(dbDir, "migrations"))
@@ -75,6 +83,10 @@ function getTenantPool(connectionString: string): Pool {
     });
     tp.on("connect", (client) => {
       client.query("SET statement_timeout = 10000").catch(() => {});
+    });
+    // Same reasoning as the control-plane pool's own listener above.
+    tp.on("error", (err) => {
+      console.error(`tenant pool (${connectionString.replace(/:[^:@]+@/, ":***@")}): idle client error`, err);
     });
     tenantPools.set(connectionString, tp);
   }
