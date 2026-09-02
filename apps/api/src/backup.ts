@@ -140,8 +140,22 @@ export function markCloneStaged(id: string, stagingHost: string) {
   if (entry) entry.meta.stagingHost = stagingHost;
 }
 
+// ponytail: one whole-archive ceiling rather than a per-entry-type budget —
+// upgrade path is a real streaming Unzip with a running total if a tenant's
+// media library genuinely needs more than this.
+const MAX_RESTORE_DECOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+
 export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[] }> {
-  const entries = unzipSync(zip);
+  let decompressedTotal = 0;
+  const entries = unzipSync(zip, {
+    filter(file) {
+      decompressedTotal += file.originalSize;
+      if (decompressedTotal > MAX_RESTORE_DECOMPRESSED_BYTES) {
+        throw new Error(`backup decompresses to more than ${MAX_RESTORE_DECOMPRESSED_BYTES} bytes — refusing to restore`);
+      }
+      return true;
+    },
+  });
   const manifest = entries["backup.json"];
   if (!manifest) throw new Error("Not a backup zip: backup.json missing");
   let raw = strFromU8(manifest);
