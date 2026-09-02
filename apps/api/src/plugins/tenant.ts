@@ -31,7 +31,11 @@ export async function tenantPlugin(app: FastifyInstance) {
       await db.execute(sql`SET SESSION app.authenticated = 'false'`);
     } catch (err) {
       if (err instanceof UnknownTenantError) {
-        return reply.code(404).send({ error: "Unknown tenant" });
+        // User-facing wording only — "tenant" stays the internal term
+        // throughout the codebase (x-tenant-host, tenantHost, etc.), this is
+        // the one place an unrecognized/inactive domain's visitor could see
+        // the raw error text.
+        return reply.code(404).send({ error: "Unknown site" });
       }
       throw err;
     }
