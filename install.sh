@@ -405,7 +405,10 @@ create_superadmin() {
     | curl -fs -X POST "http://localhost:${api_port}/api/setup" \
         -H "Content-Type: application/json" --data-binary @- \
         2>/dev/null || true)
-  if echo "$resp" | grep -q '"token"'; then
+  # -i: /api/setup's success response carries a "csrfToken" field (the
+  # cookie+CSRF session migration renamed the old bare "token"), and a
+  # case-sensitive match here was reporting a real success as a failure.
+  if echo "$resp" | grep -qi 'token'; then
     echo "Superadmin created: ${SUPERADMIN_EMAIL}"
   else
     echo "Warning: superadmin creation failed — create one later from the admin's Setup Wizard." >&2
@@ -752,7 +755,7 @@ process.stdin.on("end", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
-      }).then((r) => r.text()).then((t) => console.log(t.includes("token") ? "CREATED" : "FAILED:" + t));
+      }).then((r) => r.text()).then((t) => console.log(t.toLowerCase().includes("token") ? "CREATED" : "FAILED:" + t));
     })
     .catch((e) => { console.error(String(e)); process.exit(1); });
 });
