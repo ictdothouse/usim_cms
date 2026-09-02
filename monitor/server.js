@@ -50,7 +50,8 @@ const ALERT_POLL_INTERVAL_MS = Number(process.env.ALERT_POLL_INTERVAL_MS) || 60_
 // scripts/deploy.sh's promote step failed with DNS errors. Tracked the same
 // generic way "db" already is (composeArgsFor falls back to base-compose for
 // any name not in RELEASE_SERVICES).
-const SERVICES = DEPLOY_MODE === "docker" ? ["db", "proxy", "api", "frontend", "admin"] : ["api", "frontend", "admin"];
+const SERVICES =
+  DEPLOY_MODE === "docker" ? ["db", "proxy", "api", "frontend", "admin"] : ["api", "frontend", "admin"];
 const UNIT_MAP = { api: "ucms-api", frontend: "ucms-frontend", admin: "ucms-admin" };
 
 // api/frontend/admin were split out of docker-compose.yml into
@@ -307,10 +308,14 @@ function pollForAlerts() {
 
 function handleAlertTest(req, res) {
   if (!ALERT_WEBHOOK_URL) return sendJson(res, 400, { error: "ALERT_WEBHOOK_URL is not set" });
-  postJson(ALERT_WEBHOOK_URL, { text: `[usim_cms/${PUBLIC_HOST}] test alert`, content: `[usim_cms/${PUBLIC_HOST}] test alert` }, (err, status) => {
-    if (err) return sendJson(res, 500, { error: err.message });
-    sendJson(res, 200, { ok: true, status });
-  });
+  postJson(
+    ALERT_WEBHOOK_URL,
+    { text: `[usim_cms/${PUBLIC_HOST}] test alert`, content: `[usim_cms/${PUBLIC_HOST}] test alert` },
+    (err, status) => {
+      if (err) return sendJson(res, 500, { error: err.message });
+      sendJson(res, 200, { ok: true, status });
+    },
+  );
 }
 
 function handleConfig(req, res) {
