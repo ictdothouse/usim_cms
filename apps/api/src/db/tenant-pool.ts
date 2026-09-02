@@ -84,9 +84,16 @@ function getTenantPool(connectionString: string): Pool {
     tp.on("connect", (client) => {
       client.query("SET statement_timeout = 10000").catch(() => {});
     });
-    // Same reasoning as the control-plane pool's own listener above.
+    // Same reasoning as the control-plane pool's own listener above. Strips
+    // both a URL-style password (this codebase's only actual format, always
+    // postgres://user:pass@host/db — deriveTenantDbUrl above) and, as extra
+    // insurance against a future db_url shaped differently, a bare
+    // "password=..." parameter, before this ever reaches a log line.
     tp.on("error", (err) => {
-      console.error(`tenant pool (${connectionString.replace(/:[^:@]+@/, ":***@")}): idle client error`, err);
+      const redacted = connectionString
+        .replace(/:[^:@/?]+@/, ":***@")
+        .replace(/(password\s*=\s*)[^&\s]+/gi, "$1***");
+      console.error(`tenant pool (${redacted}): idle client error`, err);
     });
     tenantPools.set(connectionString, tp);
   }
