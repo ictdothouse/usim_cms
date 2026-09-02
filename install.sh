@@ -65,6 +65,12 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "Run this with sudo: sudo ./install.sh" >&2
   exit 1
 fi
+# Captured so install_production_mode can hand ownership of whatever it wrote
+# in the repo dir back to whoever actually owns it, once its root-only setup
+# work is done — otherwise files created while running as root (e.g.
+# .deploy-color) become unwritable by that same person's later non-sudo
+# `bash scripts/deploy.sh` runs, which is the normal way to redeploy.
+ORIG_OWNER="$(stat -c '%U:%G' "$REPO_DIR" 2>/dev/null || echo "")"
 
 # ---------------------------------------------------------------------------
 # Mode selection
@@ -279,8 +285,14 @@ ensure_private_node() {
 }
 
 install_monitor() {
-  # $1 = node_bin, $2 = deploy mode ("docker" or "systemd"), $3 = monitor port
-  local node_bin="$1" deploy_mode="$2" monitor_port="$3"
+  # $1 = node_bin, $2 = deploy mode ("docker" or "systemd", written to
+  # /etc/ucms-monitor.env for monitor/server.js's own dispatch), $3 = monitor
+  # port, $4 = topology ("trial" default, or "production") — kept separate
+  # from $2 since monitor/server.js itself doesn't need a third DEPLOY_MODE
+  # value (it already tells trial vs blue-green apart at runtime via its own
+  # isTrialModeActive()/.deploy-color); this just gates the trial-specific
+  # api-recreate step below so it never runs for a blue-green install.
+  local node_bin="$1" deploy_mode="$2" monitor_port="$3" topology="${4:-trial}"
   echo ""
   echo "Setting up the ops monitor..."
   if [ ! -f /etc/ucms-monitor.env ]; then
@@ -323,10 +335,17 @@ EOF
     set_env_kv .env MONITOR_URL "http://host.docker.internal:${monitor_port}"
     set_env_kv .env MONITOR_USER "admin"
     set_env_kv .env MONITOR_PASSWORD "${MONITOR_PASSWORD}"
-    # api is already running by the time this function is called (see the
-    # trial-mode call site) — recreate it so it actually picks up the 3 vars
-    # just written, since compose only reads .env at container start.
-    docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d api 2>/dev/null || true
+    if [ "$topology" = "trial" ]; then
+      # api is already running by the time this function is called (see the
+      # trial-mode call site) — recreate it so it actually picks up the 3
+      # vars just written, since compose only reads .env at container start.
+      docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d api 2>/dev/null || true
+    fi
+    # Production/blue-green: the MONITOR_* vars just written above reach the
+    # api container on the NEXT scripts/deploy.sh run (it always rebuilds and
+    # recreates it) — no separate recreate step here, since forcing one via
+    # docker-compose.trial.yml would stand up a second, unrelated "api"
+    # container with nothing to do with the live blue/green one.
   else
     set_env_kv apps/api/.env MONITOR_URL "http://127.0.0.1:${monitor_port}"
     set_env_kv apps/api/.env MONITOR_USER "admin"
@@ -826,13 +845,22 @@ install_production_mode() {
     exit 1
   fi
 
+  # Hand the repo dir back to whoever actually owns it — this whole function
+  # ran as root, so .env/.deploy-color/etc were all just written as root,
+  # which would otherwise block that same person's later non-sudo
+  # `bash scripts/deploy.sh` runs (the normal way to redeploy) with a
+  # confusing "Permission denied" on .deploy-color specifically.
+  if [ -n "$ORIG_OWNER" ] && [ "$ORIG_OWNER" != "root:root" ]; then
+    chown -R "$ORIG_OWNER" "$REPO_DIR"
+  fi
+
   verify_production_reachability || echo "  (continuing anyway — deploy.sh's own health-check already gated success; see above for what's not reachable yet)" >&2
 
   create_superadmin_production
 
   local node_bin
   node_bin=$(ensure_private_node)
-  install_monitor "$node_bin" "docker" "$monitor_port"
+  install_monitor "$node_bin" "docker" "$monitor_port" "production"
 
   if [ "$NEEDS_NGINX_SNIPPET" = "true" ]; then
     open_firewall_ports "$monitor_port"
