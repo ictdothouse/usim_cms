@@ -26,9 +26,12 @@ function serveStatic(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
   const urlPath = decodeURIComponent(req.url.split("?")[0]);
   const filePath = path.join(clientDir, urlPath);
-  // path.join already collapses ".." segments; startsWith guards against an
-  // encoded traversal escaping clientDir once decoded.
-  if (!filePath.startsWith(clientDir)) return false;
+  // path.join already collapses ".." segments; the boundary check guards
+  // against an encoded traversal escaping clientDir once decoded. A bare
+  // filePath.startsWith(clientDir) is not enough - a sibling directory
+  // like "dist/client-XXX" also starts with the "dist/client" string, so
+  // it must match exactly or be followed by a path separator.
+  if (filePath !== clientDir && !filePath.startsWith(clientDir + path.sep)) return false;
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return false;
   res.setHeader("content-type", MIME[path.extname(filePath)] ?? "application/octet-stream");
   // Astro content-hashes every _astro/* filename, so caching forever is safe.
