@@ -377,6 +377,27 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
       // unlike buttons' full renderPositionEditor.
       type ItemRef = { kind: "heading" } | { kind: "subtitle" } | { kind: "button"; bi: number };
       const itemKey = (ref: ItemRef) => (ref.kind === "button" ? `btn-${ref.bi}` : ref.kind);
+      // A raw pointermove stream can fire well above screen refresh rate
+      // (high-report-rate mice/trackpads go up to 1000Hz) — every one of
+      // these 4 drag handlers does real work per event (getBoundingClientRect
+      // loops, a mutate() state update), so an unthrottled listener redoes
+      // that work far more often than the screen can even show a new frame.
+      // Coalescing to one call per animation frame (latest position wins,
+      // nothing queued) is what actually fixes the reported jank — the drag
+      // math itself is unchanged.
+      const rafThrottle = <A extends unknown[]>(fn: (...args: A) => void) => {
+        let scheduled = false;
+        let latest: A;
+        return (...args: A) => {
+          latest = args;
+          if (scheduled) return;
+          scheduled = true;
+          requestAnimationFrame(() => {
+            scheduled = false;
+            fn(...latest);
+          });
+        };
+      };
       // Canvas-direct drag/resize, same idea as the heading/text
       // contentEditable commit() above: always read the freshest slides off
       // `bs` inside mutate() rather than off the `first`/`slides` captured by
@@ -547,7 +568,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           setSliderGuide({ elId: el.id, vCenter, hCenter, vGap, hGap, vGapMatches, hGapMatches, alignX, alignY });
         };
         set(ev.clientX, ev.clientY);
-        const move = (mv: PointerEvent) => set(mv.clientX, mv.clientY);
+        const move = rafThrottle((mv: PointerEvent) => set(mv.clientX, mv.clientY));
         const up = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
@@ -566,10 +587,10 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         ev.stopPropagation();
         ev.preventDefault();
         const startX = ev.clientX;
-        const move = (mv: PointerEvent) => {
+        const move = rafThrottle((mv: PointerEvent) => {
           const next = Math.max(1, Math.round(startFont + (mv.clientX - startX) / 3));
           updateItem(ref, { fontSize: String(next) });
-        };
+        });
         const up = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
@@ -596,10 +617,10 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         if (!node) return;
         const startWidth = node.getBoundingClientRect().width;
         const startX = ev.clientX;
-        const move = (mv: PointerEvent) => {
+        const move = rafThrottle((mv: PointerEvent) => {
           const next = Math.max(1, Math.round(startWidth + sign * (mv.clientX - startX)));
           updateItem(ref, { width: String(next) });
-        };
+        });
         const up = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
@@ -624,13 +645,13 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         if (!node) return;
         const startWidth = node.getBoundingClientRect().width;
         const startX = ev.clientX;
-        const move = (mv: PointerEvent) => {
+        const move = rafThrottle((mv: PointerEvent) => {
           const scale = Math.max(0.1, 1 + (sign * (mv.clientX - startX)) / startWidth);
           updateItem(ref, {
             fontSize: String(Math.max(1, Math.round(startFont * scale))),
             width: String(Math.max(1, Math.round(startWidth * scale))),
           });
-        };
+        });
         const up = () => {
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
