@@ -270,7 +270,13 @@ write_pgbouncer_userlist() {
   local hash
   hash=$(printf '%s' "${password}usim_cms_app" | md5sum | cut -d' ' -f1)
   printf '"usim_cms_app" "md5%s"\n' "$hash" > pgbouncer/userlist.txt
-  chmod 600 pgbouncer/userlist.txt
+  # edoburu/pgbouncer's entrypoint runs as uid:gid 70:70 ("postgres" in
+  # its own /etc/passwd, unrelated to any host user) — chown to that gid
+  # and restrict to group-read, not chmod 644/world-readable. install.sh
+  # itself requires sudo (see its own top-of-file check), so chown here
+  # never fails for lack of privilege.
+  chown 0:70 pgbouncer/userlist.txt
+  chmod 640 pgbouncer/userlist.txt
 }
 
 # Private, pinned Node runtime — never touches system Node (no NodeSource
