@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
@@ -15,6 +15,32 @@ const DRIVER = process.env.STORAGE_DRIVER === "s3" ? "s3" : "local";
 
 // --- local disk driver (default) ---
 export const localUploadsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "uploads");
+
+// Recursively sums file sizes under `dir` — used for a tenant's uploads
+// folder. Returns null (not 0) when the folder doesn't exist at all yet
+// (a tenant with no uploads), so callers can tell "empty" from "unmeasurable" apart from a real zero.
+export async function dirSizeBytes(dir: string): Promise<number | null> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let total = 0;
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      total += (await dirSizeBytes(full)) ?? 0;
+    } else {
+      try {
+        total += (await stat(full)).size;
+      } catch {
+        // File removed mid-scan — ignore, not worth failing the whole sum.
+      }
+    }
+  }
+  return total;
+}
 
 async function uploadLocal(tenantFolder: string, filename: string, stream: Readable): Promise<UploadResult> {
   const dir = path.join(localUploadsDir, tenantFolder);

@@ -29,6 +29,13 @@ FROM base AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/deploy/api ./
+# Created here (not left for storage.ts's own mkdir) so the ownership below
+# actually applies to it: docker-compose mounts a named volume at this exact
+# path (uploads must survive a blue-green swap, see docker-compose.yml), and
+# an empty named volume mounted over a path that doesn't already exist in the
+# image is created root:root — unwritable by the non-root `app` user below,
+# breaking every upload with EACCES on a fresh deploy.
+RUN mkdir -p uploads
 RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app
 USER app
 EXPOSE 3000
