@@ -42,6 +42,12 @@ const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
 // whole point is staying dependency-free (see the header comment).
 const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || "";
 const ALERT_POLL_INTERVAL_MS = Number(process.env.ALERT_POLL_INTERVAL_MS) || 60_000;
+const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) || 85;
+// Per-tenant uploads live in the named `ucms-uploads` docker volume (docker mode) or a
+// plain apps/api/uploads directory (bare-metal) — same resolution rule as
+// apps/api/scripts/backup-media.sh's UPLOADS_DIR, reused here so an operator who already
+// set one for backups doesn't need to work out a second value for the dashboard.
+const UPLOADS_DIR_ENV = process.env.UPLOADS_DIR || "";
 
 // Whitelisted so a service name never reaches child_process from raw user
 // input — every route validates against this array before shelling out.
@@ -246,6 +252,44 @@ function getHostStats(cb) {
   );
 }
 
+function resolveUploadsDir(cb) {
+  if (UPLOADS_DIR_ENV) return cb(UPLOADS_DIR_ENV);
+  if (DEPLOY_MODE !== "docker") return cb(path.join(REPO_DIR, "apps/api/uploads"));
+  execFile(
+    "docker",
+    ["volume", "inspect", "ucms-uploads", "--format", "{{ .Mountpoint }}"],
+    { timeout: 10_000 },
+    (err, stdout) => cb(err ? null : stdout.trim()),
+  );
+}
+
+// Per-tenant folder sizes (apps/api/src/index.ts's tenantFolder() slug, not the raw
+// hostname — this process has no DB access to translate it back, same trust boundary
+// as backup-media.sh). One `du` per top-level folder rather than a recursive Node walk —
+// `du` is already what getHostStats' `df` sibling call relies on being present.
+function getSitesUsage(cb) {
+  resolveUploadsDir((dir) => {
+    if (!dir) return cb([]);
+    execFile(
+      "sh",
+      ["-c", `du -sb "${dir}"/*/ 2>/dev/null || true`],
+      { timeout: 20_000, maxBuffer: 2 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err && !stdout) return cb([]);
+        const sites = (stdout || "")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const [bytesStr, p] = line.split("\t");
+            return { folder: path.basename((p || "").replace(/\/$/, "")), bytes: Number(bytesStr) || 0 };
+          })
+          .sort((a, b) => b.bytes - a.bytes);
+        cb(sites);
+      },
+    );
+  });
+}
+
 // Posts a plain JSON body to an operator-configured webhook. `content` is
 // included alongside `text` so a Discord webhook (which reads `content`)
 // and a Slack/Teams-style one (which reads `text`) both work unconfigured.
@@ -291,6 +335,7 @@ function sendAlert(text) {
 // observed, nothing to compare against yet," so a fresh process start never
 // fires a false "recovered" alert.
 let lastKnownUp = {};
+let lastDiskOver = false;
 function pollForAlerts() {
   getStatus((err, services) => {
     if (err) return; // transient poll failure — not itself alert-worthy
@@ -303,6 +348,19 @@ function pollForAlerts() {
       }
       lastKnownUp[name] = up;
     }
+  });
+  // Edge-triggered the same way as the service up/down checks above — fires once on
+  // crossing ALERT_DISK_THRESHOLD_PCT, once again when it drops back below, not on
+  // every single poll while it stays over.
+  getHostStats((host) => {
+    if (!host || !host.disk) return;
+    const over = host.disk.pct >= ALERT_DISK_THRESHOLD_PCT;
+    if (over !== lastDiskOver) {
+      sendAlert(
+        `[usim_cms/${PUBLIC_HOST}] disk usage ${over ? `crossed ${ALERT_DISK_THRESHOLD_PCT}%` : `back under ${ALERT_DISK_THRESHOLD_PCT}%`} (now ${host.disk.pct}%, ${host.disk.used}/${host.disk.total})`,
+      );
+    }
+    lastDiskOver = over;
   });
 }
 
@@ -324,6 +382,10 @@ function handleConfig(req, res) {
     services: SERVICES,
     dbManaged: DEPLOY_MODE === "docker" ? true : DB_MANAGED,
   });
+}
+
+function handleSites(req, res) {
+  getSitesUsage((sites) => sendJson(res, 200, { sites }));
 }
 
 function handleStatus(req, res) {
@@ -653,6 +715,10 @@ const DASHBOARD_HTML = `<!doctype html>
   <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
 </div>
 
+<h3>Sites (uploads folder size per tenant)</h3>
+<p class="muted">Folder name is the tenant's slug (lowercase, non-alphanumeric replaced with <code>_</code>), not its full hostname — this dashboard has no database access to translate it back.</p>
+<table id="sitesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+
 <h3>SSL (certbot)</h3>
 <p class="muted">Issues/renews a Let's Encrypt cert for a domain already pointed at this box's nginx — requires certbot + the nginx plugin installed on the host (<code>apt install certbot python3-certbot-nginx</code>). Renewal is handled by certbot's own installed timer, not this dashboard.</p>
 <div class="row">
@@ -692,6 +758,42 @@ function meterCard(label, pct, sub) {
   return "<div class=\\"card\\"><div class=\\"label\\">" + label + "</div>" +
     "<div class=\\"value\\">" + pct + "% <span class=\\"muted\\">" + sub + "</span></div>" +
     "<div class=\\"meter " + cls + "\\"><span style=\\"width:" + pct + "%\\"></span></div></div>";
+}
+
+function formatBytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return n.toFixed(i === 0 ? 0 : 1) + " " + units[i];
+}
+
+async function refreshSites() {
+  try {
+    const data = await api("/api/sites");
+    const tbody = document.querySelector("#sitesTable tbody");
+    tbody.innerHTML = "";
+    const sites = data.sites || [];
+    if (!sites.length) {
+      tbody.innerHTML = "<tr><td class=\\"muted\\">No uploads folders found yet.</td></tr>";
+      return;
+    }
+    const max = Math.max(...sites.map((s) => s.bytes), 1);
+    for (const s of sites) {
+      const tr = document.createElement("tr");
+      const pct = Math.round((s.bytes / max) * 100);
+      tr.innerHTML =
+        "<td style=\\"padding:0.25rem 0.5rem 0.25rem 0; white-space:nowrap;\\">" + escapeHtml(s.folder) + "</td>" +
+        "<td style=\\"padding:0.25rem 0.5rem; width:100%;\\"><div class=\\"meter ok\\"><span style=\\"width:" + pct + "%\\"></span></div></td>" +
+        "<td style=\\"padding:0.25rem 0 0.25rem 0.5rem; white-space:nowrap; text-align:right;\\" class=\\"muted\\">" + formatBytes(s.bytes) + "</td>";
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    document.querySelector("#sitesTable tbody").innerHTML = "<tr><td class=\\"muted\\">Error: " + escapeHtml(e.message) + "</td></tr>";
+  }
 }
 
 function renderHost(host) {
@@ -769,8 +871,10 @@ async function init() {
   }
   refresh();
   refreshDb();
+  refreshSites();
   setInterval(refresh, 5000);
   setInterval(refreshDb, 10000);
+  setInterval(refreshSites, 30000);
 }
 
 async function refresh() {
@@ -966,6 +1070,8 @@ const server = http.createServer((req, res) => {
       handleConfig(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/status") {
       handleStatus(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/sites") {
+      handleSites(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "service" && parts[3]) {
       handleServiceAction(req, res, parts[2], parts[3]);
     } else if (req.method === "GET" && parts[0] === "api" && parts[1] === "logs" && parts[2]) {
