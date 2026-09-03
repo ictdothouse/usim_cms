@@ -34,6 +34,27 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   recommendation resolves to in practice). `scripts/deploy.sh`'s base-tier line
   (`docker compose up -d db pgbouncer redis proxy`) must keep listing `pgbouncer`/`redis`
   explicitly — an explicit service list doesn't pick up a newly added compose service on its own.
+  **Real auth, not `auth_type = trust`** (a security-audit finding: the wildcard `[databases]`
+  entry used to embed a literal hardcoded password and `auth_type = trust` meant PgBouncer never
+  checked a connecting client's password at all). `POSTGRES_APP_PASSWORD` (`.env`) is the single
+  source of truth: the `db` container's own `docker-entrypoint-initdb.d/02-rotate-db-role-
+  password.sh` (runs right after `setup-db-role.sql`, same first-boot-only pass) forces
+  `usim_cms_app`'s password into classic **md5** storage (`SET password_encryption = 'md5'`, not
+  Postgres 16's `scram-sha-256` default) from that env var, and `db`'s own
+  `POSTGRES_HOST_AUTH_METHOD=md5` makes Postgres demand md5 over the network to match. `install.sh`'s
+  `write_pgbouncer_userlist()` independently computes the same `md5(password + role)` hash from the
+  identical env var and writes it to `pgbouncer/userlist.txt` (git-ignored — see
+  `pgbouncer/userlist.txt.example` — generated fresh on every production-mode install/re-run,
+  before `pgbouncer` first starts). `pgbouncer.ini`'s `[databases]` line now has no `password=`
+  field at all — PgBouncer falls back to this same `auth_file` entry to authenticate the *backend*
+  leg to Postgres too, not just the incoming client (`auth_type = md5`) — verified locally by
+  spinning up `db`+`pgbouncer` with a test password: correct password connects, a wrong one gets a
+  real `FATAL: password authentication failed`. **This only rotates a FRESH install's role** —
+  `docker-entrypoint-initdb.d` scripts never re-run against an existing data volume, so an
+  already-deployed instance's live password rotation is still a supervised, by-hand step (rotate
+  `.env`'s `POSTGRES_APP_PASSWORD`, `docker compose exec db psql -U postgres -c "SET
+  password_encryption='md5'; ALTER ROLE usim_cms_app WITH PASSWORD '...';"`, re-run
+  `write_pgbouncer_userlist` — or its one-liner equivalent — then restart `pgbouncer` and `api`).
 - **`redis`** (`docker-compose.yml`, always-on alongside `db`/`pgbouncer`/`proxy`) is a shared
   cache for public (anonymous) GETs — `apps/api/src/cache.ts`'s `cacheGet`/`cacheSet`/
   `cacheInvalidate`, wired into `generic-crud.ts`'s public list/`:id` routes (pages/posts/

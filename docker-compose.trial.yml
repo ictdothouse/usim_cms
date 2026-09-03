@@ -28,7 +28,7 @@ services:
     networks:
       - ucms-net
     environment:
-      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@db:5432/usim_cms
+      DATABASE_URL: postgres://usim_cms_app:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}@db:5432/usim_cms
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       PORT: 3000
       # The api's Dockerfile bakes NODE_ENV=production, which trips index.ts's

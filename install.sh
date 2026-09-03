@@ -254,6 +254,24 @@ set_env_kv() {
     echo "${key}=${value}" >> "$file"
   fi
 }
+write_pgbouncer_userlist() {
+  # Regenerates pgbouncer/userlist.txt (git-ignored — see
+  # pgbouncer/userlist.txt.example) from .env's POSTGRES_APP_PASSWORD.
+  # Always safe to re-run: deterministic from the current value, so a
+  # redeploy on an unchanged .env writes the identical file. Only used by
+  # production mode — trial mode's api talks straight to db:5432, no
+  # pgbouncer involved (see docker-compose.trial.yml's own header).
+  local password
+  password=$(grep -E '^POSTGRES_APP_PASSWORD=' .env | cut -d= -f2-)
+  if [ -z "$password" ]; then
+    echo "POSTGRES_APP_PASSWORD is blank in .env — run fill_env_if_blank first." >&2
+    exit 1
+  fi
+  local hash
+  hash=$(printf '%s' "${password}usim_cms_app" | md5sum | cut -d' ' -f1)
+  printf '"usim_cms_app" "md5%s"\n' "$hash" > pgbouncer/userlist.txt
+  chmod 600 pgbouncer/userlist.txt
+}
 
 # Private, pinned Node runtime — never touches system Node (no NodeSource
 # repo, no global npm/pnpm), so it can never conflict with whatever Node
@@ -582,6 +600,7 @@ install_docker_mode() {
   # right after it's written, so no other local account on the box can read it.
   chmod 600 .env
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
+  fill_env_if_blank .env POSTGRES_APP_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
   set_env_kv .env VITE_API_URL "http://${public_host}:${api_port}"
   set_env_kv .env VITE_FRONTEND_URL "http://${public_host}:${frontend_port}"
@@ -839,6 +858,7 @@ install_production_mode() {
   prompt_domains
 
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
+  fill_env_if_blank .env POSTGRES_APP_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
   fill_env_if_blank .env DEPLOY_SECRET
   set_env_kv .env ADMIN_DOMAIN "$ADMIN_DOMAIN"
@@ -852,6 +872,8 @@ install_production_mode() {
   grep -qE '^API_REPLICAS=.+' .env || set_env_kv .env API_REPLICAS "1"
   grep -qE '^FRONTEND_REPLICAS=.+' .env || set_env_kv .env FRONTEND_REPLICAS "1"
   grep -qE '^ADMIN_REPLICAS=.+' .env || set_env_kv .env ADMIN_REPLICAS "1"
+
+  write_pgbouncer_userlist
 
   echo ""
   echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
