@@ -115,6 +115,24 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
 - `apps/api/scripts/backup.sh` is the instance-level counterpart: `pg_dump` (whole
   control-plane + tenant DBs, or a specific tenant's schema by host), meant to run on a
   cron job (`RETENTION_DAYS` prunes old dumps, defaults 14).
+- **`apps/api/scripts/backup-media.sh`** — the filesystem-level counterpart, for the
+  uploads themselves (large-media tenants where `backup.ts`'s in-memory zip export isn't
+  practical — see `MAX_LOCAL_MEDIA_BACKUP_BYTES` in `backup.ts`). No object storage, no
+  extra dependency: `rsync -a --delete --link-dest=<previous>` mirrors each tenant's
+  `uploads/<tenantFolder>/` into `BACKUP_DIR/media/<tenantFolder>/<timestamp>/` — unchanged
+  files are hardlinked against the prior snapshot (near-zero extra disk per run), a `latest`
+  symlink always points at the newest one, and `RETENTION_DAYS` (same convention as
+  `backup.sh`) prunes old snapshot dirs. Docker mode resolves the named `ucms-uploads`
+  volume's real host path via `docker volume inspect` automatically; bare-metal/local-dev
+  sets `UPLOADS_DIR=apps/api/uploads` directly. Restore is a plain `rsync -a --delete
+  .../latest/ uploads/<tenantFolder>/`; migrating a tenant to a new server is the same
+  `rsync` pointed at `newhost:` instead — no app code involved either way, meant for a cron
+  job (`0 2 * * *`) same as `backup.sh`, not wired into `install.sh` (opt-in, same as
+  `backup.sh` itself). **Multi-VPS fleet (one department's usim_cms per VPS, each with a
+  small local disk)**: a backup written back onto the same disk it's protecting doesn't
+  survive that disk filling up or the VPS dying — set `SOURCE_HOST=user@app-vps-ip` to run
+  the script in pull mode from a separate backup box instead (plain SSH, no new
+  dependency), an explicit tenant-host list required (no remote directory listing).
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
@@ -182,14 +200,24 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   same convention as `REDIS_URL`/PgBouncer): a `setInterval` poll (`ALERT_POLL_INTERVAL_MS`, default 60s)
   reads the same `getStatus()` the dashboard itself renders from and edge-triggers a plain JSON webhook
   POST (`{text, content}` — works unconfigured with a Slack/Discord/Teams incoming webhook, or a custom
-  endpoint) whenever a monitored service (db/api/frontend/admin) flips up↔down. `POST /api/alerts/test`
-  (same basic-auth as every other monitor route) fires a one-off test message to verify wiring without
-  waiting for a real outage. Deliberately no email/SMTP client — this file's whole point is staying
-  dependency-free (`node monitor/server.js`, no `npm install`), and a webhook covers the same "someone
-  gets pinged" need without one. Still a gap: no real metrics/dashboards (CPU/memory/request-rate time
-  series) — this is service-up/down alerting only, `restart: unless-stopped` + compose healthchecks
-  still do the actual crash-recovery; revisit with a real metrics stack if/when the instance carries
-  enough tenants that this coarse a signal stops being enough.
+  endpoint) whenever a monitored service (db/api/frontend/admin) flips up↔down, or disk usage (same `df`
+  read `getHostStats` already does for the dashboard) crosses `ALERT_DISK_THRESHOLD_PCT` (default 85) —
+  edge-triggered the same way, once on crossing, once again dropping back under, never on every poll
+  while it stays over. `POST /api/alerts/test` (same basic-auth as every other monitor route) fires a
+  one-off test message to verify wiring without waiting for a real outage. Deliberately no email/SMTP
+  client — this file's whole point is staying dependency-free (`node monitor/server.js`, no `npm
+  install`), and a webhook covers the same "someone gets pinged" need without one. Still a gap: no real
+  metrics/dashboards (CPU/memory/request-rate time series) — this is up/down + disk-threshold alerting
+  only, `restart: unless-stopped` + compose healthchecks still do the actual crash-recovery; revisit
+  with a real metrics stack if/when the instance carries enough tenants that this coarse a signal stops
+  being enough.
+- **`GET /api/sites`** (dashboard's "Sites" section) — per-tenant uploads folder size, one `du -sb` per
+  top-level folder under the uploads dir (docker mode auto-resolves the named `ucms-uploads` volume's
+  real host path via `docker volume inspect`; bare-metal defaults to `apps/api/uploads`; `UPLOADS_DIR`
+  overrides either — same env var `apps/api/scripts/backup-media.sh` reads). Folder names are the
+  `tenantFolder()` slug (`index.ts`'s `host.toLowerCase().replace(/[^a-z0-9]/g,"_")`), not the real
+  hostname — this process has no DB access to translate it back, same trust boundary as the backup
+  script.
 
 ### Blue-green zero-downtime deploys (docker mode only)
 
