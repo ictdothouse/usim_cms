@@ -5,6 +5,15 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
       POSTGRES_DB: usim_cms
+      # usim_cms_app's real password (used by 02-rotate-db-role-password.sh
+      # below) and the pg_hba auth method Postgres demands for it over the
+      # network — md5, not the image's scram-sha-256 default, so pgbouncer's
+      # userlist.txt (also md5, generated from this same env var by
+      # install.sh) can authenticate both legs. Local/socket connections
+      # (initdb.d itself) are unaffected — HOST_AUTH_METHOD only governs
+      # "host" (TCP) pg_hba entries, not "local" ones.
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+      POSTGRES_HOST_AUTH_METHOD: md5
     networks:
       - ucms-net
     volumes:
@@ -13,6 +22,9 @@ services:
       # usim_cms_app role the RLS policies require (see CLAUDE.md / the
       # script's own header for why superuser connections can't use them).
       - ./apps/api/scripts/setup-db-role.sql:/docker-entrypoint-initdb.d/01-setup-db-role.sql:ro
+      # Runs right after, same first-boot-only pass: rotates the role's
+      # placeholder password to the real one — see the script's own header.
+      - ./apps/api/scripts/setup-db-role-rotate.sh:/docker-entrypoint-initdb.d/02-rotate-db-role-password.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -37,11 +49,16 @@ services:
         condition: service_healthy
     networks:
       - ucms-net
+    environment:
+      # Only used by the healthcheck below (real client auth against
+      # pgbouncer now goes through auth_type=md5 + userlist.txt, not this
+      # env var) — pgbouncer.ini itself no longer embeds a password.
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
     volumes:
       - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
       - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
     healthcheck:
-      test: ["CMD-SHELL", "PGPASSWORD='' psql -h 127.0.0.1 -p 6432 -U usim_cms_app -d pgbouncer -c 'SHOW VERSION' >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_APP_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U usim_cms_app -d pgbouncer -c 'SHOW VERSION' >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 10

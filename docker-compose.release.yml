@@ -31,7 +31,7 @@ services:
       # — see ./pgbouncer/pgbouncer.ini and CLAUDE.md's connection-budget
       # note. tenant-pool.ts's deriveTenantDbUrl swaps only the dbname on
       # top of this URL, so every tenant pool goes through pgbouncer too.
-      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@pgbouncer:6432/usim_cms
+      DATABASE_URL: postgres://usim_cms_app:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}@pgbouncer:6432/usim_cms
       # Shared public-read cache — see ./docker-compose.yml's redis service
       # and apps/api/src/cache.ts. Unset entirely = cache disabled, no
       # behavior change (every read just always hits Postgres).
