@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import { sql } from "drizzle-orm";
 import { getTenantConnection, getTenantTheme, setTenantTheme } from "./db/tenant-pool.js";
-import { localUploadsDir } from "./storage.js";
+import { localUploadsDir, dirSizeBytes } from "./storage.js";
 import * as schema from "./db/schema.js";
 
 // Tenant backup/restore/static-export. JSON dump instead of pg_dump on
@@ -19,6 +19,17 @@ import * as schema from "./db/schema.js";
 
 const BACKUP_VERSION = 1;
 const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+// Shared by export (guards the in-memory zip build below) and restore
+// (guards decompression further down) — this whole pipeline buffers a
+// tenant's uploads fully in RAM via fflate's sync zipSync/unzipSync, fine
+// for department sites (uploads capped at 5 MB/file, a few hundred MB of
+// media total) but not a tool for a tenant with a genuinely large media
+// library: past this size, use a filesystem-level copy (rsync/tar) of
+// uploads/<tenantFolder>/ directly instead — streaming this pipeline
+// properly is a real rewrite, not warranted while the practical answer for
+// "large media, single shared process" is "don't put it through this path".
+const MAX_LOCAL_MEDIA_BACKUP_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 
 const DATE_KEYS = new Set(["createdAt", "updatedAt", "publishedAt"]);
 function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -60,6 +71,14 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   };
   const dir = path.join(localUploadsDir, tenantFolder(host));
   if (existsSync(dir)) {
+    const mediaBytes = (await dirSizeBytes(dir)) ?? 0;
+    if (mediaBytes > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
+      throw new Error(
+        `${host}'s uploads folder is ${(mediaBytes / 1024 / 1024).toFixed(0)} MB — too large for this zip-backup ` +
+          `path (buffers everything in memory). Use a filesystem copy (rsync/tar) of uploads/${tenantFolder(host)}/ ` +
+          `instead; this export still covers the database rows and theme.`,
+      );
+    }
     for (const name of readdirSync(dir)) {
       files[`uploads/${name}`] = readFileSync(path.join(dir, name));
     }
@@ -140,18 +159,13 @@ export function markCloneStaged(id: string, stagingHost: string) {
   if (entry) entry.meta.stagingHost = stagingHost;
 }
 
-// ponytail: one whole-archive ceiling rather than a per-entry-type budget —
-// upgrade path is a real streaming Unzip with a running total if a tenant's
-// media library genuinely needs more than this.
-const MAX_RESTORE_DECOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
-
 export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[] }> {
   let decompressedTotal = 0;
   const entries = unzipSync(zip, {
     filter(file) {
       decompressedTotal += file.originalSize;
-      if (decompressedTotal > MAX_RESTORE_DECOMPRESSED_BYTES) {
-        throw new Error(`backup decompresses to more than ${MAX_RESTORE_DECOMPRESSED_BYTES} bytes — refusing to restore`);
+      if (decompressedTotal > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
+        throw new Error(`backup decompresses to more than ${MAX_LOCAL_MEDIA_BACKUP_BYTES} bytes — refusing to restore`);
       }
       return true;
     },
