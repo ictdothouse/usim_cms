@@ -390,6 +390,13 @@ warna yang sedang live — selamat diulang.
   eksport tapak statik (`exportStaticSite`).
 - **`apps/api/scripts/backup.sh`** — `pg_dump` peringkat instance (control-plane + semua DB tenant, atau
   satu tenant sahaja), dijadualkan cron, `RETENTION_DAYS` (default 14).
+- **`apps/api/scripts/backup-media.sh`** — pasangan peringkat fail untuk folder uploads (tenant media
+  besar, di mana eksport zip dalam-memori `backup.ts` tak praktikal — lihat `MAX_LOCAL_MEDIA_BACKUP_BYTES`).
+  `rsync -a --delete --link-dest` mirror setiap `uploads/<tenantFolder>/` ke
+  `BACKUP_DIR/media/<tenantFolder>/<timestamp>/`, hardlink terhadap snapshot lepas (jimat cakera), symlink
+  `latest` sentiasa tunjuk snapshot terkini, `RETENTION_DAYS` sama macam `backup.sh`. Auto-kesan mountpoint
+  volume Docker `ucms-uploads`; restore/migrate tenant hanya `rsync` biasa (ke folder lama atau server
+  baru) — tiada kod aplikasi terlibat.
 
 ### 9.5 Monitoring
 
