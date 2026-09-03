@@ -55,6 +55,19 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `.env`'s `POSTGRES_APP_PASSWORD`, `docker compose exec db psql -U postgres -c "SET
   password_encryption='md5'; ALTER ROLE usim_cms_app WITH PASSWORD '...';"`, re-run
   `write_pgbouncer_userlist` — or its one-liner equivalent — then restart `pgbouncer` and `api`).
+  Two gotchas hit doing this live (both fixed, but worth knowing for the next already-deployed
+  instance): (1) `userlist.txt` must be `chown 0:70` (edoburu/pgbouncer's container runs as uid:gid
+  **70:70**, not root, not whatever host user wrote the file) + `chmod 640` — `600` alone gets
+  `could not open auth_file ...: Permission denied` on pgbouncer boot, and plain `644` is
+  needlessly world-readable for a credential file when the right gid is one `chown` away; (2) an
+  already-initialized volume's `pg_hba.conf` was written at that instance's ORIGINAL first boot,
+  before this fix existed — if its host rule still says `scram-sha-256` (Postgres 16's default)
+  instead of `md5`, forcing the role's password into md5 storage while `pg_hba` demands SCRAM
+  produces the exact same generic `FATAL: password authentication failed` as a wrong password.
+  Check with `docker compose exec db grep -Ev '^\s*#|^\s*$' /var/lib/postgresql/data/pg_hba.conf`;
+  fix live, no reinit/restart needed: `docker compose exec db sed -i 's/^host all all all
+  scram-sha-256/host all all all md5/' /var/lib/postgresql/data/pg_hba.conf` then `docker compose
+  exec db psql -U postgres -c "SELECT pg_reload_conf();"`.
 - **`redis`** (`docker-compose.yml`, always-on alongside `db`/`pgbouncer`/`proxy`) is a shared
   cache for public (anonymous) GETs — `apps/api/src/cache.ts`'s `cacheGet`/`cacheSet`/
   `cacheInvalidate`, wired into `generic-crud.ts`'s public list/`:id` routes (pages/posts/
