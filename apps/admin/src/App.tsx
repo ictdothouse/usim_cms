@@ -3699,6 +3699,71 @@ const COMMON_LANGUAGES: Array<{ code: string; label: string }> = [
   { code: "vi", label: "Vietnamese" },
 ];
 
+// Upload quota card — reused for both the Global tab (tenantHost=null, edits
+// the instance-wide default) and the Site tab (tenantHost=the selected
+// site's host, edits that site's override only — blank fields there mean
+// "inherit global", not zero). Superadmin-only either way (SettingsPanel's
+// whole route is), so no permission check needed here beyond that.
+function StorageLimitsCard({ token, tenantHost }: { token: string; tenantHost: string | null }) {
+  const { t } = useT();
+  const [limits, setLimits] = useState<api.StorageLimits>({ maxUploadFileSizeMb: null, maxTotalStorageMb: null });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setErr(null);
+    setMsg(null);
+    const load = tenantHost === null ? api.getGlobalStorageLimits(token) : api.getTenantStorageLimitsOverride(token, tenantHost);
+    void load.then(setLimits).catch((e) => setErr((e as Error).message));
+  }, [token, tenantHost]);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      if (tenantHost === null) await api.putGlobalStorageLimits(token, limits);
+      else await api.putTenantStorageLimitsOverride(token, tenantHost, limits);
+      setMsg(t("settings-storage-saved"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const numField = (key: keyof api.StorageLimits, label: string) => (
+    <label className="block space-y-1">
+      <span className="text-xs text-sub">{label}</span>
+      <input
+        type="number"
+        min={1}
+        className={inputCls}
+        value={limits[key] ?? ""}
+        onChange={(e) => setLimits((prev) => ({ ...prev, [key]: e.target.value === "" ? null : Number(e.target.value) }))}
+      />
+    </label>
+  );
+
+  return (
+    <div className={`${card} space-y-3 p-5`}>
+      <h3 className="text-xs font-bold text-ink">{t("settings-storage-title")}</h3>
+      <p className="text-xs text-sub">{t(tenantHost === null ? "settings-storage-desc-global" : "settings-storage-desc-site")}</p>
+      <p className="text-[11px] italic text-sub">{t("settings-storage-blank-hint")}</p>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {msg && <p className="text-xs text-green-700">{msg}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        {numField("maxUploadFileSizeMb", t("settings-storage-max-file"))}
+        {numField("maxTotalStorageMb", t("settings-storage-max-total"))}
+      </div>
+      <button onClick={() => void save()} disabled={busy} className={btnPrimary}>
+        {busy ? t("settings-busy") : t("settings-storage-save-btn")}
+      </button>
+    </div>
+  );
+}
+
 // ---------- Settings (superadmin: backup / restore / static export) ----------
 function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Record<string, unknown>> }) {
   const { t } = useT();
@@ -3987,6 +4052,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
 
       {settingsTab === "global" && (
         <>
+          <StorageLimitsCard token={token} tenantHost={null} />
           <div className={`${card} space-y-3 p-5`}>
             <h3 className="text-xs font-bold text-ink">{t("settings-languages-title")}</h3>
             <p className="text-xs text-sub">{t("settings-languages-desc")}</p>
@@ -4176,6 +4242,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
           </Select>
           {err && <p className="text-xs text-red-600">{err}</p>}
           {msg && <p className="text-xs text-green-700">{msg}</p>}
+          {host && <StorageLimitsCard key={host} token={token} tenantHost={host} />}
           {sections.map((s) => (
             <div key={s.key} className={`${card} space-y-2 p-5`}>
               <h3 className="text-xs font-bold text-ink">{t(s.title)}</h3>
