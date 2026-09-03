@@ -764,6 +764,28 @@ export const getGlobalTheme = (token: string) =>
 export const putGlobalTheme = (token: string, settings: Record<string, string>) =>
   request("/api/portal/theme", null, token, { method: "PUT", body: JSON.stringify(settings) });
 
+// Upload quota — null in either field means "unset" (inherit global, or the
+// hardcoded 5 MB/unlimited fallback). Superadmin-only to write, both levels.
+export interface StorageLimits {
+  maxUploadFileSizeMb: number | null;
+  maxTotalStorageMb: number | null;
+}
+
+export const getStorageLimits = (tenantHost: string, token: string) =>
+  request("/api/storage-limits", tenantHost, token).then((b) => b as { limits: StorageLimits; usageBytes: number });
+
+export const getGlobalStorageLimits = (token: string) =>
+  request("/api/portal/storage-limits", null, token).then((b) => b.limits as StorageLimits);
+
+export const putGlobalStorageLimits = (token: string, limits: StorageLimits) =>
+  request("/api/portal/storage-limits", null, token, { method: "PUT", body: JSON.stringify(limits) });
+
+export const getTenantStorageLimitsOverride = (token: string, host: string) =>
+  request(`/api/portal/tenants/${host}/storage-limits`, null, token).then((b) => b.limits as StorageLimits);
+
+export const putTenantStorageLimitsOverride = (token: string, host: string, limits: StorageLimits) =>
+  request(`/api/portal/tenants/${host}/storage-limits`, null, token, { method: "PUT", body: JSON.stringify(limits) });
+
 // Personal "my collection" of saved theme presets — root-level, not
 // tenant-scoped (see apps/api's verifyAnyUser), same shape either way
 // regardless of whether the caller is on the Global or per-site Theme form.

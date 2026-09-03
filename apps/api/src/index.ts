@@ -1,6 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
-import { rm, readdir, stat } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import Fastify from "fastify";
 import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
@@ -48,6 +48,11 @@ import {
   setTenantLanguageSelection,
   getMergedTheme,
   setTenantTheme,
+  getGlobalStorageLimits,
+  setGlobalStorageLimits,
+  getTenantStorageLimits,
+  setTenantStorageLimits,
+  getMergedStorageLimits,
   getProxyAutomationEnabled,
   setProxyAutomationEnabled,
   setTenantCertInfo,
@@ -98,7 +103,7 @@ import {
   markCloneStaged,
   looksLikeDomain,
 } from "./backup.js";
-import { uploadFile, deleteFile, localUploadsDir, isLocalDriver } from "./storage.js";
+import { uploadFile, deleteFile, localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
 import { translatePlainText, translateHtmlBody } from "./translate.js";
 
 // Fixed permission matrix (resource.action) a superadmin composes into named
@@ -549,6 +554,60 @@ app.put("/api/portal/theme", async (req, reply) => {
   return { saved: true };
 });
 
+// Upload quota — global default and per-site override, both superadmin-only
+// (unlike theme.write, no webmaster permission raises this: the whole point
+// is a central cap a site owner can't lift on themselves). null in either
+// field means "unset" (inherit); see getMergedStorageLimits for the actual
+// resolution POST /api/media enforces.
+function validateStorageLimits(body: unknown): string | null {
+  const b = body as Record<string, unknown>;
+  for (const key of ["maxUploadFileSizeMb", "maxTotalStorageMb"] as const) {
+    const v = b[key];
+    if (v === null || v === undefined) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return `${key} must be a positive number or null`;
+  }
+  // 500 MB matches this codebase's own known-safe streaming ceiling (the
+  // backup-restore upload's own per-call override, index.ts ~line 1207).
+  if (typeof b.maxUploadFileSizeMb === "number" && b.maxUploadFileSizeMb > 500) return "maxUploadFileSizeMb cannot exceed 500";
+  return null;
+}
+
+app.get("/api/portal/storage-limits", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  return { limits: await getGlobalStorageLimits() };
+});
+
+app.put("/api/portal/storage-limits", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const error = validateStorageLimits(req.body);
+  if (error) {
+    reply.code(400);
+    return { error };
+  }
+  const { maxUploadFileSizeMb = null, maxTotalStorageMb = null } = req.body as Record<string, number | null>;
+  await setGlobalStorageLimits({ maxUploadFileSizeMb, maxTotalStorageMb });
+  return { saved: true };
+});
+
+app.get("/api/portal/tenants/:host/storage-limits", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  return { limits: await getTenantStorageLimits(host) };
+});
+
+app.put("/api/portal/tenants/:host/storage-limits", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  const error = validateStorageLimits(req.body);
+  if (error) {
+    reply.code(400);
+    return { error };
+  }
+  const { maxUploadFileSizeMb = null, maxTotalStorageMb = null } = req.body as Record<string, number | null>;
+  await setTenantStorageLimits(host, { maxUploadFileSizeMb, maxTotalStorageMb });
+  return { saved: true };
+});
+
 // Personal "my collection" of saved theme presets (admin's Theme panel) —
 // any logged-in user (superadmin or webmaster), scoped to their own userId,
 // not tenant-gated at all (see verifyAnyUser's comment).
@@ -649,33 +708,6 @@ app.get("/api/portal/tenants", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   return { tenants: await listTenants() };
 });
-
-// Recursively sums file sizes under `dir` — used for a tenant's uploads
-// folder. Returns null (not 0) when the folder doesn't exist at all yet
-// (a tenant with no uploads), so the Multisite column can tell "empty" from
-// "unmeasurable" apart from a real zero.
-async function dirSizeBytes(dir: string): Promise<number | null> {
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  let total = 0;
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      total += (await dirSizeBytes(full)) ?? 0;
-    } else {
-      try {
-        total += (await stat(full)).size;
-      } catch {
-        // File removed mid-scan — ignore, not worth failing the whole sum.
-      }
-    }
-  }
-  return total;
-}
 
 // Multisite panel's resource-usage column (disk + DB size per tenant) — a
 // glance metric, not billing-grade metering. Sequential, not Promise.all:
@@ -2049,7 +2081,13 @@ await app.register(async (protectedScope) => {
       reply.code(403);
       return { error: "missing media.upload permission" };
     }
-    const file = await req.file();
+    const limits = await getMergedStorageLimits(req.tenantHost);
+    // Per-call override, not the plugin's registration-time default — same
+    // pattern the backup-restore upload already uses (~line 1207) to raise
+    // its own ceiling. This is what actually enforces a site-specific cap:
+    // busboy stops reading and truncates the stream once this many bytes
+    // are seen, rather than us buffering an oversized file just to reject it.
+    const file = await req.file({ limits: { fileSize: limits.maxUploadFileSizeMb * 1024 * 1024 } });
     if (!file) {
       reply.code(400);
       return { error: "file required (multipart/form-data, field name 'file')" };
@@ -2073,7 +2111,15 @@ await app.register(async (protectedScope) => {
     if (file.file.truncated) {
       await deleteFile(safeTenant, filename);
       reply.code(413);
-      return { error: "file too large (max 5 MB)" };
+      return { error: `file too large (max ${limits.maxUploadFileSizeMb} MB)` };
+    }
+    if (limits.maxTotalStorageMb !== null) {
+      const [{ total }] = await req.db.select({ total: sql<string>`coalesce(sum(${schema.media.sizeBytes}), 0)` }).from(schema.media);
+      if (Number(total) + file.file.bytesRead > limits.maxTotalStorageMb * 1024 * 1024) {
+        await deleteFile(safeTenant, filename);
+        reply.code(413);
+        return { error: `storage limit reached (${limits.maxTotalStorageMb} MB max for this site)` };
+      }
     }
     const [item] = await req.db
       .insert(schema.media)
@@ -2089,6 +2135,17 @@ await app.register(async (protectedScope) => {
       })
       .returning();
     return { url, item };
+  });
+
+  // Tenant-facing, read-only: what the merged limit resolves to for THIS
+  // site, plus current usage — any authenticated user, not gated behind
+  // media.upload (a webmaster who can't upload should still be able to see
+  // WHY, and the Content Manager's media library page needs this even for
+  // someone who only browses, not uploads).
+  protectedScope.get("/api/storage-limits", async (req) => {
+    const limits = await getMergedStorageLimits(req.tenantHost);
+    const [{ total }] = await req.db.select({ total: sql<string>`coalesce(sum(${schema.media.sizeBytes}), 0)` }).from(schema.media);
+    return { limits, usageBytes: Number(total) };
   });
 
   // A webmaster only ever sees/edits/deletes files they personally uploaded

@@ -327,6 +327,21 @@ export const siteTheme = pgTable("site_theme", {
 // user, not a tenant, and never merged/read by the frontend. Purely a
 // favourites list the admin picks from to fill the color/font pickers or to
 // "Activate" (write into site_theme) again later.
+// Per-tenant upload quota override, same global+override shape as
+// site_theme above (tenantHost = "" is the global/default row) — a null
+// column value means "not set at this level", resolved by
+// getMergedStorageLimits (tenant-pool.ts): tenant value, else global value,
+// else a hardcoded fallback (5 MB / unlimited, matching pre-quota behavior).
+// Superadmin-only to write, both levels (Settings' global tab, Multisite's
+// per-site tab) — a webmaster never edits their own site's cap.
+export const storageLimits = pgTable("storage_limits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantHost: text("tenant_host").notNull().unique(),
+  maxUploadFileSizeMb: integer("max_upload_file_size_mb"),
+  maxTotalStorageMb: integer("max_total_storage_mb"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const themePresets = pgTable("theme_presets", {
   id: uuid("id").primaryKey().defaultRandom(),
   ownerUserId: uuid("owner_user_id")

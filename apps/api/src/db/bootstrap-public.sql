@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS "public"."site_theme" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 
+-- Per-tenant upload quota override, same global("")+override shape as
+-- site_theme above. Null column = not set at this level (see
+-- getMergedStorageLimits, tenant-pool.ts).
+CREATE TABLE IF NOT EXISTS "public"."storage_limits" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"tenant_host" text NOT NULL UNIQUE,
+	"max_upload_file_size_mb" integer,
+	"max_total_storage_mb" integer,
+	"updated_at" timestamp DEFAULT now() NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS "public"."users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email" text NOT NULL UNIQUE,
