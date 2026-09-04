@@ -104,7 +104,7 @@ export interface SiteChrome {
 
 // Soft-fail like getMenu below — a header/footer that fails to load renders
 // as nothing rather than breaking the whole page.
-async function getSiteChromeById(tenantHost: string, id: string): Promise<SiteChrome | null> {
+export async function getSiteChromeById(tenantHost: string, id: string): Promise<SiteChrome | null> {
   try {
     const { item } = await apiGet<{ item: SiteChrome | null }>(`/api/siteChrome/${id}`, tenantHost);
     return item;

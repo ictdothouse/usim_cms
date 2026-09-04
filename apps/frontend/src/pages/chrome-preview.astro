@@ -1,0 +1,45 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import HeroBlock from "../components/HeroBlock.astro";
+import { getTheme, getSiteChromeById } from "../lib/api";
+import { collectFonts } from "../lib/collectFonts";
+
+// Designer's Header/Footer device-preview modal — renders one siteChrome row
+// standalone inside BaseLayout, with placeholder body content so the
+// header/footer alone can be judged in context without needing a real page.
+// Unlike blueprint-preview.astro, no preview token is needed: siteChrome's
+// own GET /api/siteChrome/:id is already publicly readable regardless of
+// draft/published status (see siteChromeCollection's access.read in
+// apps/api/src/index.ts) — id alone is the entire access check.
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost =
+  /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+    ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    : rawHost;
+
+const id = Astro.url.searchParams.get("id") ?? "";
+const kind = Astro.url.searchParams.get("kind") === "footer" ? "footer" : "header";
+const chrome = id ? await getSiteChromeById(tenantHost, id) : null;
+if (!chrome) {
+  Astro.response.status = 404;
+}
+const siteTheme = await getTheme(tenantHost);
+const fonts = collectFonts(chrome?.layout ?? []);
+---
+<BaseLayout
+  title="Header/Footer preview"
+  theme={siteTheme}
+  fonts={fonts}
+  langSwitcher={null}
+  headerChrome={kind === "header" ? chrome : null}
+  footerChrome={kind === "footer" ? chrome : null}
+  tenantHost={tenantHost}
+>
+  {!chrome ? (
+    <HeroBlock title="Preview not available" subtitle="This header/footer preview link is invalid." />
+  ) : (
+    <div style="max-width:44rem;margin:4rem auto;padding:2rem 1rem;text-align:center;color:#86868b;">
+      <p>{kind === "header" ? "Page content appears here." : "Page content appears above."}</p>
+    </div>
+  )}
+</BaseLayout>

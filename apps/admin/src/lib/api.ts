@@ -417,6 +417,19 @@ export const updateSiteChrome = (tenantHost: string, token: string, id: string, 
 export const deleteSiteChrome = (tenantHost: string, token: string, id: string) =>
   request(`/api/siteChrome/${id}`, tenantHost, token, { method: "DELETE" });
 
+// Designer's Header/Footer device-preview modal — unlike blueprintPreviewUrl,
+// no preview token is needed: siteChrome's own GET /api/siteChrome/:id is
+// already publicly readable regardless of draft/published status (see
+// siteChromeCollection's access.read in apps/api/src/index.ts), so this just
+// points the frontend's chrome-preview.astro at the row by id.
+export const chromePreviewUrl = (tenantHost: string, id: string, kind: "header" | "footer") => {
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
+  const query = new URLSearchParams({ id, kind, ...(isLocal ? { __tenant: tenantHost } : {}) }).toString();
+  const scheme = window.location.protocol === "https:" ? "https" : "http";
+  const base = isLocal ? `${FRONTEND_DEV_URL}/chrome-preview` : `${scheme}://${tenantHost}/chrome-preview`;
+  return `${base}?${query}`;
+};
+
 export interface DesignTemplate {
   id: string;
   name: string;

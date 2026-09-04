@@ -3595,6 +3595,30 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
 
 type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "header-footer" | "blueprints" | "events";
 
+// Content Manager's sub-nav and the webmaster sidebar's own flat tab list
+// both grew past a comfortable single row (9 sub-tabs / 7 tabs) — grouped
+// per WordPress/Wix/Webflow convention (Content vs Design vs Settings)
+// instead of one long list. Pure render-layer grouping: no ContentSubTab/Tab
+// value, route, or permission changed, so nothing else depends on this.
+type NavGroup = "content" | "design" | "settings";
+const NAV_GROUP_ORDER: NavGroup[] = ["content", "design", "settings"];
+const NAV_GROUP_LABEL: Record<NavGroup, Key> = {
+  content: "nav-group-content",
+  design: "nav-group-design",
+  settings: "nav-group-settings",
+};
+const CONTENT_SUBTAB_GROUP: Record<ContentSubTab, NavGroup> = {
+  pages: "content",
+  posts: "content",
+  media: "content",
+  theme: "design",
+  menus: "design",
+  "header-footer": "design",
+  blueprints: "design",
+  languages: "settings",
+  events: "settings",
+};
+
 function ContentManager({
   isSuper,
   showSitePicker,
@@ -3650,20 +3674,30 @@ function ContentManager({
         </div>
       )}
       {siteHost && (
-        <>
-          <div className="flex gap-1.5 border-b border-line/30 pb-2">
-            {subTabs.map(({ id, labelKey, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => navigate(id)}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                  activeSubTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-col gap-6 md:flex-row md:items-start">
+          <nav className="flex flex-col gap-4 md:w-48 md:shrink-0 md:border-r md:border-line/30 md:pr-4">
+            {NAV_GROUP_ORDER.map((group) => {
+              const items = subTabs.filter((st) => CONTENT_SUBTAB_GROUP[st.id] === group);
+              if (items.length === 0) return null;
+              return (
+                <div key={group} className="space-y-0.5">
+                  <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t(NAV_GROUP_LABEL[group])}</div>
+                  {items.map(({ id, labelKey, icon: Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => navigate(id)}
+                      className={`flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeSubTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </nav>
+          <div className="min-w-0 flex-1">
           <Routes>
             <Route index element={<Navigate to="pages" replace />} />
             <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
@@ -3694,7 +3728,8 @@ function ContentManager({
               <Route path="events" element={<EventsPanel key={`events-${siteHost}`} tenantHost={siteHost} token={token} />} />
             )}
           </Routes>
-        </>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -3734,6 +3769,22 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   feed: { labelKey: "tab-feed", icon: Rss },
   settings: { labelKey: "tab-settings", icon: SettingsIcon },
   security: { labelKey: "tab-security", icon: KeyRound },
+};
+
+// Webmaster's sidebar has no site-picker, so ContentManager's own Content/
+// Design/Settings sub-tabs (menus/theme/etc, see CONTENT_SUBTAB_GROUP above)
+// surface as flat top-level Tabs instead — grouped here the same way so a
+// webmaster gets the same taxonomy a superadmin sees inside Content Manager.
+// Superadmin's own sidebar contentTabs (content/global-theme/feed) is left
+// flat — only 3 items, not crowded.
+const TAB_GROUP: Partial<Record<Tab, NavGroup>> = {
+  content: "content",
+  theme: "design",
+  menus: "design",
+  "header-footer": "design",
+  blueprints: "design",
+  languages: "settings",
+  events: "settings",
 };
 
 // Common languages for the "add language" typeahead below — picking a
@@ -4696,10 +4747,27 @@ function Shell({
             {mainTabs.map((tb) => (
               <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
             ))}
-            <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-content")}</div>
-            {contentTabs.map((tb) => (
-              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
-            ))}
+            {isSuper ? (
+              <>
+                <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-content")}</div>
+                {contentTabs.map((tb) => (
+                  <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
+                ))}
+              </>
+            ) : (
+              NAV_GROUP_ORDER.map((group) => {
+                const tabs = contentTabs.filter((tb) => TAB_GROUP[tb] === group);
+                if (tabs.length === 0) return null;
+                return (
+                  <div key={group}>
+                    <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t(NAV_GROUP_LABEL[group])}</div>
+                    {tabs.map((tb) => (
+                      <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
+                    ))}
+                  </div>
+                );
+              })
+            )}
           </nav>
           <div className="flex items-center gap-3 border-t border-line/30 bg-canvas/30 p-4">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold uppercase text-white">
