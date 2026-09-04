@@ -12,7 +12,10 @@ import { collectFonts } from "../lib/collectFonts";
 // [...slug].astro, sourced from a blueprint's own layout (via a short-lived
 // preview token) instead of a real page row, since a blueprint has no slug
 // of its own. Reserved path, never linked from anywhere a real visitor
-// could reach — id+token are both required, no anonymous fallback.
+// could reach — id+token are both required, no anonymous fallback. Not
+// underscore-prefixed: Astro's file-based router silently drops any
+// src/pages file starting with "_" from routing, so a "__blueprint-preview"
+// name (the original) never became a reachable route at all.
 const rawHost = Astro.request.headers.get("host") ?? "";
 const tenantHost =
   /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)

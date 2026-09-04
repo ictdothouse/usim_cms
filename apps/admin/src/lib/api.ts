@@ -443,8 +443,11 @@ export const deleteBlueprint = (tenantHost: string, token: string, id: string) =
   request(`/api/blueprints/${id}`, tenantHost, token, { method: "DELETE" });
 
 // Same shape as getPagePreviewToken/previewUrl, for Designer's blueprint
-// Live Edit — apps/frontend's __blueprint-preview.astro is the counterpart
+// Live Edit — apps/frontend's blueprint-preview.astro is the counterpart
 // route (a blueprint has no slug of its own, so it takes ?id= instead).
+// Not underscore-prefixed: Astro's file-based router silently excludes any
+// src/pages file starting with "_" from routing at all, which is why this
+// was originally named "__blueprint-preview" and 404'd on every request.
 export const getBlueprintPreviewToken = (tenantHost: string, token: string, id: string) =>
   request(`/api/blueprints/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
 
@@ -456,7 +459,7 @@ export const blueprintPreviewUrl = (tenantHost: string, id: string, previewToken
     ...(isLocal ? { __tenant: tenantHost } : {}),
   }).toString();
   const scheme = window.location.protocol === "https:" ? "https" : "http";
-  const base = isLocal ? `${FRONTEND_DEV_URL}/__blueprint-preview` : `${scheme}://${tenantHost}/__blueprint-preview`;
+  const base = isLocal ? `${FRONTEND_DEV_URL}/blueprint-preview` : `${scheme}://${tenantHost}/blueprint-preview`;
   return `${base}?${query}`;
 };
 
