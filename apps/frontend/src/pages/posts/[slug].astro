@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import HeroBlock from "../../components/HeroBlock.astro";
-import { getPostBySlug, getTheme, getLanguages, resolvePostContent, resolveCategoryName } from "../../lib/api";
+import { getPostBySlug, getTheme, getLanguages, resolvePostContent, resolveCategoryName, resolveDefaultHeaderFooter } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro (see its comment for why this
 // is NOT gated on import.meta.env.DEV): Host header, with the
@@ -60,8 +60,19 @@ const showTags = post ? (post.showTags ?? (theme.showPostTags !== "false")) : fa
 const showCategory = post ? (post.showCategory ?? (theme.showPostCategory !== "false")) : false;
 const showAuthor = post ? (post.showAuthor ?? (theme.showPostAuthor !== "false")) : false;
 const showDate = post ? (post.showPublishedDate ?? (theme.showPostDate !== "false")) : false;
+
+const { header: headerChrome, footer: footerChrome } = await resolveDefaultHeaderFooter(tenantHost);
 ---
-<BaseLayout title={content?.title ?? "Artikel tidak dijumpai"} ogImage={post?.bannerImageUrl} theme={theme} langSwitcher={langSwitcher}>
+<BaseLayout
+  title={content?.title ?? "Artikel tidak dijumpai"}
+  ogImage={post?.bannerImageUrl}
+  theme={theme}
+  langSwitcher={langSwitcher}
+  headerChrome={headerChrome}
+  footerChrome={footerChrome}
+  tenantHost={tenantHost}
+  requestedLang={requestedLang}
+>
   {!post || !content ? (
     <HeroBlock title="Artikel tidak dijumpai" subtitle="Artikel ini belum tersedia atau telah dialihkan." />
   ) : (

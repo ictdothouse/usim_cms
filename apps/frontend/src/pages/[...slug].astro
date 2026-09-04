@@ -3,7 +3,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
-import { getPageBySlug, getTheme, getLanguages, resolvePageLayout } from "../lib/api";
+import { getPageBySlug, getTheme, getLanguages, resolvePageLayout, resolveHeaderFooter } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Single instance, ~50 real department domains: tenant identity is always
@@ -70,6 +70,10 @@ const langSwitcher =
         })),
       }
     : null;
+
+const { header: headerChrome, footer: footerChrome } = page
+  ? await resolveHeaderFooter(page, tenantHost)
+  : { header: null, footer: null };
 ---
 <BaseLayout
   title={page?.title ?? "Halaman tidak dijumpai"}
@@ -78,6 +82,10 @@ const langSwitcher =
   fonts={fonts}
   designerEdit={designerEdit}
   langSwitcher={langSwitcher}
+  headerChrome={headerChrome}
+  footerChrome={footerChrome}
+  tenantHost={tenantHost}
+  requestedLang={requestedLang}
 >
   {!page ? (
     <HeroBlock title="Halaman tidak dijumpai" subtitle="Kandungan ini belum tersedia atau telah dialihkan." />

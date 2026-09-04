@@ -453,4 +453,37 @@ callouts before assuming any of this is speculative hardening.
     the mobile hamburger toggle (`.ds-menu-toggle`, active for every trigger mode, since touch has no
     hover at all), which only becomes visible under `global.css`'s `@media (max-width: 768px)` rule that
     also collapses `.ds-menu-list` into a fixed dropdown panel.
+  - `siteChrome` (`schema.ts`) is the Header/Footer designer (see
+    `docs/superpowers/specs/2026-09-04-header-footer-designer-design.md`, which supersedes the
+    unbuilt `site_sections` half of the earlier `2026-08-13-menu-header-footer-design.md`) —
+    header/footer designs built with the exact same Designer canvas as a page. `kind` (`"header"` |
+    `"footer"`), `layout`/`translations` (same jsonb shapes as `pages.layout`/`pages.translations`),
+    `settings` (`{ sticky?, mobileNav?: { position, size, color, animation } }`, `mobileNav` only
+    meaningful for `kind: "header"`, applied to the existing Menu element's own mobile hamburger —
+    no separate mobile canvas), `isDefault` (site-wide fallback per `kind`), `status`
+    (`"draft"`/`"published"`, same RLS shape as `events`). `siteChromeBeforeChange` (`index.ts`)
+    validates `layout`/`translations[code].layout` through the same `validateLayout()` pages use, and
+    enforces "exactly one `isDefault` per `kind`" by flipping every other row of that kind to `false`
+    whenever a write sets one `true` (flip-based, not reject-based — unlike `tenant_languages`'
+    `guardLastEnabled`, a tenant may have zero defaults, e.g. before its first header exists). `pages`
+    gained 4 nullable columns for the per-page override/exception: `headerId`/`footerId` (FK →
+    `site_chrome`, `onDelete: "set null"`) and `hideHeader`/`hideFooter` (booleans) — resolution per
+    page/kind is `hideX` → nothing renders; `Xid` set → that row; else → the tenant's `isDefault`
+    row; a fresh tenant with none configured gets no header/footer, not an error (`apps/frontend`'s
+    `resolveHeaderFooter`/`resolveDefaultHeaderFooter`, `lib/api.ts` — posts have no per-post
+    override, they always get the tenant default). Own `headerFooter.write` permission, same
+    single-permission convention as `menus.write`/`blueprints.write`, added to both `PERMISSIONS`
+    lists (server `index.ts` **and** admin's client-side `PERMISSIONS`/`PERMISSION_LABEL_KEY` in the
+    same change, per the i18n-Phase-2 lesson above). `apps/admin`'s Designer gained a third `kind`
+    ("siteChrome", alongside "page"/"blueprint") — same slug/publish/Live-Edit-stripped treatment as
+    "blueprint", minus the device-preview button too (no preview-token route for a header/footer yet,
+    a real scoped-out follow-up); a standalone panel next to the canvas (not routed through
+    `Inspector.tsx`/`DesignerCtx`, to avoid touching that shared file) handles `isDefault` + mobileNav
+    style as immediate PATCHes, separate from the canvas's own dirty/Save flow, and a page's own
+    header/footer picker + hide checkboxes live the same way in a small panel next to a `kind ===
+    "page"` Designer's Inspector. `BaseLayout.astro` accepts optional `headerChrome`/`footerChrome`
+    props (a resolved `SiteChrome` row or `null`) rendered via the same `SectionBlock`/`GenericBlock`
+    switch `[...slug].astro` already uses for page content — `null` (no header configured yet, or a
+    page's own `hideHeader`) falls back to the original hardcoded logo+lang-switcher block, so an
+    existing tenant never sees a blank bar just because this feature shipped.
   - Local API/SDK for same-process frontend access (bypassing HTTP) is not implemented yet.

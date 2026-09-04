@@ -29,6 +29,15 @@ export const pages = pgTable("pages", {
   language: text("language"),
   translations: jsonb("translations").notNull().default({}),
   multilangEnabled: boolean("multilang_enabled").notNull().default(false),
+  // Header/Footer designer (see siteChrome below): null headerId/footerId
+  // means "use whichever site_chrome row has isDefault=true for that kind";
+  // hideHeader/hideFooter is a hard exception that wins over both an
+  // explicit id and the default — set null on the referenced row's delete
+  // (falls back to default rather than blocking the delete).
+  headerId: uuid("header_id").references(() => siteChrome.id, { onDelete: "set null" }),
+  footerId: uuid("footer_id").references(() => siteChrome.id, { onDelete: "set null" }),
+  hideHeader: boolean("hide_header").notNull().default(false),
+  hideFooter: boolean("hide_footer").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -49,6 +58,33 @@ export const categories = pgTable("categories", {
   // resolveCategoryName the same way resolvePostContent resolves post text.
   translations: jsonb("translations").notNull().default({}),
   multilangEnabled: boolean("multilang_enabled").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Site chrome — header/footer designs built with the same Designer canvas as
+// a page (see docs/superpowers/specs/2026-09-04-header-footer-designer-design.md).
+// A tenant can have several of each `kind`; exactly one per kind may be
+// `isDefault` (site-wide fallback, enforced by siteChromeBeforeChange
+// flipping any other default of the same kind to false — same "exactly one"
+// shape as tenant_languages' guardLastEnabled, just flip-based instead of
+// reject-based since there's no equivalent of "can't go below zero" here).
+// A page picks a non-default row via pages.headerId/footerId, or opts out
+// entirely via pages.hideHeader/hideFooter (see below) — resolution always
+// happens from the page's own columns, never from a list stored here.
+export const siteChrome = pgTable("site_chrome", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind").notNull(), // "header" | "footer"
+  name: text("name").notNull(),
+  layout: jsonb("layout").notNull().default([]),
+  // Per-locale { layout } entries, same i18n Phase 5 shape as pages.translations.
+  translations: jsonb("translations").notNull().default({}),
+  // { sticky?: boolean, mobileNav?: { position, size, color, animation } } —
+  // mobileNav only meaningful for kind="header", applied to the Menu
+  // element's existing hamburger toggle, not a separate mobile layout.
+  settings: jsonb("settings").notNull().default({}),
+  isDefault: boolean("is_default").notNull().default(false),
+  status: text("status").notNull().default("draft"), // "draft" | "published"
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

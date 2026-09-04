@@ -1,5 +1,8 @@
 ---
 import "../styles/global.css";
+import GenericBlock from "../components/GenericBlock.astro";
+import SectionBlock from "../components/SectionBlock.astro";
+import type { SiteChrome } from "../lib/api";
 
 interface Props {
   title: string;
@@ -20,8 +23,36 @@ interface Props {
   // gets no switcher, regardless of the site setting — see this repo's
   // "let the editor tell the truth" convention elsewhere in Designer.tsx).
   langSwitcher?: { current: string | null; options: Array<{ code: string; label: string; href: string }> } | null;
+  // Header/Footer designer (docs/superpowers/specs/2026-09-04-header-footer-designer-design.md)
+  // — resolved server-side by the calling page ([...slug].astro/posts/[slug].astro)
+  // via resolveHeaderFooter(). null/undefined (a fresh tenant with nothing
+  // configured yet, or a page with hideHeader/hideFooter set) falls back to
+  // the plain logo+lang-switcher block that used to be the only header this
+  // layout ever rendered — existing tenants keep seeing that until they
+  // build a real header, never a blank bar.
+  headerChrome?: SiteChrome | null;
+  footerChrome?: SiteChrome | null;
+  tenantHost?: string;
+  requestedLang?: string | null;
 }
-const { title, ogImage, theme, fonts = [], designerEdit = false, langSwitcher = null } = Astro.props;
+const {
+  title,
+  ogImage,
+  theme,
+  fonts = [],
+  designerEdit = false,
+  langSwitcher = null,
+  headerChrome = null,
+  footerChrome = null,
+  tenantHost = "",
+  requestedLang = null,
+} = Astro.props;
+
+function chromeLayout(chrome: SiteChrome) {
+  if (!requestedLang) return chrome.layout;
+  return chrome.translations[requestedLang]?.layout ?? chrome.layout;
+}
+const mobileNav = headerChrome?.settings?.mobileNav;
 
 // Same WCAG relative-luminance math as apps/admin's lib/utils.ts
 // (contrastRatio/bestTextColor) — duplicated, not imported, since this is a
@@ -85,31 +116,62 @@ const fontsHref = allFonts.length
   <body
     style={`font-family:var(--font-family, system-ui, sans-serif);background:var(--color-bg, inherit);color:var(--color-text, inherit)`}
   >
-    {logoUrl && !langSwitcher && <img src={logoUrl} alt="" height="40" />}
-    {langSwitcher && langSwitcher.options.length > 1 && (
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1rem;">
-        {logoUrl ? <img src={logoUrl} alt="" height="40" /> : <span />}
-        <nav style="display:flex;gap:0.4rem;">
-          {langSwitcher.options.map((o) => (
-            <a
-              href={o.href}
-              style={`font-size:0.75rem;text-decoration:none;padding:0.2rem 0.6rem;border-radius:999px;${
-                o.code === langSwitcher.current
-                  ? "background:var(--color-primary,#0f62fe);color:var(--color-primary-content,#fff);"
-                  : "color:#555;background:#f2f2f2;"
-              }`}
-            >
-              {o.label}
-            </a>
-          ))}
-        </nav>
-      </div>
+    {headerChrome ? (
+      <header
+        data-mobile-nav-position={mobileNav?.position}
+        data-mobile-nav-size={mobileNav?.size}
+        data-mobile-nav-color={mobileNav?.color}
+        data-mobile-nav-animation={mobileNav?.animation}
+        style={mobileNav?.color ? `--mobile-nav-color:${mobileNav.color}` : undefined}
+      >
+        {chromeLayout(headerChrome).map((block, b) =>
+          block.type === "section" ? (
+            <SectionBlock {...(block.props ?? {})} blockIndex={b} tenantHost={tenantHost} requestedLang={requestedLang} />
+          ) : (
+            <GenericBlock type={block.type} props={block.props} />
+          ),
+        )}
+      </header>
+    ) : (
+      <>
+        {logoUrl && !langSwitcher && <img src={logoUrl} alt="" height="40" />}
+        {langSwitcher && langSwitcher.options.length > 1 && (
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1rem;">
+            {logoUrl ? <img src={logoUrl} alt="" height="40" /> : <span />}
+            <nav style="display:flex;gap:0.4rem;">
+              {langSwitcher.options.map((o) => (
+                <a
+                  href={o.href}
+                  style={`font-size:0.75rem;text-decoration:none;padding:0.2rem 0.6rem;border-radius:999px;${
+                    o.code === langSwitcher.current
+                      ? "background:var(--color-primary,#0f62fe);color:var(--color-primary-content,#fff);"
+                      : "color:#555;background:#f2f2f2;"
+                  }`}
+                >
+                  {o.label}
+                </a>
+              ))}
+            </nav>
+          </div>
+        )}
+      </>
     )}
     <main id="main-content">
       <main id="main-content">
       <slot />
     </main>
     </main>
+    {footerChrome && (
+      <footer>
+        {chromeLayout(footerChrome).map((block, b) =>
+          block.type === "section" ? (
+            <SectionBlock {...(block.props ?? {})} blockIndex={b} tenantHost={tenantHost} requestedLang={requestedLang} />
+          ) : (
+            <GenericBlock type={block.type} props={block.props} />
+          ),
+        )}
+      </footer>
+    )}
     {designerEdit && (
       <script is:inline>
         (() => {

@@ -392,6 +392,31 @@ export const updateEvent = (tenantHost: string, token: string, id: string, patch
 export const deleteEvent = (tenantHost: string, token: string, id: string) =>
   request(`/api/events/${id}`, tenantHost, token, { method: "DELETE" });
 
+export interface SiteChrome {
+  id: string;
+  kind: "header" | "footer";
+  name: string;
+  layout: unknown[];
+  translations: Record<string, { layout: unknown[] }>;
+  settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string } };
+  isDefault: boolean;
+  status: "draft" | "published";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listSiteChrome = (tenantHost: string, token: string, kind?: "header" | "footer") =>
+  request(`/api/siteChrome${kind ? `?kind=${kind}` : ""}`, tenantHost, token).then((b) => b.items as SiteChrome[]);
+
+export const createSiteChrome = (tenantHost: string, token: string, data: { kind: "header" | "footer"; name: string; layout?: unknown; settings?: unknown }) =>
+  request("/api/siteChrome", tenantHost, token, { method: "POST", body: JSON.stringify(data) }).then((b) => b.item as SiteChrome);
+
+export const updateSiteChrome = (tenantHost: string, token: string, id: string, patch: Record<string, unknown>) =>
+  request(`/api/siteChrome/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) }).then((b) => b.item as SiteChrome);
+
+export const deleteSiteChrome = (tenantHost: string, token: string, id: string) =>
+  request(`/api/siteChrome/${id}`, tenantHost, token, { method: "DELETE" });
+
 export interface DesignTemplate {
   id: string;
   name: string;

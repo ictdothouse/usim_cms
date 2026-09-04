@@ -303,8 +303,12 @@ export default function Designer({
   // live frontend route (slug, publish status, Live Edit, Preview) — a
   // blueprint has no route of its own to preview/live-edit against. Blocks
   // canvas editing, Undo/Redo, Templates, and Page Settings all work
-  // unchanged either way.
-  kind?: "page" | "blueprint";
+  // unchanged either way. "siteChrome" (header/footer designer) gets the
+  // same treatment as "blueprint" for slug/publish/Live-Edit, minus the
+  // device-preview button too — a header/footer has no preview-token route
+  // of its own yet (a real, scoped-out-for-now follow-up), Blocks-mode
+  // canvas editing is enough for v1.
+  kind?: "page" | "blueprint" | "siteChrome";
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
@@ -635,6 +639,68 @@ export default function Designer({
   // since it's not part of the undo stack, same convention as slugDraft above.
   // Persisted via save()'s `settings`.
   const [pageSettings, setPageSettings] = useState<PageSettings>(() => (page.settings as PageSettings) ?? {});
+  // Header/Footer designer (kind === "siteChrome") — isDefault + mobileNav
+  // style, edited via the standalone panel below the canvas, saved with an
+  // immediate api.updateSiteChrome PATCH rather than folded into the
+  // dirty/Save flow (see saveSiteChrome's own comment above).
+  const chromeKind = page.kind as "header" | "footer" | undefined;
+  const [chromeIsDefault, setChromeIsDefault] = useState<boolean>(Boolean(page.isDefault));
+  const [chromeMobileNav, setChromeMobileNav] = useState<{ position?: string; size?: string; color?: string; animation?: string }>(
+    () => (page.settings as { mobileNav?: Record<string, string> } | undefined)?.mobileNav ?? {},
+  );
+  async function patchChromeMeta(patch: { isDefault?: boolean; mobileNav?: Record<string, string | undefined> }) {
+    const nextDefault = patch.isDefault ?? chromeIsDefault;
+    const nextMobileNav = patch.mobileNav ? { ...chromeMobileNav, ...patch.mobileNav } : chromeMobileNav;
+    setChromeIsDefault(nextDefault);
+    setChromeMobileNav(nextMobileNav);
+    try {
+      await api.updateSiteChrome(tenantHost, token, page.id as string, {
+        isDefault: nextDefault,
+        settings: { ...(page.settings as Record<string, unknown>), mobileNav: nextMobileNav },
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // Page's own header/footer assignment (kind === "page") — same immediate-
+  // PATCH pattern as chrome meta above, real pages columns not part of
+  // `pageSettings`' jsonb bag. availableHeaders/Footers are fetched once,
+  // same shape as availableMenus above.
+  const [availableHeaders, setAvailableHeaders] = useState<api.SiteChrome[]>([]);
+  const [availableFooters, setAvailableFooters] = useState<api.SiteChrome[]>([]);
+  useEffect(() => {
+    if (kind !== "page") return;
+    void api.listSiteChrome(tenantHost, token, "header").then(setAvailableHeaders);
+    void api.listSiteChrome(tenantHost, token, "footer").then(setAvailableFooters);
+  }, [tenantHost, kind]);
+  const [pageHeaderId, setPageHeaderId] = useState<string>((page.headerId as string | null) ?? "");
+  const [pageFooterId, setPageFooterId] = useState<string>((page.footerId as string | null) ?? "");
+  const [pageHideHeader, setPageHideHeader] = useState<boolean>(Boolean(page.hideHeader));
+  const [pageHideFooter, setPageHideFooter] = useState<boolean>(Boolean(page.hideFooter));
+  async function patchPageChrome(patch: { headerId?: string; footerId?: string; hideHeader?: boolean; hideFooter?: boolean }) {
+    const next = {
+      headerId: patch.headerId !== undefined ? patch.headerId : pageHeaderId,
+      footerId: patch.footerId !== undefined ? patch.footerId : pageFooterId,
+      hideHeader: patch.hideHeader !== undefined ? patch.hideHeader : pageHideHeader,
+      hideFooter: patch.hideFooter !== undefined ? patch.hideFooter : pageHideFooter,
+    };
+    setPageHeaderId(next.headerId);
+    setPageFooterId(next.footerId);
+    setPageHideHeader(next.hideHeader);
+    setPageHideFooter(next.hideFooter);
+    try {
+      await api.updatePage(tenantHost, token, page.id as string, {
+        headerId: next.headerId || null,
+        footerId: next.footerId || null,
+        hideHeader: next.hideHeader,
+        hideFooter: next.hideFooter,
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   // "Theme" picker in Page Settings — this user's saved presets, same list
   // ThemeForm's own collection reads (api.listThemePresets).
   const [themePresets, setThemePresets] = useState<api.ThemePreset[]>([]);
@@ -1727,6 +1793,27 @@ export default function Designer({
     }
   }
 
+  // Header/Footer's own save path — same shape as saveBlueprint, just the
+  // layout PATCHed to the siteChrome row. isDefault/mobileNav settings are
+  // edited via the small standalone panel below the canvas (immediate PATCH
+  // through api.updateSiteChrome, same pattern the Header & Footer list's
+  // own "Set default" star already uses) — not part of this dirty/Save flow.
+  async function saveSiteChrome() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateSiteChrome(tenantHost, token, page.id as string, { layout: clone(blocks) });
+      setDirty(false);
+      setSavedAny(true);
+      setMsg(t("designer-saved"));
+      setTimeout(() => setMsg(null), 2500);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Only reached when there's unsaved content or the page is a draft — a
   // saved+published page renders a plain <a href target="_blank"> instead
   // (see the Preview button below), since a real anchor click is a genuine
@@ -2300,6 +2387,11 @@ export default function Designer({
             {t("blueprints-title")}
           </span>
         )}
+        {kind === "siteChrome" && (
+          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
+            {t("header-footer-title")}
+          </span>
+        )}
         {msg && <span className="text-[11px] font-semibold text-ok">{msg}</span>}
         {error && <span className="max-w-xs truncate text-[11px] text-red-600">{error}</span>}
         <span className="flex-1" />
@@ -2331,14 +2423,16 @@ export default function Designer({
             <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
           </button>
         )}
-        <button
-          onClick={() => void toggleLive()}
-          className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
-            mode === "live" ? "bg-accent/15 text-accent" : "text-body"
-          }`}
-        >
-          <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
-        </button>
+        {kind !== "siteChrome" && (
+          <button
+            onClick={() => void toggleLive()}
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
+              mode === "live" ? "bg-accent/15 text-accent" : "text-body"
+            }`}
+          >
+            <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
+          </button>
+        )}
         <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
           {(
             [
@@ -2385,7 +2479,7 @@ export default function Designer({
             </button>
           ))}
         <button
-          onClick={() => void (kind === "blueprint" ? saveBlueprint() : save())}
+          onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "siteChrome" ? saveSiteChrome() : save())}
           disabled={busy}
           className="rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-50"
         >
@@ -3221,6 +3315,108 @@ export default function Designer({
           }`}
         >
           <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
+          {kind === "siteChrome" && (
+            <div className="mb-4 space-y-3 rounded-lg border border-line/30 p-3">
+              <p className="text-xs font-bold text-ink">{t("header-footer-settings")}</p>
+              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+                <input
+                  type="checkbox"
+                  checked={chromeIsDefault}
+                  onChange={(e) => void patchChromeMeta({ isDefault: e.target.checked })}
+                />
+                {t("header-footer-set-default")}
+              </label>
+              {chromeKind === "header" && (
+                <div className="space-y-2 border-t border-line/20 pt-2">
+                  <p className="text-[11px] font-semibold text-body">{t("header-footer-mobile-nav")}</p>
+                  <label className="block text-[11px] text-body">
+                    {t("header-footer-mobile-position")}
+                    <select
+                      value={chromeMobileNav.position ?? "right"}
+                      onChange={(e) => void patchChromeMeta({ mobileNav: { position: e.target.value } })}
+                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                    >
+                      <option value="left">{t("header-footer-mobile-left")}</option>
+                      <option value="right">{t("header-footer-mobile-right")}</option>
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-body">
+                    {t("header-footer-mobile-size")}
+                    <select
+                      value={chromeMobileNav.size ?? "md"}
+                      onChange={(e) => void patchChromeMeta({ mobileNav: { size: e.target.value } })}
+                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                    >
+                      <option value="sm">{t("header-footer-mobile-sm")}</option>
+                      <option value="md">{t("header-footer-mobile-md")}</option>
+                      <option value="lg">{t("header-footer-mobile-lg")}</option>
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-body">
+                    {t("header-footer-mobile-color")}
+                    <input
+                      type="color"
+                      value={chromeMobileNav.color ?? "#111827"}
+                      onChange={(e) => void patchChromeMeta({ mobileNav: { color: e.target.value } })}
+                      className="mt-1 h-7 w-full rounded-md border border-line/30"
+                    />
+                  </label>
+                  <label className="block text-[11px] text-body">
+                    {t("header-footer-mobile-animation")}
+                    <select
+                      value={chromeMobileNav.animation ?? "slide"}
+                      onChange={(e) => void patchChromeMeta({ mobileNav: { animation: e.target.value } })}
+                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                    >
+                      <option value="slide">{t("header-footer-mobile-slide")}</option>
+                      <option value="fade">{t("header-footer-mobile-fade")}</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+          {kind === "page" && (
+            <div className="mb-4 space-y-3 rounded-lg border border-line/30 p-3">
+              <p className="text-xs font-bold text-ink">{t("header-footer-page-assignment")}</p>
+              <label className="block text-[11px] font-medium text-body">
+                {t("designer-page-header")}
+                <select
+                  value={pageHeaderId}
+                  onChange={(e) => void patchPageChrome({ headerId: e.target.value })}
+                  disabled={pageHideHeader}
+                  className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                >
+                  <option value="">{t("designer-page-header-default")}</option>
+                  {availableHeaders.map((h) => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+                <input type="checkbox" checked={pageHideHeader} onChange={(e) => void patchPageChrome({ hideHeader: e.target.checked })} />
+                {t("designer-page-hide-header")}
+              </label>
+              <label className="block text-[11px] font-medium text-body">
+                {t("designer-page-footer")}
+                <select
+                  value={pageFooterId}
+                  onChange={(e) => void patchPageChrome({ footerId: e.target.value })}
+                  disabled={pageHideFooter}
+                  className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                >
+                  <option value="">{t("designer-page-header-default")}</option>
+                  {availableFooters.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+                <input type="checkbox" checked={pageHideFooter} onChange={(e) => void patchPageChrome({ hideFooter: e.target.checked })} />
+                {t("designer-page-hide-footer")}
+              </label>
+            </div>
+          )}
           {Inspector({ ctx: designerCtx })}
         </aside>
       </div>

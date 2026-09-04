@@ -7,7 +7,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
@@ -128,6 +128,7 @@ const PERMISSIONS = new Set([
   "menus.write",
   "blueprints.write",
   "events.write",
+  "headerFooter.write",
 ]);
 
 // Superadmin bypasses every permission check — a role's permissions are only
@@ -1871,6 +1872,79 @@ const eventsCollection: CollectionConfig = {
   hooks: { beforeChange: eventsBeforeChange },
 };
 
+// Header/Footer designer (see docs/superpowers/specs/2026-09-04-header-footer-designer-design.md).
+// Own headerFooter.write permission, same reasoning as menus.write/events.write
+// — managing site chrome is its own concern, not a sub-concern of pages.*.
+// `layout`/`translations[code].layout` get the exact same validateLayout()
+// pass pagesBeforeChange runs, since a header/footer canvas is built from the
+// same Section/Row/Column/Element tree a page is. The one-default-per-kind
+// invariant is enforced here (not a DB constraint) by flipping every OTHER
+// row of the same kind to isDefault=false whenever this write sets it true —
+// "exactly one," flip-based rather than reject-based, since there's no
+// equivalent of tenant_languages' guardLastEnabled "can't go below zero" (a
+// tenant is allowed to have zero defaults, e.g. before the first header is
+// ever published).
+const siteChromeBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
+  const record = data as Record<string, unknown>;
+  if (record.kind !== undefined && record.kind !== "header" && record.kind !== "footer") {
+    throw Object.assign(new Error('kind must be "header" or "footer"'), { statusCode: 400 });
+  }
+  if (record.layout !== undefined) {
+    const err = validateLayout(record.layout);
+    if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  }
+  if (record.translations && typeof record.translations === "object") {
+    for (const entry of Object.values(record.translations as Record<string, unknown>)) {
+      const layout = (entry as Record<string, unknown> | null)?.layout;
+      if (layout === undefined) continue;
+      const err = validateLayout(layout);
+      if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+    }
+  }
+  if (record.isDefault === true) {
+    const { id } = req.params as { id?: string };
+    let kind = record.kind as string | undefined;
+    if (!kind && id) {
+      const [existing] = await req.db.select({ kind: schema.siteChrome.kind }).from(schema.siteChrome).where(eq(schema.siteChrome.id, id));
+      kind = existing?.kind as string | undefined;
+    }
+    if (kind) {
+      await req.db
+        .update(schema.siteChrome)
+        .set({ isDefault: false })
+        .where(id ? and(eq(schema.siteChrome.kind, kind), ne(schema.siteChrome.id, id)) : eq(schema.siteChrome.kind, kind));
+    }
+  }
+  record.updatedAt = new Date();
+  return record;
+};
+
+const siteChromeCollection: CollectionConfig = {
+  slug: "siteChrome",
+  table: schema.siteChrome,
+  createSchema: {
+    type: "object",
+    required: ["kind", "name"],
+    additionalProperties: false,
+    properties: {
+      kind: { type: "string", enum: ["header", "footer"] },
+      name: { type: "string", minLength: 1 },
+      layout: { type: "array" },
+      translations: { type: "object" },
+      settings: { type: "object" },
+      isDefault: { type: "boolean" },
+      status: { type: "string", enum: ["draft", "published"] },
+    },
+  },
+  access: {
+    read: () => true,
+    create: (a) => hasPermission(a, "headerFooter.write"),
+    update: (a) => hasPermission(a, "headerFooter.write"),
+    delete: (a) => hasPermission(a, "headerFooter.write"),
+  },
+  hooks: { beforeChange: siteChromeBeforeChange },
+};
+
 // Reusable Designer section blocks. Protected-scope only (see registration
 // below) — no `access.update` since there's no PATCH route (replacing a
 // template is delete-and-recreate), and no `shareable` since these aren't
@@ -1907,6 +1981,7 @@ await app.register(async (publicScope) => {
   registerPublicCollectionRoutes(publicScope, categoriesCollection);
   registerPublicCollectionRoutes(publicScope, menusCollection);
   registerPublicCollectionRoutes(publicScope, eventsCollection);
+  registerPublicCollectionRoutes(publicScope, siteChromeCollection);
   // Theme lives in the control-plane DB, not the tenant DB — req.db's own
   // site_theme copy is always empty under DB-per-tenant. A theme-preview
   // Bearer token (ThemeForm's "Test" button) overlays its not-yet-saved
@@ -2012,6 +2087,7 @@ await app.register(async (protectedScope) => {
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
   registerProtectedCollectionRoutes(protectedScope, menusCollection);
   registerProtectedCollectionRoutes(protectedScope, eventsCollection);
+  registerProtectedCollectionRoutes(protectedScope, siteChromeCollection);
 
   // History/restore — a post-specific feature the generic CRUD mechanism
   // doesn't cover (same reasoning as the preview-token route above), so
