@@ -48,13 +48,38 @@ const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionPro
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
+// See its one call site (top of ElPreview) for why this exists.
+function mergeElBp(
+  props: Record<string, string>,
+  bpBag: Record<string, string> | undefined,
+  bp: "desktop" | "tablet" | "mobile",
+  bpGetValue: (base: string | undefined, overrides: Record<string, string> | undefined, key: string) => string,
+): Record<string, string> {
+  if (bp === "desktop" || !bpBag) return props;
+  const keys = new Set(Object.keys(props));
+  for (const k of Object.keys(bpBag)) keys.add(k.slice(k.indexOf(":") + 1));
+  keys.delete("slides");
+  const merged: Record<string, string> = { ...props };
+  for (const k of keys) merged[k] = bpGetValue(props[k], bpBag, k);
+  return merged;
+}
+
 export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: number[] }) {
   const {
     mode, t, mutate, bp, availableMenus, availableCategories,
     sliderSlideIdx, setSliderSlideIdx, sliderPreviewRefs, sliderGuide, setSliderGuide,
     sliderEditingItem, setSliderEditingItem, editingText, editingSliderText, bpGetValue, bpKey, sel,
   } = ctx;
-  const p = el.props;
+  // Merge el.bp's active tier onto the base props so a per-breakpoint
+  // override (any Content/Style field's BpToggle) actually shows live on
+  // the canvas while previewing tablet/mobile — previously this read
+  // el.props raw, so every such override wrote real data (and the
+  // Inspector's toggle showed "active") but the canvas silently kept
+  // rendering the desktop value. Same root cause the "slides" field hit
+  // (see fieldGroupsProps's own comment in Inspector.tsx); "slides" is
+  // excluded here for the same reason that fix bypasses it — it manages
+  // its own per-item bp overrides internally, not via this bag.
+  const p = mergeElBp(el.props, el.bp, bp, bpGetValue);
   // Blocks is a structure-only skeleton (icon + type + a short content
   // hint) — just enough to see layout/arrangement while dragging/
   // reordering. Live Edit is untouched below: same real rendering
@@ -215,7 +240,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           <img
             src={p.src}
             alt={p.alt ?? ""}
-            style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow), width: p.width || undefined, maxWidth: "100%" }}
+            style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow), width: p.imgWidth || undefined, maxWidth: "100%" }}
           />
         </div>
       ) : (

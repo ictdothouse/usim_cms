@@ -558,6 +558,21 @@ export default function Designer({
     const v = (x?: string) => lengthValue(x, PAD, "0");
     return { padding: `${v(row.paddingTop)} ${v(row.paddingRight)} ${v(row.paddingBottom)} ${v(row.paddingLeft)}` };
   }
+  // Column span per screen size — desktop's own span is always the base;
+  // switching the canvas to tablet/mobile and setting a column's span there
+  // (Inspector's Column panel BpToggle) stores it as col.bp["tablet:span"]/
+  // ["mobile:span"], same bag/convention as every other per-breakpoint
+  // override. Mirrors SectionBlock.astro's rowGridTemplate (frontend copy)
+  // so the canvas preview matches what actually publishes. Mobile's default
+  // (no column has an explicit mobile:span) stays the pre-existing "stack to
+  // one column" behavior — an explicit override opts a row OUT of that.
+  function rowGridTemplate(row: Row, atBp: Bp): string {
+    const cols = row.columns ?? [];
+    if (atBp === "desktop") return cols.map((cc) => `${cc.span ?? 1}fr`).join(" ");
+    const hasOverride = cols.some((cc) => bpKeysOverridden(cc.bp, ["span"]));
+    if (hasOverride) return cols.map((cc) => `${bpGetValue(String(cc.span ?? 1), cc.bp, "span")}fr`).join(" ");
+    return atBp === "mobile" ? "1fr" : cols.map((cc) => `${cc.span ?? 1}fr`).join(" ");
+  }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
   // selected node's on-screen box inside the iframe, used to position
@@ -2898,8 +2913,7 @@ export default function Designer({
                               setCtxMenu({ path: [b, r], x: ev.clientX, y: ev.clientY });
                             }}
                             style={{
-                              gridTemplateColumns:
-                                bp === "mobile" ? "1fr" : row.columns.map((cc) => `${cc.span}fr`).join(" "),
+                              gridTemplateColumns: rowGridTemplate(row, bp),
                               gap: row.gap ?? pageSettings.gap ?? (mode === "live" ? "2rem" : "1rem"),
                               ...rowPaddingStyle(row),
                             }}
@@ -3304,7 +3318,9 @@ export default function Designer({
                                         const startPx = img ? Math.round(img.getBoundingClientRect().width) : 200;
                                         startSpacingDrag(ev, startPx, "x", 1, (next, px) => {
                                           const target = section(next, b).rows[r].columns[c].elements[e];
-                                          target.props = { ...(target.props ?? {}), width: `${Math.max(20, px)}px` };
+                                          const value = `${Math.max(20, px)}px`;
+                                          if (bp === "desktop") target.props = { ...(target.props ?? {}), imgWidth: value };
+                                          else target.bp = { ...(target.bp ?? {}), [bpKey("imgWidth")]: value };
                                         });
                                       }}
                                       title={t("designer-f-width")}
