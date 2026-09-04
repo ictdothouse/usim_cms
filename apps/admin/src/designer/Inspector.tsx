@@ -582,14 +582,33 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           }
         />
         <label className="block text-[11px] font-medium text-body">
-          {FieldLabel("designer-col-span", t)}: {col.span}
+          <span className="inline-flex items-center gap-1">
+            {FieldLabel("designer-col-span", t)}: {bpGetValue(String(col.span), col.bp, "span")}
+            <BpToggle
+              active={bpKeysOverridden(col.bp, ["span"])}
+              onToggle={() =>
+                mutate((bs) => {
+                  const target = section(bs, b).rows[r].columns[c];
+                  target.bp = toggleBpKeys(target.bp, ["span"]);
+                })
+              }
+              bp={bp}
+              t={t}
+            />
+          </span>
           <input
             type="range"
             min={1}
             max={6}
-            value={col.span}
+            value={Number(bpGetValue(String(col.span), col.bp, "span"))}
             className="mt-1 w-full accent-accent"
-            onChange={(ev) => mutate((bs) => (section(bs, b).rows[r].columns[c].span = Number(ev.target.value)))}
+            onChange={(ev) =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                if (bp === "desktop") target.span = Number(ev.target.value);
+                else target.bp = { ...(target.bp ?? {}), [bpKey("span")]: ev.target.value };
+              })
+            }
           />
         </label>
         <FourSideControl

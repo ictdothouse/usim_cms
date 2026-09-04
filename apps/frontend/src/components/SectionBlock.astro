@@ -991,7 +991,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         style={[
                           `border-radius:${elRadius(p)}`,
                           shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
-                          p.width ? `width:${p.width}` : null,
+                          p.imgWidth ? `width:${p.imgWidth}` : null,
                           marginStyle(p),
                           paddingStyle(p),
                         ]
@@ -1632,7 +1632,17 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return null;
               }
               })();
-              const elVisId = respId(`e${blockIndex}-${r}-${c}-${e}`, p);
+              const elId = `e${blockIndex}-${r}-${c}-${e}`;
+              // Image's own real per-breakpoint width override — same "tablet:
+              // imgWidth"/"mobile:imgWidth" bag every other bp override uses,
+              // but pushed with a custom "... img" selector (not the plain
+              // respId() below) since this wrapper renders `display:contents`
+              // and can't itself carry a width.
+              const hasWidthBp = el.type === "image" && !!el.bp && Object.keys(el.bp).some((k) => k.endsWith(":imgWidth"));
+              if (hasWidthBp) {
+                responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"] img`, el.bp!, p, (mp) => (mp.imgWidth ? `width:${mp.imgWidth}` : "")));
+              }
+              const elVisId = respId(elId, p) ?? (hasWidthBp ? elId : undefined);
               return designerEdit || elVisId ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}

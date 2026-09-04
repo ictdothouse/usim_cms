@@ -95,6 +95,12 @@ export const ENUM_VALUES: Record<string, string[]> = {
   // documentdownload is the one element offering a 1-column layout
   // (Designer.tsx's ELS.documentdownload) alongside 2/3/4 everyone else uses.
   columns: ["1", "2", "3", "4"],
+  // Column.span per breakpoint (Inspector's Column panel range 1-6) — the
+  // base (desktop) span is a plain top-level number, never validated here;
+  // only col.bp's "tablet:span"/"mobile:span" strings route through this
+  // generic bag validator, so this entry is what stops those from 400ing
+  // as an "unknown field".
+  span: ["1", "2", "3", "4", "5", "6"],
   // accordion/infobox/slider (see Designer.tsx's ELS registry additions).
   exclusive: ["false", "true"],
   iconPosition: ["top", "left"],
@@ -150,8 +156,13 @@ export const LENGTH_KEYS = new Set([
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
   "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
   // image element's own resizable width (Designer.tsx canvas drag handle +
-  // Inspector length field) — "" means natural/auto size.
-  "width",
+  // Inspector length field) — "" means natural/auto size. Named "imgWidth",
+  // not "width": ENUM_VALUES.width below is Section's own contained/full
+  // picker, same flat props-bag key namespace across every node type —
+  // LENGTH_KEYS.has(key) short-circuits validateValue before the enum
+  // check ever runs, so reusing "width" here would reject every section's
+  // width:"contained" as an invalid CSS length.
+  "imgWidth",
 ]);
 export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
