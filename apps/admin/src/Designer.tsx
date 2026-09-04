@@ -2911,7 +2911,7 @@ export default function Designer({
                             return (
                             <div
                               key={c}
-                              className={`relative min-h-[3rem] transition-colors ${
+                              className={`relative min-h-[3rem] min-w-0 transition-colors ${
                                 mode === "live" ? "" : "rounded-lg border border-dashed p-1.5"
                               } ${selCls([b, r, c])} ${dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""}`}
                               style={{ ...bpColStyle(col), borderColor: mode === "live" ? undefined : colOverlay.line, opacity: colHiddenAtBp ? 0.35 : undefined }}
