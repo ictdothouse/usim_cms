@@ -1910,7 +1910,7 @@ await app.register(async (publicScope) => {
     return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher };
   });
 
-  // Backs apps/frontend's __blueprint-preview.astro (Designer's blueprint
+  // Backs apps/frontend's blueprint-preview.astro (Designer's blueprint
   // Live Edit iframe) — a blueprint has no real slug/route, so unlike
   // pages/posts there is no underlying public row this could "elevate"
   // visibility on; the previewOnly token IS the entire access check. Never

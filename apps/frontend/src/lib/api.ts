@@ -212,7 +212,7 @@ export async function getTheme(tenantHost: string, token?: string): Promise<Reco
   return theme;
 }
 
-// Backs __blueprint-preview.astro (Designer's blueprint Live Edit iframe) —
+// Backs blueprint-preview.astro (Designer's blueprint Live Edit iframe) —
 // a blueprint has no slug/route of its own, so unlike getPageBySlug this
 // has no anonymous-visitor case at all: token is always required, and a
 // failed/missing preview always resolves to null rather than a stale-cache
