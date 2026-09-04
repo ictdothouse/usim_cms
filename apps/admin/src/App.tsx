@@ -747,6 +747,35 @@ function PageDesignerRoute({ tenantHost, token, isSuper }: { tenantHost: string;
   );
 }
 
+// Same shape as PageDesignerRoute, for editing a blueprint's own layout
+// instead of a real page's — Designer's `kind="blueprint"` prop strips the
+// slug/publish/Live-Edit/Preview UI, since a blueprint has no live route of
+// its own. `backTo` is explicit (not a relative "..") since this route is
+// mounted at two different bases (superadmin's "/content/blueprints" and a
+// webmaster's own "/blueprints").
+function BlueprintDesignerRoute({ tenantHost, token, isSuper, backTo }: { tenantHost: string; token: string; isSuper: boolean; backTo: string }) {
+  const { t } = useT();
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [bp, setBp] = useState<api.PageBlueprint | null | undefined>(undefined);
+  useEffect(() => {
+    void api.listBlueprints(tenantHost, token).then((items) => setBp(items.find((b) => b.id === id) ?? null));
+  }, [tenantHost, id]);
+  if (bp === undefined) return null;
+  if (bp === null) return <p className="text-xs text-sub">{t("blueprints-empty")}</p>;
+  return (
+    <Designer
+      page={{ id: bp.id, title: bp.name, layout: bp.layout, settings: bp.settings }}
+      tenantHost={tenantHost}
+      token={token}
+      t={t}
+      onClose={() => navigate(backTo)}
+      isSuper={isSuper}
+      kind="blueprint"
+    />
+  );
+}
+
 // ---------- Posts (rich-text articles) ----------
 type PostStatus = "draft" | "published" | "private";
 
@@ -3621,6 +3650,9 @@ function ContentManager({
               <Route path="blueprints" element={<BlueprintGallery key={siteHost} tenantHost={siteHost} token={token} mode="manage" isSuper />} />
             )}
             {isSuper && (
+              <Route path="blueprints/:id" element={<BlueprintDesignerRoute tenantHost={siteHost} token={token} isSuper backTo="/content/blueprints" />} />
+            )}
+            {isSuper && (
               <Route path="events" element={<EventsPanel key={`events-${siteHost}`} tenantHost={siteHost} token={token} />} />
             )}
           </Routes>
@@ -4696,6 +4728,7 @@ function Shell({
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="blueprints" element={!isSuper && session.tenantHost ? (<BlueprintGallery tenantHost={session.tenantHost} token={session.token} mode="manage" isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="blueprints/:id" element={!isSuper && session.tenantHost ? (<BlueprintDesignerRoute tenantHost={session.tenantHost} token={session.token} isSuper={false} backTo="/blueprints" />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="events" element={!isSuper && session.tenantHost ? (<EventsPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
