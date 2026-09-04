@@ -3296,6 +3296,21 @@ export default function Designer({
                                         </>
                                       );
                                     })()}
+                                  {selEq([b, r, c, e]) && mode !== "live" && el.type === "image" && (
+                                    <span
+                                      onMouseDown={(ev) => {
+                                        const wrapper = (ev.currentTarget as HTMLElement).parentElement;
+                                        const img = wrapper?.querySelector("img");
+                                        const startPx = img ? Math.round(img.getBoundingClientRect().width) : 200;
+                                        startSpacingDrag(ev, startPx, "x", 1, (next, px) => {
+                                          const target = section(next, b).rows[r].columns[c].elements[e];
+                                          target.props = { ...(target.props ?? {}), width: `${Math.max(20, px)}px` };
+                                        });
+                                      }}
+                                      title={t("designer-f-width")}
+                                      className="absolute -bottom-2 -right-2 z-20 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-accent shadow-sm"
+                                    />
+                                  )}
                                   {ElPreview({ ctx: designerCtx, el, path: [b, r, c, e] })}
                                 </div>
                               ))}

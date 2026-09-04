@@ -76,10 +76,14 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
   image: {
     labelKey: "designer-el-image",
     icon: ImageIcon,
-    defaults: { src: "", alt: "", radius: "md" },
+    defaults: { src: "", alt: "", radius: "md", width: "", align: "left" },
     fields: [
       { key: "src", labelKey: "designer-f-src", kind: "image" },
       { key: "alt", labelKey: "designer-f-alt", kind: "text" },
+      // width empty = natural size (capped to column, existing behavior);
+      // set = also drag-resizable via the canvas corner handle (Designer.tsx).
+      { key: "width", labelKey: "designer-f-width", kind: "length" },
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
       // radius edited via FourSideControl (element Inspector) — see ELS-radius branch.
       { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
     ],
