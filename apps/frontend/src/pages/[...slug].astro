@@ -72,7 +72,7 @@ const langSwitcher =
     : null;
 
 const { header: headerChrome, footer: footerChrome } = page
-  ? await resolveHeaderFooter(page, tenantHost)
+  ? await resolveHeaderFooter(page, tenantHost, designerEdit)
   : { header: null, footer: null };
 ---
 <BaseLayout
