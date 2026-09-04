@@ -1,6 +1,12 @@
 # Menu Management + Header/Footer Builder — Design
 
-Status: approved (brainstormed 2026-08-13), ready for implementation planning.
+Status: menu half implemented and shipped (`menus` table, Menu Designer
+element, `MenuBlock.astro`). Header/Footer half (`site_sections`) was never
+built — **superseded** by
+[2026-09-04-header-footer-designer-design.md](2026-09-04-header-footer-designer-design.md),
+which redesigns the header/footer builder with a different assignment model
+and adds mobile-nav style customization. Keep this file for the Menu
+element/data-model history; do not implement `site_sections` from here.
 
 ## Problem
 
