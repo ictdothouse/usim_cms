@@ -7,9 +7,13 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   SIGTERM/SIGINT; not static: tenant identity comes from the request's `Host` header at runtime, so
   pages can't be pre-built per-tenant at build time). `src/pages/[...slug].astro` reads `Host`, fetches
   the matching page and merged theme from `apps/api`'s public scope (`src/lib/api.ts`), and renders
-  each `layout[]` block by `type` (`hero` → `HeroBlock`, anything else → `GenericBlock` fallback — add a
-  new `<TypeBlock>.astro` and a case in the page's switch as the admin block builder grows real block
-  types). Styling is Tailwind CSS v4 + daisyUI, wired via the `@tailwindcss/vite` plugin
+  each `layout[]` block by `type` (`section` → `SectionBlock`, anything else → `GenericBlock` fallback —
+  add a new `<TypeBlock>.astro` and a case in the page's switch as the admin block builder grows real
+  block types). The retired BlockBuilder-era top-level `hero` block type never reaches this switch:
+  `apps/api`'s `pagesAfterRead` hook upgrades any surviving one into a real `section` (heading+text
+  elements) on every read, since Designer.tsx has no edit UI for a non-`section` block at all —
+  `HeroBlock.astro` is kept only for this page's (and `posts/[slug].astro`'s) "not found" fallback.
+  Styling is Tailwind CSS v4 + daisyUI, wired via the `@tailwindcss/vite` plugin
   (`astro.config.mjs`) and one global stylesheet (`src/styles/global.css`) imported by
   `BaseLayout.astro` — compile-time only, no client-side JS added, consistent with this project's
   "avoid heavy dependencies" constraint.

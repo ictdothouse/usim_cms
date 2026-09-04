@@ -1,8 +1,6 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
-import TextBlock from "../components/TextBlock.astro";
-import ImageBlock from "../components/ImageBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
 import { getTheme, getBlueprintPreview } from "../lib/api";
@@ -57,12 +55,6 @@ const designerEdit = Boolean(bp);
               requestedLang={null}
             />
           );
-        case "hero":
-          return <HeroBlock {...(block.props ?? {})} />;
-        case "text":
-          return <TextBlock {...(block.props ?? {})} />;
-        case "image":
-          return <ImageBlock {...(block.props ?? {})} />;
         default:
           return <GenericBlock type={block.type} props={block.props} />;
       }

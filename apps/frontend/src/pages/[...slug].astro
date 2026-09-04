@@ -1,8 +1,6 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
-import TextBlock from "../components/TextBlock.astro";
-import ImageBlock from "../components/ImageBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
 import { getPageBySlug, getTheme, getLanguages, resolvePageLayout } from "../lib/api";
@@ -99,12 +97,6 @@ const langSwitcher =
               requestedLang={requestedLang}
             />
           );
-        case "hero":
-          return <HeroBlock {...(block.props ?? {})} />;
-        case "text":
-          return <TextBlock {...(block.props ?? {})} />;
-        case "image":
-          return <ImageBlock {...(block.props ?? {})} />;
         default:
           return <GenericBlock type={block.type} props={block.props} />;
       }

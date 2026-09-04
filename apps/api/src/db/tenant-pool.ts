@@ -418,12 +418,30 @@ async function seedDefaultHomePage(connectionString: string, departmentName: str
       title: departmentName,
       status: "published",
       publishedAt: new Date(),
+      // Section-shaped (heading + text), not the legacy top-level "hero"
+      // block type — that BlockBuilder-era shape has no edit path left in
+      // Designer.tsx at all (see its own comment on the block-type switch),
+      // so a tenant seeded with one could never re-edit its own homepage.
       layout: [
         {
-          type: "hero",
+          type: "section",
           props: {
-            title: departmentName,
-            subtitle: "Website ini sedang disediakan. Kandungan akan dikemaskini tidak lama lagi.",
+            rows: [
+              {
+                columns: [
+                  {
+                    span: 1,
+                    elements: [
+                      { type: "heading", props: { level: "1", text: departmentName } },
+                      {
+                        type: "text",
+                        props: { text: "Website ini sedang disediakan. Kandungan akan dikemaskini tidak lama lagi." },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
           },
         },
       ],
