@@ -712,6 +712,13 @@ export default function Designer({
         hideHeader: next.hideHeader,
         hideFooter: next.hideFooter,
       });
+      // Picking a header/footer here PATCHes the page directly (not through
+      // mutate()/the layout draft), so nothing was telling the Live Edit
+      // iframe to reload — it kept showing whatever header/footer was
+      // active when it first mounted. bumpStructural() is the same signal
+      // every other structural change already uses to trigger the debounced
+      // reload (see its own comment above).
+      bumpStructural();
     } catch (err) {
       setError((err as Error).message);
     }

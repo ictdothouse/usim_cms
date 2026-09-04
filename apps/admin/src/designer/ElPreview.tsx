@@ -84,7 +84,15 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
   // hint) — just enough to see layout/arrangement while dragging/
   // reordering. Live Edit is untouched below: same real rendering
   // (fonts/colors/images/slider drag, canvas text edit) it always had.
-  if (mode === "blocks") {
+  // "image" is exempted from the skeleton: the Header/Footer Designer
+  // (kind === "siteChrome") has no Live Edit toggle at all (Designer.tsx
+  // only renders it for kind !== "siteChrome"), so a logo/image element
+  // there could never be seen or usefully drag-resized — it only ever
+  // showed the generic hint chip below, with the resize handle (Designer.tsx,
+  // gated on mode !== "live") floating over that tiny box instead of the
+  // actual picture.
+  const isImage = el.type === "image";
+  if (mode === "blocks" && !isImage) {
     const Icon = ELS[el.type].icon;
     const hint = ((): string => {
       switch (el.type) {
