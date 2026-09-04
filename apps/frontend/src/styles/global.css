@@ -86,4 +86,18 @@ h2, h3, h4, h5, h6 {
   .ds-mega-full { width: auto; transform: none; }
   .ds-menu-item.is-open-click > .ds-mega-menu { display: flex; }
   .ds-menu-item.is-open-click > .ds-menu-dropdown { display: block; }
+
+  /* Header/Footer designer's mobile-nav style knobs (settings.mobileNav on
+     the siteChrome row, see BaseLayout.astro) — scoped by a data attribute
+     on the header wrapper so a page with no configured header is unaffected. */
+  [data-mobile-nav-position="left"] .ds-menu-toggle { margin-inline-end: auto; }
+  [data-mobile-nav-position="right"] .ds-menu-toggle { margin-inline-start: auto; }
+  [data-mobile-nav-size="sm"] .ds-menu-toggle span { width: 16px; }
+  [data-mobile-nav-size="lg"] .ds-menu-toggle span { width: 28px; }
+  [data-mobile-nav-color] .ds-menu-toggle span { background: var(--mobile-nav-color, currentColor); }
+  [data-mobile-nav-animation="fade"] .ds-menu.is-open .ds-menu-list { animation: ds-menu-fade 0.2s ease; }
+}
+@keyframes ds-menu-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

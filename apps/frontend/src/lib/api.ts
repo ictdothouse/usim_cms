@@ -35,6 +35,12 @@ export interface Page {
   // see CLAUDE.md's i18n Phase 5 correction).
   language: string | null;
   translations: Record<string, { layout: PageLayout }>;
+  // Header/Footer designer (see docs/superpowers/specs/2026-09-04-header-footer-designer-design.md)
+  // — resolved to a real siteChrome row by resolveHeaderFooter() below.
+  headerId: string | null;
+  footerId: string | null;
+  hideHeader: boolean;
+  hideFooter: boolean;
 }
 
 // Resolves which layout to render for a requested language code: the base
@@ -85,6 +91,59 @@ export async function getPageBySlug(tenantHost: string, slug: string, token?: st
   // many pages the tenant has.
   const { items } = await apiGet<{ items: Page[] }>(`/api/pages?slug=${encodeURIComponent(slug)}`, tenantHost, token);
   return items[0] ?? null;
+}
+
+export interface SiteChrome {
+  id: string;
+  kind: "header" | "footer";
+  layout: PageLayout;
+  translations: Record<string, { layout: PageLayout }>;
+  settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string } };
+  isDefault: boolean;
+}
+
+// Soft-fail like getMenu below — a header/footer that fails to load renders
+// as nothing rather than breaking the whole page.
+async function getSiteChromeById(tenantHost: string, id: string): Promise<SiteChrome | null> {
+  try {
+    const { item } = await apiGet<{ item: SiteChrome | null }>(`/api/siteChrome/${id}`, tenantHost);
+    return item;
+  } catch (err) {
+    console.error(`getSiteChromeById: ${id} failed, rendering no chrome`, err);
+    return null;
+  }
+}
+
+async function getDefaultSiteChrome(tenantHost: string, kind: "header" | "footer"): Promise<SiteChrome | null> {
+  try {
+    const { items } = await apiGet<{ items: SiteChrome[] }>(`/api/siteChrome?kind=${kind}&isDefault=true&status=published`, tenantHost);
+    return items[0] ?? null;
+  } catch (err) {
+    console.error(`getDefaultSiteChrome: ${kind} failed, rendering no chrome`, err);
+    return null;
+  }
+}
+
+// Resolution order per docs/superpowers/specs/2026-09-04-header-footer-designer-design.md:
+// hideX wins outright; an explicit headerId/footerId wins over the default;
+// otherwise fall back to whichever row is marked isDefault (published only —
+// a draft default never reaches the public site). A fresh tenant with none
+// configured yet gets { header: null, footer: null }, not an error.
+export async function resolveHeaderFooter(page: Page, tenantHost: string): Promise<{ header: SiteChrome | null; footer: SiteChrome | null }> {
+  const [header, footer] = await Promise.all([
+    page.hideHeader ? null : page.headerId ? getSiteChromeById(tenantHost, page.headerId) : getDefaultSiteChrome(tenantHost, "header"),
+    page.hideFooter ? null : page.footerId ? getSiteChromeById(tenantHost, page.footerId) : getDefaultSiteChrome(tenantHost, "footer"),
+  ]);
+  return { header, footer };
+}
+
+// posts have no per-post headerId/footerId/hideHeader/hideFooter (the
+// spec scopes page-level override/exception to `pages` only) — a post
+// always gets the tenant's own default header/footer, same fallback branch
+// resolveHeaderFooter's "else" above uses.
+export async function resolveDefaultHeaderFooter(tenantHost: string): Promise<{ header: SiteChrome | null; footer: SiteChrome | null }> {
+  const [header, footer] = await Promise.all([getDefaultSiteChrome(tenantHost, "header"), getDefaultSiteChrome(tenantHost, "footer")]);
+  return { header, footer };
 }
 
 export interface Post {

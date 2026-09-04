@@ -22,6 +22,7 @@ import {
   Menu,
   Newspaper,
   Palette,
+  PanelTop,
   Pencil,
   Rss,
   Search,
@@ -52,6 +53,7 @@ import { BlueprintGallery } from "./BlueprintGallery";
 import CategoriesPanel from "./CategoriesPanel";
 import PostEditorPage from "./PostEditorPage";
 import MenusPanel from "./MenusPanel";
+import HeaderFooterPanel from "./HeaderFooterPanel";
 import EventsPanel from "./EventsPanel";
 
 const SESSION_KEY = "usim_cms_session";
@@ -772,6 +774,34 @@ function BlueprintDesignerRoute({ tenantHost, token, isSuper, backTo }: { tenant
       onClose={() => navigate(backTo)}
       isSuper={isSuper}
       kind="blueprint"
+    />
+  );
+}
+
+// Same shape as BlueprintDesignerRoute, for a header/footer's own layout —
+// see docs/superpowers/specs/2026-09-04-header-footer-designer-design.md.
+// `kind`/`isDefault`/`status` ride along on `page` since Designer's own
+// standalone chrome-settings panel (kind === "siteChrome") reads them
+// straight off `page`, same as it reads `page.headerId` etc for a real page.
+function HeaderFooterDesignerRoute({ tenantHost, token, isSuper, backTo }: { tenantHost: string; token: string; isSuper: boolean; backTo: string }) {
+  const { t } = useT();
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [item, setItem] = useState<api.SiteChrome | null | undefined>(undefined);
+  useEffect(() => {
+    void api.listSiteChrome(tenantHost, token).then((items) => setItem(items.find((i) => i.id === id) ?? null));
+  }, [tenantHost, id]);
+  if (item === undefined) return null;
+  if (item === null) return <p className="text-xs text-sub">{t("header-footer-empty")}</p>;
+  return (
+    <Designer
+      page={{ id: item.id, title: item.name, layout: item.layout, settings: item.settings, kind: item.kind, isDefault: item.isDefault, status: item.status }}
+      tenantHost={tenantHost}
+      token={token}
+      t={t}
+      onClose={() => navigate(backTo)}
+      isSuper={isSuper}
+      kind="siteChrome"
     />
   );
 }
@@ -2763,6 +2793,7 @@ const PERMISSIONS = [
   "menus.write",
   "blueprints.write",
   "events.write",
+  "headerFooter.write",
 ] as const;
 const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -2780,6 +2811,7 @@ const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "menus.write": "perm-menus-write",
   "blueprints.write": "perm-blueprints-write",
   "events.write": "perm-events-write",
+  "headerFooter.write": "perm-header-footer-write",
 };
 
 function UsersPanel({ token, onImpersonate }: { token: string; onImpersonate: (s: Session) => void }) {
@@ -3561,7 +3593,7 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   );
 }
 
-type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "blueprints" | "events";
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "header-footer" | "blueprints" | "events";
 
 function ContentManager({
   isSuper,
@@ -3591,6 +3623,7 @@ function ContentManager({
           { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
           { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
           { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
+          { id: "header-footer" as const, labelKey: "header-footer-title" as const, icon: PanelTop },
           { id: "blueprints" as const, labelKey: "blueprints-title" as const, icon: LayoutTemplate },
           { id: "events" as const, labelKey: "events-title" as const, icon: CalendarDays },
         ]
@@ -3640,6 +3673,11 @@ function ContentManager({
             <Route path="posts/:id" element={<PostEditorPage tenantHost={siteHost} token={token} />} />
             <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
             <Route path="menus" element={<MenusPanel tenantHost={siteHost} token={token} />} />
+            <Route path="header-footer" element={<HeaderFooterPanel key={siteHost} tenantHost={siteHost} token={token} />} />
+            <Route
+              path="header-footer/:id"
+              element={<HeaderFooterDesignerRoute tenantHost={siteHost} token={token} isSuper backTo="/content/header-footer" />}
+            />
             {isSuper && (
               <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
             )}
@@ -3672,6 +3710,7 @@ type Tab =
   | "theme"
   | "languages"
   | "menus"
+  | "header-footer"
   | "blueprints"
   | "events"
   | "global-theme"
@@ -3688,6 +3727,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   theme: { labelKey: "tab-theme", icon: Palette },
   languages: { labelKey: "tab-languages", icon: Globe },
   menus: { labelKey: "menus-title", icon: ListTree },
+  "header-footer": { labelKey: "header-footer-title", icon: PanelTop },
   blueprints: { labelKey: "blueprints-title", icon: LayoutTemplate },
   events: { labelKey: "events-title", icon: CalendarDays },
   "global-theme": { labelKey: "tab-global-theme", icon: Palette },
@@ -4597,7 +4637,9 @@ function Shell({
   const showSitePicker = isSuper || session.tenantHosts.length > 1;
 
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings", "security"] : ["dashboard", "security"];
-  const contentTabs: Tab[] = isSuper ? ["content", "global-theme", "feed"] : ["content", "theme", "languages", "menus", "blueprints", "events"];
+  const contentTabs: Tab[] = isSuper
+    ? ["content", "global-theme", "feed"]
+    : ["content", "theme", "languages", "menus", "header-footer", "blueprints", "events"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -4727,6 +4769,11 @@ function Shell({
                 <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="header-footer" element={!isSuper && session.tenantHost ? (<HeaderFooterPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route
+                  path="header-footer/:id"
+                  element={!isSuper && session.tenantHost ? (<HeaderFooterDesignerRoute tenantHost={session.tenantHost} token={session.token} isSuper={false} backTo="/header-footer" />) : (<Navigate to="/dashboard" replace />)}
+                />
                 <Route path="blueprints" element={!isSuper && session.tenantHost ? (<BlueprintGallery tenantHost={session.tenantHost} token={session.token} mode="manage" isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="blueprints/:id" element={!isSuper && session.tenantHost ? (<BlueprintDesignerRoute tenantHost={session.tenantHost} token={session.token} isSuper={false} backTo="/blueprints" />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="events" element={!isSuper && session.tenantHost ? (<EventsPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
