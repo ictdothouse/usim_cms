@@ -101,9 +101,17 @@ function getTenantPool(connectionString: string): Pool {
   return tp;
 }
 
-// Tracks which tenant databases this process has already provisioned, so
-// CREATE DATABASE + the migration replay aren't re-run on every request.
-const provisionedDbs = new Set<string>();
+// Tracks which tenant databases this process has already provisioned (or is
+// currently provisioning), so CREATE DATABASE + the migration replay aren't
+// re-run — or run concurrently — on every request. A brand-new tenant's
+// first page load fires several requests in parallel (e.g. the admin's Media
+// Library loads folders+items via Promise.all), and without single-flighting
+// this, two requests would race into `CREATE DATABASE` at once — one throws
+// a Postgres "already exists" error mid-response, which was surfacing to the
+// browser as a truncated body ("Unexpected end of JSON input"). Same
+// single-flight-a-promise pattern as `ensurePublicSchema`'s
+// `publicSchemaReady` above.
+const provisionedDbs = new Map<string, Promise<void>>();
 
 // ponytail: provisions the tenant database (+ runs all migrations into it)
 // on first request per process, once the host is confirmed in the registry.
@@ -112,8 +120,19 @@ const provisionedDbs = new Set<string>();
 // ~50 known department hosts; revisit if tenants need true self-service.
 async function ensureTenantDatabase(tenantHost: string, dbUrl: string | null): Promise<string> {
   const connectionString = dbUrl ?? deriveTenantDbUrl(tenantHost);
-  if (provisionedDbs.has(connectionString)) return connectionString;
+  let provisioning = provisionedDbs.get(connectionString);
+  if (!provisioning) {
+    provisioning = provisionTenantDatabase(tenantHost, dbUrl, connectionString);
+    // A failed attempt must not permanently poison the cache — let the next
+    // request retry instead of every future request 500ing forever.
+    provisioning.catch(() => provisionedDbs.delete(connectionString));
+    provisionedDbs.set(connectionString, provisioning);
+  }
+  await provisioning;
+  return connectionString;
+}
 
+async function provisionTenantDatabase(tenantHost: string, dbUrl: string | null, connectionString: string): Promise<void> {
   if (!dbUrl) {
     // Same-server case: create the database via the control-plane connection.
     const client = await pool.connect();
@@ -149,8 +168,6 @@ async function ensureTenantDatabase(tenantHost: string, dbUrl: string | null): P
   } finally {
     client.release();
   }
-  provisionedDbs.add(connectionString);
-  return connectionString;
 }
 
 export async function closePool(): Promise<void> {

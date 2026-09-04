@@ -70,7 +70,7 @@ async function request(path: string, tenantHost: string | null, token: string | 
     window.location.reload();
     return new Promise(() => {});
   }
-  const body = await res.json();
+  const body = await parseJsonBody(res);
   // Hand-written routes return `{ error: "..." }` directly; a thrown Error
   // with `.statusCode` instead goes through Fastify's default error handler,
   // whose JSON body is `{ statusCode, error: "<generic reason phrase like
@@ -79,6 +79,19 @@ async function request(path: string, tenantHost: string | null, token: string | 
   // "Bad Request" with the real reason silently discarded.
   if (!res.ok) throw new Error(body.message ?? body.error ?? `Request failed (${res.status})`);
   return body;
+}
+
+// A response can arrive with an empty/non-JSON body (a dropped connection
+// mid-response, a proxy timeout) — res.json() throws a raw, unreadable
+// SyntaxError ("Unexpected end of JSON input") in that case. Read the text
+// first so a broken response surfaces a real, actionable message instead.
+async function parseJsonBody(res: Response): Promise<any> {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Server returned an invalid response (${res.status}) — please try again`);
+  }
 }
 
 export const getSetupStatus = () =>
@@ -486,8 +499,8 @@ export async function uploadMedia(tenantHost: string, token: string, file: File,
     headers: { "x-tenant-host": tenantHost, "x-csrf-token": token },
     body: form,
   });
-  const body = await res.json();
-  if (!res.ok) throw new Error(body.error ?? "Upload failed");
+  const body = await parseJsonBody(res);
+  if (!res.ok) throw new Error(body.message ?? body.error ?? "Upload failed");
   return body.url as string;
 }
 
