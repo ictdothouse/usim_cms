@@ -442,6 +442,24 @@ export const updateBlueprint = (
 export const deleteBlueprint = (tenantHost: string, token: string, id: string) =>
   request(`/api/blueprints/${id}`, tenantHost, token, { method: "DELETE" });
 
+// Same shape as getPagePreviewToken/previewUrl, for Designer's blueprint
+// Live Edit — apps/frontend's __blueprint-preview.astro is the counterpart
+// route (a blueprint has no slug of its own, so it takes ?id= instead).
+export const getBlueprintPreviewToken = (tenantHost: string, token: string, id: string) =>
+  request(`/api/blueprints/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
+
+export const blueprintPreviewUrl = (tenantHost: string, id: string, previewToken: string) => {
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
+  const query = new URLSearchParams({
+    id,
+    token: previewToken,
+    ...(isLocal ? { __tenant: tenantHost } : {}),
+  }).toString();
+  const scheme = window.location.protocol === "https:" ? "https" : "http";
+  const base = isLocal ? `${FRONTEND_DEV_URL}/__blueprint-preview` : `${scheme}://${tenantHost}/__blueprint-preview`;
+  return `${base}?${query}`;
+};
+
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);
 

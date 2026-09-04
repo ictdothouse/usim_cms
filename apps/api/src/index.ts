@@ -1910,6 +1910,33 @@ await app.register(async (publicScope) => {
     return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher };
   });
 
+  // Backs apps/frontend's __blueprint-preview.astro (Designer's blueprint
+  // Live Edit iframe) — a blueprint has no real slug/route, so unlike
+  // pages/posts there is no underlying public row this could "elevate"
+  // visibility on; the previewOnly token IS the entire access check. Never
+  // linked from anywhere a real visitor could reach.
+  publicScope.get("/api/blueprints/:id/preview", async (req, reply) => {
+    const auth = req.headers.authorization;
+    const session = auth?.startsWith("Bearer ") ? verifySession(auth.slice("Bearer ".length)) : null;
+    if (!session || !session.previewOnly || session.pendingMfa) {
+      reply.code(401);
+      return { error: "preview token required" };
+    }
+    const { id } = req.params as { id: string };
+    const bp = await getPageBlueprint(id);
+    if (!bp) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    // A tenant-scoped blueprint is only previewable by a token minted for
+    // that same tenant; a system-wide one (tenantHost null) has no tenant to
+    // check against, so any valid previewOnly token may render it.
+    if (bp.tenantHost !== null && bp.tenantHost !== session.tenantHost) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    return { item: bp };
+  });
 });
 
 // Protected scope: tenant resolution + login required — this is what the
@@ -2435,6 +2462,31 @@ await app.register(async (protectedScope) => {
     }
     await deletePageBlueprint(id);
     return { deleted: true };
+  });
+
+  // Mints a preview credential for Designer's blueprint "Live Edit" iframe —
+  // same previewOnly/exp shape as the pages preview-token route above. A
+  // blueprint has no live route of its own (no slug), so the counterpart
+  // read route below is public (never behind requireTenantAuth) and instead
+  // gates purely on this token, mirroring how [...slug].astro's own
+  // designerEdit bridge only ever activates alongside a valid previewToken.
+  protectedScope.post("/api/blueprints/:id/preview-token", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const existing = await getPageBlueprint(id);
+    if (!existing) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const token = signSession({
+      userId: req.user.userId,
+      email: req.user.email,
+      role: req.user.role,
+      tenantHost: req.tenantHost,
+      permissions: [],
+      previewOnly: true,
+      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+    });
+    return { token };
   });
 });
 

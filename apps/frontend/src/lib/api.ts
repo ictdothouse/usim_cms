@@ -212,6 +212,26 @@ export async function getTheme(tenantHost: string, token?: string): Promise<Reco
   return theme;
 }
 
+// Backs __blueprint-preview.astro (Designer's blueprint Live Edit iframe) —
+// a blueprint has no slug/route of its own, so unlike getPageBySlug this
+// has no anonymous-visitor case at all: token is always required, and a
+// failed/missing preview always resolves to null rather than a stale-cache
+// fallback (apiGet already refuses stale-cache for any token-bearing call).
+export interface BlueprintPreview {
+  id: string;
+  layout: PageLayout;
+  settings?: Page["settings"];
+}
+
+export async function getBlueprintPreview(tenantHost: string, id: string, token: string): Promise<BlueprintPreview | null> {
+  try {
+    const { item } = await apiGet<{ item: BlueprintPreview }>(`/api/blueprints/${id}/preview`, tenantHost, token);
+    return item;
+  } catch {
+    return null;
+  }
+}
+
 export interface MenuItem {
   id: string;
   label: string;
