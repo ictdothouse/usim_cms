@@ -149,6 +149,9 @@ export const LENGTH_KEYS = new Set([
   "marginY", "marginX", "marginTop", "marginBottom", "marginLeft", "marginRight",
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
   "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
+  // image element's own resizable width (Designer.tsx canvas drag handle +
+  // Inspector length field) — "" means natural/auto size.
+  "width",
 ]);
 export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
