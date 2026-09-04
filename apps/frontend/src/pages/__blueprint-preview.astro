@@ -1,0 +1,68 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import HeroBlock from "../components/HeroBlock.astro";
+import TextBlock from "../components/TextBlock.astro";
+import ImageBlock from "../components/ImageBlock.astro";
+import GenericBlock from "../components/GenericBlock.astro";
+import SectionBlock from "../components/SectionBlock.astro";
+import { getTheme, getBlueprintPreview } from "../lib/api";
+import { collectFonts } from "../lib/collectFonts";
+
+// Designer's blueprint "Live Edit" iframe — same designerEdit bridge as
+// [...slug].astro, sourced from a blueprint's own layout (via a short-lived
+// preview token) instead of a real page row, since a blueprint has no slug
+// of its own. Reserved path, never linked from anywhere a real visitor
+// could reach — id+token are both required, no anonymous fallback.
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost =
+  /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+    ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
+    : rawHost;
+
+const id = Astro.url.searchParams.get("id") ?? "";
+const previewToken = Astro.url.searchParams.get("token") ?? "";
+const bp = id && previewToken ? await getBlueprintPreview(tenantHost, id, previewToken) : null;
+if (!bp) {
+  Astro.response.status = 404;
+}
+const siteTheme = await getTheme(tenantHost);
+const theme = bp?.settings?.theme ? { ...siteTheme, ...bp.settings.theme } : siteTheme;
+const layout = bp?.layout ?? [];
+const fonts = collectFonts(layout);
+// This route has no public/anonymous visitor path at all (unlike
+// [...slug].astro, which guards designerEdit against URL tampering because
+// a public request there has no previewToken) — reaching this page with a
+// real `bp` already proves a valid preview token was presented.
+const designerEdit = Boolean(bp);
+---
+<BaseLayout title="Blueprint preview" theme={theme} fonts={fonts} designerEdit={designerEdit} langSwitcher={null}>
+  {!bp ? (
+    <HeroBlock title="Preview not available" subtitle="This blueprint preview link is invalid or has expired." />
+  ) : (
+    layout.map((block, b) => {
+      switch (block.type) {
+        case "section":
+          return (
+            <SectionBlock
+              {...(block.props ?? {})}
+              pageGap={bp.settings?.gap}
+              pageContentWidth={bp.settings?.contentWidth}
+              pagePaddingX={bp.settings?.paddingX}
+              designerEdit={designerEdit}
+              blockIndex={b}
+              tenantHost={tenantHost}
+              requestedLang={null}
+            />
+          );
+        case "hero":
+          return <HeroBlock {...(block.props ?? {})} />;
+        case "text":
+          return <TextBlock {...(block.props ?? {})} />;
+        case "image":
+          return <ImageBlock {...(block.props ?? {})} />;
+        default:
+          return <GenericBlock type={block.type} props={block.props} />;
+      }
+    })
+  )}
+</BaseLayout>

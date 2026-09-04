@@ -24,10 +24,10 @@ const BLOCK_TYPES = new Set<ElType>([
 // text-ish element (text/list/accordion/tabs/etc) falls back to a plain
 // medium bar. Rough shape only, not a real per-type design.
 function barShape(type: ElType): string {
-  if (type === "heading") return "h-[4px] w-4/5 rounded-full";
-  if (type === "button") return "h-[5px] w-1/3 rounded-full";
+  if (type === "heading") return "h-[5px] w-4/5 rounded-full";
+  if (type === "button") return "h-[6px] w-1/3 rounded-full";
   if (type === "divider" || type === "spacer") return "h-px w-1/2 self-center bg-line";
-  return "h-[3px] w-full rounded-full";
+  return "h-[4px] w-full rounded-full";
 }
 
 // One element's skeleton piece — a real icon (pulled straight from the
@@ -38,15 +38,15 @@ function ElementSkeleton({ el }: { el: El }) {
   const Icon = ELS[el.type]?.icon;
   if (BLOCK_TYPES.has(el.type)) {
     return (
-      <div className="flex aspect-square w-full items-center justify-center rounded-sm bg-line/40">
-        {Icon && <Icon className="h-2.5 w-2.5 text-sub/60" />}
+      <div className="flex aspect-square w-full items-center justify-center rounded bg-line/60">
+        {Icon && <Icon className="h-4 w-4 text-sub" />}
       </div>
     );
   }
   return (
-    <div className="flex w-full items-center gap-1">
-      {Icon && <Icon className="h-2 w-2 shrink-0 text-sub/50" />}
-      <div className={`${barShape(el.type)} bg-accent/40`} />
+    <div className="flex w-full items-center gap-1.5">
+      {Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-sub" />}
+      <div className={`${barShape(el.type)} bg-accent/50`} />
     </div>
   );
 }
@@ -60,11 +60,14 @@ function ElementSkeleton({ el }: { el: El }) {
 // normalize to this shape before rendering.
 export function TemplatePreview({ rows }: { rows: Row[] }) {
   return (
-    <div className="flex h-20 flex-col gap-0.5 overflow-hidden rounded-md border border-line/30 bg-canvas/40 p-1.5">
+    <div className="flex h-32 flex-col gap-1.5 overflow-hidden rounded-md border border-line/40 bg-canvas/60 p-2">
       {rows.slice(0, 4).map((row, i) => (
-        <div key={i} className="flex flex-1 gap-1">
+        <div key={i} className="flex flex-1 gap-1.5">
           {(row.columns ?? []).slice(0, 5).map((col, j) => (
-            <div key={j} className="flex flex-1 flex-col justify-center gap-[3px] rounded-sm bg-white/70 p-1">
+            <div
+              key={j}
+              className="flex flex-1 flex-col justify-center gap-1 rounded border border-line/40 bg-white p-1.5 shadow-sm"
+            >
               {(col.elements ?? []).slice(0, 3).map((el, k) => (
                 <ElementSkeleton key={k} el={el} />
               ))}

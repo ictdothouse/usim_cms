@@ -1739,9 +1739,15 @@ export default function Designer({
       return;
     }
     try {
-      if (dirty) await save();
-      const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
-      win.location.href = api.previewUrl(tenantHost, page.slug as string, previewToken);
+      if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
+      const previewToken =
+        kind === "blueprint"
+          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string)
+          : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+      win.location.href =
+        kind === "blueprint"
+          ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
+          : api.previewUrl(tenantHost, page.slug as string, previewToken);
     } catch (err) {
       win.close();
       setError((err as Error).message);
@@ -1768,9 +1774,15 @@ export default function Designer({
   // "live") loads into the *inactive* slot and hands off the actual swap to
   // handleFrameLoad, so the visible iframe never sees its own navigation.
   async function enterLive(cold = false) {
-    if (dirty) await save();
-    const previewToken = await api.getPagePreviewToken(tenantHost, token, page.id as string);
-    const base = api.previewUrl(tenantHost, page.slug as string, previewToken);
+    if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
+    const previewToken =
+      kind === "blueprint"
+        ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string)
+        : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+    const base =
+      kind === "blueprint"
+        ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
+        : api.previewUrl(tenantHost, page.slug as string, previewToken);
     const src = `${base}${base.includes("?") ? "&" : "?"}designerEdit=1`;
     if (cold || (liveSrcA === null && liveSrcB === null)) {
       setReloading(true);
@@ -2292,16 +2304,14 @@ export default function Designer({
             <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
           </button>
         )}
-        {kind === "page" && (
-          <button
-            onClick={() => void toggleLive()}
-            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
-              mode === "live" ? "bg-accent/15 text-accent" : "text-body"
-            }`}
-          >
-            <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
-          </button>
-        )}
+        <button
+          onClick={() => void toggleLive()}
+          className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
+            mode === "live" ? "bg-accent/15 text-accent" : "text-body"
+          }`}
+        >
+          <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
+        </button>
         <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
           {(
             [
