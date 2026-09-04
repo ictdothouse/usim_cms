@@ -1,8 +1,0 @@
----
-interface Props {
-  imageUrl?: string;
-  alt?: string;
-}
-const { imageUrl, alt } = Astro.props;
----
-{imageUrl && <img class="image-block" src={imageUrl} alt={alt ?? ""} />}

@@ -1491,6 +1491,35 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
   return record;
 };
 
+// Upgrades any surviving legacy top-level "hero" block (the retired
+// BlockBuilder shape — Designer.tsx has no edit UI for a non-"section"
+// block at all) into an equivalent section on every read, for both
+// Designer's own fetch and the public site's (same GET /api/pages route).
+// In-memory only, never written back — a page carrying one silently
+// upgrades for real the next time it's saved through Designer, same
+// non-destructive convention as this codebase's other schema evolutions.
+const pagesAfterRead = (items: unknown[]) =>
+  (items as Record<string, unknown>[]).map((item) => {
+    const layout = item.layout;
+    if (!Array.isArray(layout) || !layout.some((b) => (b as { type?: string })?.type === "hero")) return item;
+    return {
+      ...item,
+      layout: layout.map((b) => {
+        const block = b as { type?: string; props?: Record<string, unknown> };
+        if (block.type !== "hero") return b;
+        const { title, subtitle, imageUrl } = block.props ?? {};
+        const elements = [
+          { type: "heading", props: { level: "1", text: title ?? "" } },
+          { type: "text", props: { text: subtitle ?? "" } },
+        ];
+        return {
+          type: "section",
+          props: { rows: [{ columns: [{ span: 1, elements }] }], ...(imageUrl ? { bgImage: imageUrl } : {}) },
+        };
+      }),
+    };
+  });
+
 const pagesCollection: CollectionConfig = {
   slug: "pages",
   table: schema.pages,
@@ -1532,6 +1561,7 @@ const pagesCollection: CollectionConfig = {
   },
   hooks: {
     beforeChange: pagesBeforeChange,
+    afterRead: pagesAfterRead,
   },
 };
 

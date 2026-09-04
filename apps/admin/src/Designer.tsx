@@ -2483,22 +2483,12 @@ export default function Designer({
           >
             {blocks.length === 0 && <p className="py-10 text-center text-xs text-sub">{t("designer-empty")}</p>}
             {blocks.map((block, b) => {
-              if (block.type !== "section") {
-                // legacy block from the old BlockBuilder — still rendered by the
-                // frontend; movable/deletable here, edited via the old editor.
-                return (
-                  <div
-                    key={b}
-                    className={`flex items-center justify-between rounded-xl border border-line/40 bg-white px-4 py-3 text-xs ${selCls([b])}`}
-                    onClick={(ev) => pick(ev, [b])}
-                  >
-                    <span className="font-semibold text-sub">
-                      {t("designer-legacy")}: {block.type}
-                    </span>
-                    {BlockControls({ b })}
-                  </div>
-                );
-              }
+              // apps/api's pagesAfterRead upgrades any surviving legacy
+              // top-level block (the retired BlockBuilder "hero" shape) into
+              // a real section before Designer ever sees it, so nothing but
+              // "section" reaches this point — skip defensively rather than
+              // resurrect an editor for a shape that can no longer arrive.
+              if (block.type !== "section") return null;
               const sp = block.props as unknown as SectionProps;
               const contained = (sp.width ?? "contained") === "contained";
               // Split so overflow-hidden (needed to clip the background/rounded
