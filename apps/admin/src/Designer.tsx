@@ -291,6 +291,7 @@ export default function Designer({
   t,
   onClose,
   isSuper,
+  kind = "page",
 }: {
   page: Record<string, unknown>;
   tenantHost: string;
@@ -298,6 +299,12 @@ export default function Designer({
   t: (k: Key) => string;
   onClose: (saved: boolean) => void;
   isSuper: boolean;
+  // "blueprint" strips everything that assumes a real published page with a
+  // live frontend route (slug, publish status, Live Edit, Preview) — a
+  // blueprint has no route of its own to preview/live-edit against. Blocks
+  // canvas editing, Undo/Redo, Templates, and Page Settings all work
+  // unchanged either way.
+  kind?: "page" | "blueprint";
 }) {
   const [blocks, setBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
@@ -1695,6 +1702,25 @@ export default function Designer({
     }
   }
 
+  // Blueprint's own save path — no slug/status/publish/translations concept,
+  // just the layout + page-wide settings, PATCHed straight to the blueprint
+  // row (apps/api's PATCH /api/blueprints/:id already accepts both).
+  async function saveBlueprint() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateBlueprint(tenantHost, token, page.id as string, { layout: clone(blocks), settings: pageSettings });
+      setDirty(false);
+      setSavedAny(true);
+      setMsg(t("designer-saved"));
+      setTimeout(() => setMsg(null), 2500);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Only reached when there's unsaved content or the page is a draft — a
   // saved+published page renders a plain <a href target="_blank"> instead
   // (see the Preview button below), since a real anchor click is a genuine
@@ -2187,45 +2213,54 @@ export default function Designer({
           <Settings className="h-4 w-4" />
         </button>
         <span className="text-xs font-bold text-ink">{page.title as string}</span>
-        {editingSlug ? (
-          <span className="flex items-center gap-1">
-            <span className="font-mono text-[11px] text-sub">/</span>
-            <input
-              autoFocus
-              value={slugDraft}
-              onChange={(e) => setSlugDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void renameSlug();
-                if (e.key === "Escape") {
+        {kind === "page" && (
+          <>
+            {editingSlug ? (
+              <span className="flex items-center gap-1">
+                <span className="font-mono text-[11px] text-sub">/</span>
+                <input
+                  autoFocus
+                  value={slugDraft}
+                  onChange={(e) => setSlugDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void renameSlug();
+                    if (e.key === "Escape") {
+                      setSlugDraft(page.slug as string);
+                      setEditingSlug(false);
+                      setSlugError(null);
+                    }
+                  }}
+                  onBlur={() => void renameSlug()}
+                  className="rounded border border-line/40 px-1.5 py-0.5 font-mono text-[11px] text-ink"
+                />
+              </span>
+            ) : (
+              <button
+                onClick={() => {
                   setSlugDraft(page.slug as string);
-                  setEditingSlug(false);
-                  setSlugError(null);
-                }
-              }}
-              onBlur={() => void renameSlug()}
-              className="rounded border border-line/40 px-1.5 py-0.5 font-mono text-[11px] text-ink"
-            />
-          </span>
-        ) : (
-          <button
-            onClick={() => {
-              setSlugDraft(page.slug as string);
-              setEditingSlug(true);
-            }}
-            className="font-mono text-[11px] text-sub hover:text-accent hover:underline"
-            title={t("designer-slug-edit")}
-          >
-            /{page.slug as string}
-          </button>
+                  setEditingSlug(true);
+                }}
+                className="font-mono text-[11px] text-sub hover:text-accent hover:underline"
+                title={t("designer-slug-edit")}
+              >
+                /{page.slug as string}
+              </button>
+            )}
+            {slugError && <span className="text-[11px] font-semibold text-red-600">{slugError}</span>}
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                page.status === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+              }`}
+            >
+              {dirty ? t("designer-dirty") : page.status === "published" ? t("pages-published") : t("pages-draft")}
+            </span>
+          </>
         )}
-        {slugError && <span className="text-[11px] font-semibold text-red-600">{slugError}</span>}
-        <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-            page.status === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
-          }`}
-        >
-          {dirty ? t("designer-dirty") : page.status === "published" ? t("pages-published") : t("pages-draft")}
-        </span>
+        {kind === "blueprint" && (
+          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
+            {t("blueprints-title")}
+          </span>
+        )}
         {msg && <span className="text-[11px] font-semibold text-ok">{msg}</span>}
         {error && <span className="max-w-xs truncate text-[11px] text-red-600">{error}</span>}
         <span className="flex-1" />
@@ -2249,20 +2284,24 @@ export default function Designer({
         >
           <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates")}
         </button>
-        <button
-          onClick={() => setShowSaveBlueprint(true)}
-          className="flex items-center gap-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]"
-        >
-          <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
-        </button>
-        <button
-          onClick={() => void toggleLive()}
-          className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
-            mode === "live" ? "bg-accent/15 text-accent" : "text-body"
-          }`}
-        >
-          <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
-        </button>
+        {kind === "page" && (
+          <button
+            onClick={() => setShowSaveBlueprint(true)}
+            className="flex items-center gap-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
+          </button>
+        )}
+        {kind === "page" && (
+          <button
+            onClick={() => void toggleLive()}
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
+              mode === "live" ? "bg-accent/15 text-accent" : "text-body"
+            }`}
+          >
+            <MousePointerClick className="h-3.5 w-3.5" /> {mode === "live" ? t("designer-block-view") : t("designer-live-view")}
+          </button>
+        )}
         <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
           {(
             [
@@ -2282,37 +2321,40 @@ export default function Designer({
             </button>
           ))}
         </div>
-        {page.status === "published" && !dirty ? (
-          <a
-            href={api.previewUrl(tenantHost, page.slug as string)}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
-          </a>
-        ) : (
-          <button
-            onClick={() => void preview()}
-            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
-          </button>
-        )}
+        {kind === "page" &&
+          (page.status === "published" && !dirty ? (
+            <a
+              href={api.previewUrl(tenantHost, page.slug as string)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
+            </a>
+          ) : (
+            <button
+              onClick={() => void preview()}
+              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
+            </button>
+          ))}
         <button
-          onClick={() => void save()}
+          onClick={() => void (kind === "blueprint" ? saveBlueprint() : save())}
           disabled={busy}
           className="rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-50"
         >
           {busy ? t("designer-saving") : t("designer-save")}
         </button>
-        <button
-          onClick={() => void save("published")}
-          disabled={busy}
-          className="rounded-full bg-accent px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {t("designer-publish")}
-        </button>
+        {kind === "page" && (
+          <button
+            onClick={() => void save("published")}
+            disabled={busy}
+            className="rounded-full bg-accent px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {t("designer-publish")}
+          </button>
+        )}
         <button onClick={close} className="rounded-full p-2 text-body hover:bg-canvas" title={t("designer-close")}>
           <X className="h-4 w-4" />
         </button>

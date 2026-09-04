@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import * as api from "./lib/api";
 import { TemplatePreview } from "./designer/TemplatePreview";
 import { useT } from "./App";
@@ -28,6 +29,7 @@ export function BlueprintGallery({
 }) {
   const { t } = useT();
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const [blueprints, setBlueprints] = useState<api.PageBlueprint[]>([]);
   const [category, setCategory] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +62,22 @@ export function BlueprintGallery({
     }
   }
 
+  // Starts a blank blueprint (empty canvas, same convention as a brand-new
+  // page) and jumps straight into Designer to build it — a relative nav
+  // (`navigate(id)`) since this component is mounted at both
+  // "/content/blueprints" (superadmin) and "/blueprints" (webmaster), and
+  // a sibling "blueprints/:id" route exists at both mount points.
+  async function createNew() {
+    const name = window.prompt(t("blueprints-new-name-prompt"));
+    if (!name?.trim()) return;
+    try {
+      const created = await api.createBlueprint(tenantHost, token, { name: name.trim(), layout: [] });
+      navigate(created.id);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   function startEdit(bp: api.PageBlueprint) {
     setEditingId(bp.id);
     setEditName(bp.name);
@@ -87,6 +105,14 @@ export function BlueprintGallery({
   return (
     <div className="space-y-3">
       {error && <p className="text-xs text-danger">{error}</p>}
+      {mode === "manage" && (
+        <button
+          onClick={() => void createNew()}
+          className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+        >
+          + {t("blueprints-new")}
+        </button>
+      )}
       {categories.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           <button
@@ -165,6 +191,13 @@ export function BlueprintGallery({
               </div>
             ) : (
               <div className="flex gap-2">
+                <button
+                  onClick={() => navigate(bp.id)}
+                  disabled={bp.tenantHost === null && !isSuper}
+                  className="flex-1 rounded-full bg-canvas px-3 py-1.5 text-xs font-semibold text-body disabled:opacity-40"
+                >
+                  {t("blueprints-edit-layout")}
+                </button>
                 <button
                   onClick={() => startEdit(bp)}
                   disabled={bp.tenantHost === null && !isSuper}
