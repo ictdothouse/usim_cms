@@ -114,9 +114,10 @@ export async function getSiteChromeById(tenantHost: string, id: string): Promise
   }
 }
 
-async function getDefaultSiteChrome(tenantHost: string, kind: "header" | "footer"): Promise<SiteChrome | null> {
+async function getDefaultSiteChrome(tenantHost: string, kind: "header" | "footer", includeDraft: boolean): Promise<SiteChrome | null> {
   try {
-    const { items } = await apiGet<{ items: SiteChrome[] }>(`/api/siteChrome?kind=${kind}&isDefault=true&status=published`, tenantHost);
+    const statusFilter = includeDraft ? "" : "&status=published";
+    const { items } = await apiGet<{ items: SiteChrome[] }>(`/api/siteChrome?kind=${kind}&isDefault=true${statusFilter}`, tenantHost);
     return items[0] ?? null;
   } catch (err) {
     console.error(`getDefaultSiteChrome: ${kind} failed, rendering no chrome`, err);
@@ -129,10 +130,21 @@ async function getDefaultSiteChrome(tenantHost: string, kind: "header" | "footer
 // otherwise fall back to whichever row is marked isDefault (published only —
 // a draft default never reaches the public site). A fresh tenant with none
 // configured yet gets { header: null, footer: null }, not an error.
-export async function resolveHeaderFooter(page: Page, tenantHost: string): Promise<{ header: SiteChrome | null; footer: SiteChrome | null }> {
+// `includeDraft` (set only from Designer's Live Edit — see [...slug].astro's
+// `designerEdit`, itself gated on a real previewToken) lets an author see
+// their still-draft default header/footer while editing, same as a draft
+// page itself already previews via previewToken; a real visitor never passes
+// this. An explicit headerId/footerId (getSiteChromeById) already ignores
+// status regardless, since siteChrome's own read access is unconditionally
+// public — only the isDefault fallback needed this flag.
+export async function resolveHeaderFooter(
+  page: Page,
+  tenantHost: string,
+  includeDraft = false,
+): Promise<{ header: SiteChrome | null; footer: SiteChrome | null }> {
   const [header, footer] = await Promise.all([
-    page.hideHeader ? null : page.headerId ? getSiteChromeById(tenantHost, page.headerId) : getDefaultSiteChrome(tenantHost, "header"),
-    page.hideFooter ? null : page.footerId ? getSiteChromeById(tenantHost, page.footerId) : getDefaultSiteChrome(tenantHost, "footer"),
+    page.hideHeader ? null : page.headerId ? getSiteChromeById(tenantHost, page.headerId) : getDefaultSiteChrome(tenantHost, "header", includeDraft),
+    page.hideFooter ? null : page.footerId ? getSiteChromeById(tenantHost, page.footerId) : getDefaultSiteChrome(tenantHost, "footer", includeDraft),
   ]);
   return { header, footer };
 }
@@ -142,7 +154,7 @@ export async function resolveHeaderFooter(page: Page, tenantHost: string): Promi
 // always gets the tenant's own default header/footer, same fallback branch
 // resolveHeaderFooter's "else" above uses.
 export async function resolveDefaultHeaderFooter(tenantHost: string): Promise<{ header: SiteChrome | null; footer: SiteChrome | null }> {
-  const [header, footer] = await Promise.all([getDefaultSiteChrome(tenantHost, "header"), getDefaultSiteChrome(tenantHost, "footer")]);
+  const [header, footer] = await Promise.all([getDefaultSiteChrome(tenantHost, "header", false), getDefaultSiteChrome(tenantHost, "footer", false)]);
   return { header, footer };
 }
 
