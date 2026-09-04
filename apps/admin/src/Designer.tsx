@@ -588,6 +588,12 @@ export default function Designer({
   const [uploading, setUploading] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
   const [clipTick, setClipTick] = useState(0); // bumped on every clipboard write, to re-render Paste button enabled-state
+  // Modal device preview (Desktop/Tablet/Mobile) — separate from preview()'s
+  // new-tab flow below: that one is a real browser navigation for a page's
+  // published-and-clean case, this one is for blueprints (no public URL to
+  // navigate to) and for anyone who'd rather check breakpoints without
+  // leaving the Designer.
+  const [previewModal, setPreviewModal] = useState<{ src: string; device: "desktop" | "tablet" | "mobile" } | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
@@ -1754,6 +1760,27 @@ export default function Designer({
     }
   }
 
+  // Modal device preview — no popup blocker to fight since nothing is
+  // window.open()'d, so unlike preview() above this can mint the token
+  // and set the iframe src in one straight async function.
+  async function openDevicePreview() {
+    setError(null);
+    try {
+      if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
+      const previewToken =
+        kind === "blueprint"
+          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string)
+          : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+      const src =
+        kind === "blueprint"
+          ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
+          : api.previewUrl(tenantHost, page.slug as string, previewToken);
+      setPreviewModal({ src, device: "desktop" });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   // "Live Edit": same real-render iframe the Preview button opens in a new
   // tab, but embedded and augmented with a designerEdit=1 flag so
   // BaseLayout.astro's bridge script + SectionBlock.astro's
@@ -2331,6 +2358,14 @@ export default function Designer({
             </button>
           ))}
         </div>
+        {kind === "blueprint" && (
+          <button
+            onClick={() => void openDevicePreview()}
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
+          </button>
+        )}
         {kind === "page" &&
           (page.status === "published" && !dirty ? (
             <a
@@ -3199,6 +3234,67 @@ export default function Designer({
           {Inspector({ ctx: designerCtx })}
         </aside>
       </div>
+
+      {previewModal &&
+        (() => {
+          const DEVICE_WIDTH: Record<"desktop" | "tablet" | "mobile", string> = {
+            desktop: "100%",
+            tablet: "48rem",
+            mobile: "24rem",
+          };
+          return (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4"
+              onClick={() => setPreviewModal(null)}
+            >
+              <div
+                className="flex h-[90vh] w-[min(95vw,80rem)] flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+                onClick={(ev) => ev.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-line/30 px-4 py-2.5">
+                  <p className="text-xs font-bold text-ink">{t("designer-preview")}</p>
+                  <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
+                    {(
+                      [
+                        { key: "desktop", icon: Monitor, labelKey: "designer-bp-desktop" },
+                        { key: "tablet", icon: Tablet, labelKey: "designer-bp-tablet" },
+                        { key: "mobile", icon: Smartphone, labelKey: "designer-bp-mobile" },
+                      ] as const
+                    ).map(({ key, icon: Icon, labelKey }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setPreviewModal((m) => (m ? { ...m, device: key } : m))}
+                        title={t(labelKey)}
+                        className={`rounded-full p-1.5 ${
+                          previewModal.device === key ? "bg-white text-accent shadow-sm" : "text-sub hover:text-body"
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setPreviewModal(null)}
+                    className="rounded-full p-1.5 text-body hover:bg-canvas"
+                    title={t("designer-close")}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex flex-1 items-start justify-center overflow-auto bg-canvas/60 p-4">
+                  <iframe
+                    key={previewModal.src}
+                    src={previewModal.src}
+                    className="h-full rounded-lg border border-line/30 bg-white shadow-sm"
+                    style={{ width: DEVICE_WIDTH[previewModal.device] }}
+                    title={t("designer-preview")}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {showTemplates &&
         (() => {
