@@ -982,20 +982,23 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   );
                 case "image":
                   return safeUrl(p.src) ? (
-                    <img
-                      class={cls("ds-img", p.cssClass)}
-                      src={safeUrl(p.src)}
-                      alt={p.alt ?? ""}
-                      loading="lazy"
-                      style={[
-                        `border-radius:${elRadius(p)}`,
-                        shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
-                        marginStyle(p),
-                        paddingStyle(p),
-                      ]
-                        .filter(Boolean)
-                        .join(";")}
-                    />
+                    <div style={p.align ? `text-align:${p.align}` : null}>
+                      <img
+                        class={cls("ds-img", p.cssClass)}
+                        src={safeUrl(p.src)}
+                        alt={p.alt ?? ""}
+                        loading="lazy"
+                        style={[
+                          `border-radius:${elRadius(p)}`,
+                          shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
+                          p.width ? `width:${p.width}` : null,
+                          marginStyle(p),
+                          paddingStyle(p),
+                        ]
+                          .filter(Boolean)
+                          .join(";")}
+                      />
+                    </div>
                   ) : null;
                 case "button":
                   return p.label ? (

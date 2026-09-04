@@ -211,11 +211,13 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
       );
     case "image":
       return p.src ? (
-        <img
-          src={p.src}
-          alt={p.alt ?? ""}
-          style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow), maxWidth: "100%" }}
-        />
+        <div style={align}>
+          <img
+            src={p.src}
+            alt={p.alt ?? ""}
+            style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow), width: p.width || undefined, maxWidth: "100%" }}
+          />
+        </div>
       ) : (
         <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
           <ImageIcon className="h-6 w-6" />
