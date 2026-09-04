@@ -936,3 +936,34 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   mutating any of them would mutate the same locked section subtree and get rejected on Save anyway — simpler
   and clearer than disabling each nested field individually. `locked` is validated the same generic
   `ENUM_VALUES` way as `hideDesktop`/`hideTablet`/`hideMobile` (`packages/element-schema`).
+
+  **Header/Footer Designer** (`kind === "siteChrome"`) gained a real Publish/Unpublish toggle and a
+  read-only device-preview modal, closing a gap from its first pass (it could only ever save as
+  draft, and `resolveHeaderFooter`'s default-chrome lookup already filtered `status=published` — so
+  a freshly built header/footer could never actually reach the real site). `saveSiteChrome(status?)`
+  now optionally PATCHes `status` alongside `layout` (mirrors `save(status?)`'s page-publish shape);
+  the header bar shows the same dirty/published/draft badge pages use, keyed off local `chromeStatus`
+  state. The device-preview button (`openDevicePreview()`, previously blueprint-only) now also handles
+  `kind === "siteChrome"` — but unlike blueprint's preview (which needs a minted preview-token route
+  since a blueprint has no public row of its own), it just points at `api.chromePreviewUrl()`
+  directly: `siteChromeCollection.access.read` is unconditionally `() => true` (any status, no auth),
+  so no token is needed — apps/frontend's new `chrome-preview.astro` (`?id=&kind=header|footer`)
+  fetches the row straight off the existing public `GET /api/siteChrome/:id` (via
+  `getSiteChromeById`, now exported) and renders it through `BaseLayout`'s existing
+  `headerChrome`/`footerChrome` props, with simple placeholder body text standing in for real page
+  content — full click-to-edit Live Edit (the designerEdit bridge) was deliberately not extended to
+  chrome, this is view-only, same scope line the original spec drew.
+
+  **Content Manager nav grouping**: the superadmin's Content Manager sub-nav (9 items:
+  Pages/Posts/Media/Theme/Languages/Menus/Header&Footer/Blueprints/Events) and the webmaster
+  sidebar's own flat CONTENT tab list had both grown past a comfortable single row/list — regrouped
+  per WordPress/Wix/Webflow convention into 3 labeled clusters (`NAV_GROUP_ORDER`/`NAV_GROUP_LABEL`
+  in `App.tsx`): **Content** (Pages/Posts/Media), **Design** (Theme/Menus/Header&Footer/Blueprints),
+  **Settings** (Languages/Events). `ContentManager`'s own sub-nav is now a vertical mini-sidebar
+  (`CONTENT_SUBTAB_GROUP` maps each `ContentSubTab`) next to the routed panel instead of a horizontal
+  pill row; the webmaster's `Shell` sidebar groups its CONTENT section the same way for `!isSuper`
+  (`TAB_GROUP` maps each `Tab`) — a group with zero matching items for that session (e.g. a webmaster
+  who has none of the isSuper-only sub-tabs) simply doesn't render its header. Superadmin's own
+  sidebar `contentTabs` (`content`/`global-theme`/`feed`, only 3 items) was deliberately left flat —
+  not crowded enough to need grouping. Pure render-layer change: no `ContentSubTab`/`Tab` value,
+  route, or permission changed, so nothing else in the app depends on this.

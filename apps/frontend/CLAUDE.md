@@ -26,3 +26,10 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   admin panel's own origin, the one legitimate consumer (Designer's Live Edit preview iframe), instead of
   leaving every tenant page framable by any site. An install that hasn't set `ADMIN_ORIGIN` on the
   frontend container yet sees no behavior change.
+- **`chrome-preview.astro`** — apps/admin Designer's Header/Footer device-preview modal (`kind ===
+  "siteChrome"`). Reads `?id=&kind=header|footer`, fetches that row via `getSiteChromeById` (now
+  exported — no preview token needed, since `GET /api/siteChrome/:id` is already publicly readable
+  regardless of draft/published status), and renders it through `BaseLayout`'s existing
+  `headerChrome`/`footerChrome` props with placeholder body text. View-only (no `designerEdit`
+  bridge) — mirrors `blueprint-preview.astro`'s "reserved route, id is the whole access check" shape,
+  just without that route's preview-token minting since siteChrome's read access is already open.

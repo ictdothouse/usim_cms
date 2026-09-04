@@ -644,6 +644,7 @@ export default function Designer({
   // immediate api.updateSiteChrome PATCH rather than folded into the
   // dirty/Save flow (see saveSiteChrome's own comment above).
   const chromeKind = page.kind as "header" | "footer" | undefined;
+  const [chromeStatus, setChromeStatus] = useState<"draft" | "published">((page.status as "draft" | "published") ?? "draft");
   const [chromeIsDefault, setChromeIsDefault] = useState<boolean>(Boolean(page.isDefault));
   const [chromeMobileNav, setChromeMobileNav] = useState<{ position?: string; size?: string; color?: string; animation?: string }>(
     () => (page.settings as { mobileNav?: Record<string, string> } | undefined)?.mobileNav ?? {},
@@ -1798,14 +1799,18 @@ export default function Designer({
   // edited via the small standalone panel below the canvas (immediate PATCH
   // through api.updateSiteChrome, same pattern the Header & Footer list's
   // own "Set default" star already uses) — not part of this dirty/Save flow.
-  async function saveSiteChrome() {
+  async function saveSiteChrome(status?: "draft" | "published") {
     setBusy(true);
     setError(null);
     try {
-      await api.updateSiteChrome(tenantHost, token, page.id as string, { layout: clone(blocks) });
+      await api.updateSiteChrome(tenantHost, token, page.id as string, {
+        layout: clone(blocks),
+        ...(status ? { status } : {}),
+      });
+      if (status) setChromeStatus(status);
       setDirty(false);
       setSavedAny(true);
-      setMsg(t("designer-saved"));
+      setMsg(status === "published" ? t("designer-published") : status === "draft" ? t("header-footer-unpublished") : t("designer-saved"));
       setTimeout(() => setMsg(null), 2500);
     } catch (err) {
       setError((err as Error).message);
@@ -1853,6 +1858,11 @@ export default function Designer({
   async function openDevicePreview() {
     setError(null);
     try {
+      if (kind === "siteChrome") {
+        if (dirty) await saveSiteChrome();
+        setPreviewModal({ src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer"), device: "desktop" });
+        return;
+      }
       if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
       const previewToken =
         kind === "blueprint"
@@ -2388,9 +2398,18 @@ export default function Designer({
           </span>
         )}
         {kind === "siteChrome" && (
-          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
-            {t("header-footer-title")}
-          </span>
+          <>
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
+              {t("header-footer-title")}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                chromeStatus === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+              }`}
+            >
+              {dirty ? t("designer-dirty") : chromeStatus === "published" ? t("pages-published") : t("pages-draft")}
+            </span>
+          </>
         )}
         {msg && <span className="text-[11px] font-semibold text-ok">{msg}</span>}
         {error && <span className="max-w-xs truncate text-[11px] text-red-600">{error}</span>}
@@ -2452,7 +2471,7 @@ export default function Designer({
             </button>
           ))}
         </div>
-        {kind === "blueprint" && (
+        {(kind === "blueprint" || kind === "siteChrome") && (
           <button
             onClick={() => void openDevicePreview()}
             className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
@@ -2494,6 +2513,24 @@ export default function Designer({
             {t("designer-publish")}
           </button>
         )}
+        {kind === "siteChrome" &&
+          (chromeStatus === "published" ? (
+            <button
+              onClick={() => void saveSiteChrome("draft")}
+              disabled={busy}
+              className="rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-body hover:bg-[#e8e8ed] disabled:opacity-50"
+            >
+              {t("header-footer-unpublish")}
+            </button>
+          ) : (
+            <button
+              onClick={() => void saveSiteChrome("published")}
+              disabled={busy}
+              className="rounded-full bg-accent px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {t("designer-publish")}
+            </button>
+          ))}
         <button onClick={close} className="rounded-full p-2 text-body hover:bg-canvas" title={t("designer-close")}>
           <X className="h-4 w-4" />
         </button>
