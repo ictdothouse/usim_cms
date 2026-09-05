@@ -724,6 +724,39 @@ export default function Designer({
     }
   }
 
+  // Real-header/footer canvas preview (kind === "page" only) — Elementor
+  // shows the site's real header/footer around whatever page you're editing;
+  // this Designer's canvas never did, since it's an in-app re-render of just
+  // the page's own content (see the "used to be an iframe" comment near
+  // `siteTheme` above), so an author had no way to see how a page actually
+  // sits under its real header/footer short of publishing. Resolves the same
+  // headerId/footerId/isDefault fallback apps/frontend's own
+  // resolveHeaderFooter() uses (mirrored client-side since availableHeaders/
+  // Footers are already fetched above), then embeds the REAL rendered chrome
+  // (apps/frontend's chrome-preview.astro?embed=1 — same fonts/CSS/menu
+  // resolution as the live site, not a re-implemented approximation) as a
+  // read-only band above/below the canvas. `headerFrameHeight`/
+  // `footerFrameHeight` come from that page's own postMessage (its real
+  // rendered height), reset to 0 (a small skeleton height while loading)
+  // whenever which chrome is showing changes.
+  const resolvedHeaderId =
+    kind === "page" && !pageHideHeader ? pageHeaderId || availableHeaders.find((h) => h.isDefault)?.id || "" : "";
+  const resolvedFooterId =
+    kind === "page" && !pageHideFooter ? pageFooterId || availableFooters.find((f) => f.isDefault)?.id || "" : "";
+  const [headerFrameHeight, setHeaderFrameHeight] = useState(0);
+  const [footerFrameHeight, setFooterFrameHeight] = useState(0);
+  useEffect(() => setHeaderFrameHeight(0), [resolvedHeaderId]);
+  useEffect(() => setFooterFrameHeight(0), [resolvedFooterId]);
+  useEffect(() => {
+    function onChromeHeight(e: MessageEvent) {
+      if (e.data?.type !== "chromePreview:height") return;
+      if (e.data.kind === "header") setHeaderFrameHeight(Number(e.data.height) || 0);
+      else if (e.data.kind === "footer") setFooterFrameHeight(Number(e.data.height) || 0);
+    }
+    window.addEventListener("message", onChromeHeight);
+    return () => window.removeEventListener("message", onChromeHeight);
+  }, []);
+
   // "Theme" picker in Page Settings — this user's saved presets, same list
   // ThemeForm's own collection reads (api.listThemePresets).
   const [themePresets, setThemePresets] = useState<api.ThemePreset[]>([]);
@@ -2630,6 +2663,17 @@ export default function Designer({
             } as React.CSSProperties
           }
         >
+          {resolvedHeaderId && (
+            <div className="mb-3 overflow-hidden rounded-lg border border-dashed border-line/40">
+              <iframe
+                key={resolvedHeaderId}
+                src={api.chromePreviewUrl(tenantHost, resolvedHeaderId, "header", { embed: true })}
+                className="w-full border-0"
+                style={{ height: headerFrameHeight || 64, pointerEvents: "none" }}
+                title="Header preview"
+              />
+            </div>
+          )}
           <div
             className={`mx-auto ${mode === "live" ? "" : "space-y-4"}`}
             style={{ maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem" }}
@@ -3381,6 +3425,17 @@ export default function Designer({
               <Plus className="h-4 w-4" /> {t("designer-add-section")}
             </button>
           </div>
+          {resolvedFooterId && (
+            <div className="mt-3 overflow-hidden rounded-lg border border-dashed border-line/40">
+              <iframe
+                key={resolvedFooterId}
+                src={api.chromePreviewUrl(tenantHost, resolvedFooterId, "footer", { embed: true })}
+                className="w-full border-0"
+                style={{ height: footerFrameHeight || 96, pointerEvents: "none" }}
+                title="Footer preview"
+              />
+            </div>
+          )}
         </main>
 
         {/* inspector */}
