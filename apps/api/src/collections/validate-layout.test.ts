@@ -188,6 +188,18 @@ test("accepts a slide-nested element with free-position props and a real bp over
   assert.equal(validateLayout(layout), null);
 });
 
+test("accepts a heading with hoverEffect/entrance and rejects an unrecognized value", () => {
+  const layout = [
+    { type: "section", props: { rows: [{ columns: [{ elements: [{ type: "heading", props: { text: "Hi", hoverEffect: "lift", entrance: "fade" } }] }] }] } },
+  ];
+  assert.equal(validateLayout(layout), null);
+
+  const bad = [
+    { type: "section", props: { rows: [{ columns: [{ elements: [{ type: "heading", props: { text: "Hi", hoverEffect: "spin" } }] }] }] } },
+  ];
+  assert.match(validateLayout(bad) ?? "", /unrecognized/);
+});
+
 test("rejects an unrecognized slide-nested element position value", () => {
   const layout = [
     {

@@ -743,6 +743,15 @@ function posStyle(mp: Record<string, string>): string | null {
         .join(";")
     : null;
 }
+// Hover/entrance effect classes — mirrors apps/admin's elHoverClass; the
+// classes themselves are defined once in global.css (ds-hover-*/ds-entrance-*).
+// entrance has no admin-canvas equivalent, see that file's own comment.
+function elHoverClass(p: Record<string, string>): string | undefined {
+  return p.hoverEffect && p.hoverEffect !== "none" ? `ds-hover-${p.hoverEffect}` : undefined;
+}
+function elEntranceClass(p: Record<string, string>): string | undefined {
+  return p.entrance && p.entrance !== "none" ? `ds-entrance-${p.entrance}` : undefined;
+}
 function elRadius(p: Record<string, string>): string {
   const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.none);
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
@@ -877,7 +886,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   const Tag = headingTag(p.level) as "h1";
                   return (
                     <Tag
-                      class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass)}
+                      class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p), elEntranceClass(p))}
                       style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
                         .filter(Boolean)
                         .join(";")}
@@ -888,7 +897,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                 case "text":
                   return (
                     <p
-                      class={cls("ds-text", p.cssClass)}
+                      class={cls("ds-text", p.cssClass, elHoverClass(p), elEntranceClass(p))}
                       style={[
                         `font-size:${fluidTextSize(lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md))}`,
                         p.align ? `text-align:${p.align}` : null,
@@ -906,7 +915,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return safeUrl(p.src) ? (
                     <div style={p.align ? `text-align:${p.align}` : null}>
                       <img
-                        class={cls("ds-img", p.cssClass)}
+                        class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
                         src={safeUrl(p.src)}
                         alt={p.alt ?? ""}
                         loading="lazy"
@@ -928,7 +937,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
                     >
                       <a
-                        class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass)}
+                        class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p), elEntranceClass(p))}
                         href={safeUrl(p.href) ?? "#"}
                         style={[p.color ? `color:${p.color}` : null, elBorderShadowStyle(p)].filter(Boolean).join(";") || undefined}
                       >
@@ -1128,8 +1137,12 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   // per-breakpoint override is wired for margin/padding/
                   // free-position (the fields the Inspector's own FourSideControl/
                   // Position block let an author toggle a BpToggle on) —
-                  // shadow/border/color/typography stay admin-canvas-preview-
-                  // only for now, the one remaining scope reduction (same
+                  // shadow/border/color/typography/hoverEffect/entrance stay
+                  // admin-canvas-preview-only for now (a bp override toggle
+                  // still shows for them in the Inspector, since FieldGroups
+                  // renders every ELS field the same generic way, but it's
+                  // inert here — only the base value ever reaches this
+                  // render), the one remaining scope reduction (same
                   // "not every field, just the common layout ones" tradeoff
                   // imgWidth/slider-height made before this).
                   const renderSlideEl = (el: El) => {
@@ -1147,7 +1160,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         const Tag = headingTag(ep.level) as "h1";
                         return (
                           <Tag
-                            class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass)}
+                            class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
                             data-slide-el={el.id}
                             style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), typoStyle(ep), elBorderShadowStyle(ep), posStyle(ep)]
                               .filter(Boolean)
@@ -1159,7 +1172,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       case "text":
                         return (
                           <p
-                            class={cls("ds-text", ep.cssClass)}
+                            class={cls("ds-text", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
                             data-slide-el={el.id}
                             style={[
                               `font-size:${fluidTextSize(lengthValue(ep.size, TEXT_SIZE, TEXT_SIZE.md))}`,
@@ -1179,7 +1192,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         return safeUrl(ep.src) ? (
                           <div data-slide-el={el.id} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
                             <img
-                              class={cls("ds-img", ep.cssClass)}
+                              class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
                               src={safeUrl(ep.src)}
                               alt={ep.alt ?? ""}
                               loading="lazy"
@@ -1202,7 +1215,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                             style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), posStyle(ep)].filter(Boolean).join(";")}
                           >
                             <a
-                              class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass)}
+                              class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
                               href={safeUrl(ep.href) ?? "#"}
                               style={[ep.color ? `color:${ep.color}` : null, elBorderShadowStyle(ep)].filter(Boolean).join(";") || undefined}
                             >

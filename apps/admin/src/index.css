@@ -82,3 +82,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Canvas preview of an element's hoverEffect field (Designer.tsx's ELS
+   heading/text/image/button) — mirrors apps/frontend's global.css classes
+   of the same name so what the author sees here matches the published
+   site. Entrance animation has no admin-canvas equivalent (see style.ts's
+   elHoverClass comment) — hover only. */
+.ds-hover-scale { transition: transform 0.2s ease; }
+.ds-hover-scale:hover { transform: scale(1.04); }
+.ds-hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.ds-hover-lift:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
+.ds-hover-glow { transition: box-shadow 0.2s ease; }
+.ds-hover-glow:hover { box-shadow: 0 0 24px rgba(15, 98, 254, 0.35); }

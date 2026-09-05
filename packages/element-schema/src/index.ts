@@ -140,6 +140,12 @@ export const ENUM_VALUES: Record<string, string[]> = {
   // column; "custom" opts into position:absolute inside the slide box, with
   // x/y/posWidth/posHeight (below) controlling placement/size.
   position: ["flow", "custom"],
+  // heading/text/image/button hover + scroll-entrance effects (Designer.tsx's
+  // ELS registry) — pure CSS classes (ds-hover-*/ds-entrance-*, see
+  // apps/frontend's global.css and apps/admin's index.css), no per-element
+  // computed style, so this enum is the whole validation surface.
+  hoverEffect: ["none", "scale", "lift", "glow"],
+  entrance: ["none", "fade", "slide-up", "zoom"],
 };
 
 // Free-typed CSS lengths (each ends up as `key:value` in a raw style
