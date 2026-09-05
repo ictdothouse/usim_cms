@@ -1,45 +1,111 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards, stringifyCards } from "./parsers";
+import {
+  parsePairs,
+  parseSlides,
+  stringifySlides,
+  newSlide,
+  addSlideElement,
+  addSlideRow,
+  deleteSlideElement,
+  deleteSlideRow,
+  updateSlideElementProps,
+  parseCards,
+  stringifyCards,
+} from "./parsers";
 
 test("parsePairs splits on the first pipe, defaults b to '', filters blank lines", () => {
   assert.deepEqual(parsePairs("Q1|A1\n\nno-pipe-line\n"), [{ a: "Q1", b: "A1" }, { a: "no-pipe-line", b: "" }]);
   assert.deepEqual(parsePairs(undefined), []);
 });
 
-test("parseSlideText wraps a legacy string, reads a full object, defaults a garbage input", () => {
-  assert.deepEqual(parseSlideText("Hello").text, "Hello");
-  const obj = parseSlideText({ text: "Hi", align: "center", fontSize: "20", bp: { "mobile:fontSize": "14" } });
-  assert.equal(obj.text, "Hi");
-  assert.equal(obj.align, "center");
-  assert.equal(obj.fontSize, "20");
-  assert.deepEqual(obj.bp, { "mobile:fontSize": "14" });
-  assert.equal(parseSlideText(42).text, "");
+test("newSlide starts with empty rows (placeholder-only, nothing opt-in yet)", () => {
+  const s = newSlide();
+  assert.deepEqual(s.rows, []);
+  assert.equal(s.imageUrl, "");
+  assert.equal(s.bgSize, "");
 });
 
-test("parseSlideButtons rejects non-arrays, fills defaults, guards the variant/size enums", () => {
-  assert.deepEqual(parseSlideButtons(null), []);
-  const [btn] = parseSlideButtons([{ label: "Go", variant: "bogus", size: "xxl" }]);
-  assert.equal(btn.label, "Go");
-  assert.equal(btn.variant, "primary");
-  assert.equal(btn.size, "md");
+test("addSlideElement appends into the last row, creating one if none exists", () => {
+  let s = newSlide();
+  s = addSlideElement(s, "heading", { text: "Hi", level: "2", align: "left" });
+  assert.equal(s.rows.length, 1);
+  assert.equal(s.rows[0].columns[0].elements.length, 1);
+  assert.equal(s.rows[0].columns[0].elements[0].type, "heading");
+  assert.equal(s.rows[0].columns[0].elements[0].props.text, "Hi");
+
+  s = addSlideRow(s);
+  s = addSlideElement(s, "button", { label: "Go", href: "#", variant: "primary", align: "left" });
+  assert.equal(s.rows.length, 2);
+  assert.equal(s.rows[0].columns[0].elements.length, 1, "first row untouched by the element added after addSlideRow");
+  assert.equal(s.rows[1].columns[0].elements[0].type, "button");
 });
 
-test("parseSlides accepts the JSON shape and the legacy pipe-line shape", () => {
-  const jsonForm = parseSlides(JSON.stringify([{ imageUrl: "a.jpg", heading: "H", subtitle: "S", buttons: [] }]));
-  assert.equal(jsonForm.length, 1);
-  assert.equal(jsonForm[0].imageUrl, "a.jpg");
-  assert.equal(jsonForm[0].heading.text, "H");
+test("deleteSlideElement/deleteSlideRow remove exactly the targeted node", () => {
+  let s = newSlide();
+  s = addSlideElement(s, "text", { text: "A", size: "", align: "left" });
+  s = addSlideElement(s, "text", { text: "B", size: "", align: "left" });
+  s = deleteSlideElement(s, 0, 0, 0);
+  assert.equal(s.rows[0].columns[0].elements.length, 1);
+  assert.equal(s.rows[0].columns[0].elements[0].props.text, "B");
 
-  const legacyForm = parseSlides("a.jpg|Heading|Subtitle|Click me|https://example.com");
-  assert.equal(legacyForm.length, 1);
-  assert.equal(legacyForm[0].buttons[0]?.label, "Click me");
+  s = addSlideRow(s);
+  assert.equal(s.rows.length, 2);
+  s = deleteSlideRow(s, 0);
+  assert.equal(s.rows.length, 1);
+  assert.equal(s.rows[0].columns[0].elements.length, 0, "the remaining row is the freshly-added empty one");
+});
+
+test("updateSlideElementProps merges into one nested element's own props only", () => {
+  let s = newSlide();
+  s = addSlideElement(s, "text", { text: "A", size: "", align: "left" });
+  s = addSlideElement(s, "text", { text: "B", size: "", align: "left" });
+  s = updateSlideElementProps(s, 0, 0, 1, { text: "B2" });
+  assert.equal(s.rows[0].columns[0].elements[0].props.text, "A");
+  assert.equal(s.rows[0].columns[0].elements[1].props.text, "B2");
+});
+
+test("parseSlides accepts the current rows shape, the legacy heading/subtitle/buttons object shape, and the legacy pipe-line shape", () => {
+  const current = parseSlides(JSON.stringify([{ imageUrl: "a.jpg", rows: [] }]));
+  assert.equal(current.length, 1);
+  assert.equal(current[0].imageUrl, "a.jpg");
+  assert.deepEqual(current[0].rows, []);
+
+  // Legacy JSON object shape (pre-rework): heading/subtitle/buttons upgrade
+  // into equivalent heading/text/button elements, empty ones contribute
+  // nothing (matches today's opt-in default).
+  const legacyJson = parseSlides(
+    JSON.stringify([
+      {
+        imageUrl: "a.jpg",
+        heading: { text: "H", align: "center" },
+        subtitle: "",
+        buttons: [{ label: "Click me", href: "https://example.com" }],
+      },
+    ]),
+  );
+  assert.equal(legacyJson.length, 1);
+  const els = legacyJson[0].rows[0].columns[0].elements;
+  assert.equal(els.length, 2, "empty subtitle contributes nothing");
+  assert.equal(els[0].type, "heading");
+  assert.equal(els[0].props.text, "H");
+  assert.equal(els[0].props.align, "center");
+  assert.equal(els[1].type, "button");
+  assert.equal(els[1].props.label, "Click me");
+
+  const legacyPipe = parseSlides("a.jpg|Heading|Subtitle|Click me|https://example.com");
+  assert.equal(legacyPipe.length, 1);
+  const pipeEls = legacyPipe[0].rows[0].columns[0].elements;
+  assert.equal(pipeEls.length, 3);
+  assert.equal(pipeEls[0].type, "heading");
+  assert.equal(pipeEls[1].type, "text");
+  assert.equal(pipeEls[2].type, "button");
 
   assert.deepEqual(parseSlides(undefined), []);
 });
 
-test("stringifySlides round-trips through parseSlides for the JSON shape", () => {
-  const original = parseSlides(JSON.stringify([{ imageUrl: "x.jpg", heading: "H1", subtitle: "S1", buttons: [] }]));
+test("stringifySlides round-trips through parseSlides for the current shape", () => {
+  const original = parseSlides(JSON.stringify([{ imageUrl: "x.jpg", rows: [] }]));
   const roundTripped = parseSlides(stringifySlides(original));
   assert.deepEqual(roundTripped, original);
 });

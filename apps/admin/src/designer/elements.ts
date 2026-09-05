@@ -49,6 +49,7 @@ import type { Key } from "@/i18n";
 import type { CardItem, ElType, Field } from "./types";
 import { TYPOGRAPHY_FIELDS } from "./fields";
 import { ICONS } from "./icons";
+import { newSlide } from "./parsers";
 
 export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: Record<string, string>; fields: Field[] }> = {
   heading: {
@@ -76,7 +77,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
   image: {
     labelKey: "designer-el-image",
     icon: ImageIcon,
-    defaults: { src: "", alt: "", radius: "md", imgWidth: "", align: "left" },
+    defaults: { src: "", alt: "", radius: "", imgWidth: "", align: "left" },
     fields: [
       { key: "src", labelKey: "designer-f-src", kind: "image" },
       { key: "alt", labelKey: "designer-f-alt", kind: "text" },
@@ -112,7 +113,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
   embed: {
     labelKey: "designer-el-embed",
     icon: Video,
-    defaults: { url: "", ratio: "16:9", radius: "md" },
+    defaults: { url: "", ratio: "16:9", radius: "" },
     fields: [
       { key: "url", labelKey: "designer-f-url", kind: "text" },
       { key: "ratio", labelKey: "designer-f-ratio", kind: "select", options: ["16:9", "4:3", "1:1"] },
@@ -153,7 +154,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
   gallery: {
     labelKey: "designer-el-gallery",
     icon: Images,
-    defaults: { images: "", columns: "3", radius: "md" },
+    defaults: { images: "", columns: "3", radius: "" },
     fields: [
       { key: "images", labelKey: "designer-f-gallery-images", kind: "gallery" },
       { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
@@ -225,10 +226,10 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     labelKey: "designer-el-slider",
     icon: GalleryHorizontal,
     defaults: {
-      slides: JSON.stringify([
-        { imageUrl: "", heading: "Slide one heading", subtitle: "Slide one subtitle", textPosition: "center", overlayColor: "#000000", overlayOpacity: "35", buttons: [] },
-        { imageUrl: "", heading: "Slide two heading", subtitle: "Slide two subtitle", textPosition: "center", overlayColor: "#000000", overlayOpacity: "35", buttons: [] },
-      ]),
+      // Placeholder-only by default (empty rows, see SlideItem/newSlide in
+      // parsers.ts) — no heading/subtitle/button until the author explicitly
+      // adds one via the slides editor's Add Text/Button/Image/Row buttons.
+      slides: JSON.stringify([newSlide(), newSlide()]),
       autoplay: "0",
       // A literal length now that the field itself accepts one directly
       // (kind "length", below) — "32rem" is exactly what the old "md" preset

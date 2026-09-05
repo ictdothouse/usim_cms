@@ -1,4 +1,3 @@
-import type { SlideButton } from "./types";
 import { bestTextColor } from "@/lib/utils";
 
 // Style-computation pure helpers split out of Designer.tsx (Layer 0 of the
@@ -18,9 +17,6 @@ export const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem
 export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 export const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
 export const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
-// Baseline px used as the resize-handle drag's starting point when a slider
-// button has no explicit fontSize yet — purely a UI convenience, not stored.
-export const SIZE_PX: Record<SlideButton["size"], number> = { sm: 13, md: 16, lg: 20 };
 // Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
 // before the height field became free-form ("length" kind) still store one of
 // these keywords; resolving it here lets the canvas preview show the real
@@ -134,10 +130,10 @@ export function colStyle(cp?: Record<string, string>): React.CSSProperties {
 }
 
 // Element radius (image/embed/gallery): same per-corner freedom as Section/
-// Column, but these elements default to a rounded "md" look out of the box,
-// so the fallback is RADIUS.md, not RADIUS.none.
+// Column, and the same RADIUS.none fallback — no element gets a rounded
+// corner unless the author explicitly sets one.
 export function elRadius(p: Record<string, string>): string {
-  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.md);
+  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.none);
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
 }
 

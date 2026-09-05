@@ -15,7 +15,7 @@
 import type React from "react";
 import type * as api from "@/lib/api";
 import type { Key } from "@/i18n";
-import type { Bp, Block, FieldGroupKey, PageSettings, Sel, SectionProps, SliderGuide } from "./types";
+import type { Bp, Block, FieldGroupKey, PageSettings, Sel, SectionProps } from "./types";
 
 export type ClipLevel = "section" | "row" | "column" | "element";
 
@@ -75,6 +75,16 @@ export interface DesignerCtx {
   siteTheme: Record<string, string> | null;
   sliderSlideIdx: Record<string, number>;
   setSliderSlideIdx: (v: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
+  // Nested selection inside the currently-previewed slide of each slider
+  // element (keyed by slider El.id) — see designer/types.ts's SlideItem/Row
+  // note. Separate from the global `sel` above, which never addresses
+  // content inside a slide.
+  sliderInnerSel: Record<string, { r: number; c: number; e: number } | null>;
+  setSliderInnerSel: (
+    v:
+      | Record<string, { r: number; c: number; e: number } | null>
+      | ((prev: Record<string, { r: number; c: number; e: number } | null>) => Record<string, { r: number; c: number; e: number } | null>),
+  ) => void;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
   availableMenus: api.Menu[];
   availableCategories: api.Category[];
@@ -131,12 +141,6 @@ export interface DesignerCtx {
   duplicateElement: (b: number, r: number, c: number, e: number) => void;
   deleteElement: (b: number, r: number, c: number, e: number) => void;
 
-  // ElPreview-only: canvas-direct text editing + slider drag/resize state
+  // ElPreview-only: canvas-direct text editing (heading/text inline edit)
   editingText: React.MutableRefObject<Record<string, string>>;
-  editingSliderText: React.MutableRefObject<Record<string, string>>;
-  sliderPreviewRefs: React.MutableRefObject<Record<string, { box: HTMLElement | null; items: Record<string, HTMLElement | null> }>>;
-  sliderGuide: SliderGuide;
-  setSliderGuide: (v: SliderGuide | ((prev: SliderGuide) => SliderGuide)) => void;
-  sliderEditingItem: Record<string, string | null>;
-  setSliderEditingItem: (fn: (prev: Record<string, string | null>) => Record<string, string | null>) => void;
 }

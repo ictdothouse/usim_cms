@@ -364,7 +364,7 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 // A blueprint's layout (system-seeded via bootstrap-public.sql, or
 // tenant-saved from a real page) carries its own element ids — cloning it
 // verbatim onto a brand new page risks id collisions with Designer's
-// id-keyed edit state (editingText/sliderPreviewRefs) the moment two pages
+// id-keyed edit state (editingText/sliderSlideIdx/sliderInnerSel) the moment two pages
 // sourced from the same blueprint are open at once. Deep-clones the layout
 // and assigns every element a fresh id first. Section rows are checked in
 // both places they appear across this codebase's blueprint data (nested

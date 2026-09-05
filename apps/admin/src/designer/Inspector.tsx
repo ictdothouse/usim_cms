@@ -30,6 +30,7 @@ import { BASE_LANG, type DesignerCtx } from "./context";
 import { BufferedInput, BpToggle } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
 import { CSS_CLASS_FIELD, COLUMN_FIELDS, FIELD_GROUP_BY_KEY, FieldLabel, SECTION_FIELDS } from "./fields";
+import { parseSlides, stringifySlides, updateSlideElementProps } from "./parsers";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_FALLBACK, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS, gapPx } from "./style";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
@@ -152,7 +153,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     setFourSideValue, setColSideValue, setElSideValue,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
-    iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx, uploadImage,
+    iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
+    sliderInnerSel, setSliderInnerSel, uploadImage,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
@@ -450,6 +452,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           blocks={blocks}
           sliderSlideIdx={sliderSlideIdx}
           setSliderSlideIdx={setSliderSlideIdx}
+          sliderInnerSel={sliderInnerSel}
+          setSliderInnerSel={setSliderInnerSel}
           uploadImage={uploadImage}
           bpGetValue={bpGetValue}
           bpKeysOverridden={bpKeysOverridden}
@@ -694,6 +698,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           blocks={blocks}
           sliderSlideIdx={sliderSlideIdx}
           setSliderSlideIdx={setSliderSlideIdx}
+          sliderInnerSel={sliderInnerSel}
+          setSliderInnerSel={setSliderInnerSel}
           uploadImage={uploadImage}
           bpGetValue={bpGetValue}
           bpKeysOverridden={bpKeysOverridden}
@@ -765,20 +771,108 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     const def = ELS[el.type];
     const elFields = [...def.fields, CSS_CLASS_FIELD];
     const hasContentFields = elFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
+    // A slider element with a nested element selected (clicked inside its
+    // currently-previewed slide's mini-canvas, see ElPreview.tsx's slider
+    // case) shows THAT element's own Content/Style fields instead of the
+    // slider's own — same FieldGroups/FieldInput renderer every other
+    // element uses, just reading/writing through the slide's own
+    // rows/columns/elements tree (parseSlides/stringifySlides round trip,
+    // one level deeper than a normal element's `props`) rather than
+    // `el.props` directly. No per-breakpoint override here — nested slide
+    // elements don't have a `bp` bag, an accepted scope reduction (see the
+    // design doc's Mini-canvas section).
+    const innerSel = el.type === "slider" ? (sliderInnerSel[el.id] ?? null) : null;
+    if (innerSel) {
+      const slideIdx = sliderSlideIdx[el.id] ?? 0;
+      const childEl = parseSlides(el.props.slides)[slideIdx]?.rows[innerSel.r]?.columns[innerSel.c]?.elements[innerSel.e];
+      if (childEl) {
+        const childDef = ELS[childEl.type];
+        const childFields = [...childDef.fields, CSS_CLASS_FIELD];
+        const childHasContent = childFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
+        const childFieldGroupsProps = {
+          fields: childFields,
+          getValue: (f: Field) => childEl.props[f.key] ?? "",
+          setValue: (f: Field, v: string) =>
+            mutate((bs) => {
+              const target = section(bs, b).rows[r].columns[c].elements[e];
+              const currentSlides = parseSlides(target.props.slides);
+              const s0 = currentSlides[slideIdx];
+              if (!s0) return;
+              currentSlides[slideIdx] = updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { [f.key]: v });
+              target.props.slides = stringifySlides(currentSlides);
+            }),
+          collapsedGroups,
+          toggleGroup,
+          bp,
+          t,
+          iconSearch,
+          setIconSearch,
+          uploading,
+          siteTheme,
+          sel,
+          blocks,
+          sliderSlideIdx,
+          setSliderSlideIdx,
+          sliderInnerSel,
+          setSliderInnerSel,
+          uploadImage,
+          bpGetValue,
+          bpKeysOverridden,
+          toggleBpKeys,
+          bpKey,
+          availableMenus,
+          availableCategories,
+          ICONS,
+        };
+        return (
+          <div className="space-y-3">
+            <Breadcrumb />
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-ink">{t(childDef.labelKey)}</p>
+              <button
+                onClick={() => setSliderInnerSel((m) => ({ ...m, [el.id]: null }))}
+                className="text-[10px] font-semibold text-accent"
+              >
+                {t("designer-slide-back")}
+              </button>
+            </div>
+            {childHasContent && (
+              <div className="flex gap-1 rounded-full bg-canvas p-0.5">
+                {(["content", "style"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setInspectorTab(tab)}
+                    className={`flex-1 rounded-full py-1 text-[11px] font-semibold ${
+                      inspectorTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
+                    }`}
+                  >
+                    {t(tab === "content" ? "designer-inspector-tab-content" : "designer-inspector-tab-style")}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(!childHasContent || inspectorTab === "style") && (
+              <FieldGroups {...childFieldGroupsProps} only={childHasContent ? "style" : undefined} />
+            )}
+            {childHasContent && inspectorTab === "content" && <FieldGroups {...childFieldGroupsProps} only="content" />}
+          </div>
+        );
+      }
+    }
     const fieldGroupsProps = {
       fields: elFields,
-      // "slides" is a structured JSON blob, not a simple style value — it
-      // manages its own per-breakpoint overrides internally (each slide's
-      // heading/subtitle has its own `SlideText.bp`, written by the
-      // Text size/Alignment BpToggle inside the slides editor itself).
-      // Routing it through the SAME generic bp mechanism as every other
-      // field wrote a second, whole-array copy into `target.bp["mobile:
-      // slides"]` on any edit made while previewing tablet/mobile — the
-      // Inspector read that copy back (so it looked live), but the canvas
-      // (ElPreview) reads `el.props.slides` directly and never checked
-      // `el.bp`, so nothing ever appeared to change there. Bypassing bp
-      // entirely for this one field/kind fixes both the data (edits land
-      // in the one real `slides` string) and the ghost-toggle UI.
+      // "slides" is a structured JSON blob, not a simple style value — its
+      // own content (the rows/columns/elements tree above) is edited via
+      // FieldInput's dedicated "slides" kind UI and the nested-selection
+      // branch above, not through this generic bp mechanism. Routing it
+      // through the SAME generic bp mechanism as every other field wrote a
+      // second, whole-array copy into `target.bp["mobile:slides"]` on any
+      // edit made while previewing tablet/mobile — the Inspector read that
+      // copy back (so it looked live), but the canvas (ElPreview) reads
+      // `el.props.slides` directly and never checked `el.bp`, so nothing
+      // ever appeared to change there. Bypassing bp entirely for this one
+      // field/kind fixes both the data (edits land in the one real
+      // `slides` string) and the ghost-toggle UI.
       // "image" (a logo/bgImage media picker) hit the same footgun from the
       // other direction: there's no legitimate per-breakpoint logo swap, so
       // the BpToggle sitting next to it just invited an accidental empty
@@ -817,6 +911,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
       blocks,
       sliderSlideIdx,
       setSliderSlideIdx,
+      sliderInnerSel,
+      setSliderInnerSel,
       uploadImage,
       bpGetValue,
       bpKeysOverridden,

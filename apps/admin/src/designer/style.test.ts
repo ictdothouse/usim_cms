@@ -36,8 +36,8 @@ test("colStyle returns {} with no props, sets background/padding/radius when pre
   assert.equal(s.borderRadius, `${RADIUS.md} ${RADIUS.md} ${RADIUS.md} ${RADIUS.md}`);
 });
 
-test("elRadius falls back to RADIUS.md (not RADIUS.none) when unset", () => {
-  assert.equal(elRadius({}), `${RADIUS.md} ${RADIUS.md} ${RADIUS.md} ${RADIUS.md}`);
+test("elRadius falls back to RADIUS.none when unset", () => {
+  assert.equal(elRadius({}), `${RADIUS.none} ${RADIUS.none} ${RADIUS.none} ${RADIUS.none}`);
 });
 
 test("typoStyle only sets keys that are actually present", () => {

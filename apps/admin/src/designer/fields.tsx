@@ -147,21 +147,6 @@ export const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type 
 // "md" preset, so switching a legacy preset into the new panel doesn't jump.
 export const SHADOW_DEFAULT_PARTS = ["0", "4", "12", "0", "#000000", "0.12"] as const;
 
-// Baseline px used as the canvas resize handle's starting point when
-// heading/subtitle (slider element) have no explicit fontSize yet.
-export const TEXT_BASE_PX = { heading: 20, subtitle: 13 };
-
-// 3x3 anchor grid offered as one-click shortcuts for a slide button/heading/
-// subtitle's custom x/y — clicking a dot just sets x/y to a canonical spot
-// and switches position to "custom"; there's no separate named-preset enum
-// to keep in sync between admin/frontend/validator, presets are purely a UI
-// convenience over the same x/y percent every custom-dragged item already uses.
-export const POSITION_PRESETS: { x: string; y: string }[] = [
-  { x: "10", y: "15" }, { x: "50", y: "15" }, { x: "90", y: "15" },
-  { x: "10", y: "50" }, { x: "50", y: "50" }, { x: "90", y: "50" },
-  { x: "10", y: "85" }, { x: "50", y: "85" }, { x: "90", y: "85" },
-];
-
 // One glyph per field label, so the inspector reads at a glance instead of
 // requiring every label to be sounded out — same "icon + short label" idea
 // Puck uses throughout its own field list. Not exhaustive on purpose: a field
