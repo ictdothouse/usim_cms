@@ -570,12 +570,24 @@ app.post("/api/portal/branding-upload", async (req, reply) => {
     reply.code(400);
     return { error: "file required (multipart/form-data, field name 'file')" };
   }
-  const allowed = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon"]);
-  if (!allowed.has(file.mimetype)) {
+  // svg deliberately excluded — an SVG can embed <script>, making it a
+  // stored-XSS vector when served back and opened directly; the extension
+  // also comes from this map (server-controlled), not the client's own
+  // filename, so a mismatched-extension file can't be smuggled in.
+  const extByMime: Record<string, string> = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
+  };
+  const ext = extByMime[file.mimetype];
+  if (!ext) {
     reply.code(415);
     return { error: `unsupported file type ${file.mimetype}` };
   }
-  const filename = `${randomUUID()}${path.extname(file.filename)}`;
+  const filename = `${randomUUID()}${ext}`;
   const { url } = await uploadFile("_global", filename, file.file);
   return { url };
 });
