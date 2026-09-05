@@ -183,7 +183,7 @@ const POST_TITLE_FONT_SIZE_MAX = 96;
 // (BaseLayout.astro, posts/[slug].astro) — reject anything else instead of
 // silently storing it.
 function validateThemeSettings(settings: Record<string, unknown>): string | null {
-  const allowed = new Set([...THEME_COLOR_KEYS, ...FONT_KEYS, ...POST_DISPLAY_KEYS, "logoUrl", "postTitleFontSize"]);
+  const allowed = new Set([...THEME_COLOR_KEYS, ...FONT_KEYS, ...POST_DISPLAY_KEYS, "logoUrl", "faviconUrl", "postTitleFontSize"]);
   for (const key of Object.keys(settings)) {
     if (!allowed.has(key)) return `unknown theme key: ${key}`;
   }
@@ -202,6 +202,10 @@ function validateThemeSettings(settings: Record<string, unknown>): string | null
   if (settings.logoUrl !== undefined && settings.logoUrl !== "") {
     if (typeof settings.logoUrl !== "string") return "logoUrl must be a string";
     if (!isSafeUrl(settings.logoUrl)) return "logoUrl has an unsafe URL scheme";
+  }
+  if (settings.faviconUrl !== undefined && settings.faviconUrl !== "") {
+    if (typeof settings.faviconUrl !== "string") return "faviconUrl must be a string";
+    if (!isSafeUrl(settings.faviconUrl)) return "faviconUrl has an unsafe URL scheme";
   }
   const fontSize = settings.postTitleFontSize;
   if (fontSize !== undefined && fontSize !== "") {

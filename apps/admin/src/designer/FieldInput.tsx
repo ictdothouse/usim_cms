@@ -228,18 +228,42 @@ export function FieldInput({
     return (
       <div className="space-y-1.5">
         <BufferedInput className={base} value={value} placeholder="https://" onCommit={onChange} />
-        <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
-          {uploading ? t("designer-uploading") : t("designer-upload")}
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void uploadImage(f, onChange);
-            }}
-          />
-        </label>
+        <div className="flex flex-wrap gap-1.5">
+          <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+            {uploading ? t("designer-uploading") : t("designer-upload")}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadImage(f, onChange);
+              }}
+            />
+          </label>
+          {/* Theme Settings' Branding logo/favicon (site_theme.settings) are
+              just uploaded media URLs — reusing them here is a one-click copy
+              into this element's own src, not a live binding, matching how
+              logoUrl/faviconUrl are already plain strings everywhere else. */}
+          {siteTheme?.logoUrl && (
+            <button
+              type="button"
+              onClick={() => onChange(siteTheme.logoUrl!)}
+              className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+            >
+              {t("designer-use-site-logo")}
+            </button>
+          )}
+          {siteTheme?.faviconUrl && (
+            <button
+              type="button"
+              onClick={() => onChange(siteTheme.faviconUrl!)}
+              className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+            >
+              {t("designer-use-site-favicon")}
+            </button>
+          )}
+        </div>
         {value && <img src={value} alt="" className="h-16 rounded-lg object-cover" />}
       </div>
     );
