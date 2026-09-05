@@ -779,19 +779,27 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
       // `el.bp`, so nothing ever appeared to change there. Bypassing bp
       // entirely for this one field/kind fixes both the data (edits land
       // in the one real `slides` string) and the ghost-toggle UI.
-      getValue: (f: Field) => (f.kind === "slides" ? el.props[f.key] ?? "" : bpGetValue(el.props[f.key], el.bp, f.key)),
+      // "image" (a logo/bgImage media picker) hit the same footgun from the
+      // other direction: there's no legitimate per-breakpoint logo swap, so
+      // the BpToggle sitting next to it just invited an accidental empty
+      // override while previewing tablet/mobile — enabling it seeds "" (see
+      // toggleBpKeys), which then out-ranked the real desktop src and made
+      // the canvas show the no-image placeholder despite the real, saved
+      // src being intact. Same bypass as slides fixes it the same way.
+      getValue: (f: Field) =>
+        f.kind === "slides" || f.kind === "image" ? el.props[f.key] ?? "" : bpGetValue(el.props[f.key], el.bp, f.key),
       setValue: (f: Field, v: string) =>
         mutate((bs) => {
           const target = section(bs, b).rows[r].columns[c].elements[e];
-          if (bp === "desktop" || f.kind === "slides") {
+          if (bp === "desktop" || f.kind === "slides" || f.kind === "image") {
             target.props[f.key] = v;
           } else {
             target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
           }
         }),
-      hasOverride: (f: Field) => f.kind !== "slides" && bpKeysOverridden(el.bp, [f.key]),
+      hasOverride: (f: Field) => f.kind !== "slides" && f.kind !== "image" && bpKeysOverridden(el.bp, [f.key]),
       onToggleOverride: (f: Field) => {
-        if (f.kind === "slides") return;
+        if (f.kind === "slides" || f.kind === "image") return;
         mutate((bs) => {
           const target = section(bs, b).rows[r].columns[c].elements[e];
           target.bp = toggleBpKeys(target.bp, [f.key]);
