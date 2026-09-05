@@ -17,6 +17,7 @@ import {
   Link2,
   Lock,
   Monitor,
+  Move,
   Paintbrush,
   RefreshCw,
   Smartphone,
@@ -30,7 +31,7 @@ import { BASE_LANG, type DesignerCtx } from "./context";
 import { BufferedInput, BpToggle } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
 import { CSS_CLASS_FIELD, COLUMN_FIELDS, FIELD_GROUP_BY_KEY, FieldLabel, SECTION_FIELDS } from "./fields";
-import { parseSlides, stringifySlides, updateSlideElementProps } from "./parsers";
+import { parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_FALLBACK, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS, gapPx } from "./style";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
@@ -778,9 +779,11 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     // element uses, just reading/writing through the slide's own
     // rows/columns/elements tree (parseSlides/stringifySlides round trip,
     // one level deeper than a normal element's `props`) rather than
-    // `el.props` directly. No per-breakpoint override here — nested slide
-    // elements don't have a `bp` bag, an accepted scope reduction (see the
-    // design doc's Mini-canvas section).
+    // `el.props` directly. Real per-breakpoint override now works the same
+    // way as any top-level element — nested El already carries its own `bp`
+    // bag (the type never excluded it, this was just unwired until now);
+    // childSetValue below writes into it via updateSlideElementBp instead of
+    // updateSlideElementProps whenever the Inspector's own `bp` isn't desktop.
     const innerSel = el.type === "slider" ? (sliderInnerSel[el.id] ?? null) : null;
     if (innerSel) {
       const slideIdx = sliderSlideIdx[el.id] ?? 0;
@@ -789,18 +792,29 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
         const childDef = ELS[childEl.type];
         const childFields = [...childDef.fields, CSS_CLASS_FIELD];
         const childHasContent = childFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
+        const withChildSlide = (apply: (s0: ReturnType<typeof parseSlides>[number]) => ReturnType<typeof parseSlides>[number]) =>
+          mutate((bs) => {
+            const target = section(bs, b).rows[r].columns[c].elements[e];
+            const currentSlides = parseSlides(target.props.slides);
+            const s0 = currentSlides[slideIdx];
+            if (!s0) return;
+            currentSlides[slideIdx] = apply(s0);
+            target.props.slides = stringifySlides(currentSlides);
+          });
+        const childSetValue = (key: string, v: string) =>
+          withChildSlide((s0) =>
+            bp === "desktop"
+              ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { [key]: v })
+              : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:${key}`]: v }),
+          );
+        const childToggleOverride = (keys: string[]) =>
+          withChildSlide((s0) => updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, toggleBpKeys(childEl.bp, keys)));
         const childFieldGroupsProps = {
           fields: childFields,
-          getValue: (f: Field) => childEl.props[f.key] ?? "",
-          setValue: (f: Field, v: string) =>
-            mutate((bs) => {
-              const target = section(bs, b).rows[r].columns[c].elements[e];
-              const currentSlides = parseSlides(target.props.slides);
-              const s0 = currentSlides[slideIdx];
-              if (!s0) return;
-              currentSlides[slideIdx] = updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { [f.key]: v });
-              target.props.slides = stringifySlides(currentSlides);
-            }),
+          getValue: (f: Field) => bpGetValue(childEl.props[f.key], childEl.bp, f.key),
+          setValue: (f: Field, v: string) => childSetValue(f.key, v),
+          hasOverride: (f: Field) => bpKeysOverridden(childEl.bp, [f.key]),
+          onToggleOverride: (f: Field) => childToggleOverride([f.key]),
           collapsedGroups,
           toggleGroup,
           bp,
@@ -824,6 +838,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           availableCategories,
           ICONS,
         };
+        const childIsFree = bpGetValue(childEl.props.position, childEl.bp, "position") === "custom";
         return (
           <div className="space-y-3">
             <Breadcrumb />
@@ -852,7 +867,78 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               </div>
             )}
             {(!childHasContent || inspectorTab === "style") && (
-              <FieldGroups {...childFieldGroupsProps} only={childHasContent ? "style" : undefined} />
+              <>
+                <div className="space-y-1.5 rounded-lg border border-line/20 bg-canvas/40 p-2">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-body">
+                    <span className="flex items-center gap-1.5">
+                      <Move className="h-3.5 w-3.5" /> {t("designer-slide-free-position")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => childSetValue("position", childIsFree ? "" : "custom")}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        childIsFree ? "bg-accent text-white" : "bg-white text-sub"
+                      }`}
+                    >
+                      {t(childIsFree ? "designer-slide-free-on" : "designer-slide-free-off")}
+                    </button>
+                  </div>
+                  {childIsFree && (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(["x", "y", "posWidth", "posHeight"] as const).map((key) => (
+                        <label key={key} className="space-y-0.5 text-[10px] text-sub">
+                          {key === "x" ? "X %" : key === "y" ? "Y %" : t(key === "posWidth" ? "designer-f-width" : "designer-f-height")}
+                          <BufferedInput
+                            className="w-full rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
+                            value={bpGetValue(childEl.props[key], childEl.bp, key)}
+                            placeholder={key === "x" || key === "y" ? "10" : "auto"}
+                            onCommit={(v) => childSetValue(key, v)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <FourSideControl
+                  labelKey="designer-s-padding"
+                  icon={Frame}
+                  linked={linkedPadding}
+                  onToggleLink={() => setLinkedPadding((v) => !v)}
+                  getSide={(side) => sideValue(childEl.props, childEl.bp, PADDING_SIDE_KEYS[side], "padding")}
+                  setSide={(side, v) => childSetValue(PADDING_SIDE_KEYS[side], v)}
+                  hasOverride={bpKeysOverridden(childEl.bp, Object.values(PADDING_SIDE_KEYS))}
+                  onToggleOverride={() => childToggleOverride(Object.values(PADDING_SIDE_KEYS))}
+                  bp={bp}
+                  t={t}
+                />
+                {(childEl.type === "image" || childEl.type === "embed" || childEl.type === "gallery") && (
+                  <FourSideControl
+                    labelKey="designer-f-radius"
+                    icon={SquareDashedBottom}
+                    linked={linkedRadius}
+                    onToggleLink={() => setLinkedRadius((v) => !v)}
+                    getSide={(side) => sideValue(childEl.props, childEl.bp, RADIUS_CORNER_KEYS[side], "radius")}
+                    setSide={(side, v) => childSetValue(RADIUS_CORNER_KEYS[side], v)}
+                    hasOverride={bpKeysOverridden(childEl.bp, Object.values(RADIUS_CORNER_KEYS))}
+                    onToggleOverride={() => childToggleOverride(Object.values(RADIUS_CORNER_KEYS))}
+                    bp={bp}
+                    t={t}
+                  />
+                )}
+                <FourSideControl
+                  labelKey="designer-f-marginy"
+                  icon={Frame}
+                  linked={linkedMargin}
+                  onToggleLink={() => setLinkedMargin((v) => !v)}
+                  getSide={(side) => sideValue(childEl.props, childEl.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
+                  setSide={(side, v) => childSetValue(MARGIN_SIDE_KEYS[side], v)}
+                  hasOverride={bpKeysOverridden(childEl.bp, Object.values(MARGIN_SIDE_KEYS))}
+                  onToggleOverride={() => childToggleOverride(Object.values(MARGIN_SIDE_KEYS))}
+                  bp={bp}
+                  t={t}
+                />
+                <FieldGroups {...childFieldGroupsProps} only={childHasContent ? "style" : undefined} />
+              </>
             )}
             {childHasContent && inspectorTab === "content" && <FieldGroups {...childFieldGroupsProps} only="content" />}
           </div>

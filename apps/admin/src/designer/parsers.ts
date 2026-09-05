@@ -26,7 +26,10 @@ export const SLIDE_DEFAULTS = {
   bgColor: "",
   textPosition: "center" as const,
   overlayColor: "#000000",
-  overlayOpacity: "35",
+  // No overlay by default — only appears once the author sets an opacity
+  // (see FieldInput's slide card slider), same "opt-in, not on-by-default"
+  // rule as heading/subtitle/buttons and corner radius elsewhere in this file.
+  overlayOpacity: "0",
 };
 
 const SLIDE_BG_SIZES = ["cover", "contain", "repeat", "no-repeat", "auto"] as const;
@@ -211,6 +214,24 @@ export function updateSlideElementProps(slide: SlideItem, r: number, c: number, 
             ci !== c
               ? col
               : { ...col, elements: col.elements.map((el, ei) => (ei !== e ? el : { ...el, props: { ...el.props, ...patch } })) },
+          ),
+        },
+  );
+  return { ...slide, rows };
+}
+
+// Replaces (not merges) a slide-nested element's `bp` bag — mirrors
+// Designer.tsx's `target.bp = ...` assignment for top-level elements, since
+// callers (Inspector's per-field write, and its toggleBpKeys-driven override
+// toggle) already compute the full next bp object themselves.
+export function updateSlideElementBp(slide: SlideItem, r: number, c: number, e: number, bp: Record<string, string> | undefined): SlideItem {
+  const rows = slide.rows.map((row, ri) =>
+    ri !== r
+      ? row
+      : {
+          ...row,
+          columns: row.columns.map((col, ci) =>
+            ci !== c ? col : { ...col, elements: col.elements.map((el, ei) => (ei !== e ? el : { ...el, bp })) },
           ),
         },
   );

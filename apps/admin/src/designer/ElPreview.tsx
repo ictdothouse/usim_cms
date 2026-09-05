@@ -29,14 +29,14 @@ import {
   Users,
   Video,
 } from "lucide-react";
-import type { Block, El, Sel } from "./types";
+import type { Block, El, Sel, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
-import { parseCards, parsePairs, parseRepeaterItems, parseSlides } from "./parsers";
+import { parseCards, parsePairs, parseRepeaterItems, parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
 import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
-  elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
+  elBorderShadowStyle, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
 } from "./style";
 
 // Only the one shape ElPreview's mutate() calls actually touch (props/bp on
@@ -47,6 +47,34 @@ const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionPro
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
 // See its one call site (top of ElPreview) for why this exists.
+// Slide-nested free-position drag: percentage math against the slide's own
+// canvas box (`.ds-slide-canvas`, the "slider" case's outer position:relative
+// div). Plain imperative pointer listeners, not a hook — ElPreview holds no
+// hooks of its own (see file header) since it's called as a plain function,
+// including recursively for nested slide elements.
+function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: number) => void) {
+  ev.stopPropagation();
+  const container = (ev.currentTarget as HTMLElement).closest(".ds-slide-canvas") as HTMLElement | null;
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  const target = ev.currentTarget as HTMLElement;
+  const startLeft = target.offsetLeft;
+  const startTop = target.offsetTop;
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  function move(e: PointerEvent) {
+    const xPct = Math.min(100, Math.max(0, ((startLeft + (e.clientX - startX)) / rect.width) * 100));
+    const yPct = Math.min(100, Math.max(0, ((startTop + (e.clientY - startY)) / rect.height) * 100));
+    apply(Math.round(xPct * 10) / 10, Math.round(yPct * 10) / 10);
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
 function mergeElBp(
   type: El["type"],
   props: Record<string, string>,
@@ -232,6 +260,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             lineHeight: 1.2,
             fontFamily: headingFontFamily(p.level),
             ...typoStyle(p),
+            ...elBorderShadowStyle(p),
           }}
           dangerouslySetInnerHTML={{ __html: p.text ? renderInline(p.text) : "Heading" }}
         />
@@ -239,7 +268,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
     case "text":
       return p.text ? (
         <div
-          style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap", lineHeight: 1.65, ...typoStyle(p) }}
+          style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap", lineHeight: 1.65, ...typoStyle(p), ...elBorderShadowStyle(p) }}
           dangerouslySetInnerHTML={{ __html: renderInline(p.text) }}
         />
       ) : (
@@ -253,7 +282,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           <img
             src={p.src}
             alt={p.alt ?? ""}
-            style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow), width: p.imgWidth || undefined, maxWidth: "100%" }}
+            style={{ borderRadius: elRadius(p), width: p.imgWidth || undefined, maxWidth: "100%", ...elBorderShadowStyle(p) }}
           />
         </div>
       ) : (
@@ -268,8 +297,8 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             className="inline-block rounded-full px-5 py-2 text-sm font-semibold"
             style={
               p.variant === "outline"
-                ? { border: "2px solid currentColor" }
-                : { backgroundColor: "var(--color-primary, #0f62fe)", color: "var(--color-primary-content, #fff)" }
+                ? { border: "2px solid currentColor", color: p.color || undefined, ...elBorderShadowStyle(p) }
+                : { backgroundColor: "var(--color-primary, #0f62fe)", color: p.color || "var(--color-primary-content, #fff)", ...elBorderShadowStyle(p) }
             }
           >
             {p.label || "Button"}
@@ -436,13 +465,18 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
               editor) — each nested element renders through ElPreview's own
               per-type switch above (real typography/colors/sizing, no
               slide-specific duplicate rendering code), just without a
-              `path` (no canvas drag/resize/inline-edit for nested content —
-              an accepted scope reduction, see the design doc's Mini-canvas
-              section). Clicking a nested element sets this slider's own
-              `sliderInnerSel` so the Inspector shows that element's Content/
-              Style fields instead of the slider's own. */}
+              `path` (no canvas-direct inline-text-edit for nested content —
+              an accepted scope reduction). An element with props.position
+              === "custom" opts out of the row/column flow and into drag-to-
+              move (startFreeElDrag, below) — position is computed against
+              THIS div (`.ds-slide-canvas`), which must stay the nearest
+              `position:relative` ancestor so the on-canvas math matches the
+              site's own `.ds-slide-content` containing block (see
+              SectionBlock.astro's mirrored CSS). Clicking a nested element
+              sets this slider's own `sliderInnerSel` so the Inspector shows
+              that element's Content/Style fields instead of the slider's own. */}
           <div
-            className={`relative z-[1] w-full max-w-[36rem] space-y-2 p-6 ${
+            className={`ds-slide-canvas relative z-[1] w-full max-w-[36rem] space-y-2 p-6 ${
               slide.textPosition === "left" ? "self-start" : slide.textPosition === "right" ? "self-end" : ""
             }`}
           >
@@ -457,13 +491,46 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                   <div key={`${r}.${c}`} className="space-y-2">
                     {col.elements.map((childEl, e) => {
                       const selected = innerSel?.r === r && innerSel?.c === c && innerSel?.e === e;
+                      const childIsFree = bpGetValue(childEl.props.position, childEl.bp, "position") === "custom";
                       return (
                         <div
                           key={childEl.id}
                           onClick={() => setSliderInnerSel((m) => ({ ...m, [el.id]: { r, c, e } }))}
+                          onPointerDown={
+                            childIsFree && path
+                              ? (ev) => {
+                                  startFreeElDrag(ev, (xPct, yPct) => {
+                                    mutate((bs) => {
+                                      const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
+                                      const currentSlides = parseSlides(target.props.slides);
+                                      const s0 = currentSlides[slideIdx];
+                                      if (!s0) return;
+                                      const xv = String(xPct);
+                                      const yv = String(yPct);
+                                      currentSlides[slideIdx] =
+                                        bp === "desktop"
+                                          ? updateSlideElementProps(s0, r, c, e, { x: xv, y: yv })
+                                          : updateSlideElementBp(s0, r, c, e, { ...(childEl.bp ?? {}), [`${bp}:x`]: xv, [`${bp}:y`]: yv });
+                                      target.props.slides = stringifySlides(currentSlides);
+                                    });
+                                  });
+                                }
+                              : undefined
+                          }
                           className={`cursor-pointer rounded ${
                             selected ? "outline outline-2 outline-accent" : "hover:outline hover:outline-1 hover:outline-white/40"
-                          }`}
+                          } ${childIsFree ? "cursor-move" : ""}`}
+                          style={
+                            childIsFree
+                              ? {
+                                  position: "absolute",
+                                  top: `${bpGetValue(childEl.props.y, childEl.bp, "y") || "10"}%`,
+                                  left: `${bpGetValue(childEl.props.x, childEl.bp, "x") || "10"}%`,
+                                  width: bpGetValue(childEl.props.posWidth, childEl.bp, "posWidth") || undefined,
+                                  height: bpGetValue(childEl.props.posHeight, childEl.bp, "posHeight") || undefined,
+                                }
+                              : { ...elMarginStyle(childEl.props ?? {}), ...elPaddingStyle(childEl.props ?? {}) }
+                          }
                         >
                           {ElPreview({ ctx, el: childEl })}
                         </div>

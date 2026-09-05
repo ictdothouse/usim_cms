@@ -91,6 +91,41 @@ export function lengthValue(v: string | undefined, table: Record<string, string>
   return table[v] ?? v;
 }
 
+// Plain (non-bp) margin/padding — for elements that don't carry a `bp` bag
+// of their own, e.g. slide-nested elements (see ElPreview's "slider" case).
+// Designer.tsx's bpMarginStyle()/bpPaddingStyle() do the same thing plus a
+// bp-merge step for top-level elements; those stay closures over Designer()
+// state, so this is the bp-less subset factored out for reuse here instead.
+export function elMarginStyle(p: Record<string, string>): React.CSSProperties | undefined {
+  if (!p.marginY && !p.marginX && !p.marginTop && !p.marginRight && !p.marginBottom && !p.marginLeft) return undefined;
+  const side = (per: string, axis: string) => lengthValue(p[per] || p[axis], SPACE, "0");
+  return {
+    margin: `${side("marginTop", "marginY")} ${side("marginRight", "marginX")} ${side("marginBottom", "marginY")} ${side("marginLeft", "marginX")}`,
+  };
+}
+export function elPaddingStyle(p: Record<string, string>): React.CSSProperties | undefined {
+  if (!p.padding && !p.paddingTop && !p.paddingRight && !p.paddingBottom && !p.paddingLeft) return undefined;
+  const side = (per: string) => lengthValue(p[per] || p.padding, PAD, "0");
+  return { padding: `${side("paddingTop")} ${side("paddingRight")} ${side("paddingBottom")} ${side("paddingLeft")}` };
+}
+
+// Border/shadow escape hatch shared by heading/text/button/image — mirrors
+// colStyle()'s border/boxShadow lines, just factored out so any element type
+// can opt in without duplicating the borderWidth-wins-over-border fallback.
+export function elBorderShadowStyle(p: Record<string, string>): React.CSSProperties {
+  // Omit unset keys entirely (rather than setting them to `undefined`) so
+  // spreading this into a style object never clobbers a variant's own
+  // default border (e.g. button's outline variant) when the author hasn't
+  // overridden it.
+  const border = p.borderWidth
+    ? `${p.borderWidth}px ${p.borderStyle || "solid"} ${p.borderColor || "currentColor"}`
+    : p.border
+      ? BORDER[p.border]
+      : undefined;
+  const boxShadow = shadowToCss(p.shadow);
+  return { ...(border ? { border } : {}), ...(boxShadow ? { boxShadow } : {}) };
+}
+
 export function typoStyle(p: Record<string, string>): React.CSSProperties {
   const s: React.CSSProperties = {};
   if (p.fontFamily) s.fontFamily = p.fontFamily;

@@ -142,6 +142,81 @@ test("accepts a slider with the current rows-based slide shape", () => {
   assert.equal(validateLayout(layout), null);
 });
 
+test("accepts a slide-nested element with free-position props and a real bp override", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                elements: [
+                  {
+                    type: "slider",
+                    props: {
+                      slides: JSON.stringify([
+                        {
+                          imageUrl: "",
+                          rows: [
+                            {
+                              columns: [
+                                {
+                                  elements: [
+                                    {
+                                      type: "button",
+                                      props: { label: "Go", href: "/x", position: "custom", x: "40", y: "20", posWidth: "12rem", posHeight: "3rem" },
+                                      bp: { "mobile:x": "10", "mobile:y": "80" },
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ]),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  assert.equal(validateLayout(layout), null);
+});
+
+test("rejects an unrecognized slide-nested element position value", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                elements: [
+                  {
+                    type: "slider",
+                    props: {
+                      slides: JSON.stringify([
+                        { imageUrl: "", rows: [{ columns: [{ elements: [{ type: "button", props: { label: "Go", href: "/x", position: "floating" } }] }] }] },
+                      ]),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  assert.match(validateLayout(layout) ?? "", /unrecognized/);
+});
+
 test("accepts a slider still in the legacy heading/subtitle/buttons shape (not yet upgraded)", () => {
   const layout = [
     {
