@@ -1724,11 +1724,32 @@ function ThemeForm({
   const [showPostAuthor, setShowPostAuthor] = useState("");
   const [showPostDate, setShowPostDate] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
+  const [faviconUrl, setFaviconUrl] = useState("");
+  const [brandUploading, setBrandUploading] = useState<"logo" | "favicon" | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [presets, setPresets] = useState<api.ThemePreset[]>([]);
   const [presetName, setPresetName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Branding assets upload into this site's own media library — only
+  // possible for a per-site ThemeForm (previewTenantHost set); the Global
+  // Theme form has no single tenant's media library to upload into, so it
+  // keeps the plain URL field only, same as logoUrl already did.
+  async function uploadBrandAsset(file: File, kind: "logo" | "favicon") {
+    if (!previewTenantHost) return;
+    setBrandUploading(kind);
+    try {
+      const url = await api.uploadMedia(previewTenantHost, token, file);
+      const full = url.startsWith("http") ? url : api.API_URL + url;
+      if (kind === "logo") setLogoUrl(full);
+      else setFaviconUrl(full);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBrandUploading(null);
+    }
+  }
 
   const currentColors = () => ({
     primaryColor,
@@ -1745,6 +1766,7 @@ function ThemeForm({
     showPostAuthor,
     showPostDate,
     logoUrl,
+    faviconUrl,
   });
 
   async function refreshPresets() {
@@ -1771,6 +1793,7 @@ function ThemeForm({
       setShowPostAuthor(th.showPostAuthor ?? "");
       setShowPostDate(th.showPostDate ?? "");
       setLogoUrl(th.logoUrl ?? "");
+      setFaviconUrl(th.faviconUrl ?? "");
     });
     void refreshPresets();
   }, []);
@@ -1813,6 +1836,7 @@ function ThemeForm({
     setShowPostAuthor(p.settings.showPostAuthor ?? "");
     setShowPostDate(p.settings.showPostDate ?? "");
     setLogoUrl(p.settings.logoUrl ?? "");
+    setFaviconUrl(p.settings.faviconUrl ?? "");
   }
 
   // Fills all 4 font roles from one curated pairing — heading, sub-heading,
@@ -2154,10 +2178,37 @@ function ThemeForm({
               {t("theme-show-date")}
             </label>
           </div>
-          <label className="block text-xs font-medium text-body">
-            {t("theme-logo")}
-            <input className={`${inputCls} mt-1`} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} />
-          </label>
+          <div className="space-y-3 rounded-xl border border-line/20 p-3">
+            <p className="text-xs font-semibold text-body">{t("theme-branding")}</p>
+            {(
+              [
+                ["logo", t("theme-logo"), logoUrl, setLogoUrl, "h-10"],
+                ["favicon", t("theme-favicon"), faviconUrl, setFaviconUrl, "h-8 w-8"],
+              ] as const
+            ).map(([kind, label, value, setValue, previewCls]) => (
+              <label key={kind} className="block text-xs font-medium text-body">
+                {label}
+                <div className="mt-1 flex items-center gap-2">
+                  <input className={inputCls} value={value} placeholder="https://" onChange={(e) => setValue(e.target.value)} />
+                  {previewTenantHost && (
+                    <label className="inline-block shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-canvas px-3 py-1.5 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+                      {brandUploading === kind ? t("designer-uploading") : t("designer-upload")}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void uploadBrandAsset(f, kind);
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+                {value && <img src={value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
+              </label>
+            ))}
+          </div>
           <button type="submit" className={btnPrimary}>
             {t("theme-save")}
           </button>
