@@ -100,7 +100,7 @@ export function FieldGroups({
                   <label key={f.key} className="block text-[11px] font-medium text-body">
                     <span className="inline-flex items-center gap-1">
                       {FieldLabel(f.labelKey, t)}
-                      {hasOverride && onToggleOverride && f.kind !== "slides" && (
+                      {hasOverride && onToggleOverride && f.kind !== "slides" && f.kind !== "image" && (
                         <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
                       )}
                     </span>

@@ -50,6 +50,7 @@ const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length
 
 // See its one call site (top of ElPreview) for why this exists.
 function mergeElBp(
+  type: El["type"],
   props: Record<string, string>,
   bpBag: Record<string, string> | undefined,
   bp: "desktop" | "tablet" | "mobile",
@@ -59,6 +60,12 @@ function mergeElBp(
   const keys = new Set(Object.keys(props));
   for (const k of Object.keys(bpBag)) keys.add(k.slice(k.indexOf(":") + 1));
   keys.delete("slides");
+  // "image"-kind fields (logo/bgImage) are excluded from bp routing at the
+  // Inspector level (see its own comment) — deleting any of their keys here
+  // too means an element saved BEFORE that fix, still carrying a stray
+  // empty "mobile:src"/"tablet:src" override from the old footgun, self-
+  // heals on next render instead of permanently masking the real src.
+  for (const f of ELS[type].fields) if (f.kind === "image") keys.delete(f.key);
   const merged: Record<string, string> = { ...props };
   for (const k of keys) merged[k] = bpGetValue(props[k], bpBag, k);
   return merged;
@@ -79,7 +86,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
   // (see fieldGroupsProps's own comment in Inspector.tsx); "slides" is
   // excluded here for the same reason that fix bypasses it — it manages
   // its own per-item bp overrides internally, not via this bag.
-  const p = mergeElBp(el.props, el.bp, bp, bpGetValue);
+  const p = mergeElBp(el.type, el.props, el.bp, bp, bpGetValue);
   // Blocks is a structure-only skeleton (icon + type + a short content
   // hint) — just enough to see layout/arrangement while dragging/
   // reordering. Live Edit is untouched below: same real rendering

@@ -1915,7 +1915,11 @@ export default function Designer({
     try {
       if (kind === "siteChrome") {
         if (dirty) await saveSiteChrome();
-        setPreviewModal({ src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer"), device: "desktop" });
+        // Opens at whatever breakpoint the canvas itself is currently
+        // previewing (bp) instead of always "desktop" — editing under
+        // Mobile/Tablet and hitting Preview used to silently jump back to
+        // desktop, a mismatch reported as "preview tak tepat".
+        setPreviewModal({ src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer"), device: bp });
         return;
       }
       if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
@@ -1927,7 +1931,8 @@ export default function Designer({
         kind === "blueprint"
           ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
           : api.previewUrl(tenantHost, page.slug as string, previewToken);
-      setPreviewModal({ src, device: "desktop" });
+      // Same bp-matches-canvas fix as the siteChrome branch above.
+      setPreviewModal({ src, device: bp });
     } catch (err) {
       setError((err as Error).message);
     }
