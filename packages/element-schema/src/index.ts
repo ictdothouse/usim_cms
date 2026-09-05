@@ -269,35 +269,68 @@ function isSafeSlideText(v: unknown): boolean {
   }
   return true;
 }
-function isSafeSlide(s: unknown): boolean {
-  if (typeof s !== "object" || s === null) return false;
-  const o = s as Record<string, unknown>;
-  if (typeof o.imageUrl !== "string" || (o.imageUrl && !isSafeCssUrl(o.imageUrl))) return false;
-  if (o.bgColor !== undefined && o.bgColor !== "" && (typeof o.bgColor !== "string" || !HEX_COLOR_RE.test(o.bgColor))) return false;
-  if (!isSafeSlideText(o.heading) || !isSafeSlideText(o.subtitle)) return false;
-  if (o.textPosition !== undefined && !["left", "center", "right"].includes(o.textPosition as string)) return false;
-  if (o.overlayColor !== undefined && (typeof o.overlayColor !== "string" || !HEX_COLOR_RE.test(o.overlayColor))) return false;
-  if (o.overlayOpacity !== undefined && (typeof o.overlayOpacity !== "string" || !NUM_RE.test(o.overlayOpacity))) return false;
-  if (o.buttons !== undefined) {
-    if (!Array.isArray(o.buttons)) return false;
-    if (!o.buttons.every(isSafeSlideButton)) return false;
+// bgSize (background-size/repeat for the slide's own image) — new field
+// added alongside the rows: Row[] rework below.
+const SLIDE_BG_SIZES = ["cover", "contain", "repeat", "no-repeat", "auto"];
+
+// Post-rework, a slide's heading/subtitle/buttons are real elements inside
+// its own `rows: Row[]` tree — the SAME row/column/element validation path
+// (validateRow/validateColumn/validateElement below) that already validates
+// a Section's own rows, reused here rather than duplicated. isSafeSlideText/
+// isSafeSlideButton above are kept for the legacy shape branch only (a slide
+// saved before this rework, still carrying heading/subtitle/buttons and no
+// `rows` — see apps/admin/src/designer/parsers.ts's parseSlides for the
+// matching read-side dual-shape handling).
+function isSafeSlideRows(rows: unknown, path: string): string | null {
+  if (!Array.isArray(rows)) return `${path} must be an array`;
+  for (let i = 0; i < rows.length; i++) {
+    const err = validateRow(rows[i], `${path}[${i}]`);
+    if (err) return err;
   }
-  return true;
+  return null;
 }
-function isSafeSlides(value: string): boolean {
+function isSafeSlide(s: unknown, path: string): string | null {
+  if (typeof s !== "object" || s === null) return `${path} must be an object`;
+  const o = s as Record<string, unknown>;
+  if (typeof o.imageUrl !== "string" || (o.imageUrl && !isSafeCssUrl(o.imageUrl))) return `${path}.imageUrl has an unsafe URL`;
+  if (o.bgSize !== undefined && o.bgSize !== "" && !SLIDE_BG_SIZES.includes(o.bgSize as string)) return `${path}.bgSize has an unrecognized value`;
+  if (o.bgColor !== undefined && o.bgColor !== "" && (typeof o.bgColor !== "string" || !HEX_COLOR_RE.test(o.bgColor)))
+    return `${path}.bgColor must be a hex color`;
+  if (o.textPosition !== undefined && !["left", "center", "right"].includes(o.textPosition as string))
+    return `${path}.textPosition has an unrecognized value`;
+  if (o.overlayColor !== undefined && (typeof o.overlayColor !== "string" || !HEX_COLOR_RE.test(o.overlayColor)))
+    return `${path}.overlayColor must be a hex color`;
+  if (o.overlayOpacity !== undefined && (typeof o.overlayOpacity !== "string" || !NUM_RE.test(o.overlayOpacity)))
+    return `${path}.overlayOpacity must be numeric`;
+  if (Array.isArray(o.rows)) return isSafeSlideRows(o.rows, `${path}.rows`);
+  // Legacy shape (pre-rework, no `rows` yet).
+  if (!isSafeSlideText(o.heading) || !isSafeSlideText(o.subtitle)) return `${path} has an unsafe legacy heading/subtitle`;
+  if (o.buttons !== undefined) {
+    if (!Array.isArray(o.buttons)) return `${path}.buttons must be an array`;
+    if (!o.buttons.every(isSafeSlideButton)) return `${path}.buttons has an unsafe button`;
+  }
+  return null;
+}
+function isSafeSlides(value: string): string | null {
   try {
     const parsed: unknown = JSON.parse(value);
-    if (Array.isArray(parsed)) return parsed.every(isSafeSlide);
+    if (Array.isArray(parsed)) {
+      for (let i = 0; i < parsed.length; i++) {
+        const err = isSafeSlide(parsed[i], `slides[${i}]`);
+        if (err) return err;
+      }
+      return null;
+    }
   } catch {
     // Not JSON — legacy pipe-line format, checked below.
   }
   for (const line of value.split("\n")) {
     if (!line.trim()) continue;
     const [image, , , , href] = line.split("|");
-    if (image && !isSafeCssUrl(image)) return false;
-    if (href && !isSafeUrl(href)) return false;
+    if (image && !isSafeCssUrl(image)) return "slides has an unsafe image URL";
+    if (href && !isSafeUrl(href)) return "slides has an unsafe button URL";
   }
-  return true;
+  return null;
 }
 
 // cardgrid's `cards` field (Sprint 5) — a JSON array of {image, title,
@@ -417,7 +450,7 @@ function validateValue(key: string, value: unknown): string | null {
     }
     return null;
   }
-  if (key === "slides") return isSafeSlides(value) ? null : `${key} contains an unsafe URL`;
+  if (key === "slides") return isSafeSlides(value);
   if (key === "cards") return isSafeCards(value) ? null : `${key} contains an unsafe URL`;
   if (REPEATER_SCHEMAS[key]) return isSafeRepeaterItems(value, key) ? null : `${key} contains an unsafe value`;
   if (FREE_TEXT_KEYS.has(key)) return null;

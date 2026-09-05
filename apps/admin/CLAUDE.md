@@ -35,6 +35,55 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   convention below: accordion is native `<details>`/`<summary>` (zero JS, `name`-grouped only when the
   author opts into "one open at a time"); tabs is the one exception needing a real click handler, a small
   event-delegated `<script>` Astro bundles once per page regardless of how many instances render.
+  **Slider/banner was reworked 2026-09-05 — everything below through the "Section/Row/Column/Element
+  already had a per-breakpoint STYLE-override system" paragraph describes the OLD (pre-rework)
+  heading/subtitle/button drag-resize/smart-guide implementation, kept here only as historical context
+  for anyone reading old commits; it no longer reflects the current code.** The current shape: a slide
+  is `{ imageUrl, bgSize, bgColor, overlayColor, overlayOpacity, textPosition, rows: Row[] }`
+  (`designer/types.ts`'s `SlideItem`) — the same `Row[]→Col[]→El[]` tree a Section's own body already
+  is, reusing every real element type (heading/text/button/image) and the Inspector's normal field
+  editor instead of a bespoke heading/subtitle/button schema. A freshly-added slide has `rows: []`
+  (placeholder-only, matching every other element's already-opt-in `buttons`); the slides field editor
+  (`FieldInput.tsx`) has dedicated **Add Text/Button/Image/Row** buttons per slide, plus a small
+  per-slide layer list (click a layer to edit it, trash icon to delete it, a row-level delete once a
+  slide has more than one row). Legacy slides (still carrying the old `heading`/`subtitle`/`buttons`
+  keys) are silently upgraded to an equivalent `rows` tree on read (`parsers.ts`'s
+  `legacySlideElements`/`legacySlideRows`, mirrored in `SectionBlock.astro`) — a legacy button's own
+  `color`/`textColor`/`radius`/`fontSize`/custom-position have no equivalent on the standalone `button`
+  element type and are dropped on upgrade, an accepted one-time fidelity loss.
+  **Selection is NOT part of Designer's global `Sel`** — a real attempt to make the slide's own
+  `rows`/`Col`/`El` tree share Designer.tsx's actual Row→Column→Element canvas code (its real path/
+  mutation addressing) was investigated and abandoned: that code is ~1000+ lines inlined directly in
+  `Designer.tsx`, hardcoded to absolute `[b,r,c,e]` path indices with mutation callbacks written as
+  literal tree traversals, and rewriting it to be relative/composable would be a much larger, riskier
+  refactor than this rework needed, touching the core canvas in daily production use. Instead: a
+  slide's own mini-canvas (`ElPreview.tsx`'s `"slider"` case) renders each nested element by calling
+  `ElPreview({ ctx, el: childEl })` directly — no `path` — which already works standalone (`path` is
+  optional and only gates the inline-contentEditable-edit shortcut), giving real typography/color/
+  sizing rendering for free with zero changes to Designer's core selection/mutation system. Clicking a
+  nested element sets new `DesignerCtx` state, `sliderInnerSel: Record<sliderElId, {r,c,e}|null>` —
+  when the currently-selected top-level element is a slider AND that slider has a `sliderInnerSel`
+  entry, `Inspector.tsx`'s `sel.length === 4` branch shows THAT nested element's own Content/Style
+  fields (same `FieldGroups`/`FieldInput` call shape as a normal element) instead of the slider's own,
+  writing through `parsers.ts`'s `updateSlideElementProps` (parse `slides` → mutate the nested node →
+  re-stringify). **Accepted scope reduction**: nested slide elements get no canvas drag/resize/inline-
+  edit, no padding/margin/grid controls, and no per-breakpoint (`bp`) override of their own — real
+  editing happens through the Inspector's normal fields, not the canvas.
+  **Slider height** (`p.height`, the element's own top-level field, unrelated to per-slide `rows`) is
+  the one Element-level field with a REAL per-breakpoint override — every other Element style field is
+  still admin-canvas-preview-only (see the deferred note further below). `SectionBlock.astro` pushes a
+  `bpStyleRules` rule scoped to `[data-vis="elId"] .ds-slider` (mirroring the pre-existing `imgWidth`
+  per-breakpoint-image-width pattern right next to it) so a tablet/mobile-only height set via the
+  Inspector's BpToggle actually renders on the published site, not just in the admin canvas.
+  **Corner radius**: `image`/`embed`/`gallery` no longer default to a rounded corner —
+  `elRadius()` (`style.ts`/`SectionBlock.astro`) now falls back to `RADIUS.none` like Section/Column
+  already did, and those 3 element types' own `radius` default was changed from `"md"` to `""`. A
+  radius only ever appears when the author explicitly sets one.
+  **Not done in this rework** (deliberately out of scope, tracked as follow-ups if ever asked for):
+  Designer admin-panel UI responsiveness (sidebar/Inspector/canvas on a narrow browser window) — a
+  separate concern from the slider rework, no code overlap; see
+  `docs/superpowers/specs/2026-09-05-slider-banner-rework-design.md` for the full design.
+
   Slider/banner's `slides` field is a **JSON array**, one object per slide (`imageUrl`, `heading`,
   `subtitle`, `textPosition` — left/center/right —, `overlayColor`+`overlayOpacity` for the darkening
   scrim, and a `buttons` array — each button its own card in the Inspector (not a cramped single-line

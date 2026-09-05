@@ -145,15 +145,14 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
-import type { SlideButton, SlideText, EdgeRect, GapMark, Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem, Sel, PageSettings } from "./designer/types";
-import { parsePairs, parseSlideText, parseSlideButtons, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
-import { nudgePosition, edgeGap, fitTextBox, fluidPreviewPx } from "./designer/geometry";
+import type { Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem, Sel, PageSettings } from "./designer/types";
+import { parsePairs, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
 import { TemplatePreview } from "./designer/TemplatePreview";
 import {
   PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle,
   SPACE, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK, RADIUS_CORNER_KEYS,
 } from "./designer/style";
-import { TYPOGRAPHY_FIELDS, TEXT_BASE_PX, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel, SECTION_FIELDS, COLUMN_FIELDS, COLUMN_SPACING_KEYS, CSS_CLASS_FIELD } from "./designer/fields";
+import { TYPOGRAPHY_FIELDS, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel, SECTION_FIELDS, COLUMN_FIELDS, COLUMN_SPACING_KEYS, CSS_CLASS_FIELD } from "./designer/fields";
 import { BufferedInput, BpToggle } from "./designer/FieldControls";
 import { FieldGroups } from "./designer/FieldGroups";
 import { Inspector } from "./designer/Inspector";
@@ -924,58 +923,21 @@ export default function Designer({
   const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
-  // Same stable-snapshot-while-typing pattern as editingText above, but for
-  // slider heading/subtitle canvas-direct editing: keyed by `${el.id}:${itemKey}`
-  // since a slider has two independently-editable text items, not one.
-  const editingSliderText = useRef<Record<string, string>>({});
-  // Which slider item (per element id) is currently in canvas-direct edit
-  // mode — entered via double-click (single click/drag is already bound to
-  // move), exited on blur.
-  const [sliderEditingItem, setSliderEditingItem] = useState<Record<string, string | null>>({});
-  // Slider button canvas drag: DOM refs for each slider element's own preview
-  // box + text block (keyed by el.id, same convention as editingText above —
-  // a flat single ref would get overwritten by whichever slider block
-  // rendered last if a page has more than one), and the transient "smart
-  // guide" state a drag shows (center-alignment lines + a text-block spacing
-  // indicator) — tagged with elId so only the slider block actually being
-  // dragged renders its own guide, not every slider on the page.
-  // `items` is keyed "heading" | "subtitle" | "btn-<index>" — one flat map
-  // for every draggable/resizable thing a slide can have, so the smart-guide
-  // candidate search (below) doesn't need to special-case text vs buttons.
-  const sliderPreviewRefs = useRef<Record<string, { box: HTMLElement | null; items: Record<string, HTMLElement | null> }>>(
-    {},
-  );
   // Which slide each slider element is previewing on the Blocks canvas, keyed
-  // by element id (same per-element keying as sliderPreviewRefs — a page can
-  // hold several sliders). The canvas used to hard-code slides[0], so adding a
-  // button or editing text on slide 2+ appeared to do nothing at all: the
-  // Inspector edits every slide, the canvas only ever drew the first one. The
-  // dots along the bottom of the preview drive this now instead of being
-  // decorative.
+  // by element id (a page can hold several sliders). The canvas used to
+  // hard-code slides[0], so adding content to slide 2+ appeared to do nothing
+  // at all: the Inspector edits every slide, the canvas only ever drew the
+  // first one. The dots along the bottom of the preview drive this now
+  // instead of being decorative.
   const [sliderSlideIdx, setSliderSlideIdx] = useState<Record<string, number>>({});
-  const [sliderGuide, setSliderGuide] = useState<{
-    elId: string;
-    vCenter: boolean;
-    hCenter: boolean;
-    // vGap = a vertical (top/bottom) spacing tick, hGap = a horizontal
-    // (left/right) one — against whichever candidate (text block or another
-    // button) is nearest on that axis, not every candidate at once.
-    vGap: { top: number; left: number; length: number } | null;
-    hGap: { top: number; left: number; length: number } | null;
-    // vGapMatches/hGapMatches = every OTHER pair of items (not involving the
-    // dragged one) whose own gap on that axis happens to equal vGap/hGap's
-    // length — e.g. the two untouched buttons either side of the one being
-    // dragged already sit 33px apart, same as the gap just formed by the
-    // drag, so both get a tick, not just the dragged item's own nearest one.
-    vGapMatches: { top: number; left: number; length: number }[];
-    hGapMatches: { top: number; left: number; length: number }[];
-    // alignX/alignY = a full-height/full-width pink guide line (box-relative
-    // px) when the dragged item's own center lands on another item's center
-    // on that axis — sibling-to-sibling alignment, distinct from vCenter/
-    // hCenter above (which only snap to the slide box's own 50% center).
-    alignX: number | null;
-    alignY: number | null;
-  } | null>(null);
+  // Which nested row/column/element inside the CURRENTLY-PREVIEWED slide is
+  // selected for editing, keyed by the slider element's own id — separate
+  // from Designer's own global `sel` (which only ever addresses
+  // section/row/column/element paths, never reaches inside a slide). Set by
+  // clicking a Text/Button/Image/Row chip on the slide's own mini-canvas;
+  // read by Inspector to show that nested element's own Content/Style tabs
+  // instead of the slider's own fields.
+  const [sliderInnerSel, setSliderInnerSel] = useState<Record<string, { r: number; c: number; e: number } | null>>({});
   const frameARef = useRef<HTMLIFrameElement>(null);
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
@@ -2375,7 +2337,8 @@ export default function Designer({
     setFourSideValue, setColSideValue, setElSideValue,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
-    iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx, uploadImage,
+    iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
+    sliderInnerSel, setSliderInnerSel, uploadImage,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
@@ -2384,7 +2347,7 @@ export default function Designer({
     setRowGap, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow, clipHas, styleHas,
     nudgeColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, saveAsTemplate,
     moveElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, duplicateElement, deleteElement,
-    editingText, editingSliderText, sliderPreviewRefs, sliderGuide, setSliderGuide, sliderEditingItem, setSliderEditingItem,
+    editingText,
   };
 
   // ---------- render ----------

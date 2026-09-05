@@ -97,6 +97,134 @@ test("rejects an invalid locked value", () => {
   assert.match(validateLayout(layout) ?? "", /unrecognized/);
 });
 
+test("accepts a slider with the current rows-based slide shape", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                elements: [
+                  {
+                    type: "slider",
+                    props: {
+                      height: "32rem",
+                      slides: JSON.stringify([
+                        {
+                          imageUrl: "https://example.com/a.jpg",
+                          bgSize: "cover",
+                          rows: [
+                            {
+                              columns: [
+                                {
+                                  elements: [
+                                    { type: "heading", props: { text: "Hi", level: "2", align: "left" } },
+                                    { type: "button", props: { label: "Go", href: "/x", variant: "primary" } },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ]),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  assert.equal(validateLayout(layout), null);
+});
+
+test("accepts a slider still in the legacy heading/subtitle/buttons shape (not yet upgraded)", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                elements: [
+                  {
+                    type: "slider",
+                    props: {
+                      slides: JSON.stringify([
+                        { imageUrl: "", heading: "Legacy heading", subtitle: "Legacy subtitle", buttons: [{ label: "Go", href: "/x" }] },
+                      ]),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  assert.equal(validateLayout(layout), null);
+});
+
+test("rejects a javascript: URL smuggled into a slide's nested button href", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                elements: [
+                  {
+                    type: "slider",
+                    props: {
+                      slides: JSON.stringify([
+                        {
+                          imageUrl: "",
+                          rows: [{ columns: [{ elements: [{ type: "button", props: { label: "Go", href: "javascript:alert(1)" } }] }] }],
+                        },
+                      ]),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  assert.match(validateLayout(layout) ?? "", /unsafe URL/);
+});
+
+test("rejects an unrecognized slide bgSize value", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                elements: [
+                  { type: "slider", props: { slides: JSON.stringify([{ imageUrl: "", bgSize: "zoom", rows: [] }]) } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  assert.match(validateLayout(layout) ?? "", /unrecognized/);
+});
+
 test("rejects a repeater item with an unrecognized key", () => {
   const layout = [
     {

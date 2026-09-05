@@ -52,6 +52,12 @@ export interface FieldGroupsProps {
   setSliderSlideIdx: (
     v: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>),
   ) => void;
+  sliderInnerSel: Record<string, { r: number; c: number; e: number } | null>;
+  setSliderInnerSel: (
+    v:
+      | Record<string, { r: number; c: number; e: number } | null>
+      | ((prev: Record<string, { r: number; c: number; e: number } | null>) => Record<string, { r: number; c: number; e: number } | null>),
+  ) => void;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
   bpGetValue: (base: string | undefined, overrides: Record<string, string> | undefined, key: string) => string;
   bpKeysOverridden: (bag: Record<string, string> | undefined, keys: string[]) => boolean;
@@ -69,6 +75,7 @@ export function FieldGroups({
   fields, getValue, setValue, only, hasOverride, onToggleOverride,
   collapsedGroups, toggleGroup, bp, t,
   iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
+  sliderInnerSel, setSliderInnerSel,
   uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey, availableMenus, availableCategories, ICONS,
 }: FieldGroupsProps) {
   const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
@@ -108,6 +115,7 @@ export function FieldGroups({
                       {FieldInput({
                         field: f, value: getValue(f), onChange: (v) => setValue(f, v),
                         iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
+                        sliderInnerSel, setSliderInnerSel,
                         bp, t, uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
                         availableMenus, availableCategories, ICONS,
                       })}

@@ -126,32 +126,58 @@ default Column already has for a freshly-added Row). No default styling beyond e
 type's own normal `ELS` defaults — a newly-added Text starts exactly like a Text element dropped
 onto a normal page, not with slide-specific defaults.
 
-## Mini-canvas + selection
+## Mini-canvas + selection (revised after implementation-time verification)
 
-This is the core structural change. `ElPreview.tsx`'s `"slider"` case stops hand-rendering
-heading/subtitle/button chips with slider-specific drag/resize/smart-guide code
-(`textChip`/`btnChip`/`startMove`/`startResize`/`startCornerScale`/`startWidthResize`, the
-~700-line block from line ~402). Instead, for the currently-previewed slide
-(`sliderSlideIdx[el.id]`), it renders that slide's `rows: Row[]` through the **same recursive
-row/column/element render function** Section already calls for its own body — not a copy of it.
-This is a refactor precondition: the existing Section-body render logic in `Designer.tsx`/
-`ElPreview.tsx` needs to be callable as a function taking `(rows, basePath, ctx)` rather than
-being inlined only at the top level, so both a real Section and a slide's own `rows` can call it.
+**Verified before writing this section** (per the Risk this spec originally flagged): Section's
+Row→Column→Element canvas is *not* a callable function — it's ~1000+ lines inlined directly in
+`Designer.tsx`'s JSX (`Designer.tsx:2977-3390`), hardcoded to absolute path indices (`[b,r,c,e]`)
+with mutation callbacks written as literal `section(next, b).rows[r].columns[c]` traversals, plus
+per-side padding/margin drag-handle chrome keyed off those same indices. Making a slide *literally*
+share this exact code would mean rewriting Designer's whole path/mutation addressing scheme to be
+relative/composable — a much larger, riskier refactor than this spec originally assumed, touching
+the core canvas in daily production use. Decided against doing that refactor now.
 
-**Selection path.** `Sel` (`types.ts:328`, today `number[] | null` of length 1-4) gains a 5th+
-depth for content inside a slide: selecting something inside slide index `si` of slider element
-path `[b,r,c,e]` extends to `[b,r,c,e, si, ...innerPath]` where `innerPath` is itself a 1-3 length
-row/col/el path *within that slide's own `rows[]`* — structurally the same shape as a top-level
-path, just nested one level under a slide marker. `pick()`, `selCls()`, and the Inspector's
-level-dispatch (`sel.length === 1/2/3/4` today) extend their length checks to recognize this
-nested form (`sel.length` 6/7/8 for slide-row/slide-col/slide-el, gated on `sel[4]` being a slide
-index rather than a plain row index — reusing the same functions with an extra prefix segment,
-not new parallel functions). Clicking inside a slide's placeholder area with nothing added yet
-shows the 4 add-buttons directly on canvas (not just in the Inspector), same "empty column shows
-an add-element hint" pattern Column already has today.
+**What's reused instead — confirmed safe:** `ElPreview({ ctx, el, path })`
+(`apps/admin/src/designer/ElPreview.tsx:74`) already takes `path` as *optional*, and its per-type
+render `switch` (`heading`/`text`/`image`/`button` cases, lines 226-280) never depends on `path`
+for anything except the inline-contentEditable-edit toggle (`editable = path && selEq(sel, path)`,
+line 191) and that toggle's own `mutate()` commit callback (which does assume a literal 4-length
+`[b,r,c,e]`, only reached when `editable` is true). This means `ElPreview({ ctx, el })` — path
+omitted — can be called directly on any `El` node anywhere, including one nested inside a slide,
+and gets fully real heading/text/image/button rendering (typography, colors, sizing) for free,
+with zero changes to Designer's core selection/mutation system. The one accepted gap: a slide's
+nested heading/text element doesn't get the canvas double-click-to-edit-inline shortcut (no `path`
+to compare against `sel`) — editing goes through the Inspector's normal field editor instead, same
+as editing a button's label always has.
 
-Guides/handles/drag/resize/typography controls are inherited for free from the real
-Row/Col/El render path — no new guide code is written for slides specifically.
+**Slide's own render + selection is new, small, and separate from Designer's global `Sel`.** A
+slide's `rows: Row[]` renders via a new, slide-scoped function (in `ElPreview.tsx`, next to the
+slider case) that walks `rows → columns → elements` with a simple stacked-flex layout (no
+per-column span/gap grid system, no padding/margin drag-handle chrome — the scoped-down decision)
+and calls `ElPreview({ ctx, el })` per element for the actual content. Selecting one of these nested
+elements does **not** touch the global `Sel`/`pick()`/`selCls()` — it's tracked in new
+`DesignerCtx` state, `sliderInnerSel: Record<string, { r: number; c: number; e: number } | null>`
+keyed by the slider element's own id (mirrors the existing `sliderSlideIdx` per-element-id keying
+convention). A click sets `sliderInnerSel[sliderElId]`; the Inspector, when the currently-selected
+top-level element (`sel = [b,r,c,e]`) is a slider **and** that slider has a `sliderInnerSel` entry,
+renders that inner element's own Content/Style tabs (reusing `FieldGroups`/`FieldInput` generically,
+same call convention as a normal depth-4 element) instead of the slider's own fields, with a "back
+to slide settings" affordance to clear the inner selection.
+
+**Mutation.** A new helper mutates a slide's nested element by: reading the slider `El` at
+`section(bs,b).rows[r].columns[c].elements[e]`, parsing its `props.slides` via `parseSlides`,
+mutating `slides[slideIdx].rows[r2].columns[c2].elements[e2]` per a callback, then writing back
+through `stringifySlides` into `props.slides` — the same parse/mutate/stringify round trip the
+slides field editor already uses today, just reaching one level deeper.
+
+Clicking inside a slide's placeholder area with nothing added yet shows the 4 add-buttons directly
+on canvas (mirrors Column's own empty-state "add element" hint), in addition to the Inspector's
+dedicated Add Text/Button/Image/Row buttons.
+
+**Accepted scope reduction vs. the original "true" mini-canvas idea:** no drag/resize, no smart
+guides, no padding/margin drag handles, no nested-row grid-column-span control for content inside
+a slide. What's real: real element rendering (typography/colors/sizing exactly as elsewhere), real
+click-to-select-and-edit via the Inspector, real add/remove/reorder of Text/Button/Image/Row.
 
 ## Background controls
 
@@ -249,13 +275,13 @@ the parser's own "has `rows`? then new-shape; else legacy" dispatch, not a hard 
 
 ## Risks / open questions for implementation
 
-- The Section-body row/col/el render function may not currently be cleanly extractable as a
-  standalone function without wider `Designer.tsx`/`ElPreview.tsx` refactor risk — implementation
-  should re-verify this is a clean extraction before assuming it, and flag if it turns out to need
-  a larger precursor refactor than this design assumes.
-- The heading/subtitle-as-real-elements bp-realness question flagged inline above (whether
-  standalone heading/text elements already have real, not just preview, bp support) must be
-  resolved during implementation before claiming feature parity with the old slide-text bp escape
-  hatch.
-- Legacy-slide auto-upgrade must be verified against at least one real saved page with the old
-  shape (not just unit-test fixtures) before considering this rework complete.
+- ~~The Section-body row/col/el render function may not currently be cleanly extractable~~ —
+  **resolved**: confirmed not extractable without a much larger core refactor; scope revised to
+  the "reuse `ElPreview` per-element rendering only" approach in the Mini-canvas section above.
+- ~~The heading/subtitle-as-real-elements bp-realness question~~ — **moot**: implementation settled on
+  "no bp support for nested slide elements at all" (an explicit accepted scope reduction, not a silent
+  regression from the old slide-text bp escape hatch) — see the Mini-canvas section above.
+- Legacy-slide auto-upgrade verified via unit tests covering both the legacy JSON-object shape and the
+  original pipe-line format (`apps/admin/src/designer/parsers.test.ts`,
+  `apps/api/src/collections/validate-layout.test.ts`) — not yet verified against a real saved production
+  page with the old shape; do that before considering this rework fully complete in production.
