@@ -88,7 +88,13 @@ export function shadowToCss(raw: string | undefined): string | undefined {
 // free-form units. Duplicated in SectionBlock.astro like every other table.
 export function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
   if (!v) return fallback;
-  return table[v] ?? v;
+  if (v in table) return table[v];
+  // FourSideControl's per-side inputs are bare text boxes (no unit picker,
+  // unlike single "length"-kind fields) — a user typing "20" meant px, but
+  // unitless non-zero border-radius/padding/margin is invalid CSS and gets
+  // silently dropped by the browser. Coerce it here instead of guessing at
+  // every call site.
+  return /^-?\d+(\.\d+)?$/.test(v) ? `${v}px` : v;
 }
 
 // Plain (non-bp) margin/padding — for elements that don't carry a `bp` bag

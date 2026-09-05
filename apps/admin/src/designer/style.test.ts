@@ -8,6 +8,12 @@ test("lengthValue resolves a preset keyword, falls back when unset, passes throu
   assert.equal(lengthValue("42px", PAD, "0"), "42px");
 });
 
+test("lengthValue coerces a bare number (FourSideControl's unitless radius/padding/margin input) to px", () => {
+  assert.equal(lengthValue("20", RADIUS, "0"), "20px");
+  assert.equal(lengthValue("-4", PAD, "0"), "-4px");
+  assert.equal(lengthValue("2.5", PAD, "0"), "2.5px");
+});
+
 test("gapPx converts rem to px, passes through a bare number, guards bad input", () => {
   assert.equal(gapPx("2rem"), 32);
   assert.equal(gapPx("24"), 24);
