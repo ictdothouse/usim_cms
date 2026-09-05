@@ -96,8 +96,18 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   not previously offered on these 3 types; `style.ts`/`SectionBlock.astro`'s `elBorderShadowStyle()` is
   the shared border/shadow-to-CSS helper (omits an unset key entirely rather than setting it `undefined`,
   so spreading it into button's outline-variant style object can never clobber that variant's own
-  default border). Animation/hover-effect fields do not exist yet for ANY element type — a real deferred
-  follow-up, not started.
+  default border).
+  **Animation/hover-effect**: heading/text/image/button gained `hoverEffect` (none/scale/lift/glow) and
+  `entrance` (none/fade/slide-up/zoom) — pure CSS classes (`ds-hover-*`/`ds-entrance-*`), not a computed
+  style, since `:hover` and scroll-linked animation can't be expressed as inline `React.CSSProperties`;
+  `style.ts`'s `elHoverClass()`/`SectionBlock.astro`'s matching `elHoverClass()`+`elEntranceClass()`
+  just pick the class name, the actual rules live once in `index.css` (canvas preview) and `global.css`
+  (published site). Entrance is site-only — applying it in `ElPreview`'s canvas would replay the
+  animation on every React re-render. `entrance` uses `animation-timeline: view()` for real scroll-
+  triggered playback where supported (Chrome/Edge/Firefox), `@supports`-gated; elsewhere it silently
+  degrades to a one-shot animation that finishes on page load, never a broken/stuck state. Both fields
+  are the same "admin-canvas-preview-only, no real per-bp" bucket as shadow/border/color/typography
+  above (see `SectionBlock.astro`'s `renderSlideEl` comment) for slide-nested elements.
   **Slide overlay bug fix**: `SLIDE_DEFAULTS.overlayOpacity` used to default to `"35"`, so a freshly-
   added slide showed a darkening scrim the author never asked for; it now defaults to `"0"` (no overlay
   until the author sets one), fixed in both `parsers.ts` and `SectionBlock.astro`'s 2 legacy-shape
@@ -114,8 +124,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   radius only ever appears when the author explicitly sets one.
   **Not done** (deliberately out of scope, tracked as follow-ups if ever asked for): Designer admin-panel
   UI responsiveness (sidebar/Inspector/canvas on a narrow browser window) — a separate concern, no code
-  overlap; animation/hover-effect element style fields (see above); real per-bp shadow/border/color/
-  typography on nested elements (see above). See
+  overlap; real per-bp shadow/border/color/typography/hoverEffect/entrance on nested elements (see
+  above). See
   `docs/superpowers/specs/2026-09-05-slider-banner-rework-design.md` for the original design.
 
   Slider/banner's `slides` field is a **JSON array**, one object per slide (`imageUrl`, `heading`,

@@ -126,6 +126,16 @@ export function elBorderShadowStyle(p: Record<string, string>): React.CSSPropert
   return { ...(border ? { border } : {}), ...(boxShadow ? { boxShadow } : {}) };
 }
 
+// Hover/entrance effect class names — :hover and scroll-linked animation
+// can't be expressed as inline React.CSSProperties, so these opt into fixed
+// CSS classes defined once in index.css (mirrored in apps/frontend's
+// global.css for the published site) instead of a computed style object.
+// Entrance is site-only (no matching helper/class use here) — replaying a
+// scroll-entrance animation on every canvas re-render would just flicker.
+export function elHoverClass(p: Record<string, string>): string | undefined {
+  return p.hoverEffect && p.hoverEffect !== "none" ? `ds-hover-${p.hoverEffect}` : undefined;
+}
+
 export function typoStyle(p: Record<string, string>): React.CSSProperties {
   const s: React.CSSProperties = {};
   if (p.fontFamily) s.fontFamily = p.fontFamily;

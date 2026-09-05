@@ -65,6 +65,8 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
       { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
       { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+      { key: "hoverEffect", labelKey: "designer-s-hover", kind: "select", options: ["none", "scale", "lift", "glow"] },
+      { key: "entrance", labelKey: "designer-s-entrance", kind: "select", options: ["none", "fade", "slide-up", "zoom"] },
     ],
   },
   text: {
@@ -80,6 +82,8 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
       { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
       { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+      { key: "hoverEffect", labelKey: "designer-s-hover", kind: "select", options: ["none", "scale", "lift", "glow"] },
+      { key: "entrance", labelKey: "designer-s-entrance", kind: "select", options: ["none", "fade", "slide-up", "zoom"] },
     ],
   },
   image: {
@@ -101,6 +105,8 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
       { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
       { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+      { key: "hoverEffect", labelKey: "designer-s-hover", kind: "select", options: ["none", "scale", "lift", "glow"] },
+      { key: "entrance", labelKey: "designer-s-entrance", kind: "select", options: ["none", "fade", "slide-up", "zoom"] },
     ],
   },
   button: {
@@ -117,6 +123,8 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
       { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
       { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+      { key: "hoverEffect", labelKey: "designer-s-hover", kind: "select", options: ["none", "scale", "lift", "glow"] },
+      { key: "entrance", labelKey: "designer-s-entrance", kind: "select", options: ["none", "fade", "slide-up", "zoom"] },
     ],
   },
   spacer: {

@@ -101,3 +101,49 @@ h2, h3, h4, h5, h6 {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Element hoverEffect/entrance fields (heading/text/image/button — see
+   SectionBlock.astro's elHoverClass/elEntranceClass, mirrored in
+   apps/admin's index.css for the canvas preview). Compile-time CSS only,
+   no client JS added (this project's own constraint) — entrance uses the
+   scroll-driven animation-timeline:view() where the browser supports it
+   (Chrome/Edge/Firefox); elsewhere @supports skips straight to the
+   time-based fallback, which just finishes once on page load instead of
+   on scroll — a silent, harmless degrade, not a broken animation. */
+.ds-hover-scale { transition: transform 0.2s ease; }
+.ds-hover-scale:hover { transform: scale(1.04); }
+.ds-hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.ds-hover-lift:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
+.ds-hover-glow { transition: box-shadow 0.2s ease; }
+.ds-hover-glow:hover { box-shadow: 0 0 24px rgba(15, 98, 254, 0.35); }
+
+.ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom {
+  animation-duration: 0.6s;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+@supports (animation-timeline: view()) {
+  .ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom {
+    animation-timeline: view();
+    animation-range: entry 0% cover 30%;
+  }
+}
+.ds-entrance-fade { animation-name: ds-entrance-fade; }
+.ds-entrance-slide-up { animation-name: ds-entrance-slide-up; }
+.ds-entrance-zoom { animation-name: ds-entrance-zoom; }
+@keyframes ds-entrance-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ds-entrance-slide-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ds-entrance-zoom {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom { animation: none; }
+  .ds-hover-scale:hover, .ds-hover-lift:hover { transform: none; }
+}

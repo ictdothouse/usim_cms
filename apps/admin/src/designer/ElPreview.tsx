@@ -36,7 +36,7 @@ import { ICONS } from "./icons";
 import { parseCards, parsePairs, parseRepeaterItems, parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
 import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
-  elBorderShadowStyle, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
+  elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
 } from "./style";
 
 // Only the one shape ElPreview's mutate() calls actually touch (props/bp on
@@ -253,6 +253,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
     case "heading":
       return (
         <div
+          className={elHoverClass(p)}
           style={{
             ...align,
             fontSize: H_SIZE[p.level ?? "2"],
@@ -268,6 +269,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
     case "text":
       return p.text ? (
         <div
+          className={elHoverClass(p)}
           style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap", lineHeight: 1.65, ...typoStyle(p), ...elBorderShadowStyle(p) }}
           dangerouslySetInnerHTML={{ __html: renderInline(p.text) }}
         />
@@ -282,6 +284,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           <img
             src={p.src}
             alt={p.alt ?? ""}
+            className={elHoverClass(p)}
             style={{ borderRadius: elRadius(p), width: p.imgWidth || undefined, maxWidth: "100%", ...elBorderShadowStyle(p) }}
           />
         </div>
@@ -294,7 +297,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
       return (
         <div style={align}>
           <span
-            className="inline-block rounded-full px-5 py-2 text-sm font-semibold"
+            className={`inline-block rounded-full px-5 py-2 text-sm font-semibold ${elHoverClass(p) ?? ""}`}
             style={
               p.variant === "outline"
                 ? { border: "2px solid currentColor", color: p.color || undefined, ...elBorderShadowStyle(p) }
