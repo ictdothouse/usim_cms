@@ -1732,15 +1732,15 @@ function ThemeForm({
   const [presetName, setPresetName] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  // Branding assets upload into this site's own media library — only
-  // possible for a per-site ThemeForm (previewTenantHost set); the Global
-  // Theme form has no single tenant's media library to upload into, so it
-  // keeps the plain URL field only, same as logoUrl already did.
+  // Per-site ThemeForm uploads into that tenant's own media library; the
+  // Global Theme form (no previewTenantHost) has no tenant media library to
+  // use, so it uploads into a fixed control-plane "_global" folder instead
+  // (POST /api/portal/branding-upload) — this becomes every site's default
+  // logo/favicon unless a site's own Branding overrides it.
   async function uploadBrandAsset(file: File, kind: "logo" | "favicon") {
-    if (!previewTenantHost) return;
     setBrandUploading(kind);
     try {
-      const url = await api.uploadMedia(previewTenantHost, token, file);
+      const url = previewTenantHost ? await api.uploadMedia(previewTenantHost, token, file) : await api.uploadGlobalBranding(token, file);
       const full = url.startsWith("http") ? url : api.API_URL + url;
       if (kind === "logo") setLogoUrl(full);
       else setFaviconUrl(full);
@@ -2180,6 +2180,7 @@ function ThemeForm({
           </div>
           <div className="space-y-3 rounded-xl border border-line/20 p-3">
             <p className="text-xs font-semibold text-body">{t("theme-branding")}</p>
+            {!previewTenantHost && <p className="text-[11px] text-muted-foreground">{t("theme-branding-global-hint")}</p>}
             {(
               [
                 ["logo", t("theme-logo"), logoUrl, setLogoUrl, "h-10"],
@@ -2190,20 +2191,18 @@ function ThemeForm({
                 {label}
                 <div className="mt-1 flex items-center gap-2">
                   <input className={inputCls} value={value} placeholder="https://" onChange={(e) => setValue(e.target.value)} />
-                  {previewTenantHost && (
-                    <label className="inline-block shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-canvas px-3 py-1.5 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
-                      {brandUploading === kind ? t("designer-uploading") : t("designer-upload")}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void uploadBrandAsset(f, kind);
-                        }}
-                      />
-                    </label>
-                  )}
+                  <label className="inline-block shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-canvas px-3 py-1.5 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+                    {brandUploading === kind ? t("designer-uploading") : t("designer-upload")}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void uploadBrandAsset(f, kind);
+                      }}
+                    />
+                  </label>
                 </div>
                 {value && <img src={value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
               </label>

@@ -836,6 +836,20 @@ export const getGlobalTheme = (token: string) =>
 export const putGlobalTheme = (token: string, settings: Record<string, string>) =>
   request("/api/portal/theme", null, token, { method: "PUT", body: JSON.stringify(settings) });
 
+export async function uploadGlobalBranding(token: string, file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/portal/branding-upload`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "x-csrf-token": token },
+    body: form,
+  });
+  const body = await parseJsonBody(res);
+  if (!res.ok) throw new Error(body.message ?? body.error ?? "Upload failed");
+  return body.url as string;
+}
+
 // Upload quota — null in either field means "unset" (inherit global, or the
 // hardcoded 5 MB/unlimited fallback). Superadmin-only to write, both levels.
 export interface StorageLimits {
