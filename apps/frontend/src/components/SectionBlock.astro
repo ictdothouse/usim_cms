@@ -333,7 +333,7 @@ function parseSlides(raw: string | undefined): Slide[] {
           bgSize: typeof s.bgSize === "string" && SLIDE_BG_SIZES.includes(s.bgSize) ? s.bgSize : "",
           bgColor: typeof s.bgColor === "string" ? s.bgColor : "",
           overlayColor: typeof s.overlayColor === "string" ? s.overlayColor : "#000000",
-          overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : "35",
+          overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : "0",
           textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
           rows,
         };
@@ -353,7 +353,7 @@ function parseSlides(raw: string | undefined): Slide[] {
         bgSize: "",
         bgColor: "",
         overlayColor: "#000000",
-        overlayOpacity: "35",
+        overlayOpacity: "0",
         textPosition: "center" as const,
         rows: legacySlideRows({ heading, subtitle, buttons: buttonLabel ? [{ label: buttonLabel, href: buttonHref }] : [] }),
       };
@@ -665,6 +665,19 @@ function paddingStyle(p: Record<string, string>) {
   const side = (per: string) => lengthValue(p[per] || p.padding, PAD, "0");
   return `padding:${side("paddingTop")} ${side("paddingRight")} ${side("paddingBottom")} ${side("paddingLeft")}`;
 }
+// Border/shadow escape hatch shared by heading/text/button/image — mirrors
+// apps/admin's elBorderShadowStyle(); returns null (not a stray "border:;")
+// when neither is set, so an existing default (e.g. button's outline
+// variant CSS class) isn't overridden by an empty declaration.
+function elBorderShadowStyle(p: Record<string, string>): string | null {
+  const border = p.borderWidth
+    ? `border:${p.borderWidth}px ${p.borderStyle || "solid"} ${p.borderColor || "currentColor"}`
+    : p.border
+      ? `border:${BORDER[p.border]}`
+      : null;
+  const shadow = shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null;
+  return [border, shadow].filter(Boolean).join(";") || null;
+}
 // Full typography escape hatch for heading/text/list.
 function typoStyle(p: Record<string, string>) {
   return [
@@ -709,6 +722,27 @@ function colStyle(cp?: Record<string, string>) {
 // chain convention as colStyle()/sectionStyle above, and the same
 // RADIUS.none fallback — no element gets a rounded corner unless the
 // author explicitly sets one.
+// Slide-nested element free positioning (props.position === "custom") — opts
+// an element out of the row/column stack and into position:absolute inside
+// `.ds-slide-content` (already `position:relative` for its own z-index — see
+// that rule's own comment), the same containing block apps/admin's ElPreview
+// drags against (`.ds-slide-canvas` there), so an x/y saved in the admin
+// lands in the same spot here. Defined in frontmatter (not inside
+// renderSlideEl, which lives in the template for JSX) — Astro's template
+// expression parser rejects a function declaration's TS type annotations.
+function posStyle(mp: Record<string, string>): string | null {
+  return mp.position === "custom"
+    ? [
+        "position:absolute",
+        `top:${mp.y || "10"}%`,
+        `left:${mp.x || "10"}%`,
+        mp.posWidth ? `width:${mp.posWidth}` : null,
+        mp.posHeight ? `height:${mp.posHeight}` : null,
+      ]
+        .filter(Boolean)
+        .join(";")
+    : null;
+}
 function elRadius(p: Record<string, string>): string {
   const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.none);
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
@@ -824,6 +858,19 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
           >
             {(col.elements ?? []).map((el, e) => {
               const p = el.props ?? {};
+              // Hoisted above `node` (rather than its original spot right
+              // after it) so the "slider" case's renderSlideEl can scope a
+              // nested element's own real per-breakpoint CSS to
+              // `[data-vis="${elId}"] [data-slide-el="..."]` — same id, just
+              // needed one statement earlier than the imgWidth/height bp
+              // checks below still are.
+              const elId = `e${blockIndex}-${r}-${c}-${e}`;
+              // Set by the "slider" case's renderSlideEl when any nested
+              // slide element actually has a `bp` override to render — the
+              // slider's own wrapper needs `data-vis` for that nested
+              // selector to exist, same reason hasWidthBp/hasHeightBp below
+              // force it too.
+              let hasSlideChildBp = false;
               const node = (() => {
               switch (el.type) {
                 case "heading": {
@@ -831,7 +878,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return (
                     <Tag
                       class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass)}
-                      style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p)]
+                      style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
                         .filter(Boolean)
                         .join(";")}
                       set:html={p.text ? renderInline(p.text) : ""}
@@ -848,6 +895,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         marginStyle(p),
                         paddingStyle(p),
                         typoStyle(p),
+                        elBorderShadowStyle(p),
                       ]
                         .filter(Boolean)
                         .join(";")}
@@ -864,10 +912,10 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         loading="lazy"
                         style={[
                           `border-radius:${elRadius(p)}`,
-                          shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
                           p.imgWidth ? `width:${p.imgWidth}` : null,
                           marginStyle(p),
                           paddingStyle(p),
+                          elBorderShadowStyle(p),
                         ]
                           .filter(Boolean)
                           .join(";")}
@@ -882,6 +930,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                       <a
                         class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass)}
                         href={safeUrl(p.href) ?? "#"}
+                        style={[p.color ? `color:${p.color}` : null, elBorderShadowStyle(p)].filter(Boolean).join(";") || undefined}
                       >
                         {p.label}
                       </a>
@@ -1073,19 +1122,36 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   // the admin's slides editor can ever add via its Add Text/
                   // Button/Image buttons; "Add Row" only nests more of the
                   // same three). Mirrors the main element switch's own
-                  // heading/text/image/button cases above almost exactly,
-                  // minus margin/padding (nested slide elements don't carry
-                  // those — an accepted scope reduction, matching the admin
-                  // canvas's own ElPreview({ el }) reuse with no `path`).
+                  // heading/text/image/button cases above. Margin/padding/
+                  // shadow/border/color/typography are real per-element
+                  // props (same fields as any top-level element). Real
+                  // per-breakpoint override is wired for margin/padding/
+                  // free-position (the fields the Inspector's own FourSideControl/
+                  // Position block let an author toggle a BpToggle on) —
+                  // shadow/border/color/typography stay admin-canvas-preview-
+                  // only for now, the one remaining scope reduction (same
+                  // "not every field, just the common layout ones" tradeoff
+                  // imgWidth/slider-height made before this).
                   const renderSlideEl = (el: El) => {
                     const ep = el.props ?? {};
+                    if (el.bp && Object.keys(el.bp).length > 0) {
+                      hasSlideChildBp = true;
+                      responsiveRules.push(
+                        ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"]`, el.bp, ep, (mp) =>
+                          [marginStyle(mp), paddingStyle(mp), posStyle(mp)].filter(Boolean).join(";"),
+                        ),
+                      );
+                    }
                     switch (el.type) {
                       case "heading": {
                         const Tag = headingTag(ep.level) as "h1";
                         return (
                           <Tag
                             class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass)}
-                            style={[ep.align ? `text-align:${ep.align}` : null, typoStyle(ep)].filter(Boolean).join(";")}
+                            data-slide-el={el.id}
+                            style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), typoStyle(ep), elBorderShadowStyle(ep), posStyle(ep)]
+                              .filter(Boolean)
+                              .join(";")}
                             set:html={ep.text ? renderInline(ep.text) : ""}
                           />
                         );
@@ -1094,10 +1160,15 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         return (
                           <p
                             class={cls("ds-text", ep.cssClass)}
+                            data-slide-el={el.id}
                             style={[
                               `font-size:${fluidTextSize(lengthValue(ep.size, TEXT_SIZE, TEXT_SIZE.md))}`,
                               ep.align ? `text-align:${ep.align}` : null,
+                              marginStyle(ep),
+                              paddingStyle(ep),
                               typoStyle(ep),
+                              elBorderShadowStyle(ep),
+                              posStyle(ep),
                             ]
                               .filter(Boolean)
                               .join(";")}
@@ -1106,7 +1177,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         );
                       case "image":
                         return safeUrl(ep.src) ? (
-                          <div style={ep.align ? `text-align:${ep.align}` : null}>
+                          <div data-slide-el={el.id} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
                             <img
                               class={cls("ds-img", ep.cssClass)}
                               src={safeUrl(ep.src)}
@@ -1114,8 +1185,10 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                               loading="lazy"
                               style={[
                                 `border-radius:${elRadius(ep)}`,
-                                shadowToCss(ep.shadow) ? `box-shadow:${shadowToCss(ep.shadow)}` : null,
                                 ep.imgWidth ? `width:${ep.imgWidth}` : null,
+                                marginStyle(ep),
+                                paddingStyle(ep),
+                                elBorderShadowStyle(ep),
                               ]
                                 .filter(Boolean)
                                 .join(";")}
@@ -1124,10 +1197,14 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                         ) : null;
                       case "button":
                         return ep.label ? (
-                          <div style={ep.align ? `text-align:${ep.align}` : null}>
+                          <div
+                            data-slide-el={el.id}
+                            style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), posStyle(ep)].filter(Boolean).join(";")}
+                          >
                             <a
                               class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass)}
                               href={safeUrl(ep.href) ?? "#"}
+                              style={[ep.color ? `color:${ep.color}` : null, elBorderShadowStyle(ep)].filter(Boolean).join(";") || undefined}
                             >
                               {ep.label}
                             </a>
@@ -1515,7 +1592,6 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   return null;
               }
               })();
-              const elId = `e${blockIndex}-${r}-${c}-${e}`;
               // Image's own real per-breakpoint width override — same "tablet:
               // imgWidth"/"mobile:imgWidth" bag every other bp override uses,
               // but pushed with a custom "... img" selector (not the plain
@@ -1540,7 +1616,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
                   ...bpStyleRules(`[data-vis="${elId}"] .ds-slider`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`),
                 );
               }
-              const elVisId = respId(elId, p) ?? (hasWidthBp || hasHeightBp ? elId : undefined);
+              const elVisId = respId(elId, p) ?? (hasWidthBp || hasHeightBp || hasSlideChildBp ? elId : undefined);
               return designerEdit || elVisId ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}

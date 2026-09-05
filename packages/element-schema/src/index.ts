@@ -135,6 +135,11 @@ export const ENUM_VALUES: Record<string, string[]> = {
   // googlemap/announcementticker's own enum fields.
   requireConsent: ["true", "false"],
   speed: ["slow", "normal", "fast"],
+  // Slide-nested element free positioning (apps/admin's ElPreview "slider"
+  // case) — "flow" (default, absent) keeps the element stacked in its row/
+  // column; "custom" opts into position:absolute inside the slide box, with
+  // x/y/posWidth/posHeight (below) controlling placement/size.
+  position: ["flow", "custom"],
 };
 
 // Free-typed CSS lengths (each ends up as `key:value` in a raw style
@@ -163,6 +168,10 @@ export const LENGTH_KEYS = new Set([
   // check ever runs, so reusing "width" here would reject every section's
   // width:"contained" as an invalid CSS length.
   "imgWidth",
+  // Slide-nested element free positioning (see ENUM_VALUES.position above) —
+  // x/y are percent-ish bare numbers (LENGTH_RE's unit-less branch), posWidth/
+  // posHeight plain CSS lengths, same as any other size field.
+  "x", "y", "posWidth", "posHeight",
 ]);
 export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so

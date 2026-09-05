@@ -65,24 +65,58 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   when the currently-selected top-level element is a slider AND that slider has a `sliderInnerSel`
   entry, `Inspector.tsx`'s `sel.length === 4` branch shows THAT nested element's own Content/Style
   fields (same `FieldGroups`/`FieldInput` call shape as a normal element) instead of the slider's own,
-  writing through `parsers.ts`'s `updateSlideElementProps` (parse `slides` → mutate the nested node →
-  re-stringify). **Accepted scope reduction**: nested slide elements get no canvas drag/resize/inline-
-  edit, no padding/margin/grid controls, and no per-breakpoint (`bp`) override of their own — real
-  editing happens through the Inspector's normal fields, not the canvas.
-  **Slider height** (`p.height`, the element's own top-level field, unrelated to per-slide `rows`) is
-  the one Element-level field with a REAL per-breakpoint override — every other Element style field is
-  still admin-canvas-preview-only (see the deferred note further below). `SectionBlock.astro` pushes a
-  `bpStyleRules` rule scoped to `[data-vis="elId"] .ds-slider` (mirroring the pre-existing `imgWidth`
-  per-breakpoint-image-width pattern right next to it) so a tablet/mobile-only height set via the
-  Inspector's BpToggle actually renders on the published site, not just in the admin canvas.
+  writing through `parsers.ts`'s `updateSlideElementProps`/`updateSlideElementBp` (parse `slides` →
+  mutate the nested node → re-stringify). **Follow-up round (same day)** closed most of the original
+  scope reductions above: nested elements now get real padding/margin (`FourSideControl`s in the
+  Inspector's inner-selection branch, same as any top-level element) and a real `bp` override — `El.bp`
+  was never actually excluded from the type, just unwired for nested content; `childSetValue` in
+  Inspector.tsx now writes into it via `updateSlideElementBp` exactly like a top-level element's fields
+  do via plain mutation, and `ElPreview`'s existing `mergeElBp` merge (generic over whatever `el` it's
+  given) previews the override on canvas for free. **Free positioning**: a nested element's own
+  `position` prop (`"flow"`, the default/absent, vs `"custom"`) opts it out of the row/column stack and
+  into `position:absolute` — `x`/`y` (percent) and optional `posWidth`/`posHeight`, all real per-bp
+  fields too. Toggled via the Inspector's "Free position" block (`ElPreview.tsx`'s slider case, `Move`
+  icon); a free element is also drag-to-move directly on the canvas (`startFreeElDrag`, plain imperative
+  pointer listeners — `ElPreview` holds no hooks of its own and is called as a plain function, so this
+  can't be a `useState`/`useRef`-driven drag the way a real component's would be) — resize stays
+  numeric-only (Width/Height fields), no corner-drag handle, to avoid resurrecting the old smart-guide
+  system's snap/edge-detection complexity for a still-narrow need. The drag's percentage math and the
+  site's own CSS both resolve against `.ds-slide-canvas`/`.ds-slide-content` (the same box, already
+  `position:relative` for its z-index) — NOT the outer slide/`.ds-slide`, which is also
+  `position:relative` and would silently give a different containing block than the one the math assumes
+  if the class ever moved. **Still admin-canvas-preview-only** (real scope reduction that remains):
+  shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
+  live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;
+  only margin/padding/position get a real `bpStyleRules` CSS rule (`SectionBlock.astro`'s
+  `renderSlideEl`, scoped to `[data-vis="elId"] [data-slide-el="childId"]` — `elId` had to be hoisted
+  above the element switch's own IIFE so the slider case's closure could reach it before it was
+  otherwise computed).
+  **Effects parity**: heading/text/button gained `shadow`+`borderWidth`/`borderColor`/`borderStyle`
+  (button also gained `color`) — fields that already existed on image/embed or as a generic kind, just
+  not previously offered on these 3 types; `style.ts`/`SectionBlock.astro`'s `elBorderShadowStyle()` is
+  the shared border/shadow-to-CSS helper (omits an unset key entirely rather than setting it `undefined`,
+  so spreading it into button's outline-variant style object can never clobber that variant's own
+  default border). Animation/hover-effect fields do not exist yet for ANY element type — a real deferred
+  follow-up, not started.
+  **Slide overlay bug fix**: `SLIDE_DEFAULTS.overlayOpacity` used to default to `"35"`, so a freshly-
+  added slide showed a darkening scrim the author never asked for; it now defaults to `"0"` (no overlay
+  until the author sets one), fixed in both `parsers.ts` and `SectionBlock.astro`'s 2 legacy-shape
+  fallbacks.
+  **Slider height** (`p.height`, the element's own top-level field, unrelated to per-slide `rows`) was
+  the first Element-level field with a REAL per-breakpoint override, before the round above generalized
+  the pattern to nested elements too. `SectionBlock.astro` pushes a `bpStyleRules` rule scoped to
+  `[data-vis="elId"] .ds-slider` (mirroring the pre-existing `imgWidth` per-breakpoint-image-width
+  pattern right next to it) so a tablet/mobile-only height set via the Inspector's BpToggle actually
+  renders on the published site, not just in the admin canvas.
   **Corner radius**: `image`/`embed`/`gallery` no longer default to a rounded corner —
   `elRadius()` (`style.ts`/`SectionBlock.astro`) now falls back to `RADIUS.none` like Section/Column
   already did, and those 3 element types' own `radius` default was changed from `"md"` to `""`. A
   radius only ever appears when the author explicitly sets one.
-  **Not done in this rework** (deliberately out of scope, tracked as follow-ups if ever asked for):
-  Designer admin-panel UI responsiveness (sidebar/Inspector/canvas on a narrow browser window) — a
-  separate concern from the slider rework, no code overlap; see
-  `docs/superpowers/specs/2026-09-05-slider-banner-rework-design.md` for the full design.
+  **Not done** (deliberately out of scope, tracked as follow-ups if ever asked for): Designer admin-panel
+  UI responsiveness (sidebar/Inspector/canvas on a narrow browser window) — a separate concern, no code
+  overlap; animation/hover-effect element style fields (see above); real per-bp shadow/border/color/
+  typography on nested elements (see above). See
+  `docs/superpowers/specs/2026-09-05-slider-banner-rework-design.md` for the original design.
 
   Slider/banner's `slides` field is a **JSON array**, one object per slide (`imageUrl`, `heading`,
   `subtitle`, `textPosition` — left/center/right —, `overlayColor`+`overlayOpacity` for the darkening

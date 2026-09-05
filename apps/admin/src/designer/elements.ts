@@ -61,6 +61,10 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "level", labelKey: "designer-f-level", kind: "select", options: ["1", "2", "3", "4"] },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
       ...TYPOGRAPHY_FIELDS,
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+      { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+      { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+      { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
     ],
   },
   text: {
@@ -72,6 +76,10 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "size", labelKey: "designer-f-size", kind: "length" },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
       ...TYPOGRAPHY_FIELDS,
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+      { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+      { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+      { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
     ],
   },
   image: {
@@ -90,6 +98,9 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
       // radius edited via FourSideControl (element Inspector) — see ELS-radius branch.
       { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+      { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+      { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+      { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
     ],
   },
   button: {
@@ -101,6 +112,11 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "href", labelKey: "designer-f-href", kind: "text" },
       { key: "variant", labelKey: "designer-f-variant", kind: "select", options: ["primary", "outline"] },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+      { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+      { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+      { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
     ],
   },
   spacer: {

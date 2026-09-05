@@ -10,6 +10,7 @@ import {
   deleteSlideElement,
   deleteSlideRow,
   updateSlideElementProps,
+  updateSlideElementBp,
   parseCards,
   stringifyCards,
 } from "./parsers";
@@ -63,6 +64,17 @@ test("updateSlideElementProps merges into one nested element's own props only", 
   s = updateSlideElementProps(s, 0, 0, 1, { text: "B2" });
   assert.equal(s.rows[0].columns[0].elements[0].props.text, "A");
   assert.equal(s.rows[0].columns[0].elements[1].props.text, "B2");
+});
+
+test("updateSlideElementBp replaces (not merges into) one nested element's own bp bag only", () => {
+  let s = newSlide();
+  s = addSlideElement(s, "text", { text: "A", size: "", align: "left" });
+  s = addSlideElement(s, "text", { text: "B", size: "", align: "left" });
+  s = updateSlideElementBp(s, 0, 0, 0, { "mobile:text": "A-mobile" });
+  assert.deepEqual(s.rows[0].columns[0].elements[0].bp, { "mobile:text": "A-mobile" });
+  assert.equal(s.rows[0].columns[0].elements[1].bp, undefined);
+  s = updateSlideElementBp(s, 0, 0, 0, undefined);
+  assert.equal(s.rows[0].columns[0].elements[0].bp, undefined);
 });
 
 test("parseSlides accepts the current rows shape, the legacy heading/subtitle/buttons object shape, and the legacy pipe-line shape", () => {
