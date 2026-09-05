@@ -295,6 +295,12 @@ export const platformSettings = pgTable("platform_settings", {
   // just see the "Set up MFA" prompt appear in their own Security tab. This
   // is the extension point for Entra ID/SSO later — see users table comment.
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
+  // Instance-wide default for the language switcher's placement/style —
+  // the seed value a tenant with no explicit override (tenant_languages.
+  // switcherPosition/switcherStyle both null) resolves to. Settings tab's
+  // "Language Switcher" card, superadmin-only.
+  switcherPosition: text("switcher_position").notNull().default("header"),
+  switcherStyle: text("switcher_style").notNull().default("text"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
@@ -431,6 +437,14 @@ export const tenantLanguages = pgTable("tenant_languages", {
   // later global-disable of that code must NOT retroactively invalidate it
   // (same "re-intersect at read time" tolerance as enabledCodes itself).
   defaultLanguage: text("default_language"),
+  // Language-switcher placement/style (site-picker override of the
+  // superadmin's global default below). Nullable — null means "inherit the
+  // global default" (platformSettings.switcherPosition/switcherStyle),
+  // resolved at read time by getTenantLanguageSelection, same
+  // resolve-on-read convention as `defaultLanguage`. Values: "header" |
+  // "topbar" | "float" | "footer"; "text" | "flag" | "shortform".
+  switcherPosition: text("switcher_position"),
+  switcherStyle: text("switcher_style"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

@@ -58,6 +58,8 @@ import {
   setTenantCertInfo,
   getMfaEnabled,
   setMfaEnabled,
+  getLanguageSwitcherDefaults,
+  setLanguageSwitcherDefaults,
   findUserById,
   setUserTotpSecret,
   setUserTotpEnabled,
@@ -149,6 +151,11 @@ function validatePermissions(permissions: unknown): string | null {
   const unknown = permissions.find((p) => !PERMISSIONS.has(p));
   return unknown ? `unknown permission: ${unknown}` : null;
 }
+
+// Language-switcher placement/style — shared enum for both the global
+// (platform_settings) and per-site (tenant_languages) settings.
+const SWITCHER_POSITIONS = ["header", "topbar", "float", "footer"] as const;
+const SWITCHER_STYLES = ["text", "flag", "shortform"] as const;
 
 const THEME_COLOR_KEYS = ["primaryColor", "secondaryColor", "backgroundColor", "textColor"] as const;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
@@ -2048,8 +2055,8 @@ await app.register(async (publicScope) => {
   // i18n Phase 3 — anonymous visitor's view: is the switcher even on, and
   // what does each enabled code display as.
   publicScope.get("/api/languages", async (req) => {
-    const { allEnabled, showHeaderSwitcher } = await getTenantLanguageSelection(req.tenantHost);
-    return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher };
+    const { allEnabled, showHeaderSwitcher, switcherPosition, switcherStyle } = await getTenantLanguageSelection(req.tenantHost);
+    return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher, switcherPosition, switcherStyle };
   });
 
   // Backs apps/frontend's blueprint-preview.astro (Designer's blueprint
@@ -2469,8 +2476,9 @@ await app.register(async (protectedScope) => {
   // current selection; only languages.write can change it (superadmin
   // always bypasses, per hasPermission).
   protectedScope.get("/api/tenant-languages", async (req) => {
-    const { allEnabled, selectedCodes, showHeaderSwitcher, multilangEnabled, defaultLanguage } = await getTenantLanguageSelection(req.tenantHost);
-    return { allEnabled, selectedCodes, showHeaderSwitcher, multilangEnabled, defaultLanguage };
+    const { allEnabled, selectedCodes, showHeaderSwitcher, multilangEnabled, defaultLanguage, switcherPosition, switcherStyle } =
+      await getTenantLanguageSelection(req.tenantHost);
+    return { allEnabled, selectedCodes, showHeaderSwitcher, multilangEnabled, defaultLanguage, switcherPosition, switcherStyle };
   });
 
   protectedScope.put("/api/tenant-languages", async (req, reply) => {
@@ -2478,17 +2486,19 @@ await app.register(async (protectedScope) => {
       reply.code(403);
       return { error: "missing languages.write permission" };
     }
-    const { codes, showHeaderSwitcher, multilangEnabled, defaultLanguage } = req.body as {
+    const { codes, showHeaderSwitcher, multilangEnabled, defaultLanguage, switcherPosition, switcherStyle } = req.body as {
       codes?: string[];
       showHeaderSwitcher?: boolean;
       multilangEnabled?: boolean;
       defaultLanguage?: string | null;
+      switcherPosition?: string;
+      switcherStyle?: string;
     };
     if (!Array.isArray(codes)) {
       reply.code(400);
       return { error: "codes must be an array" };
     }
-    const { allEnabled } = await getTenantLanguageSelection(req.tenantHost);
+    const { allEnabled, switcherPosition: currentPosition, switcherStyle: currentStyle } = await getTenantLanguageSelection(req.tenantHost);
     if (codes.length > 0) {
       const validCodes = new Set(allEnabled.map((l) => l.code));
       if (codes.some((c) => !validCodes.has(c))) {
@@ -2503,8 +2513,60 @@ await app.register(async (protectedScope) => {
         return { error: "defaultLanguage must be one of this site's selected languages" };
       }
     }
-    await setTenantLanguageSelection(req.tenantHost, codes, Boolean(showHeaderSwitcher), Boolean(multilangEnabled), defaultLanguage ?? null);
+    const resolvedPosition = switcherPosition ?? currentPosition;
+    const resolvedStyle = switcherStyle ?? currentStyle;
+    if (!SWITCHER_POSITIONS.includes(resolvedPosition as (typeof SWITCHER_POSITIONS)[number])) {
+      reply.code(400);
+      return { error: `switcherPosition must be one of: ${SWITCHER_POSITIONS.join(", ")}` };
+    }
+    if (!SWITCHER_STYLES.includes(resolvedStyle as (typeof SWITCHER_STYLES)[number])) {
+      reply.code(400);
+      return { error: `switcherStyle must be one of: ${SWITCHER_STYLES.join(", ")}` };
+    }
+    await setTenantLanguageSelection(
+      req.tenantHost,
+      codes,
+      Boolean(showHeaderSwitcher),
+      Boolean(multilangEnabled),
+      defaultLanguage ?? null,
+      resolvedPosition,
+      resolvedStyle,
+    );
     return { saved: true };
+  });
+
+  // Instance-wide default for the language switcher's placement/style —
+  // same shape/gating as /api/portal/login-settings above (superadmin-only
+  // read too, since a webmaster reads their own effective value already
+  // resolved through GET /api/tenant-languages, not this raw default).
+  app.get("/api/portal/language-switcher-settings", async (req, reply) => {
+    if (!verifySuperadmin(req, reply)) return;
+    return await getLanguageSwitcherDefaults();
+  });
+
+  app.put("/api/portal/language-switcher-settings", async (req, reply) => {
+    const session = verifySuperadmin(req, reply);
+    if (!session) return;
+    const body = req.body as { switcherPosition?: string; switcherStyle?: string };
+    if (!SWITCHER_POSITIONS.includes(body.switcherPosition as (typeof SWITCHER_POSITIONS)[number])) {
+      reply.code(400);
+      return { error: `switcherPosition must be one of: ${SWITCHER_POSITIONS.join(", ")}` };
+    }
+    if (!SWITCHER_STYLES.includes(body.switcherStyle as (typeof SWITCHER_STYLES)[number])) {
+      reply.code(400);
+      return { error: `switcherStyle must be one of: ${SWITCHER_STYLES.join(", ")}` };
+    }
+    const switcherPosition = body.switcherPosition as (typeof SWITCHER_POSITIONS)[number];
+    const switcherStyle = body.switcherStyle as (typeof SWITCHER_STYLES)[number];
+    await setLanguageSwitcherDefaults(switcherPosition, switcherStyle);
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.language_switcher_settings",
+      meta: { switcherPosition, switcherStyle },
+      ip: req.ip,
+    });
+    return { switcherPosition, switcherStyle };
   });
 
   // Page Blueprint (Sprint 5 sub-project 2) — control-plane CRUD, hand-

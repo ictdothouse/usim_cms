@@ -30,7 +30,7 @@ if (!post) {
 // i18n Phase 5 — every language's content now lives on this SAME post row
 // (post.translations), so switching language means re-rendering this same
 // row under a `?lang=` query param, not linking to a different slug/row.
-const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
+const { enabled: siteLanguages, showHeaderSwitcher, switcherPosition, switcherStyle } = await getLanguages(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
 const content = post ? resolvePostContent(post, requestedLang) : null;
 // Bare language codes (e.g. "ar", "zh") work fine as Intl locales — no need
@@ -44,6 +44,8 @@ const langSwitcher =
   post && showHeaderSwitcher && availableCodes.length > 1
     ? {
         current: requestedLang ?? post.language,
+        position: switcherPosition,
+        style: switcherStyle,
         options: availableCodes.map((code) => ({
           code,
           label: langLabel(code),

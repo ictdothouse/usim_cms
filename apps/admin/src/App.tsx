@@ -3551,6 +3551,8 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
   // The language new posts/pages fall back to when their own Language field
   // is unset — "" = no default, matches the old "None" behavior.
   const [defaultLanguage, setDefaultLanguage] = useState("");
+  const [switcherPosition, setSwitcherPosition] = useState<api.SwitcherPosition>("header");
+  const [switcherStyle, setSwitcherStyle] = useState<api.SwitcherStyle>("text");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -3565,6 +3567,8 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
         setShowSwitcher(d.showHeaderSwitcher);
         setMultilangEnabled(d.multilangEnabled);
         setDefaultLanguage(d.defaultLanguage ?? "");
+        setSwitcherPosition(d.switcherPosition);
+        setSwitcherStyle(d.switcherStyle);
       })
       .catch((e) => setErr((e as Error).message));
   }, [tenantHost, token]);
@@ -3591,7 +3595,7 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
       // A default outside the persisted subset is dropped rather than sent —
       // avoids the server rejecting an otherwise-valid save over a stale pick.
       const effectiveDefault = defaultLanguage && selected.has(defaultLanguage) ? defaultLanguage : null;
-      await api.putTenantLanguages(tenantHost, token, codes, showSwitcher, multilangEnabled, effectiveDefault);
+      await api.putTenantLanguages(tenantHost, token, codes, showSwitcher, multilangEnabled, effectiveDefault, switcherPosition, switcherStyle);
       setMsg(t("tenant-languages-saved"));
     } catch (e) {
       setErr((e as Error).message);
@@ -3633,6 +3637,33 @@ function TenantLanguagesForm({ tenantHost, token }: { tenantHost: string; token:
             {allEnabled.filter((l) => selected.has(l.code)).map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
             ))}
+          </select>
+        </label>
+        <label className="block pt-1 text-xs text-ink">
+          <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-languages-switcher-position")}</span>
+          <select
+            value={switcherPosition}
+            onChange={(e) => setSwitcherPosition(e.target.value as api.SwitcherPosition)}
+            disabled={!multilangEnabled}
+            className="w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+          >
+            <option value="header">{t("switcher-pos-header")}</option>
+            <option value="topbar">{t("switcher-pos-topbar")}</option>
+            <option value="float">{t("switcher-pos-float")}</option>
+            <option value="footer">{t("switcher-pos-footer")}</option>
+          </select>
+        </label>
+        <label className="block pt-1 text-xs text-ink">
+          <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-languages-switcher-style")}</span>
+          <select
+            value={switcherStyle}
+            onChange={(e) => setSwitcherStyle(e.target.value as api.SwitcherStyle)}
+            disabled={!multilangEnabled}
+            className="w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+          >
+            <option value="text">{t("switcher-style-text")}</option>
+            <option value="flag">{t("switcher-style-flag")}</option>
+            <option value="shortform">{t("switcher-style-shortform")}</option>
           </select>
         </label>
       </div>
@@ -3961,6 +3992,11 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaErr, setMfaErr] = useState<string | null>(null);
   const [mfaBusy, setMfaBusy] = useState(false);
+  const [switcherPosition, setSwitcherPosition] = useState<api.SwitcherPosition>("header");
+  const [switcherStyle, setSwitcherStyle] = useState<api.SwitcherStyle>("text");
+  const [switcherErr, setSwitcherErr] = useState<string | null>(null);
+  const [switcherBusy, setSwitcherBusy] = useState(false);
+  const [switcherMsg, setSwitcherMsg] = useState<string | null>(null);
   const [proxyTenants, setProxyTenants] = useState<Array<Record<string, unknown>>>(tenants);
   const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
@@ -4048,6 +4084,31 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
       setMfaErr((e as Error).message);
     } finally {
       setMfaBusy(false);
+    }
+  }
+
+  function reloadSwitcherSettings() {
+    void api
+      .getLanguageSwitcherSettings(token)
+      .then((s) => {
+        setSwitcherPosition(s.switcherPosition);
+        setSwitcherStyle(s.switcherStyle);
+      })
+      .catch((e) => setSwitcherErr((e as Error).message));
+  }
+  useEffect(reloadSwitcherSettings, [token]);
+
+  async function saveSwitcherSettings() {
+    setSwitcherErr(null);
+    setSwitcherMsg(null);
+    setSwitcherBusy(true);
+    try {
+      await api.setLanguageSwitcherSettings(token, switcherPosition, switcherStyle);
+      setSwitcherMsg(t("tenant-languages-saved"));
+    } catch (e) {
+      setSwitcherErr((e as Error).message);
+    } finally {
+      setSwitcherBusy(false);
     }
   }
 
@@ -4395,6 +4456,42 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
               </div>
             </div>
             {mfaEnabled && <p className="text-xs text-sub">{t("settings-login-mfa-hint")}</p>}
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <Globe className="h-3.5 w-3.5 text-accent" /> {t("settings-switcher-title")}
+            </h3>
+            <p className="text-xs text-sub">{t("settings-switcher-desc")}</p>
+            {switcherErr && <p className="text-xs text-red-600">{switcherErr}</p>}
+            {switcherMsg && <p className="text-xs text-green-700">{switcherMsg}</p>}
+            <label className="block text-xs text-ink">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-languages-switcher-position")}</span>
+              <select
+                value={switcherPosition}
+                onChange={(e) => setSwitcherPosition(e.target.value as api.SwitcherPosition)}
+                className="w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+              >
+                <option value="header">{t("switcher-pos-header")}</option>
+                <option value="topbar">{t("switcher-pos-topbar")}</option>
+                <option value="float">{t("switcher-pos-float")}</option>
+                <option value="footer">{t("switcher-pos-footer")}</option>
+              </select>
+            </label>
+            <label className="block text-xs text-ink">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-languages-switcher-style")}</span>
+              <select
+                value={switcherStyle}
+                onChange={(e) => setSwitcherStyle(e.target.value as api.SwitcherStyle)}
+                className="w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+              >
+                <option value="text">{t("switcher-style-text")}</option>
+                <option value="flag">{t("switcher-style-flag")}</option>
+                <option value="shortform">{t("switcher-style-shortform")}</option>
+              </select>
+            </label>
+            <button onClick={() => void saveSwitcherSettings()} disabled={switcherBusy} className={btnPrimary}>
+              {switcherBusy ? t("settings-busy") : t("tenant-languages-save-btn")}
+            </button>
           </div>
         </>
       )}

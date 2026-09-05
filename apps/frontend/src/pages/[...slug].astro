@@ -53,7 +53,7 @@ const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boole
 // i18n Phase 5 — every language's layout now lives on this SAME page row
 // (page.translations), so switching language re-renders this same row
 // under a `?lang=` query param, not a link to a different slug/row.
-const { enabled: siteLanguages, showHeaderSwitcher } = await getLanguages(tenantHost);
+const { enabled: siteLanguages, showHeaderSwitcher, switcherPosition, switcherStyle } = await getLanguages(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
 const layout = page ? resolvePageLayout(page, requestedLang) : [];
 const fonts = collectFonts(layout);
@@ -63,6 +63,8 @@ const langSwitcher =
   page && showHeaderSwitcher && availableCodes.length > 1
     ? {
         current: requestedLang ?? page.language,
+        position: switcherPosition,
+        style: switcherStyle,
         options: availableCodes.map((code) => ({
           code,
           label: pageLangLabel(code),

@@ -271,7 +271,12 @@ export interface SiteLanguageInfo {
   label: string;
 }
 
-export async function getLanguages(tenantHost: string): Promise<{ enabled: SiteLanguageInfo[]; showHeaderSwitcher: boolean }> {
+export type SwitcherPosition = "header" | "topbar" | "float" | "footer";
+export type SwitcherStyle = "text" | "flag" | "shortform";
+
+export async function getLanguages(
+  tenantHost: string,
+): Promise<{ enabled: SiteLanguageInfo[]; showHeaderSwitcher: boolean; switcherPosition: SwitcherPosition; switcherStyle: SwitcherStyle }> {
   return apiGet("/api/languages", tenantHost);
 }
 

@@ -184,6 +184,28 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   `siteDefaultLanguage`/`page.id` that ONLY fires `setLanguage`/`setPageLanguage` when that post/page's own
   `language` is still null — once a row has ever been saved with an explicit language (including
   explicitly "None"), a later-changed or newly-set site default never silently overwrites it.
+- **Language-switcher placement/style** (requested after i18n Phase 5 shipped): where the switcher
+  renders (`"header" | "topbar" | "float" | "footer"`) and how each option displays
+  (`"text" | "flag" | "shortform"`) — a superadmin-wide default plus a per-site override, same two-level
+  shape as `multilangEnabled`'s site-vs-instance split above. `platform_settings.switcher_position`/
+  `switcher_style` (`schema.ts`, defaults `"header"`/`"text"`) is the instance-wide seed, managed via
+  `GET/PUT /api/portal/language-switcher-settings` (superadmin-only, same `verifySuperadmin` gate and
+  audit-log convention as `/api/portal/login-settings`) and the Settings tab's "Language Switcher" card.
+  `tenant_languages.switcher_position`/`switcher_style` (both nullable) are the per-site override — null
+  means "inherit the global default", resolved server-side by `getTenantLanguageSelection`
+  (`tenant-pool.ts`) so every caller (public `GET /api/languages`, protected `GET /api/tenant-languages`)
+  always gets an already-resolved, never-null value; there is no separate "reset to inherit" affordance,
+  `TenantLanguagesForm`'s two new selects always save an explicit value (same convention `defaultLanguage`
+  above already uses). Editing the per-site value is gated on the existing `languages.write` permission
+  (not a new one — placement/style is a sub-concern of managing a site's languages, mirroring how
+  `categories` reuses `posts.update` rather than growing its own permission). `apps/frontend`'s
+  `BaseLayout.astro` renders the switcher at the requested position — `"header"` only in the logo+switcher
+  fallback bar (no equivalent slot exists inside a custom Designer-built `headerChrome` yet, a known scope
+  line, not a bug), `"topbar"`/`"footer"` as their own always-rendered bars, `"float"` as a
+  `position:fixed` bottom-right widget — and formats each option via `switcherLabel()`: `"shortform"` is
+  just the uppercased language code, `"flag"` looks the code up in a small hardcoded `FLAG_MAP` (a
+  language code is not a country code, so this is a best-effort table, not a full ISO-3166 mapping) and
+  falls back to the plain text label for any code with no entry.
 - Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
   the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
   `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is
