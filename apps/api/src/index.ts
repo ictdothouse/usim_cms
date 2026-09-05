@@ -559,6 +559,27 @@ app.put("/api/portal/theme", async (req, reply) => {
   return { saved: true };
 });
 
+// Global branding (logo/favicon) upload — this is control-plane data, no
+// tenant DB involved, so it can't go through the tenant-scoped POST /api/media
+// (which requires req.db). Stored under a fixed "_global" folder, no media
+// library row since there's no tenant media table to attach one to.
+app.post("/api/portal/branding-upload", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const file = await req.file();
+  if (!file) {
+    reply.code(400);
+    return { error: "file required (multipart/form-data, field name 'file')" };
+  }
+  const allowed = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon"]);
+  if (!allowed.has(file.mimetype)) {
+    reply.code(415);
+    return { error: `unsupported file type ${file.mimetype}` };
+  }
+  const filename = `${randomUUID()}${path.extname(file.filename)}`;
+  const { url } = await uploadFile("_global", filename, file.file);
+  return { url };
+});
+
 // Upload quota — global default and per-site override, both superadmin-only
 // (unlike theme.write, no webmaster permission raises this: the whole point
 // is a central cap a site owner can't lift on themselves). null in either
