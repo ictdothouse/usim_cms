@@ -422,9 +422,14 @@ export const deleteSiteChrome = (tenantHost: string, token: string, id: string) 
 // already publicly readable regardless of draft/published status (see
 // siteChromeCollection's access.read in apps/api/src/index.ts), so this just
 // points the frontend's chrome-preview.astro at the row by id.
-export const chromePreviewUrl = (tenantHost: string, id: string, kind: "header" | "footer") => {
+export const chromePreviewUrl = (tenantHost: string, id: string, kind: "header" | "footer", opts?: { embed?: boolean }) => {
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
-  const query = new URLSearchParams({ id, kind, ...(isLocal ? { __tenant: tenantHost } : {}) }).toString();
+  const query = new URLSearchParams({
+    id,
+    kind,
+    ...(opts?.embed ? { embed: "1" } : {}),
+    ...(isLocal ? { __tenant: tenantHost } : {}),
+  }).toString();
   const scheme = window.location.protocol === "https:" ? "https" : "http";
   const base = isLocal ? `${FRONTEND_DEV_URL}/chrome-preview` : `${scheme}://${tenantHost}/chrome-preview`;
   return `${base}?${query}`;

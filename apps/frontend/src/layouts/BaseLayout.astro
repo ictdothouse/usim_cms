@@ -113,7 +113,6 @@ const fontsHref = allFonts.length
     {ogImage && <meta property="og:image" content={ogImage} />}
     {fontsHref && <link rel="stylesheet" href={fontsHref} />}
     {faviconUrl && <link rel="icon" href={faviconUrl} />}
-    {faviconUrl && <link rel="icon" href={faviconUrl} />}
     <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
   </head>
   <body
@@ -160,9 +159,7 @@ const fontsHref = allFonts.length
       </>
     )}
     <main id="main-content">
-      <main id="main-content">
       <slot />
-    </main>
     </main>
     {footerChrome && (
       <footer>
