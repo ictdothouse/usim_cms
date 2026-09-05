@@ -22,7 +22,16 @@ interface Props {
   // translation siblings to switch to (a page with nothing to switch to
   // gets no switcher, regardless of the site setting — see this repo's
   // "let the editor tell the truth" convention elsewhere in Designer.tsx).
-  langSwitcher?: { current: string | null; options: Array<{ code: string; label: string; href: string }> } | null;
+  langSwitcher?: {
+    current: string | null;
+    // Where the switcher renders on the public page, and how each option
+    // displays — both resolved server-side (tenant override, else the
+    // superadmin's global default) before this prop is ever built. See
+    // apps/api's tenant_languages/platform_settings switcherPosition/Style.
+    position: "header" | "topbar" | "float" | "footer";
+    style: "text" | "flag" | "shortform";
+    options: Array<{ code: string; label: string; href: string }>;
+  } | null;
   // Header/Footer designer (docs/superpowers/specs/2026-09-04-header-footer-designer-design.md)
   // — resolved server-side by the calling page ([...slug].astro/posts/[slug].astro)
   // via resolveHeaderFooter(). null/undefined (a fresh tenant with nothing
@@ -92,6 +101,20 @@ const themeVars = [
 ]
   .filter(Boolean)
   .join(";");
+// Best-effort code->flag lookup for style:"flag" (a language code is not a
+// country code, so this can't be a complete mapping) — a code with no entry
+// here falls back to its plain text label rather than rendering nothing.
+// ponytail: known ceiling, extend this table if a real gap is reported.
+const FLAG_MAP: Record<string, string> = {
+  ms: "🇲🇾", en: "🇬🇧", ar: "🇸🇦", zh: "🇨🇳", ta: "🇮🇳", hi: "🇮🇳", ja: "🇯🇵", ko: "🇰🇷",
+  fr: "🇫🇷", es: "🇪🇸", de: "🇩🇪", id: "🇮🇩", th: "🇹🇭", vi: "🇻🇳", pt: "🇵🇹", ru: "🇷🇺",
+  it: "🇮🇹", nl: "🇳🇱", tr: "🇹🇷", ur: "🇵🇰", bn: "🇧🇩", tl: "🇵🇭",
+};
+function switcherLabel(code: string, label: string, style: "text" | "flag" | "shortform"): string {
+  if (style === "shortform") return code.toUpperCase();
+  if (style === "flag") return FLAG_MAP[code.toLowerCase()] ?? label;
+  return label;
+}
 const fontFamily = typeof theme.fontFamily === "string" ? theme.fontFamily : "";
 const headingFont = typeof theme.headingFont === "string" ? theme.headingFont : "";
 const subHeadingFont = typeof theme.subHeadingFont === "string" ? theme.subHeadingFont : "";
@@ -118,6 +141,22 @@ const fontsHref = allFonts.length
   <body
     style={`font-family:var(--font-family, system-ui, sans-serif);background:var(--color-bg, inherit);color:var(--color-text, inherit)`}
   >
+    {langSwitcher && langSwitcher.position === "topbar" && langSwitcher.options.length > 1 && (
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:0.4rem;padding:0.4rem 1rem;font-size:0.7rem;background:#f2f2f2;">
+        {langSwitcher.options.map((o) => (
+          <a
+            href={o.href}
+            style={`text-decoration:none;padding:0.15rem 0.55rem;border-radius:999px;${
+              o.code === langSwitcher.current
+                ? "background:var(--color-primary,#0f62fe);color:var(--color-primary-content,#fff);"
+                : "color:#555;background:#fff;"
+            }`}
+          >
+            {switcherLabel(o.code, o.label, langSwitcher.style)}
+          </a>
+        ))}
+      </div>
+    )}
     {headerChrome ? (
       <header
         data-mobile-nav-position={mobileNav?.position}
@@ -137,7 +176,7 @@ const fontsHref = allFonts.length
     ) : (
       <>
         {logoUrl && !langSwitcher && <img src={logoUrl} alt="" height="40" />}
-        {langSwitcher && langSwitcher.options.length > 1 && (
+        {langSwitcher && langSwitcher.position === "header" && langSwitcher.options.length > 1 && (
           <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1rem;">
             {logoUrl ? <img src={logoUrl} alt="" height="40" /> : <span />}
             <nav style="display:flex;gap:0.4rem;">
@@ -150,7 +189,7 @@ const fontsHref = allFonts.length
                       : "color:#555;background:#f2f2f2;"
                   }`}
                 >
-                  {o.label}
+                  {switcherLabel(o.code, o.label, langSwitcher.style)}
                 </a>
               ))}
             </nav>
@@ -161,6 +200,22 @@ const fontsHref = allFonts.length
     <main id="main-content">
       <slot />
     </main>
+    {langSwitcher && langSwitcher.position === "footer" && langSwitcher.options.length > 1 && (
+      <div style="display:flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.75rem 1rem;font-size:0.75rem;">
+        {langSwitcher.options.map((o) => (
+          <a
+            href={o.href}
+            style={`text-decoration:none;padding:0.2rem 0.6rem;border-radius:999px;${
+              o.code === langSwitcher.current
+                ? "background:var(--color-primary,#0f62fe);color:var(--color-primary-content,#fff);"
+                : "color:#555;background:#f2f2f2;"
+            }`}
+          >
+            {switcherLabel(o.code, o.label, langSwitcher.style)}
+          </a>
+        ))}
+      </div>
+    )}
     {footerChrome && (
       <footer>
         {chromeLayout(footerChrome).map((block, b) =>
@@ -171,6 +226,22 @@ const fontsHref = allFonts.length
           ),
         )}
       </footer>
+    )}
+    {langSwitcher && langSwitcher.position === "float" && langSwitcher.options.length > 1 && (
+      <nav style="position:fixed;bottom:1rem;right:1rem;z-index:40;display:flex;gap:0.3rem;padding:0.4rem;border-radius:999px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,0.15);">
+        {langSwitcher.options.map((o) => (
+          <a
+            href={o.href}
+            style={`font-size:0.75rem;text-decoration:none;padding:0.2rem 0.6rem;border-radius:999px;${
+              o.code === langSwitcher.current
+                ? "background:var(--color-primary,#0f62fe);color:var(--color-primary-content,#fff);"
+                : "color:#555;background:#f2f2f2;"
+            }`}
+          >
+            {switcherLabel(o.code, o.label, langSwitcher.style)}
+          </a>
+        ))}
+      </nav>
     )}
     {designerEdit && (
       <script is:inline>

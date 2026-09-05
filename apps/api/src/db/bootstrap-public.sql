@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS "public"."platform_settings" (
 -- Upgrade path: instance-wide MFA master switch (Settings "Login Methods").
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "mfa_enabled" boolean DEFAULT false NOT NULL;
 
+-- Instance-wide default language-switcher placement/style (Settings
+-- "Language Switcher" card) — the seed a tenant with no override resolves to.
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "switcher_position" text DEFAULT 'header' NOT NULL;
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "switcher_style" text DEFAULT 'text' NOT NULL;
+
 -- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
 -- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
 -- counter table.
@@ -158,6 +163,12 @@ ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "multilang_enab
 -- i18n Phase 5 follow-up: default language new posts/pages fall back to
 -- when their own Language field is unset. Nullable — no default set yet.
 ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "default_language" text;
+
+-- Language-switcher placement/style, per-site override of the global
+-- default (platform_settings.switcher_position/switcher_style above).
+-- Nullable — null means "inherit the global default".
+ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "switcher_position" text;
+ALTER TABLE "public"."tenant_languages" ADD COLUMN IF NOT EXISTS "switcher_style" text;
 
 -- Page Blueprint (Sprint 5 sub-project 2). tenant_host NULL = system-wide.
 CREATE TABLE IF NOT EXISTS "public"."page_blueprints" (

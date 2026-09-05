@@ -523,13 +523,49 @@ export interface TenantLanguageSelection {
   // The language a post/page's own Language field defaults to when unset —
   // null = no default (falls back to the old "None" behavior).
   defaultLanguage: string | null;
+  // Language-switcher placement/style — always resolved (never null): a
+  // site with no explicit override already inherited the superadmin's
+  // global default server-side (see tenant-pool.ts's getTenantLanguageSelection).
+  switcherPosition: SwitcherPosition;
+  switcherStyle: SwitcherStyle;
 }
+
+export type SwitcherPosition = "header" | "topbar" | "float" | "footer";
+export type SwitcherStyle = "text" | "flag" | "shortform";
 
 export const getTenantLanguages = (tenantHost: string, token: string) =>
   request("/api/tenant-languages", tenantHost, token) as Promise<TenantLanguageSelection>;
 
-export const putTenantLanguages = (tenantHost: string, token: string, codes: string[], showHeaderSwitcher: boolean, multilangEnabled: boolean, defaultLanguage: string | null) =>
-  request("/api/tenant-languages", tenantHost, token, { method: "PUT", body: JSON.stringify({ codes, showHeaderSwitcher, multilangEnabled, defaultLanguage }) });
+export const putTenantLanguages = (
+  tenantHost: string,
+  token: string,
+  codes: string[],
+  showHeaderSwitcher: boolean,
+  multilangEnabled: boolean,
+  defaultLanguage: string | null,
+  switcherPosition: SwitcherPosition,
+  switcherStyle: SwitcherStyle,
+) =>
+  request("/api/tenant-languages", tenantHost, token, {
+    method: "PUT",
+    body: JSON.stringify({ codes, showHeaderSwitcher, multilangEnabled, defaultLanguage, switcherPosition, switcherStyle }),
+  });
+
+// Instance-wide default for the language switcher (Settings tab's
+// "Language Switcher" card) — same shape/pattern as getLoginSettings above.
+export interface LanguageSwitcherSettings {
+  switcherPosition: SwitcherPosition;
+  switcherStyle: SwitcherStyle;
+}
+
+export const getLanguageSwitcherSettings = (token: string) =>
+  request("/api/portal/language-switcher-settings", null, token) as Promise<LanguageSwitcherSettings>;
+
+export const setLanguageSwitcherSettings = (token: string, switcherPosition: SwitcherPosition, switcherStyle: SwitcherStyle) =>
+  request("/api/portal/language-switcher-settings", null, token, {
+    method: "PUT",
+    body: JSON.stringify({ switcherPosition, switcherStyle }),
+  }) as Promise<LanguageSwitcherSettings>;
 
 // i18n Phase 5 — a translation is content living on the SAME post/page row
 // (see PostTranslations below), not a separate row — so there is no
