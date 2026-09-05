@@ -646,7 +646,11 @@ function renderInline(text: string): string {
 // free-form units. Duplicated in Designer.tsx like every other shared table.
 function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
   if (!v) return fallback;
-  return table[v] ?? v;
+  if (v in table) return table[v];
+  // Mirrors Designer.tsx's own lengthValue fix: FourSideControl's per-side
+  // inputs are bare text boxes, so a typed "20" meant px — unitless non-zero
+  // border-radius/padding/margin is invalid CSS and silently dropped.
+  return /^-?\d+(\.\d+)?$/.test(v) ? `${v}px` : v;
 }
 // Every element accepts marginY/marginX, or independent per-side overrides
 // (see Designer.tsx's Inspector) — same fallback convention as paddingStyle.
