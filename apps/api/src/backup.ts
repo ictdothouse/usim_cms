@@ -43,13 +43,13 @@ function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[]
 
 export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
-  let pages, posts, media, mediaFolders, siteChrome;
+  let pages, posts, media, mediaFolders, siteChrome, categories;
   try {
     // This root-scope call never goes through tenantPlugin/requireTenantAuth
     // (see plugins/auth.ts), so nothing else sets the RLS flag draft rows
     // and writes need — set it directly on this connection.
     await db.execute(sql`SET SESSION app.authenticated = 'true'`);
-    [pages, posts, media, mediaFolders, siteChrome] = await Promise.all([
+    [pages, posts, media, mediaFolders, siteChrome, categories] = await Promise.all([
       db.select().from(schema.pages),
       db.select().from(schema.posts),
       db.select().from(schema.media),
@@ -58,6 +58,9 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
       // table in the dump, restoring into a fresh tenant (clone/promote) 400s
       // on the very first page insert since those ids don't exist yet there.
       db.select().from(schema.siteChrome),
+      // posts.categoryId is a real FK into categories — same failure mode as
+      // site_chrome above, just surfaces on the posts insert instead.
+      db.select().from(schema.categories),
     ]);
   } finally {
     release();
@@ -68,7 +71,7 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
         version: BACKUP_VERSION,
         sourceHost: host,
         exportedAt: new Date().toISOString(),
-        tables: { pages, posts, media, mediaFolders, siteChrome },
+        tables: { pages, posts, media, mediaFolders, siteChrome, categories },
         theme: await getTenantTheme(host),
       }),
     ),
@@ -204,9 +207,10 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
       pages: Record<string, unknown>[];
       posts: Record<string, unknown>[];
       media: Record<string, unknown>[];
-      // Older backups (pre-media-folders / pre-site-chrome) won't have these keys.
+      // Older backups (pre-media-folders / pre-site-chrome / pre-categories) won't have these keys.
       mediaFolders?: Record<string, unknown>[];
       siteChrome?: Record<string, unknown>[];
+      categories?: Record<string, unknown>[];
     };
     theme: Record<string, unknown> | null;
   };
@@ -217,18 +221,23 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
     await db.execute(sql`SET SESSION app.authenticated = 'true'`);
     // Full replace, not merge — a restore means "make the tenant look like
     // the backup". Wipe in FK-safe order: media references media_folders,
-    // pages references site_chrome (headerId/footerId) — delete pages
-    // before site_chrome, insert site_chrome before pages.
+    // pages references site_chrome (headerId/footerId), posts references
+    // categories (onDelete: "restrict" — can't delete a category while a
+    // post still points at it) — delete posts before categories, insert
+    // categories before posts.
     await db.delete(schema.media);
     await db.delete(schema.posts);
     await db.delete(schema.pages);
     await db.delete(schema.mediaFolders);
     await db.delete(schema.siteChrome);
-    const { pages, posts, media, mediaFolders = [], siteChrome = [] } = backup.tables;
+    await db.delete(schema.categories);
+    const { pages, posts, media, mediaFolders = [], siteChrome = [], categories = [] } = backup.tables;
     if (siteChrome.length)
       await db.insert(schema.siteChrome).values(reviveDates(siteChrome) as (typeof schema.siteChrome.$inferInsert)[]);
     if (mediaFolders.length)
       await db.insert(schema.mediaFolders).values(reviveDates(mediaFolders) as (typeof schema.mediaFolders.$inferInsert)[]);
+    if (categories.length)
+      await db.insert(schema.categories).values(reviveDates(categories) as (typeof schema.categories.$inferInsert)[]);
     if (pages.length) await db.insert(schema.pages).values(reviveDates(pages) as (typeof schema.pages.$inferInsert)[]);
     if (posts.length) await db.insert(schema.posts).values(reviveDates(posts) as (typeof schema.posts.$inferInsert)[]);
     if (media.length) await db.insert(schema.media).values(reviveDates(media) as (typeof schema.media.$inferInsert)[]);
