@@ -1744,9 +1744,15 @@ function ThemeForm({
       const url = previewTenantHost ? await api.uploadMedia(previewTenantHost, token, file) : await api.uploadGlobalBranding(token, file);
       // previewTenantHost is only set for a per-site ThemeForm (see the
       // comment above this function) — the instance-wide Global Theme default
-      // has no single tenant domain to bake in, so it keeps API_URL there (a
-      // real per-site override, the common path, always gets the branded URL).
-      const full = url.startsWith("http") ? url : (previewTenantHost ? api.publicMediaBase(previewTenantHost) : api.API_URL) + url;
+      // has no single tenant domain to bake in, so it's stored bare/relative
+      // instead (no host at all): every tenant's own domain now proxies
+      // /uploads/* to the api container (see proxy-sync.ts), so a relative
+      // path resolves correctly against WHICHEVER tenant is rendering the
+      // page — the one case where storing no host beats baking in any one.
+      // The <img> preview a few lines below resolves it back to an absolute
+      // URL for the admin's own on-screen display only (a different origin
+      // than any tenant, so it needs one).
+      const full = url.startsWith("http") ? url : previewTenantHost ? api.publicMediaBase(previewTenantHost) + url : url;
       if (kind === "logo") setLogoUrl(full);
       else setFaviconUrl(full);
     } catch (err) {
@@ -2209,7 +2215,7 @@ function ThemeForm({
                     />
                   </label>
                 </div>
-                {value && <img src={value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
+                {value && <img src={value.startsWith("http") ? value : api.API_URL + value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
               </label>
             ))}
           </div>
