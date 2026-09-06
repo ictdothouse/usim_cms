@@ -2871,6 +2871,14 @@ function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost:
     });
   }
 
+  async function remove(c: api.CloneMeta) {
+    if (!(await confirm(c.stagingHost ? t("tenants-clone-delete-staged-confirm") : t("tenants-clone-delete-confirm")))) return;
+    await run(c.id, async () => {
+      await api.deletePortalClone(token, c.id);
+      await refresh();
+    });
+  }
+
   return (
     <div className={`${card} space-y-3 p-5`}>
       <h3 className="text-xs font-bold text-ink">{t("tenants-clone-box-title")}</h3>
@@ -2971,6 +2979,13 @@ function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost:
                 className={`${btnGhost} px-2.5 py-1`}
               >
                 {t("tenants-clone-newsite")}
+              </button>
+              <button
+                disabled={busyId === c.id}
+                onClick={() => void remove(c)}
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Trash2 className="h-3 w-3" /> {t("tenants-clone-delete")}
               </button>
             </div>
           </div>

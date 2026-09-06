@@ -43,17 +43,21 @@ function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[]
 
 export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
-  let pages, posts, media, mediaFolders;
+  let pages, posts, media, mediaFolders, siteChrome;
   try {
     // This root-scope call never goes through tenantPlugin/requireTenantAuth
     // (see plugins/auth.ts), so nothing else sets the RLS flag draft rows
     // and writes need — set it directly on this connection.
     await db.execute(sql`SET SESSION app.authenticated = 'true'`);
-    [pages, posts, media, mediaFolders] = await Promise.all([
+    [pages, posts, media, mediaFolders, siteChrome] = await Promise.all([
       db.select().from(schema.pages),
       db.select().from(schema.posts),
       db.select().from(schema.media),
       db.select().from(schema.mediaFolders),
+      // pages.headerId/footerId are real FKs into site_chrome — without this
+      // table in the dump, restoring into a fresh tenant (clone/promote) 400s
+      // on the very first page insert since those ids don't exist yet there.
+      db.select().from(schema.siteChrome),
     ]);
   } finally {
     release();
@@ -64,7 +68,7 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
         version: BACKUP_VERSION,
         sourceHost: host,
         exportedAt: new Date().toISOString(),
-        tables: { pages, posts, media, mediaFolders },
+        tables: { pages, posts, media, mediaFolders, siteChrome },
         theme: await getTenantTheme(host),
       }),
     ),
@@ -93,10 +97,10 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
 // through the existing importTenantBackup unchanged.
 export async function exportTenantDesignClone(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
-  let pages;
+  let pages, siteChrome;
   try {
     await db.execute(sql`SET SESSION app.authenticated = 'true'`);
-    pages = await db.select().from(schema.pages);
+    [pages, siteChrome] = await Promise.all([db.select().from(schema.pages), db.select().from(schema.siteChrome)]);
   } finally {
     release();
   }
@@ -113,7 +117,12 @@ export async function exportTenantDesignClone(host: string): Promise<Uint8Array>
         version: BACKUP_VERSION,
         sourceHost: host,
         exportedAt: new Date().toISOString(),
-        tables: { pages: skeletonPages, posts: [], media: [], mediaFolders: [] },
+        // A page's headerId/footerId still points at these real site_chrome
+        // rows even in a skeleton clone (see exportTenantBackup's own comment
+        // on why this table can't be dropped) — header/footer design is
+        // structure, not content, so keeping it here matches this clone
+        // type's own "site structure + theme survive" premise anyway.
+        tables: { pages: skeletonPages, posts: [], media: [], mediaFolders: [], siteChrome },
         theme: await getTenantTheme(host),
       }),
     ),
@@ -159,6 +168,15 @@ export function markCloneStaged(id: string, stagingHost: string) {
   if (entry) entry.meta.stagingHost = stagingHost;
 }
 
+// Drops the in-memory clone entry only — a staged clone's real tenant
+// row/database (created by stageClone's own createTenant call) is a
+// separate concern the caller (index.ts's DELETE /api/portal/clones/:id)
+// handles itself via the existing deleteTenant, so this never has to know
+// about tenant provisioning.
+export function deleteClone(id: string): boolean {
+  return cloneStore.delete(id);
+}
+
 export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[] }> {
   let decompressedTotal = 0;
   const entries = unzipSync(zip, {
@@ -186,8 +204,9 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
       pages: Record<string, unknown>[];
       posts: Record<string, unknown>[];
       media: Record<string, unknown>[];
-      // Older backups (pre-media-folders) won't have this key.
+      // Older backups (pre-media-folders / pre-site-chrome) won't have these keys.
       mediaFolders?: Record<string, unknown>[];
+      siteChrome?: Record<string, unknown>[];
     };
     theme: Record<string, unknown> | null;
   };
@@ -197,12 +216,17 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
   try {
     await db.execute(sql`SET SESSION app.authenticated = 'true'`);
     // Full replace, not merge — a restore means "make the tenant look like
-    // the backup". Wipe in FK-safe order: media references media_folders.
+    // the backup". Wipe in FK-safe order: media references media_folders,
+    // pages references site_chrome (headerId/footerId) — delete pages
+    // before site_chrome, insert site_chrome before pages.
     await db.delete(schema.media);
     await db.delete(schema.posts);
     await db.delete(schema.pages);
     await db.delete(schema.mediaFolders);
-    const { pages, posts, media, mediaFolders = [] } = backup.tables;
+    await db.delete(schema.siteChrome);
+    const { pages, posts, media, mediaFolders = [], siteChrome = [] } = backup.tables;
+    if (siteChrome.length)
+      await db.insert(schema.siteChrome).values(reviveDates(siteChrome) as (typeof schema.siteChrome.$inferInsert)[]);
     if (mediaFolders.length)
       await db.insert(schema.mediaFolders).values(reviveDates(mediaFolders) as (typeof schema.mediaFolders.$inferInsert)[]);
     if (pages.length) await db.insert(schema.pages).values(reviveDates(pages) as (typeof schema.pages.$inferInsert)[]);
@@ -254,14 +278,26 @@ function internalGet(urlPath: string, host: string): Promise<{ status: number; b
 // be picked up.
 export async function exportStaticSite(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
-  let pages, posts;
+  let pages, posts, categories;
   try {
-    [pages, posts] = await Promise.all([
+    [pages, posts, categories] = await Promise.all([
       db.select({ slug: schema.pages.slug }).from(schema.pages),
-      db.select({ slug: schema.posts.slug }).from(schema.posts),
+      db.select({ slug: schema.posts.slug, tags: schema.posts.tags, authorEmail: schema.posts.authorEmail }).from(schema.posts),
+      db.select({ slug: schema.categories.slug }).from(schema.categories),
     ]);
   } finally {
     release();
+  }
+
+  // Every OTHER real public route type (category/tag/author archives) —
+  // missing these left them 404ing in the exported zip whenever the site's
+  // own header/footer/menu linked to one, since only pages/posts were ever
+  // crawled here before.
+  const tags = new Set<string>();
+  const authors = new Set<string>();
+  for (const p of posts) {
+    for (const tg of p.tags ?? []) tags.add(tg);
+    if (p.authorEmail) authors.add(p.authorEmail);
   }
 
   const files: Record<string, Uint8Array> = {};
@@ -269,14 +305,26 @@ export async function exportStaticSite(host: string): Promise<Uint8Array> {
   const routes: Array<{ urlPath: string; file: string }> = [
     ...pages.map((p) => ({ urlPath: `/${p.slug}`, file: p.slug === "home" ? "index.html" : `${p.slug}.html` })),
     ...posts.map((p) => ({ urlPath: `/posts/${p.slug}`, file: `posts/${p.slug}.html` })),
+    ...categories.map((c) => ({ urlPath: `/category/${encodeURIComponent(c.slug)}`, file: `category/${encodeURIComponent(c.slug)}.html` })),
+    ...[...tags].map((tg) => ({ urlPath: `/tag/${encodeURIComponent(tg)}`, file: `tag/${encodeURIComponent(tg)}.html` })),
+    ...[...authors].map((email) => ({
+      urlPath: `/author/${encodeURIComponent(email)}`,
+      file: `author/${encodeURIComponent(email)}.html`,
+    })),
   ];
   for (const { urlPath, file } of routes) {
     const res = await internalGet(urlPath, host);
     if (res.status !== 200) continue; // unpublished/broken page — skip, don't fail the whole export
     const html = res.body.toString("utf8");
     files[file] = strToU8(html);
-    for (const match of html.matchAll(/(?:src|href)="(\/(?:_astro|uploads)\/[^"]+)"/g)) {
-      assets.add(match[1]);
+    for (const match of html.matchAll(/(?:src|href|srcset)="([^"]+)"/g)) {
+      // srcset carries a comma-separated "url widthDescriptor" list, not a
+      // single URL — split it out so a responsive image's other candidate
+      // sizes get bundled too, not just whichever src happened to match.
+      for (const candidate of match[1].split(",")) {
+        const url = candidate.trim().split(/\s+/)[0];
+        if (/^\/(?:_astro|uploads)\//.test(url)) assets.add(url);
+      }
     }
   }
   for (const assetPath of assets) {
