@@ -99,7 +99,7 @@ function mergeElBp(
 
 export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: number[] }) {
   const {
-    mode, t, mutate, bp, availableMenus, availableCategories,
+    mode, kind, t, mutate, bp, availableMenus, availableCategories,
     sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     editingText, bpGetValue, sel,
   } = ctx;
@@ -123,9 +123,12 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
   // there could never be seen or usefully drag-resized — it only ever
   // showed the generic hint chip below, with the resize handle (Designer.tsx,
   // gated on mode !== "live") floating over that tiny box instead of the
-  // actual picture.
-  const isImage = el.type === "image";
-  if (mode === "blocks" && !isImage) {
+  // actual picture. "menu" gets the same exemption there for the same
+  // reason: a header/footer nav bar's whole point is showing its real
+  // items (and, at mobile bp, the hamburger settings), never just a
+  // "Menu — <name>" label chip with no toggle to ever see past it.
+  const skipSkeleton = el.type === "image" || (el.type === "menu" && kind === "siteChrome");
+  if (mode === "blocks" && !skipSkeleton) {
     const Icon = ELS[el.type].icon;
     const hint = ((): string => {
       switch (el.type) {
