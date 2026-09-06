@@ -133,6 +133,17 @@ whole host destabilizing first.
 - **Disk-full protection**: already covered by `monitor/server.js`'s
   `ALERT_DISK_THRESHOLD_PCT` webhook alert (Option list above) — disk filling up (WAL
   growth, uploads) is a common real cause of Postgres/Caddy refusing to start.
+- **Monitor dashboard button**: `monitor/server.js` gained "Apply base-tier config
+  (db/proxy/pgbouncer/redis)" — `POST /api/base/apply`, docker-mode only, same
+  job-runner convention as the existing Rollback button (`deployState`/`DEPLOY_LOG`,
+  detached + pollable). Runs `git fetch origin && git reset --hard origin/main` then
+  `docker compose up -d db proxy pgbouncer redis` — `up -d` only recreates a container
+  whose own config actually drifted, so this is safe to click any time, not just right
+  after a base-tier compose change. Deliberately a SEPARATE button from "Pull latest &
+  deploy", not folded into it: that button (`handlePull`/`scripts/deploy.sh`) must stay
+  zero-downtime for ordinary api/frontend/admin-only changes, so it never touches base
+  tier — this new button is the one-off, deliberate action for when
+  `docker-compose.yml` itself changed.
 - Deliberately NOT covered here (still needs Option C): the VPS host itself dying
   (hardware/power/network at the provider level) — no amount of single-box hardening
   answers that, it always needs a second machine.

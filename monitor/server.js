@@ -581,6 +581,47 @@ function handleRollback(req, res) {
   });
 }
 
+// Deliberately separate from handlePull/scripts/deploy.sh: db/proxy/
+// pgbouncer/redis are the always-on "base" every blue/green color shares,
+// so a normal redeploy must never touch them (that's the whole point of the
+// split). This is the one-off manual step for when docker-compose.yml
+// itself changed (e.g. a new mem_limit) — `up -d` only recreates a
+// container whose own config actually changed, but any of these four is a
+// single instance, so expect a few seconds of interruption per container
+// recreated. Docker-mode only: systemd/bare-metal mode has no containers
+// here at all.
+function handleApplyBaseTier(req, res) {
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, {
+      error: "base-tier apply needs docker mode — this box runs systemd mode",
+    });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/rollback is already running" });
+  deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+  const logFd = fs.openSync(DEPLOY_LOG, "a");
+  fs.writeSync(logFd, `\n\n=== base-tier apply started ${deployState.startedAt} ===\n`);
+  const script = `
+    set -e
+    echo "--- git pull ---"
+    git fetch origin && git reset --hard origin/main
+    echo "--- recreating db/proxy/pgbouncer/redis (only containers whose config actually changed are touched) ---"
+    docker compose up -d db proxy pgbouncer redis
+    echo "--- done ---"
+  `;
+  const child = spawn("sh", ["-c", script], {
+    cwd: REPO_DIR,
+    stdio: ["ignore", logFd, logFd],
+    detached: true,
+  });
+  child.unref();
+  child.on("exit", (code) => {
+    deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+    fs.appendFileSync(DEPLOY_LOG, `=== base-tier apply finished, exit ${code} ===\n`);
+    fs.closeSync(logFd);
+  });
+  sendJson(res, 202, { ok: true, started: true });
+}
+
 function handlePullStatus(req, res) {
   sendJson(res, 200, deployState);
 }
@@ -698,6 +739,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <div class="row">
   <button onclick="pull()">Pull latest &amp; deploy</button>
   <button class="secondary" onclick="rollback()">Rollback</button>
+  <button class="secondary" onclick="applyBaseTier()">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
   <button class="secondary" onclick="restartAll()">Restart all</button>
   <button class="secondary" onclick="refresh()">Refresh now</button>
 </div>
@@ -989,6 +1031,17 @@ async function rollback() {
   }
 }
 
+async function applyBaseTier() {
+  if (!confirm("Recreate db/proxy/pgbouncer/redis to pick up a docker-compose.yml change? Each one that actually changed will briefly interrupt (a few seconds) — these aren't blue-green.")) return;
+  try {
+    await api("/api/base/apply", { method: "POST" });
+    pollDeployLog();
+    refresh();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
 let polling = false;
 async function pollDeployLog() {
   if (polling) return;
@@ -1084,6 +1137,8 @@ const server = http.createServer((req, res) => {
       handlePull(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/rollback") {
       handleRollback(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/base/apply") {
+      handleApplyBaseTier(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/status") {
       handlePullStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/log") {
