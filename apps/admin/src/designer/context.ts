@@ -98,6 +98,15 @@ export interface DesignerCtx {
   setPageThemePreset: (preset: api.ThemePreset | null) => void;
   themePresets: api.ThemePreset[];
 
+  // Page-level header/footer assignment ("nothing selected" panel, page kind only)
+  pageHeaderId: string;
+  pageFooterId: string;
+  pageHideHeader: boolean;
+  pageHideFooter: boolean;
+  availableHeaders: api.SiteChrome[];
+  availableFooters: api.SiteChrome[];
+  patchPageChrome: (patch: { headerId?: string; footerId?: string; hideHeader?: boolean; hideFooter?: boolean }) => void | Promise<void>;
+
   // Page language ("nothing selected" panel)
   siteMultilangEnabled: boolean;
   pageMultilangEnabled: boolean;

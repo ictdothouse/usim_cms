@@ -162,7 +162,7 @@ const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionPro
 
 export function Inspector({ ctx }: { ctx: DesignerCtx }) {
   const {
-    t, bp, sel, setSel, blocks, mutate,
+    t, bp, kind, sel, setSel, blocks, mutate,
     bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
     setFourSideValue, setColSideValue, setElSideValue,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
@@ -171,6 +171,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     sliderInnerSel, setSliderInnerSel, uploadImage,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
+    pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
     siteLanguages, pageLanguage, setPageLanguage, activeLang, hasLangSlot,
     clickPageLanguagePill, translating, retranslatePageLanguage,
@@ -273,6 +274,47 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
             ))}
           </select>
         </label>
+        {kind === "page" && (
+          <div className="space-y-2 border-t border-line/30 pt-3">
+            <p className="text-[11px] font-bold text-ink">{t("header-footer-page-assignment")}</p>
+            <label className="block text-[11px] font-medium text-body">
+              {t("designer-page-header")}
+              <select
+                value={pageHeaderId}
+                onChange={(e) => void patchPageChrome({ headerId: e.target.value })}
+                disabled={pageHideHeader}
+                className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+              >
+                <option value="">{t("designer-page-header-default")}</option>
+                {availableHeaders.map((h) => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+              <input type="checkbox" checked={pageHideHeader} onChange={(e) => void patchPageChrome({ hideHeader: e.target.checked })} />
+              {t("designer-page-hide-header")}
+            </label>
+            <label className="block text-[11px] font-medium text-body">
+              {t("designer-page-footer")}
+              <select
+                value={pageFooterId}
+                onChange={(e) => void patchPageChrome({ footerId: e.target.value })}
+                disabled={pageHideFooter}
+                className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+              >
+                <option value="">{t("designer-page-header-default")}</option>
+                {availableFooters.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+              <input type="checkbox" checked={pageHideFooter} onChange={(e) => void patchPageChrome({ hideFooter: e.target.checked })} />
+              {t("designer-page-hide-footer")}
+            </label>
+          </div>
+        )}
         {siteMultilangEnabled && (
         <div className="space-y-1.5">
           <label className="block text-[11px] font-medium text-body">{t("designer-page-language")}</label>
