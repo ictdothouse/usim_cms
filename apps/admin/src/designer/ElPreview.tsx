@@ -484,7 +484,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             }`}
           >
             {slide.rows.length === 0 ? (
-              <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-white/40 px-4 py-6 text-center text-white/70">
+              <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-black/20 bg-black/10 px-4 py-6 text-center text-black/50">
                 <ImageIcon className="h-6 w-6" />
                 <span className="text-xs">{t("designer-slide-empty")}</span>
               </div>
