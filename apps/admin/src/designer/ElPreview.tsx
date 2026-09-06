@@ -585,6 +585,18 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           </div>
         );
       }
+      if (bp === "mobile") {
+        // The real site collapses ANY .ds-menu to a hamburger-only trigger
+        // below 768px (global.css) regardless of where it's placed — mirror
+        // that here so previewing the mobile breakpoint doesn't still show
+        // the full desktop item list, which read as identical to desktop/
+        // tablet and hid the real published behavior from the author.
+        return (
+          <div className="flex items-center justify-end rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2">
+            <Menu className="h-4 w-4 text-body" />
+          </div>
+        );
+      }
       return (
         <nav className={`flex items-center gap-4 text-xs ${p.layout === "vertical" ? "flex-col items-start gap-1.5" : ""}`}>
           {linked.items.map((item) => (

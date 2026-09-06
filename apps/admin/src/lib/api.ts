@@ -398,7 +398,7 @@ export interface SiteChrome {
   name: string;
   layout: unknown[];
   translations: Record<string, { layout: unknown[] }>;
-  settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string } };
+  settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string; style?: string } };
   isDefault: boolean;
   status: "draft" | "published";
   createdAt: string;
