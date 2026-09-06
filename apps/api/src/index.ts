@@ -105,6 +105,7 @@ import {
   listClones,
   getClone,
   markCloneStaged,
+  deleteClone,
   looksLikeDomain,
 } from "./backup.js";
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
@@ -1359,6 +1360,27 @@ app.get("/api/portal/tenants/:host/clones", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   const { host } = req.params as { host: string };
   return { clones: listClones(host) };
+});
+
+// Removes a clone box entry. If it was staged (has a real stagingHost —
+// stageClone's own createTenant already made that a live tenant + Caddy
+// route), that staging tenant is deleted too, since a staged preview only
+// ever exists as a byproduct of this clone and shouldn't outlive it as an
+// orphaned, no-longer-linked site.
+app.delete("/api/portal/clones/:id", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { id } = req.params as { id: string };
+  const entry = getClone(id);
+  if (!entry) {
+    reply.code(404);
+    return { error: "clone not found" };
+  }
+  if (entry.meta.stagingHost) {
+    await deleteTenant(entry.meta.stagingHost);
+    await maybeSyncCaddy();
+  }
+  deleteClone(id);
+  return { deleted: true, id };
 });
 
 app.get("/api/portal/clones/:id/download", async (req, reply) => {

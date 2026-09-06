@@ -818,6 +818,9 @@ export const listClones = (token: string, host: string) =>
 export const downloadClone = (token: string, id: string) =>
   downloadZip(`/api/portal/clones/${id}/download`, token, `clone-${id}.zip`);
 
+export const deletePortalClone = (token: string, id: string) =>
+  request(`/api/portal/clones/${id}`, null, token, { method: "DELETE" }) as Promise<{ deleted: boolean; id: string }>;
+
 export const stageClone = (token: string, id: string) =>
   request(`/api/portal/clones/${id}/stage`, null, token, { method: "POST" }) as Promise<{
     staged: boolean;

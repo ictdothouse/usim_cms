@@ -282,6 +282,25 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   check never depends on either of those changing shape. `GET /api/portal/tenants` (the Multisite list)
   already returns `maintenanceMode` on every row for free, since it's a plain `db.select()` off the
   `tenants` table with no explicit column list.
+- **Backup/restore/clone dumps `site_chrome` too** (`backup.ts`'s `exportTenantBackup`/
+  `exportTenantDesignClone`/`importTenantBackup`) — `pages.headerId`/`footerId` are real FKs into
+  `site_chrome`, and the dump originally only ever covered `pages`/`posts`/`media`/`mediaFolders`, so
+  promoting a clone into a brand-new (empty `site_chrome`) tenant 400'd on the very first page insert
+  (`pages_header_id_site_chrome_id_fk`). Fixed by adding `siteChrome` to both export functions' `tables`
+  and to `importTenantBackup`'s delete/insert order (insert `site_chrome` before `pages`, since pages
+  reference it) — an older backup without this key still restores fine (`siteChrome = []` default, same
+  optional-key convention as `mediaFolders`).
+- **Clone delete** — `DELETE /api/portal/clones/:id` (superadmin) drops the in-memory `cloneStore` entry
+  (`backup.ts`'s `deleteClone`) and, if the clone was staged (`meta.stagingHost` set — `stageClone`'s own
+  `createTenant` call already made that a real tenant+DB+Caddy route), also deletes that staging tenant
+  via the existing `deleteTenant`/`maybeSyncCaddy` — a staged preview only ever exists as a byproduct of
+  its clone and shouldn't outlive it as an orphaned site nobody can find from the Clone box anymore.
+- **`exportStaticSite` now crawls category/tag/author archive pages** (previously only `pages`/`posts` —
+  any header/footer/menu link to `/category/:slug`, `/tag/:tag`, or `/author/:email` 404'd in the
+  downloaded zip). Tag/author values come from every post's own `tags`/`authorEmail` (no dedicated
+  list-tags endpoint — computed by walking the already-fetched posts). The asset-discovery regex also
+  now matches `srcset=` (splitting its comma-separated candidate list), not just `src=`/`href=`, so a
+  future responsive-image `srcset` won't silently produce a static export missing half its own images.
 
 ## Auth hardening (rate limiting, audit log, MFA)
 
