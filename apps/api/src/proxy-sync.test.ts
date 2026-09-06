@@ -32,8 +32,26 @@ test("buildCaddyConfig defaults to one dial target per service when no upstreams
   const servers = (config as any).apps.http.servers.srv0;
   const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
   assert.deepEqual(apiRoute.handle[0].upstreams, [{ dial: "api:3000" }]);
-  const tenantRoute = servers.routes.find((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
-  assert.deepEqual(tenantRoute.handle[0].upstreams, [{ dial: "frontend:4321" }]);
+  const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
+  const frontendRoute = tenantRoutes.find((r: any) => !r.match[0].path);
+  assert.deepEqual(frontendRoute.handle[0].upstreams, [{ dial: "frontend:4321" }]);
+});
+
+test("buildCaddyConfig proxies a tenant's own /uploads/* to the api upstream, not the frontend", () => {
+  // The fix for uploaded media leaking this instance's internal api.<domain>
+  // hostname: a tenant's own domain must itself serve its own uploads.
+  const config = buildCaddyConfig([{ host: "dept-a.usim.edu.my", active: true }]);
+  const servers = (config as any).apps.http.servers.srv0;
+  const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
+  const uploadsRoute = tenantRoutes.find((r: any) => r.match[0].path?.[0] === "/uploads/*");
+  assert.ok(uploadsRoute, "expected a dedicated /uploads/* route for the tenant host");
+  assert.deepEqual(uploadsRoute.handle[0].upstreams, [{ dial: "api:3000" }]);
+  // Order matters: Caddy evaluates routes in list order and reverse_proxy is
+  // terminal, so the path-specific route must come before the catch-all one.
+  const uploadsIdx = servers.routes.indexOf(uploadsRoute);
+  const frontendRoute = tenantRoutes.find((r: any) => !r.match[0].path);
+  const frontendIdx = servers.routes.indexOf(frontendRoute);
+  assert.ok(uploadsIdx < frontendIdx);
 });
 
 test("buildCaddyConfig fans out to every replica dial target for a blue-green/scaled deploy", () => {
@@ -48,10 +66,16 @@ test("buildCaddyConfig fans out to every replica dial target for a blue-green/sc
     { dial: "ucms-green-api-1:3000" },
     { dial: "ucms-green-api-2:3000" },
   ]);
-  const tenantRoute = servers.routes.find((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
-  assert.deepEqual(tenantRoute.handle[0].upstreams, [
+  const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
+  const frontendRoute = tenantRoutes.find((r: any) => !r.match[0].path);
+  assert.deepEqual(frontendRoute.handle[0].upstreams, [
     { dial: "ucms-green-frontend-1:4321" },
     { dial: "ucms-green-frontend-2:4321" },
+  ]);
+  const uploadsRoute = tenantRoutes.find((r: any) => r.match[0].path?.[0] === "/uploads/*");
+  assert.deepEqual(uploadsRoute.handle[0].upstreams, [
+    { dial: "ucms-green-api-1:3000" },
+    { dial: "ucms-green-api-2:3000" },
   ]);
 });
 

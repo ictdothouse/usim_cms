@@ -1,5 +1,23 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
+// Base URL to bake into a media reference that gets PERSISTED into page/post/
+// theme content — deliberately NOT the same as API_URL, which every on-screen
+// admin preview (MediaPickerModal's grid, MediaManager's thumbnails, etc.)
+// still uses directly and unchanged. A visitor has no reason to ever see this
+// instance's internal api.<domain> hostname baked into a saved image URL —
+// it leaks infrastructure and reads as unprofessional. Pairs with the
+// tenant's own Caddy site block proxying /uploads/* straight to the api
+// container (see proxy-sync.ts's buildCaddyConfig/Caddyfile), so the tenant's
+// own domain serves the exact same files. Falls back to API_URL in dev
+// (`pnpm dev:admin` has no Caddy in front, the admin talks to the api
+// container directly there, same as every other dev-vs-prod branch in this
+// file, e.g. FRONTEND_DEV_URL below).
+export function publicMediaBase(tenantHost: string): string {
+  if (import.meta.env.DEV) return API_URL;
+  const scheme = window.location.protocol === "https:" ? "https" : "http";
+  return `${scheme}://${tenantHost}`;
+}
+
 // Base for the "View" link on a page/post. In production each tenant IS its
 // own real domain (tenantHost), so no separate frontend URL is needed there.
 // Locally there's one shared `astro dev` server, so this points at it with

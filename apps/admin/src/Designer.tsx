@@ -2454,7 +2454,7 @@ export default function Designer({
   async function uploadImage(file: File, setValue: (v: string) => void) {
     setUploading(true);
     try {
-      setValue(api.API_URL + (await api.uploadMedia(tenantHost, token, file)));
+      setValue(api.publicMediaBase(tenantHost) + (await api.uploadMedia(tenantHost, token, file)));
     } catch (err) {
       setError((err as Error).message);
     } finally {

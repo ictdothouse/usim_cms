@@ -80,12 +80,29 @@ export function buildCaddyConfig(
   const apiUpstreams = dials(upstreams.api, DEFAULT_API_UPSTREAM);
   const frontendUpstreams = dials(upstreams.frontend, DEFAULT_FRONTEND_UPSTREAM);
 
+  // Two routes per tenant, uploads-path one FIRST — Caddy evaluates routes in
+  // list order and a reverse_proxy handler is terminal, so the more specific
+  // host+path match must precede the plain host match or it would never be
+  // reached. This is the fix for uploaded media otherwise only being
+  // reachable at api.<domain>/uploads/... (this instance's internal api
+  // container's own hostname, leaking infrastructure and reading as
+  // unprofessional to a visitor) — a tenant's own domain now serves its own
+  // uploads too, same bytes, same api container, just proxied under the
+  // hostname a visitor actually sees. apps/admin's own write paths
+  // (publicMediaBase in lib/api.ts) bake this same tenant hostname into a
+  // saved image/logo/favicon URL instead of API_URL, so the two halves match.
   const tenantRoutes = tenants
     .filter((t) => t.active)
-    .map((t) => ({
-      match: [{ host: [t.host] }],
-      handle: [{ handler: "reverse_proxy", upstreams: frontendUpstreams }],
-    }));
+    .flatMap((t) => [
+      {
+        match: [{ host: [t.host], path: ["/uploads/*"] }],
+        handle: [{ handler: "reverse_proxy", upstreams: apiUpstreams }],
+      },
+      {
+        match: [{ host: [t.host] }],
+        handle: [{ handler: "reverse_proxy", upstreams: frontendUpstreams }],
+      },
+    ]);
 
   const staticRoutes = [
     {
