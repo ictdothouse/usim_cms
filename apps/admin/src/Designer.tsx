@@ -3880,13 +3880,35 @@ export default function Designer({
                   </button>
                 </div>
                 <div className="flex flex-1 items-start justify-center overflow-auto bg-canvas/60 p-4">
-                  <iframe
-                    key={previewModal.src}
-                    src={previewModal.src}
-                    className="h-full rounded-lg border border-line/30 bg-white shadow-sm"
-                    style={{ width: DEVICE_WIDTH[previewModal.device] }}
-                    title={t("designer-preview")}
-                  />
+                  {previewModal.device === "desktop" ? (
+                    <iframe
+                      key={previewModal.src}
+                      src={previewModal.src}
+                      className="h-full rounded-lg border border-line/30 bg-white shadow-sm"
+                      style={{ width: DEVICE_WIDTH[previewModal.device] }}
+                      title={t("designer-preview")}
+                    />
+                  ) : (
+                    // Device bezel so tablet/mobile preview reads as an actual
+                    // phone/tablet instead of a plain narrowed box — the
+                    // iframe itself is unchanged, just wrapped.
+                    <div
+                      className={`flex h-full shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
+                        previewModal.device === "mobile" ? "rounded-[2.5rem] p-3" : "rounded-[1.5rem] p-2.5"
+                      }`}
+                      style={{ width: `calc(${DEVICE_WIDTH[previewModal.device]} + 1.5rem)` }}
+                    >
+                      {previewModal.device === "mobile" && (
+                        <div className="mx-auto h-1.5 w-16 shrink-0 rounded-full bg-white/25" />
+                      )}
+                      <iframe
+                        key={previewModal.src}
+                        src={previewModal.src}
+                        className={`w-full flex-1 bg-white ${previewModal.device === "mobile" ? "rounded-[1.75rem]" : "rounded-xl"}`}
+                        title={t("designer-preview")}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -89,7 +89,12 @@ h2, h3, h4, h5, h6 {
 
   /* Header/Footer designer's mobile-nav style knobs (settings.mobileNav on
      the siteChrome row, see BaseLayout.astro) — scoped by a data attribute
-     on the header wrapper so a page with no configured header is unaffected. */
+     on the header wrapper so a page with no configured header is unaffected.
+     .ds-menu-toggle is the only in-flow child while closed (.ds-menu-list is
+     display:none until opened), so .ds-menu needs to be a flex container
+     for its margin-inline-start/end:auto below to actually push it to
+     either edge — auto margins are a no-op on a plain block parent. */
+  .ds-menu { display: flex; align-items: center; }
   [data-mobile-nav-position="left"] .ds-menu-toggle { margin-inline-end: auto; }
   [data-mobile-nav-position="right"] .ds-menu-toggle { margin-inline-start: auto; }
   [data-mobile-nav-size="sm"] .ds-menu-toggle span { width: 16px; }
