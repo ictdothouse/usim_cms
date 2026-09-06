@@ -2412,7 +2412,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
     }
   }
   @media (max-width: 768px) {
-    .ds-row {
+    .ds-row:not(header .ds-row) {
       grid-template-columns: 1fr !important;
     }
     .ds-gallery {
