@@ -271,6 +271,17 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   auto-derived `staging-<id>.<sourceHost>` clone-preview subdomain (no DNS record of its own — relies on
   the parent domain's own routing, if any). A real custom label typed into the clone-stage form still
   gets the full check.
+- **Maintenance mode** is a per-tenant `tenants.maintenanceMode` boolean, distinct from `active`: `active`
+  is enforced by `tenant.ts`'s plugin and 404s the tenant everywhere (admin included) the moment it's
+  false, while a tenant in maintenance stays fully active/reachable — only apps/frontend's own
+  `src/middleware.ts` swaps the real page for a maintenance notice on every request. Toggled from
+  apps/admin's Manage Site page (`SiteOpsPanel`) via `PATCH /api/portal/tenants/:host/maintenance`
+  (superadmin-only, `setTenantMaintenanceMode` in `tenant-pool.ts`); read by the public,
+  auth-free `GET /api/tenant-status` (`getTenantMaintenanceMode`) that apps/frontend's middleware calls
+  once per request — its own tiny route rather than folded into `/api/languages`/`/api/theme`, so this
+  check never depends on either of those changing shape. `GET /api/portal/tenants` (the Multisite list)
+  already returns `maintenanceMode` on every row for free, since it's a plain `db.select()` off the
+  `tenants` table with no explicit column list.
 
 ## Auth hardening (rate limiting, audit log, MFA)
 

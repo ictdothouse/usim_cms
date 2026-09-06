@@ -71,6 +71,8 @@ import {
   createPageBlueprint,
   updatePageBlueprint,
   deletePageBlueprint,
+  getTenantMaintenanceMode,
+  setTenantMaintenanceMode,
 } from "./db/tenant-pool.js";
 import sanitizeHtml from "sanitize-html";
 import {
@@ -651,6 +653,20 @@ app.put("/api/portal/tenants/:host/storage-limits", async (req, reply) => {
   const { maxUploadFileSizeMb = null, maxTotalStorageMb = null } = req.body as Record<string, number | null>;
   await setTenantStorageLimits(host, { maxUploadFileSizeMb, maxTotalStorageMb });
   return { saved: true };
+});
+
+// Manage Site's maintenance-mode toggle — separate from suspend/delete, see
+// schema.ts's own comment on tenants.maintenanceMode.
+app.patch("/api/portal/tenants/:host/maintenance", async (req, reply) => {
+  if (!verifySuperadmin(req, reply)) return;
+  const { host } = req.params as { host: string };
+  const { maintenanceMode } = req.body as { maintenanceMode?: boolean };
+  if (typeof maintenanceMode !== "boolean") {
+    reply.code(400);
+    return { error: "maintenanceMode must be a boolean" };
+  }
+  await setTenantMaintenanceMode(host, maintenanceMode);
+  return { host, maintenanceMode };
 });
 
 // Personal "my collection" of saved theme presets (admin's Theme panel) —
@@ -2073,6 +2089,15 @@ await app.register(async (publicScope) => {
   publicScope.get("/api/languages", async (req) => {
     const { allEnabled, showHeaderSwitcher, switcherPosition, switcherStyle } = await getTenantLanguageSelection(req.tenantHost);
     return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher, switcherPosition, switcherStyle };
+  });
+
+  // apps/frontend's own middleware (src/middleware.ts) calls this on every
+  // request to decide whether to show the maintenance page instead of real
+  // content — deliberately its own tiny public route rather than folded
+  // into /api/languages or /api/theme, so a maintenance check never depends
+  // on either of those growing/changing shape.
+  publicScope.get("/api/tenant-status", async (req) => {
+    return { maintenanceMode: await getTenantMaintenanceMode(req.tenantHost) };
   });
 
   // Backs apps/frontend's blueprint-preview.astro (Designer's blueprint

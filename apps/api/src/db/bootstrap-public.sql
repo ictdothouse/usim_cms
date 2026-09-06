@@ -15,6 +15,10 @@ ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "db_url" text;
 ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "has_custom_cert" boolean DEFAULT false NOT NULL;
 ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "cert_expires_at" timestamp;
 
+-- Upgrade path: per-tenant maintenance-mode flag (Manage Site's toggle) —
+-- separate from `active`, see schema.ts's own comment on this column.
+ALTER TABLE "public"."tenants" ADD COLUMN IF NOT EXISTS "maintenance_mode" boolean DEFAULT false NOT NULL;
+
 -- Single-row instance-wide switch: whether apps/api keeps the bundled
 -- Caddy proxy's config in sync with the tenants table above. Off by
 -- default — orgs using their own reverse proxy/ingress/cPanel never touch

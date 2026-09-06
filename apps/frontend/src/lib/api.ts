@@ -334,6 +334,11 @@ export async function getLanguages(
   return apiGet("/api/languages", tenantHost);
 }
 
+// src/middleware.ts's own maintenance-mode gate — see that file.
+export async function getTenantStatus(tenantHost: string): Promise<{ maintenanceMode: boolean }> {
+  return apiGet("/api/tenant-status", tenantHost);
+}
+
 // token here is a theme-preview token (see apps/admin's getThemePreviewToken)
 // — a separate credential from getPageBySlug's draft-visibility token, even
 // though both ride the same Bearer-forwarding apiGet helper.

@@ -26,6 +26,14 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   admin panel's own origin, the one legitimate consumer (Designer's Live Edit preview iframe), instead of
   leaving every tenant page framable by any site. An install that hasn't set `ADMIN_ORIGIN` on the
   frontend container yet sees no behavior change.
+- **`src/middleware.ts`** — the one place that gates every request on a tenant's maintenance-mode flag
+  (`GET /api/tenant-status`, apps/api). Deliberately not a per-page check duplicated across
+  `[...slug].astro`/`posts/[slug].astro`/etc (which already each duplicate their own Host-header
+  tenantHost-resolution regex) — one middleware covers all of them. Returns the maintenance HTML directly
+  (503) rather than `context.rewrite()`-ing to a dedicated page, since a rewrite re-enters this same
+  middleware against the new path and would loop; `/_astro/`, `/_image`, and `/uploads/` are excluded so
+  the maintenance page's own assets (and any admin preview iframe) still load. Fails open on an apps/api
+  hiccup — a status-check failure never takes a healthy tenant's site down.
 - **`chrome-preview.astro`** — apps/admin Designer's Header/Footer device-preview modal (`kind ===
   "siteChrome"`). Reads `?id=&kind=header|footer`, fetches that row via `getSiteChromeById` (now
   exported — no preview token needed, since `GET /api/siteChrome/:id` is already publicly readable
