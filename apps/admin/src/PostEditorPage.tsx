@@ -398,7 +398,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     schema: bookmarkCardSchema,
     uploadFile: async (file: File) => {
       const url = await api.uploadMedia(tenantHost, token, file);
-      return url.startsWith("http") ? url : api.API_URL + url;
+      return url.startsWith("http") ? url : api.publicMediaBase(tenantHost) + url;
     },
   });
 

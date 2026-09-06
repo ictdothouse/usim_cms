@@ -243,6 +243,33 @@ Any failure before promote succeeds leaves the previously-live color completely 
   blue-green. A blue-green/scaled deploy instead passes every live replica's own
   Compose-generated container name (`ucms-green-api-1`, `-2`, ...) — Caddy fans out
   (round-robins + health-checks) across all of them.
+- **Branded uploads, no `api.<domain>` leak** (fix, not part of the original blue-green
+  work above): `buildCaddyConfig` now emits TWO routes per tenant — a `{host, path:
+  ["/uploads/*"]}` match to the api upstream, listed BEFORE the plain `{host}` match to
+  the frontend upstream (Caddy evaluates routes in list order and `reverse_proxy` is
+  terminal, so the more specific one must come first or it's dead code) — mirrored in
+  the static `Caddyfile`'s tenant block as a `handle /uploads/*` / `handle {}` pair. Before
+  this, an uploaded image's only reachable URL was `api.<domain>/uploads/...` — this
+  instance's own internal api-container hostname, visible to every site visitor,
+  reading as an infrastructure leak rather than the tenant's own branded site. Now a
+  tenant's own domain serves its own uploads too (same api container, same files, just
+  proxied under the hostname a visitor is actually looking at). The other half of this
+  fix is client-side: `apps/admin/src/lib/api.ts`'s `publicMediaBase(tenantHost)` is what
+  every media-persisting write path (Designer's image upload, MediaPickerModal, the
+  post-body BlockNote image uploader, ThemeForm's per-site logo/favicon) now bakes into
+  a SAVED url instead of `API_URL` — falls back to `API_URL` only in `import.meta.env.DEV`
+  (`pnpm dev:admin` has no Caddy in front). Every on-screen ADMIN preview (MediaManager's
+  grid, MediaPickerModal's grid, the "copy URL" clipboard action) is unaffected by this —
+  those still fetch straight from `API_URL`, since that's the admin app's own internal
+  concern, not something a site visitor ever sees. One accepted gap, not solved here: the
+  instance-wide Global Theme default logo/favicon (no single tenant to derive a domain
+  from) still bakes in `API_URL` — a real per-site Theme override always gets the
+  branded URL, which is the common path. Existing already-uploaded media keeps its old
+  `api.<domain>/...` URL (never rewritten retroactively) — only new uploads/saves after
+  this fix get the branded URL. Local-disk storage is what this fixes; `STORAGE_DRIVER=s3`
+  with `S3_PUBLIC_URL_BASE` pointed at a real CDN domain (see storage.ts) is still the
+  advanced-tier upgrade path and is unaffected either way, since it already returns its
+  own absolute URL.
 - **This is a real, deliberate change to what the "Domain & SSL Automation" switch
   (`getProxyAutomationEnabled`) means.** That switch used to gate the ONLY way Caddy's
   config ever got pushed dynamically (tenant create/delete, `PUT /api/portal/proxy-

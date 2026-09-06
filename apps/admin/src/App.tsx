@@ -1114,7 +1114,8 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
   }
 
   async function copyUrl(m: Record<string, unknown>) {
-    await navigator.clipboard.writeText(api.API_URL + (m.url as string));
+    const raw = m.url as string;
+    await navigator.clipboard.writeText(raw.startsWith("http") ? raw : api.publicMediaBase(tenantHost) + raw);
     setCopiedId(m.id as string);
     setTimeout(() => setCopiedId(null), 1500);
   }
@@ -1416,7 +1417,7 @@ function MediaManager({ tenantHost, token }: { tenantHost: string; token: string
                 className="absolute left-1.5 top-1.5 z-10 h-3.5 w-3.5"
               />
               <img
-                src={api.API_URL + (m.url as string)}
+                src={(m.url as string).startsWith("http") ? (m.url as string) : api.publicMediaBase(tenantHost) + (m.url as string)}
                 alt={(m.altText as string) || (m.originalName as string)}
                 className="h-24 w-full object-cover"
               />
@@ -1741,7 +1742,11 @@ function ThemeForm({
     setBrandUploading(kind);
     try {
       const url = previewTenantHost ? await api.uploadMedia(previewTenantHost, token, file) : await api.uploadGlobalBranding(token, file);
-      const full = url.startsWith("http") ? url : api.API_URL + url;
+      // previewTenantHost is only set for a per-site ThemeForm (see the
+      // comment above this function) — the instance-wide Global Theme default
+      // has no single tenant domain to bake in, so it keeps API_URL there (a
+      // real per-site override, the common path, always gets the branded URL).
+      const full = url.startsWith("http") ? url : (previewTenantHost ? api.publicMediaBase(previewTenantHost) : api.API_URL) + url;
       if (kind === "logo") setLogoUrl(full);
       else setFaviconUrl(full);
     } catch (err) {

@@ -37,8 +37,19 @@
 # token on this line as its own site, all sharing this block. Host header is
 # preserved by reverse_proxy, which is how apps/frontend resolves the tenant
 # (see CLAUDE.md's Multi-tenancy section) — do not rewrite it here.
+#
+# /uploads/* is carved out to the api container instead of falling through to
+# the frontend catch-all below: uploaded media otherwise would only ever be
+# reachable at api.<domain>/uploads/... (this instance's own internal api
+# hostname) — a visitor's own tenant domain now serves its own uploads too,
+# same files, just proxied under the hostname they're actually looking at.
 {$TENANT_DOMAINS:tenant.localhost} {
-	reverse_proxy ucms-blue-frontend-1:4321
+	handle /uploads/* {
+		reverse_proxy ucms-blue-api-1:3000
+	}
+	handle {
+		reverse_proxy ucms-blue-frontend-1:4321
+	}
 }
 
 # The three routes above are only ever read ONCE — the very first time this
