@@ -610,3 +610,30 @@ export function validateLayout(layout: unknown): string | null {
   }
   return null;
 }
+
+// Per-language STYLE/TEXT override shape (Designer.tsx's language-pill
+// rework, replacing the old translations[code] = { layout } full-tree-fork
+// — see apps/api/CLAUDE.md's i18n Phase 5 note): translations[code] =
+// { overrides: Record<pathKey, Record<fieldKey, string>> }, one sparse bag
+// of prop-key/value pairs per Section/Column/Element position (Designer.tsx's
+// own pathKey()), rather than a whole cloned layout tree. Every value here
+// is exactly as much of a CSS-injection/XSS surface as the same key would be
+// on the base `layout` (this is precisely how a language override actually
+// reaches the published site — merged onto a clone of the base tree, see
+// apps/frontend's resolvePageLayout), so it gets the SAME per-key check
+// (`validateValue`) the base tree's own props/bp bags already get — a
+// "tablet:"/"mobile:"-prefixed fieldKey (the "stack by breakpoint" opt-in)
+// is stripped to its underlying key first, same convention `validateBp`
+// already uses for the ordinary bp bag.
+export function validateOverrides(overrides: unknown): string | null {
+  if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) return "overrides must be an object";
+  for (const [path, bag] of Object.entries(overrides as Record<string, unknown>)) {
+    if (typeof bag !== "object" || bag === null || Array.isArray(bag)) return `overrides.${path} must be an object`;
+    for (const [rawKey, value] of Object.entries(bag as Record<string, unknown>)) {
+      const key = rawKey.includes(":") ? rawKey.slice(rawKey.indexOf(":") + 1) : rawKey;
+      const err = validateValue(key, value);
+      if (err) return `overrides.${path}.${err}`;
+    }
+  }
+  return null;
+}

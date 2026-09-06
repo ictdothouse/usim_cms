@@ -20,7 +20,7 @@ import type { Menu, Category } from "@/lib/api";
 import type { Key } from "@/i18n";
 import type { Field, FieldGroupKey, Bp, Block } from "./types";
 import { FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel } from "./fields";
-import { BpToggle } from "./FieldControls";
+import { BpToggle, LangToggle } from "./FieldControls";
 import { FieldInput } from "./FieldInput";
 
 export interface FieldGroupsProps {
@@ -36,6 +36,12 @@ export interface FieldGroupsProps {
   // `bp` bag (none currently omit it; Row doesn't use FieldGroups at all).
   hasOverride?: (f: Field) => boolean;
   onToggleOverride?: (f: Field) => void;
+  // Per-field per-language style-override toggle (LangToggle) — only ever
+  // passed while a non-base language pill is active (see Inspector's own
+  // call sites), and never rendered for a "content"-bucket (text) field,
+  // which is always per-language with no opt-in needed.
+  hasLangOverride?: (f: Field) => boolean;
+  onToggleLangOverride?: (f: Field) => void;
   collapsedGroups: Set<FieldGroupKey>;
   toggleGroup: (g: FieldGroupKey) => void;
   bp: Bp;
@@ -72,7 +78,7 @@ export interface FieldGroupsProps {
 // renders each non-empty bucket as a collapsible section (Advanced starts
 // collapsed, everything else starts open — see collapsedGroups above).
 export function FieldGroups({
-  fields, getValue, setValue, only, hasOverride, onToggleOverride,
+  fields, getValue, setValue, only, hasOverride, onToggleOverride, hasLangOverride, onToggleLangOverride,
   collapsedGroups, toggleGroup, bp, t,
   iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
   sliderInnerSel, setSliderInnerSel,
@@ -107,6 +113,9 @@ export function FieldGroups({
                   <label key={f.key} className="block text-[11px] font-medium text-body">
                     <span className="inline-flex items-center gap-1">
                       {FieldLabel(f.labelKey, t)}
+                      {hasLangOverride && onToggleLangOverride && g.key !== "content" && f.kind !== "slides" && f.kind !== "image" && (
+                        <LangToggle active={hasLangOverride(f)} onToggle={() => onToggleLangOverride(f)} t={t} />
+                      )}
                       {hasOverride && onToggleOverride && f.kind !== "slides" && f.kind !== "image" && (
                         <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
                       )}
