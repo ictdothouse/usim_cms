@@ -850,6 +850,12 @@ export async function restoreTenantBackup(token: string, host: string, file: Fil
   return body.restored as number;
 }
 
+export const setTenantMaintenanceMode = (token: string, host: string, maintenanceMode: boolean) =>
+  request(`/api/portal/tenants/${host}/maintenance`, null, token, {
+    method: "PATCH",
+    body: JSON.stringify({ maintenanceMode }),
+  }) as Promise<{ host: string; maintenanceMode: boolean }>;
+
 export const listPortalRoles = (token: string) =>
   request("/api/portal/roles", null, token).then((b) => b.roles as Array<Record<string, unknown>>);
 

@@ -320,6 +320,37 @@ export async function findUserByEmail(email: string) {
   }
 }
 
+// Read-only, control-plane-only lookup — the one apps/frontend's own
+// middleware calls (via GET /api/tenant-status) on every request to decide
+// whether to show the maintenance page instead of real content. Separate
+// from the `active` gate tenant.ts's plugin already enforces (which 404s the
+// whole tenant, admin included) — a maintenance tenant stays fully active.
+export async function getTenantMaintenanceMode(host: string): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [tenant] = await db
+      .select({ maintenanceMode: schema.tenants.maintenanceMode })
+      .from(schema.tenants)
+      .where(eq(schema.tenants.host, host));
+    return tenant?.maintenanceMode ?? false;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setTenantMaintenanceMode(host: string, maintenanceMode: boolean): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db.update(schema.tenants).set({ maintenanceMode }).where(eq(schema.tenants.host, host));
+  } finally {
+    client.release();
+  }
+}
+
 export async function listTenants() {
   const client = await pool.connect();
   try {

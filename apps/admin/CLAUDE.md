@@ -1060,3 +1060,18 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   sidebar `contentTabs` (`content`/`global-theme`/`feed`, only 3 items) was deliberately left flat —
   not crowded enough to need grouping. Pure render-layer change: no `ContentSubTab`/`Tab` value,
   route, or permission changed, so nothing else in the app depends on this.
+
+  **Manage Site shortcuts/ops** (`TenantsPanel`'s managed-site detail view, `App.tsx`): a "Content
+  Management" button next to the existing "View" link calls `setSiteHost(managed.host)` (lifted at
+  `Shell` level, threaded down as a new `TenantsPanel` prop) then `navigate("/content/pages")` — a
+  shortcut into the SAME Content Manager the sidebar's own Content tab already reaches, not a second
+  copy of it; the sidebar's own nav item is untouched. `SiteOpsPanel` (new, sits between the site-info
+  card and `CloneBox`) wraps 3 already-existing-on-the-backend operations behind one panel: Backup
+  (Download DB / Download Web Files, `api.downloadTenantBackup`/`downloadStaticExport`, both pre-existing
+  functions this panel was the first UI to actually call), Restore (a hidden file input + `useConfirm()`
+  gate, `api.restoreTenantBackup` — a full destructive content replace, confirmed the same way
+  `CloneBox`'s own replace-from-staging is), and Maintenance Mode (a toggle button, confirmed only when
+  turning ON since that's the one direction that affects live visitors; `api.setTenantMaintenanceMode` —
+  see apps/api/CLAUDE.md's own maintenance-mode paragraph). `maintenanceMode` reads straight off the
+  `managed` tenant row already fetched by `listPortalTenants`; toggling it patches local `tenants` state
+  in place rather than a full `refresh()` round-trip.

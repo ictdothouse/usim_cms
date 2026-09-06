@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Copy,
+  Download,
   ExternalLink,
   FileText,
   Folder,
@@ -32,6 +33,7 @@ import {
   Trash2,
   UploadCloud,
   Users as UsersIcon,
+  Wrench,
   X,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -2391,8 +2393,9 @@ const tenantCreateSchema = z.object({
 });
 type TenantCreateForm = z.infer<typeof tenantCreateSchema>;
 
-function TenantsPanel({ token }: { token: string }) {
+function TenantsPanel({ token, setSiteHost }: { token: string; setSiteHost: (host: string) => void }) {
   const { t } = useT();
+  const navigate = useNavigate();
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [usage, setUsage] = useState<Record<string, api.TenantUsage>>({});
   const [error, setError] = useState<string | null>(null);
@@ -2453,15 +2456,36 @@ function TenantsPanel({ token }: { token: string }) {
               <span className="text-sub">{t("tenants-suspended")}</span>
             )}
           </p>
-          <a
-            href={api.previewUrl(managed.host as string, "home")}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${btnGhost} inline-flex items-center gap-1.5`}
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
-          </a>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={api.previewUrl(managed.host as string, "home")}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${btnGhost} inline-flex items-center gap-1.5`}
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
+            </a>
+            <button
+              onClick={() => {
+                setSiteHost(managed.host as string);
+                navigate("/content/pages");
+              }}
+              className={`${btnGhost} inline-flex items-center gap-1.5`}
+            >
+              <FileText className="h-3.5 w-3.5" /> {t("tenants-manage-content")}
+            </button>
+          </div>
         </div>
+        {!staging && (
+          <SiteOpsPanel
+            token={token}
+            host={managed.host as string}
+            maintenanceMode={Boolean(managed.maintenanceMode)}
+            onMaintenanceModeChange={(v) =>
+              setTenants((prev) => prev.map((tn) => (tn.host === managed.host ? { ...tn, maintenanceMode: v } : tn)))
+            }
+          />
+        )}
         {!staging && <CloneBox token={token} sourceHost={managed.host as string} onNewSite={refresh} />}
         <DangerZone
           token={token}
@@ -2615,6 +2639,125 @@ function TenantCard({
           className={`${btnPrimary} flex-1 justify-center inline-flex items-center gap-1.5 px-3 py-1.5`}
         >
           <SettingsIcon className="h-3.5 w-3.5" /> {t("tenants-manage")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Site ops (backup / restore / maintenance mode) ----------
+function SiteOpsPanel({
+  token,
+  host,
+  maintenanceMode,
+  onMaintenanceModeChange,
+}: {
+  token: string;
+  host: string;
+  maintenanceMode: boolean;
+  onMaintenanceModeChange: (v: boolean) => void;
+}) {
+  const { t } = useT();
+  const confirm = useConfirm();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function run(busyKey: string, fn: () => Promise<void>) {
+    setError(null);
+    setMsg(null);
+    setBusyId(busyKey);
+    try {
+      await fn();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onRestoreFile(file: File) {
+    if (!(await confirm(t("tenants-restore-confirm")))) return;
+    await run("restore", async () => {
+      const restored = await api.restoreTenantBackup(token, host, file);
+      setMsg(`${t("tenants-restore-done")} (${restored})`);
+    });
+  }
+
+  async function toggleMaintenance() {
+    const next = !maintenanceMode;
+    if (next && !(await confirm(t("tenants-maintenance-confirm")))) return;
+    await run("maintenance", async () => {
+      await api.setTenantMaintenanceMode(token, host, next);
+      onMaintenanceModeChange(next);
+    });
+  }
+
+  return (
+    <div className={`${card} space-y-4 p-5`}>
+      <FormError>{error}</FormError>
+      {msg && <p className="text-xs text-green-700">{msg}</p>}
+
+      <div className="space-y-2">
+        <h3 className="text-xs font-bold text-ink">{t("tenants-backup-title")}</h3>
+        <div className="flex flex-wrap gap-2">
+          <button
+            disabled={busyId !== null}
+            onClick={() => void run("db", () => api.downloadTenantBackup(token, host))}
+            className={`${btnGhost} inline-flex items-center gap-1.5`}
+          >
+            <Download className="h-3.5 w-3.5" /> {busyId === "db" ? t("settings-busy") : t("tenants-backup-download-db")}
+          </button>
+          <button
+            disabled={busyId !== null}
+            onClick={() => void run("web", () => api.downloadStaticExport(token, host))}
+            className={`${btnGhost} inline-flex items-center gap-1.5`}
+          >
+            <Download className="h-3.5 w-3.5" /> {busyId === "web" ? t("settings-busy") : t("tenants-backup-download-web")}
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2 border-t border-line pt-4">
+        <h3 className="text-xs font-bold text-ink">{t("tenants-restore-title")}</h3>
+        <p className="text-xs text-sub">{t("tenants-restore-desc")}</p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void onRestoreFile(file);
+          }}
+        />
+        <button
+          disabled={busyId !== null}
+          onClick={() => fileInputRef.current?.click()}
+          className={`${btnGhost} inline-flex items-center gap-1.5`}
+        >
+          <UploadCloud className="h-3.5 w-3.5" /> {busyId === "restore" ? t("settings-busy") : t("tenants-restore-btn")}
+        </button>
+      </div>
+
+      <div className="space-y-2 border-t border-line pt-4">
+        <h3 className="flex items-center gap-1.5 text-xs font-bold text-ink">
+          <Wrench className="h-3.5 w-3.5" /> {t("tenants-maintenance-title")}
+        </h3>
+        <p className="text-xs text-sub">{t("tenants-maintenance-desc")}</p>
+        <button
+          disabled={busyId !== null}
+          onClick={() => void toggleMaintenance()}
+          className={
+            maintenanceMode
+              ? "inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-40"
+              : `${btnGhost} inline-flex items-center gap-1.5`
+          }
+        >
+          <Wrench className="h-3.5 w-3.5" />
+          {busyId === "maintenance" ? t("settings-busy") : maintenanceMode ? t("tenants-maintenance-on") : t("tenants-maintenance-off")}
         </button>
       </div>
     </div>
@@ -4988,7 +5131,10 @@ function Shell({
               <Routes>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard session={session} />} />
-                <Route path="multisite" element={isSuper ? <TenantsPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
+                <Route
+                  path="multisite"
+                  element={isSuper ? <TenantsPanel token={session.token} setSiteHost={setSiteHost} /> : <Navigate to="/dashboard" replace />}
+                />
                 <Route path="users" element={isSuper ? <UsersPanel token={session.token} onImpersonate={onImpersonate} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="roles" element={isSuper ? <RolesPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="content/*" element={<ContentManager isSuper={isSuper} showSitePicker={showSitePicker} siteHost={siteHost} setSiteHost={setSiteHost} tenants={siteOptions} token={session.token} />} />

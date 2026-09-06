@@ -267,6 +267,11 @@ export const tenants = pgTable("tenants", {
   host: text("host").notNull().unique(),
   departmentName: text("department_name").notNull(),
   active: boolean("active").notNull().default(true),
+  // Public-facing "under maintenance" flag (Manage Site's own toggle) —
+  // unlike `active` (which the tenant plugin uses to 404 the whole tenant,
+  // admin included), a tenant in maintenance stays fully reachable; only
+  // apps/frontend's middleware swaps the real page for a maintenance notice.
+  maintenanceMode: boolean("maintenance_mode").notNull().default(false),
   // Where this tenant's own database lives. Null = same Postgres server as
   // the control-plane DATABASE_URL, database name tenant_<host> (derived in
   // tenant-pool.ts). Set explicitly to move a tenant to another DB server —
