@@ -906,11 +906,6 @@ export default function Designer({
   const [pageFooterId, setPageFooterId] = useState<string>((page.footerId as string | null) ?? "");
   const [pageHideHeader, setPageHideHeader] = useState<boolean>(Boolean(page.hideHeader));
   const [pageHideFooter, setPageHideFooter] = useState<boolean>(Boolean(page.hideFooter));
-  // Header/Footer assignment used to render permanently at the top of the
-  // Inspector aside regardless of what was selected below it, eating sidebar
-  // space while editing an unrelated element. Now a gear-triggered modal,
-  // openable on demand from the top toolbar instead.
-  const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   async function patchPageChrome(patch: { headerId?: string; footerId?: string; hideHeader?: boolean; hideFooter?: boolean }) {
     const next = {
       headerId: patch.headerId !== undefined ? patch.headerId : pageHeaderId,
@@ -2658,6 +2653,7 @@ export default function Designer({
     sliderInnerSel, setSliderInnerSel, uploadImage,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
+    pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
     siteLanguages, pageLanguage, setPageLanguage, activeLang, hasLangSlot,
     clickPageLanguagePill, translating, retranslatePageLanguage,
@@ -2777,7 +2773,7 @@ export default function Designer({
         </button>
         {kind === "page" && (
           <button
-            onClick={() => setPageSettingsOpen(true)}
+            onClick={() => setSel(null)}
             className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
             title={t("designer-page-settings")}
           >
@@ -3905,68 +3901,6 @@ export default function Designer({
             </div>
           );
         })()}
-
-      {pageSettingsOpen && kind === "page" && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
-          onClick={() => setPageSettingsOpen(false)}
-        >
-          <div
-            className="w-[min(90vw,24rem)] rounded-xl bg-white p-4 shadow-xl"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-bold text-ink">{t("header-footer-page-assignment")}</p>
-              <button
-                onClick={() => setPageSettingsOpen(false)}
-                className="text-body hover:text-ink"
-                aria-label={t("designer-close")}
-                title={t("designer-close")}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <label className="block text-[11px] font-medium text-body">
-                {t("designer-page-header")}
-                <select
-                  value={pageHeaderId}
-                  onChange={(e) => void patchPageChrome({ headerId: e.target.value })}
-                  disabled={pageHideHeader}
-                  className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-                >
-                  <option value="">{t("designer-page-header-default")}</option>
-                  {availableHeaders.map((h) => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
-                <input type="checkbox" checked={pageHideHeader} onChange={(e) => void patchPageChrome({ hideHeader: e.target.checked })} />
-                {t("designer-page-hide-header")}
-              </label>
-              <label className="block text-[11px] font-medium text-body">
-                {t("designer-page-footer")}
-                <select
-                  value={pageFooterId}
-                  onChange={(e) => void patchPageChrome({ footerId: e.target.value })}
-                  disabled={pageHideFooter}
-                  className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-                >
-                  <option value="">{t("designer-page-header-default")}</option>
-                  {availableFooters.map((f) => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
-                <input type="checkbox" checked={pageHideFooter} onChange={(e) => void patchPageChrome({ hideFooter: e.target.checked })} />
-                {t("designer-page-hide-footer")}
-              </label>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showTemplates &&
         (() => {
