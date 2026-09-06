@@ -30,11 +30,17 @@ export interface Page {
   // tenant's own theme for this page's render only (see [...slug].astro).
   settings?: { gap?: string; contentWidth?: "contained" | "full"; paddingX?: string; theme?: Record<string, string> };
   // i18n Phase 5 — language is null until an author picks one for this
-  // page's own base content; translations holds every OTHER language's
-  // layout on this SAME row, keyed by code (no separate page per language —
-  // see CLAUDE.md's i18n Phase 5 correction).
+  // page's own base content; translations holds every OTHER language's own
+  // data on this SAME row, keyed by code (no separate page per language —
+  // see CLAUDE.md's i18n Phase 5 correction). `overrides` is the CURRENT
+  // shape (Designer.tsx's language-pill rework — style is shared from the
+  // base `layout` by default, only a sparse per-position bag of explicitly
+  // opted-in style/text values differs per language, see
+  // resolvePageLayout's applyLangOverrides below); `layout` is the OLD,
+  // retired shape (a full independently-forked tree per language) still
+  // accepted from a row that hasn't been re-saved since.
   language: string | null;
-  translations: Record<string, { layout: PageLayout }>;
+  translations: Record<string, { layout?: PageLayout; overrides?: Record<string, Record<string, string>> }>;
   // Header/Footer designer (see docs/superpowers/specs/2026-09-04-header-footer-designer-design.md)
   // — resolved to a real siteChrome row by resolveHeaderFooter() below.
   headerId: string | null;
@@ -43,12 +49,60 @@ export interface Page {
   hideFooter: boolean;
 }
 
+// Overlays a language's own sparse override bag onto a clone of the base
+// layout — mirrors apps/admin's Designer.tsx applyLangOverrides byte-for-
+// byte in intent (same pathKey()-addressed Section/Column/Element
+// positions, same flat-vs-"tablet:"/"mobile:"-prefixed key split), just
+// against this file's own looser PageLayout typing — same "no shared
+// render code between admin/frontend" convention every other parser/style
+// helper here already follows. A flat key becomes that node's own value for
+// this language, across every breakpoint; a bp-prefixed key merges into the
+// node's own `bp` bag instead, so it rides the SAME real per-breakpoint CSS
+// SectionBlock.astro's bpStyleRules already emits for an ordinary bp
+// override (Section/Column only — see CLAUDE.md's bp-override note) — this
+// is the "stack by breakpoint" opt-in a language override can turn on.
+function applyLangOverrides(base: PageLayout, overrides: Record<string, Record<string, string>>): PageLayout {
+  const out = JSON.parse(JSON.stringify(base)) as PageLayout;
+  const mergeInto = (bag: Record<string, string> | undefined, props: Record<string, unknown>, bpHost: { bp?: Record<string, string> }) => {
+    if (!bag) return;
+    for (const [key, value] of Object.entries(bag)) {
+      if (key.startsWith("tablet:") || key.startsWith("mobile:")) bpHost.bp = { ...(bpHost.bp ?? {}), [key]: value };
+      else props[key] = value;
+    }
+  };
+  out.forEach((block, b) => {
+    if (block.type !== "section") return;
+    const sp = (block.props ??= {});
+    mergeInto(overrides[String(b)], sp, sp as { bp?: Record<string, string> });
+    const rows = (sp.rows as Array<{ columns?: unknown[] }> | undefined) ?? [];
+    rows.forEach((row, r) => {
+      (row.columns ?? []).forEach((col, c) => {
+        const cc = col as { props?: Record<string, unknown>; bp?: Record<string, string>; elements?: Array<{ props?: Record<string, unknown>; bp?: Record<string, string> }> };
+        cc.props ??= {};
+        mergeInto(overrides[`${b}.${r}.${c}`], cc.props, cc);
+        (cc.elements ?? []).forEach((el, e) => {
+          el.props ??= {};
+          mergeInto(overrides[`${b}.${r}.${c}.${e}`], el.props, el);
+        });
+      });
+    });
+  });
+  return out;
+}
+
 // Resolves which layout to render for a requested language code: the base
 // layout when code is null/matches the page's own language/has no
-// translation entry, otherwise that language's stored layout.
+// translation entry, otherwise that language's own resolved view — the
+// CURRENT shape merges its override bag onto the base layout (style shared
+// unless explicitly opted in, see applyLangOverrides); the OLD, retired
+// shape's full stored layout is used as-is for a row that hasn't been
+// re-saved since.
 export function resolvePageLayout(page: Page, code: string | null): PageLayout {
   if (!code || code === page.language) return page.layout;
-  return page.translations[code]?.layout ?? page.layout;
+  const entry = page.translations[code];
+  if (!entry) return page.layout;
+  if (entry.overrides) return applyLangOverrides(page.layout, entry.overrides);
+  return entry.layout ?? page.layout;
 }
 
 // token, when present, is forwarded as a Bearer header so apps/api's

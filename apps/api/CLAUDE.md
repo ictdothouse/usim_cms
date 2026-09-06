@@ -65,8 +65,10 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   create: adding a language just adds a key to this row's own jsonb column. `postsBeforeChange` sanitizes
   `translations[code].body` through the exact same `sanitizePostBodyHtml` helper (extracted from the old
   inline call) as the top-level `body` — a translation's HTML is exactly as much of a trust boundary as
-  the base one. `pagesBeforeChange` likewise runs `validateLayout` on every `translations[code].layout`,
-  not just the top-level `layout`.
+  the base one. `pagesBeforeChange` likewise runs `validateLayout` on every `translations[code].layout`
+  (the OLD, retired per-page shape — see the "pages i18n rework" paragraph below for the CURRENT one) and
+  `validateOverrides` on every `translations[code].overrides` (the current shape), not just the top-level
+  `layout`.
   **Admin editor — one editor, a language pill switcher, never a new row.** `PostEditorPage` holds a
   `content: Record<string, {title,excerpt,body}>` map plus `activeLang` state; `BASE_LANG` (a sentinel
   string, never a real language code) is the key for the row's own base content. The visible title/
@@ -86,6 +88,44 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   is keyed on `post?.id`, not the `post` object itself — `save()` always refreshes the whole posts list
   afterward, which gives `post` a new object identity for the SAME row; keying on the object would have
   re-fired this effect after every save and snapped `activeLang` back to `BASE_LANG` mid-edit.
+  **Pages i18n rework (post-launch correction, this changes PAGES only — posts/categories/menus are
+  unaffected and keep the full-per-language-content shape above, since they have no style/block-tree
+  concept to begin with).** Live feedback on the design above: editing a page's STYLE (e.g. a column's
+  padding) while a non-base language pill was open silently forked — the first time a language was
+  opened, `translations[code].layout` cloned the ENTIRE tree (structure + style + text), and once forked,
+  a later style edit on either side never propagated to the other. This read as "editing the English
+  version changed the style specifically for English" even though style was always meant to be shared —
+  "cadangan sy yg bertukar biarlah hanya text. style selain text minta buatkan option tukar stail utk
+  versi tu shj" (the ask: only TEXT should differ per language by default; STYLE should stay shared
+  unless the author explicitly opts a specific field into "different for this language"). Corrected
+  design: `pages.translations[code]` is now `{ overrides: Record<pathKey, Record<fieldKey, string>> }` —
+  a SPARSE bag of prop-key/value pairs at specific Section/Column/Element positions (`pathKey(b, r?, c?,
+  e?)`, positional not id-based — Sections have no id of their own), not a whole cloned layout tree.
+  `pages.layout` (the base row) is the single shared source of truth for structure AND style; a
+  translation's own bag only ever holds (a) every TRANSLATABLE_TEXT_KEYS text value for that language
+  (always per-language, auto-seeded via `/api/translate` the first time a language is opened, same
+  `TRANSLATABLE_TEXT_KEYS`-driven walk the old `translateLayoutBlocks` used, just writing into this
+  sparse bag instead of cloning the whole tree) and (b) any STYLE field the author explicitly toggled
+  "different for this language" for (Designer's Inspector, a small `Languages`-icon toggle next to each
+  style field/group, mirroring the existing per-breakpoint `BpToggle` visually) — that toggle, once on,
+  can ALSO be nested-toggled to further split by breakpoint (a bag key is either a flat `fieldKey` or a
+  `"tablet:"`/`"mobile:"`-prefixed one, same convention the ordinary per-node `bp` bag already uses),
+  default flat/off. `validateOverrides` (`packages/element-schema`) validates every value in this bag
+  through the exact same per-key `validateValue` check `validateLayout`'s own tree-walk already applies —
+  a language override reaches the published site by being merged onto a clone of the base layout (both
+  `apps/admin/src/Designer.tsx`'s `applyLangOverrides`, for the admin canvas, and
+  `apps/frontend/src/lib/api.ts`'s `resolvePageLayout`'s own mirrored `applyLangOverrides`, for the real
+  site — no shared code between the two apps, per this codebase's usual convention), so it's exactly as
+  much of a CSS-injection/XSS surface as the same key on the base tree. An existing page's OLD-shape
+  `translations[code] = { layout }` is transparently upgraded on load (`Designer.tsx`'s
+  `migrateOldTranslation`) by walking the old translated tree alongside the current base tree at the same
+  positions and keeping ONLY each translatable text value — style is deliberately dropped (kept from the
+  base instead, the confirmed migration choice) rather than attempting to reconcile a structurally-
+  diverged old fork; both shapes are still read (never a hard DB migration, same convention as every
+  other schema evolution here), a re-saved page always writes the new shape. Real per-breakpoint stacking
+  for a language override rides the SAME Section/Column real-site `bpStyleRules` mechanism an ordinary bp
+  override already uses (see the bp-override paragraph elsewhere in this file) — Element-level stacking
+  stays admin-preview-only, inheriting that same existing asymmetry rather than opening a new one.
   **Why this replaced the separate-row design**: the first cut spawned a whole new post/page per
   language (own slug/status/id), which visibly multiplied the content list (a screenshot showed a dozen
   near-duplicate rows from testing) and required navigating away to a different editor session just to

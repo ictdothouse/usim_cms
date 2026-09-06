@@ -7,7 +7,7 @@
 // instead (see its signature below) — its call sites now live across
 // Designer.tsx, FieldInput.tsx, and FieldGroups.tsx.
 import { useEffect, useRef, useState } from "react";
-import { Smartphone, Tablet } from "lucide-react";
+import { Languages, Smartphone, Tablet } from "lucide-react";
 import { GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import type { Bp } from "./types";
@@ -221,6 +221,38 @@ export function BpToggle({
       className={`inline-flex rounded p-0.5 ${active ? "text-accent" : "text-sub/40 hover:text-sub"}`}
     >
       <Icon className="h-3 w-3" />
+    </button>
+  );
+}
+
+// Per-field per-language style override toggle — sits next to BpToggle, but
+// unlike it renders regardless of `bp` tier (a language override is a real
+// choice on its own, not something that only exists once you leave desktop).
+// Only ever rendered while a non-base language tab is active (see Inspector's
+// call sites) — editing the base language never shows this, since there's
+// nothing to override against. Enabling seeds the override at "" (same
+// "falls through until typed over" convention BpToggle already uses),
+// disabling removes it and the field reverts to the shared base value.
+export function LangToggle({
+  active,
+  onToggle,
+  t,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  t: (k: Key) => string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(ev) => {
+        ev.stopPropagation();
+        onToggle();
+      }}
+      title={t(active ? "designer-lang-override-clear" : "designer-lang-override-set")}
+      className={`inline-flex rounded p-0.5 ${active ? "text-accent" : "text-sub/40 hover:text-sub"}`}
+    >
+      <Languages className="h-3 w-3" />
     </button>
   );
 }

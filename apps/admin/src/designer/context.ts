@@ -106,10 +106,29 @@ export interface DesignerCtx {
   pageLanguage: string;
   setPageLanguage: (v: string) => void;
   activeLang: string;
-  content: Record<string, unknown>;
+  // Does this language slot have any override of its own yet? (Page Settings
+  // panel's pill fill-state — BASE_LANG is always considered to have
+  // content, since it IS the shared base.)
+  hasLangSlot: (code: string) => boolean;
   clickPageLanguagePill: (code: string) => void;
   translating: boolean;
   retranslatePageLanguage: (code: string) => Promise<void>;
+  // Per-language STYLE override plumbing (see Designer.tsx's own comment
+  // above setFourSideValue for the outer/inner opt-in split) — `path` is
+  // `pathKey(b, r?, c?, e?)`, `isTextKey` tells the Inspector/FieldGroups
+  // when NOT to offer the outer toggle at all (a text field is always
+  // per-language, no opt-in needed).
+  isTextKey: (elType: string | undefined, key: string) => boolean;
+  pathKey: (b: number, r?: number, c?: number, e?: number) => string;
+  langKeysOverridden: (path: string, keys: string[]) => boolean;
+  toggleLangKeys: (path: string, keys: string[]) => void;
+  langStackKeysOverridden: (path: string, keys: string[]) => boolean;
+  toggleLangStackKeys: (path: string, keys: string[]) => void;
+  // Single-field write once a language override is ON for that field (or,
+  // for a TEXT field, unconditionally — see isTextKey) — Section/Column's
+  // own FieldGroups setValue and the FourSideControl setters route through
+  // this instead of `mutate` whenever that's the case.
+  setLangValue: (path: string, key: string, value: string) => void;
 
   // Row-level actions
   setRowGap: (b: number, r: number, gap: string | undefined) => void;

@@ -28,7 +28,7 @@ import {
 import type { Key } from "@/i18n";
 import type { Bp, Block, Field, SectionProps } from "./types";
 import { BASE_LANG, type DesignerCtx } from "./context";
-import { BufferedInput, BpToggle } from "./FieldControls";
+import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
 import { CSS_CLASS_FIELD, COLUMN_FIELDS, FIELD_GROUP_BY_KEY, FieldLabel, SECTION_FIELDS } from "./fields";
 import { parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
@@ -46,6 +46,8 @@ function FourSideControl({
   sides = ["top", "right", "bottom", "left"],
   hasOverride,
   onToggleOverride,
+  hasLangOverride,
+  onToggleLangOverride,
   bp,
   t,
 }: {
@@ -59,9 +61,17 @@ function FourSideControl({
   // (block-flow spacing only), so it passes just ["top", "bottom"].
   sides?: readonly ("top" | "right" | "bottom" | "left")[];
   // Omitted entirely for a node with no `bp` bag at all (Row) — the toggle
-  // then simply never renders, same as being on desktop.
+  // then simply never renders, same as being on desktop. While a non-base
+  // language is active, call sites repurpose this pair as the NESTED
+  // "also stack by breakpoint" toggle (only meaningful once
+  // `hasLangOverride` is on) rather than the ordinary bp override.
   hasOverride?: boolean;
   onToggleOverride?: () => void;
+  // Per-language "different for this language" toggle — only ever passed by
+  // call sites while a non-base language pill is active. Renders regardless
+  // of `bp` tier (a language override is a real choice on its own).
+  hasLangOverride?: boolean;
+  onToggleLangOverride?: () => void;
   bp: Bp;
   t: (k: Key) => string;
 }) {
@@ -70,6 +80,9 @@ function FourSideControl({
       <div className="flex items-center justify-between text-[11px] font-medium text-body">
         <span className="flex items-center gap-1.5">
           <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
+          {hasLangOverride !== undefined && onToggleLangOverride && (
+            <LangToggle active={hasLangOverride} onToggle={onToggleLangOverride} t={t} />
+          )}
           {hasOverride !== undefined && onToggleOverride && (
             <BpToggle active={hasOverride} onToggle={onToggleOverride} bp={bp} t={t} />
           )}
@@ -159,13 +172,33 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
-    siteLanguages, pageLanguage, setPageLanguage, activeLang, content,
+    siteLanguages, pageLanguage, setPageLanguage, activeLang, hasLangSlot,
     clickPageLanguagePill, translating, retranslatePageLanguage,
+    isTextKey, pathKey, langKeysOverridden, toggleLangKeys, langStackKeysOverridden, toggleLangStackKeys, setLangValue,
     setRowGap, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow, clipHas, styleHas,
     nudgeColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, saveAsTemplate,
     moveElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, duplicateElement, deleteElement,
     isSuper, isSectionLocked,
   } = ctx;
+
+  // Shared per-STYLE-field language-override wiring for FourSideControl and
+  // the generic FieldGroups getValue/setValue below — spread this AFTER a
+  // block's own base/bp props so it wins while a non-base language is
+  // active, and is a no-op ({}) while the base language pill is active
+  // (leaving the ordinary bp-override wiring untouched). `hasOverride`/
+  // `onToggleOverride` are repurposed here as the NESTED "also stack by
+  // breakpoint" toggle (only shown once the outer per-language toggle is
+  // on) — see Designer.tsx's own comment above setFourSideValue.
+  function langOverrideProps(path: string, keys: string[]) {
+    if (activeLang === BASE_LANG) return {};
+    const has = langKeysOverridden(path, keys);
+    return {
+      hasLangOverride: has,
+      onToggleLangOverride: () => toggleLangKeys(path, keys),
+      hasOverride: has ? langStackKeysOverridden(path, keys) : undefined,
+      onToggleOverride: has ? () => toggleLangStackKeys(path, keys) : undefined,
+    };
+  }
 
   function Breadcrumb() {
     if (!sel || blocks[sel[0]]?.type !== "section") return null;
@@ -259,7 +292,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               {siteLanguages.map((l) => {
                 const slotKey = l.code === pageLanguage ? BASE_LANG : l.code;
                 const isCurrent = activeLang === slotKey;
-                const hasContent = Boolean(content[slotKey]);
+                const hasContent = hasLangSlot(slotKey);
                 const isBase = l.code === pageLanguage;
                 return (
                   <span key={l.code} className="inline-flex items-center gap-0.5">
@@ -384,6 +417,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               props.bp = toggleBpKeys(props.bp, Object.values(PADDING_SIDE_KEYS));
             })
           }
+          {...langOverrideProps(pathKey(b), Object.values(PADDING_SIDE_KEYS))}
           bp={bp}
           t={t}
         />
@@ -401,6 +435,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               props.bp = toggleBpKeys(props.bp, Object.values(RADIUS_CORNER_KEYS));
             })
           }
+          {...langOverrideProps(pathKey(b), Object.values(RADIUS_CORNER_KEYS))}
           bp={bp}
           t={t}
         />
@@ -418,13 +453,19 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               props.bp = toggleBpKeys(props.bp, Object.values(MARGIN_SIDE_KEYS));
             })
           }
+          {...langOverrideProps(pathKey(b), Object.values(MARGIN_SIDE_KEYS))}
           bp={bp}
           t={t}
         />
         <FieldGroups
           fields={SECTION_FIELDS}
           getValue={(f) => bpGetValue((sp as unknown as Record<string, string>)[f.key], sp.bp, f.key)}
-          setValue={(f, v) =>
+          setValue={(f, v) => {
+            const path = pathKey(b);
+            if (activeLang !== BASE_LANG && langKeysOverridden(path, [f.key])) {
+              setLangValue(path, f.key, v);
+              return;
+            }
             mutate((bs) => {
               if (bp === "desktop") {
                 (bs[b].props as Record<string, unknown>)[f.key] = v;
@@ -432,8 +473,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                 const props = bs[b].props as unknown as SectionProps;
                 props.bp = { ...(props.bp ?? {}), [bpKey(f.key)]: v };
               }
-            })
-          }
+            });
+          }}
           hasOverride={(f) => bpKeysOverridden(sp.bp, [f.key])}
           onToggleOverride={(f) =>
             mutate((bs) => {
@@ -441,6 +482,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               props.bp = toggleBpKeys(props.bp, [f.key]);
             })
           }
+          hasLangOverride={activeLang === BASE_LANG ? undefined : (f) => langKeysOverridden(pathKey(b), [f.key])}
+          onToggleLangOverride={activeLang === BASE_LANG ? undefined : (f) => toggleLangKeys(pathKey(b), [f.key])}
           collapsedGroups={collapsedGroups}
           toggleGroup={toggleGroup}
           bp={bp}
@@ -630,6 +673,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
             })
           }
+          {...langOverrideProps(pathKey(b, r, c), Object.values(PADDING_SIDE_KEYS))}
           bp={bp}
           t={t}
         />
@@ -647,6 +691,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
             })
           }
+          {...langOverrideProps(pathKey(b, r, c), Object.values(RADIUS_CORNER_KEYS))}
           bp={bp}
           t={t}
         />
@@ -664,13 +709,19 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
             })
           }
+          {...langOverrideProps(pathKey(b, r, c), Object.values(MARGIN_SIDE_KEYS))}
           bp={bp}
           t={t}
         />
         <FieldGroups
           fields={COLUMN_FIELDS}
           getValue={(f) => bpGetValue(col.props?.[f.key], col.bp, f.key)}
-          setValue={(f, v) =>
+          setValue={(f, v) => {
+            const path = pathKey(b, r, c);
+            if (activeLang !== BASE_LANG && langKeysOverridden(path, [f.key])) {
+              setLangValue(path, f.key, v);
+              return;
+            }
             mutate((bs) => {
               const target = section(bs, b).rows[r].columns[c];
               if (bp === "desktop") {
@@ -678,8 +729,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               } else {
                 target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
               }
-            })
-          }
+            });
+          }}
           hasOverride={(f) => bpKeysOverridden(col.bp, [f.key])}
           onToggleOverride={(f) =>
             mutate((bs) => {
@@ -687,6 +738,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
               target.bp = toggleBpKeys(target.bp, [f.key]);
             })
           }
+          hasLangOverride={activeLang === BASE_LANG ? undefined : (f) => langKeysOverridden(pathKey(b, r, c), [f.key])}
+          onToggleLangOverride={activeLang === BASE_LANG ? undefined : (f) => toggleLangKeys(pathKey(b, r, c), [f.key])}
           collapsedGroups={collapsedGroups}
           toggleGroup={toggleGroup}
           bp={bp}
@@ -968,7 +1021,17 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
       // src being intact. Same bypass as slides fixes it the same way.
       getValue: (f: Field) =>
         f.kind === "slides" || f.kind === "image" ? el.props[f.key] ?? "" : bpGetValue(el.props[f.key], el.bp, f.key),
-      setValue: (f: Field, v: string) =>
+      setValue: (f: Field, v: string) => {
+        const path = pathKey(b, r, c, e);
+        if (activeLang !== BASE_LANG && f.kind !== "slides" && f.kind !== "image") {
+          // A TEXT field is always per-language, no opt-in needed — see
+          // isTextKey. A STYLE field only routes here once the author has
+          // explicitly turned on "different for this language" for it.
+          if (isTextKey(el.type, f.key) || langKeysOverridden(path, [f.key])) {
+            setLangValue(path, f.key, v);
+            return;
+          }
+        }
         mutate((bs) => {
           const target = section(bs, b).rows[r].columns[c].elements[e];
           if (bp === "desktop" || f.kind === "slides" || f.kind === "image") {
@@ -976,7 +1039,8 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           } else {
             target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
           }
-        }),
+        });
+      },
       hasOverride: (f: Field) => f.kind !== "slides" && f.kind !== "image" && bpKeysOverridden(el.bp, [f.key]),
       onToggleOverride: (f: Field) => {
         if (f.kind === "slides" || f.kind === "image") return;
@@ -985,6 +1049,17 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           target.bp = toggleBpKeys(target.bp, [f.key]);
         });
       },
+      hasLangOverride:
+        activeLang === BASE_LANG
+          ? undefined
+          : (f: Field) => f.kind !== "slides" && f.kind !== "image" && langKeysOverridden(pathKey(b, r, c, e), [f.key]),
+      onToggleLangOverride:
+        activeLang === BASE_LANG
+          ? undefined
+          : (f: Field) => {
+              if (f.kind === "slides" || f.kind === "image") return;
+              toggleLangKeys(pathKey(b, r, c, e), [f.key]);
+            },
       collapsedGroups,
       toggleGroup,
       bp,
@@ -1052,6 +1127,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                   target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
                 })
               }
+              {...langOverrideProps(pathKey(b, r, c, e), Object.values(PADDING_SIDE_KEYS))}
               bp={bp}
               t={t}
             />
@@ -1070,6 +1146,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                     target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
                   })
                 }
+                {...langOverrideProps(pathKey(b, r, c, e), Object.values(RADIUS_CORNER_KEYS))}
                 bp={bp}
                 t={t}
               />
@@ -1088,6 +1165,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                   target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
                 })
               }
+              {...langOverrideProps(pathKey(b, r, c, e), Object.values(MARGIN_SIDE_KEYS))}
               bp={bp}
               t={t}
             />

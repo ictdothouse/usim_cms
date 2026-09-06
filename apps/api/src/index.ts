@@ -13,7 +13,7 @@ import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/au
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
-import { validateLayout, isSafeUrl } from "./collections/validate-layout.js";
+import { validateLayout, validateOverrides, isSafeUrl } from "./collections/validate-layout.js";
 import { validateMenuItems } from "./collections/validate-menu.js";
 import * as schema from "./db/schema.js";
 import {
@@ -1493,14 +1493,25 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
       }
     }
   }
-  // i18n Phase 5 — each translations[code].layout is just as much a raw
-  // layout tree as the top-level one above, and gets the exact same check.
+  // i18n Phase 5 — each translations[code].layout (the OLD, retired shape —
+  // still accepted from an existing unmigrated row, or a raw API caller) is
+  // just as much a raw layout tree as the top-level one above, and gets the
+  // exact same check. translations[code].overrides (the CURRENT shape —
+  // Designer.tsx's language-pill rework, see CLAUDE.md's i18n Phase 5 note)
+  // is a sparse prop-key/value bag, not a layout tree, so it gets its own
+  // matching validator instead — every value in it is exactly as much of a
+  // CSS-injection/XSS surface as the same key would be on the base layout.
   if (record.translations && typeof record.translations === "object") {
     for (const entry of Object.values(record.translations as Record<string, unknown>)) {
-      const layout = (entry as Record<string, unknown> | null)?.layout;
-      if (layout === undefined) continue;
-      const err = validateLayout(layout);
-      if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+      const e = entry as Record<string, unknown> | null;
+      if (e?.layout !== undefined) {
+        const err = validateLayout(e.layout);
+        if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+      }
+      if (e?.overrides !== undefined) {
+        const err = validateOverrides(e.overrides);
+        if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+      }
     }
   }
   // Page settings — contentWidth/paddingX are page-wide defaults SectionBlock.astro
@@ -1939,10 +1950,15 @@ const siteChromeBeforeChange = async (data: unknown, _args: AccessArgs, req: Fas
   }
   if (record.translations && typeof record.translations === "object") {
     for (const entry of Object.values(record.translations as Record<string, unknown>)) {
-      const layout = (entry as Record<string, unknown> | null)?.layout;
-      if (layout === undefined) continue;
-      const err = validateLayout(layout);
-      if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+      const e = entry as Record<string, unknown> | null;
+      if (e?.layout !== undefined) {
+        const err = validateLayout(e.layout);
+        if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+      }
+      if (e?.overrides !== undefined) {
+        const err = validateOverrides(e.overrides);
+        if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+      }
     }
   }
   if (record.isDefault === true) {
