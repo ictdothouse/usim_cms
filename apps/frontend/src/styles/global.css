@@ -94,13 +94,96 @@ h2, h3, h4, h5, h6 {
      display:none until opened), so .ds-menu needs to be a flex container
      for its margin-inline-start/end:auto below to actually push it to
      either edge — auto margins are a no-op on a plain block parent. */
-  .ds-menu { display: flex; align-items: center; }
+  .ds-menu { display: flex; align-items: center; position: static; }
+  /* .ds-site-header (BaseLayout.astro's <header>, wraps the whole header
+     row/column grid, not just the nav's own narrow grid cell) is the
+     positioned ancestor .ds-menu-list's absolute left:0/right:0 resolves
+     against. Before this, .ds-menu itself was position:relative, so a
+     hamburger sitting in (say) a 2/6-width column made the "full width"
+     dropdown only ever span that column — the bug this fixes. */
+  .ds-site-header { position: relative; }
+
+  /* Classic hamburger->X morph while open, independent of reveal style —
+     confirms to the visitor which control closes the menu. */
+  .ds-menu-toggle span { transition: transform 0.2s ease, opacity 0.2s ease; }
+  .ds-menu.is-open .ds-menu-toggle { position: relative; z-index: 41; }
+  .ds-menu.is-open .ds-menu-toggle span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  .ds-menu.is-open .ds-menu-toggle span:nth-child(2) { opacity: 0; }
+  .ds-menu.is-open .ds-menu-toggle span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
   [data-mobile-nav-position="left"] .ds-menu-toggle { margin-inline-end: auto; }
   [data-mobile-nav-position="right"] .ds-menu-toggle { margin-inline-start: auto; }
   [data-mobile-nav-size="sm"] .ds-menu-toggle span { width: 16px; }
   [data-mobile-nav-size="lg"] .ds-menu-toggle span { width: 28px; }
   [data-mobile-nav-color] .ds-menu-toggle span { background: var(--mobile-nav-color, currentColor); }
   [data-mobile-nav-animation="fade"] .ds-menu.is-open .ds-menu-list { animation: ds-menu-fade 0.2s ease; }
+
+  /* Reveal style "fly": an off-canvas panel sliding in from the screen edge
+     (data-mobile-nav-position picks which edge — reusing the same field the
+     dropdown style uses for the hamburger's own side, since both express
+     "which side this nav lives on"), full viewport height, with a dimming
+     backdrop behind it. Kept always in-flex (never display:none) so the
+     transform transition actually has something to animate between. */
+  [data-mobile-nav-style="fly"] .ds-menu-list {
+    display: flex;
+    position: fixed;
+    inset: 0 0 0 auto;
+    left: auto;
+    width: min(85vw, 22rem);
+    margin: 0;
+    box-shadow: -4px 0 24px rgba(0,0,0,0.18);
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.28s ease;
+    visibility: hidden;
+    z-index: 40;
+  }
+  [data-mobile-nav-style="fly"][data-mobile-nav-position="left"] .ds-menu-list {
+    inset: 0 auto 0 0;
+    right: auto;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+    transform: translateX(-100%);
+  }
+  [data-mobile-nav-style="fly"] .ds-menu.is-open .ds-menu-list {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  [data-mobile-nav-style="fly"] .ds-menu.is-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 39;
+  }
+
+  /* Reveal style "fullscreen": the whole panel takes over the viewport,
+     centered — no backdrop needed, it IS the backdrop. */
+  [data-mobile-nav-style="fullscreen"] .ds-menu-list {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    font-size: 1.15rem;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease;
+    z-index: 40;
+  }
+  [data-mobile-nav-style="fullscreen"] .ds-menu.is-open .ds-menu-list {
+    opacity: 1;
+    visibility: visible;
+  }
+  [data-mobile-nav-style="fullscreen"] .ds-menu-dropdown,
+  [data-mobile-nav-style="fullscreen"] .ds-mega-menu,
+  [data-mobile-nav-style="fly"] .ds-menu-dropdown,
+  [data-mobile-nav-style="fly"] .ds-mega-menu {
+    padding-left: 1rem;
+  }
 }
 @keyframes ds-menu-fade {
   from { opacity: 0; }

@@ -159,10 +159,12 @@ const fontsHref = allFonts.length
     )}
     {headerChrome ? (
       <header
+        class="ds-site-header"
         data-mobile-nav-position={mobileNav?.position}
         data-mobile-nav-size={mobileNav?.size}
         data-mobile-nav-color={mobileNav?.color}
         data-mobile-nav-animation={mobileNav?.animation}
+        data-mobile-nav-style={mobileNav?.style}
         style={mobileNav?.color ? `--mobile-nav-color:${mobileNav.color}` : undefined}
       >
         {chromeLayout(headerChrome).map((block, b) =>
