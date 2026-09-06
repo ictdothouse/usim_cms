@@ -574,11 +574,23 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
     }
     case "menu": {
       const linked = availableMenus.find((m) => m.id === el.props.menuId);
+      if (!linked || linked.items.length === 0) {
+        return (
+          <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
+            <Menu className="h-3.5 w-3.5" />
+            {linked ? linked.name : t("designer-f-menu-none")}
+          </div>
+        );
+      }
       return (
-        <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
-          <Menu className="h-3.5 w-3.5" />
-          {linked ? linked.name : t("designer-f-menu-none")}
-        </div>
+        <nav className={`flex items-center gap-4 text-xs ${p.layout === "vertical" ? "flex-col items-start gap-1.5" : ""}`}>
+          {linked.items.map((item) => (
+            <span key={item.id} className="whitespace-nowrap text-body">
+              {item.label}
+              {item.children && item.children.length > 0 && <ChevronsUpDown className="ml-0.5 inline h-2.5 w-2.5 text-sub" />}
+            </span>
+          ))}
+        </nav>
       );
     }
     case "cardgrid": {
