@@ -2643,7 +2643,7 @@ export default function Designer({
   // element/field only ever means adding a field here, not touching every
   // call site.
   const designerCtx: DesignerCtx = {
-    t, bp, mode, sel, setSel, blocks, mutate,
+    t, bp, mode, kind, sel, setSel, blocks, mutate,
     isSuper, isSectionLocked,
     bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
     setFourSideValue, setColSideValue, setElSideValue,
@@ -3893,10 +3893,16 @@ export default function Designer({
                     // phone/tablet instead of a plain narrowed box — the
                     // iframe itself is unchanged, just wrapped.
                     <div
-                      className={`flex h-full shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
-                        previewModal.device === "mobile" ? "rounded-[2.5rem] p-3" : "rounded-[1.5rem] p-2.5"
+                      className={`flex shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
+                        previewModal.device === "mobile"
+                          ? "aspect-[9/19.5] h-full max-h-[42rem] rounded-[2.5rem] p-3"
+                          : "h-full rounded-[1.5rem] p-2.5"
                       }`}
-                      style={{ width: `calc(${DEVICE_WIDTH[previewModal.device]} + 1.5rem)` }}
+                      style={
+                        previewModal.device === "mobile"
+                          ? undefined
+                          : { width: `calc(${DEVICE_WIDTH[previewModal.device]} + 1.5rem)` }
+                      }
                     >
                       {previewModal.device === "mobile" && (
                         <div className="mx-auto h-1.5 w-16 shrink-0 rounded-full bg-white/25" />

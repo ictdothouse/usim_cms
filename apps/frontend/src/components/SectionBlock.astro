@@ -846,6 +846,38 @@ const rowStyle = (row: Row, isFirst: boolean) => {
   return `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
 };
 const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
+// Column width (Col.span) is edited per-breakpoint in the Inspector (col.bp's
+// "tablet:span"/"mobile:span"), same bag every other Col/El style override
+// uses — but the value actually drives the PARENT row's own
+// grid-template-columns, not the column's own style, so it can't flow
+// through the per-column respId() call below like padding/radius do.
+// Flatten every column's span override into one synthetic flat bag keyed
+// "tablet:span0"/"mobile:span1"/... (one key per column index) so it can
+// reuse bpMerge/bpStyleRules unchanged, same as every other bp-driven style
+// on this page. Kept as frontmatter functions (not inline template consts) —
+// typed local declarations inside the markup section trip up Astro's
+// TSX-like template parser (`Record<string, string>` reads as an ambiguous
+// JSX tag start there).
+function rowSpanBp(row: Row): Record<string, string> {
+  const out: Record<string, string> = {};
+  (row.columns ?? []).forEach((col, i) => {
+    for (const [k, v] of Object.entries(col.bp ?? {})) {
+      const sep = k.indexOf(":");
+      if (sep !== -1 && k.slice(sep + 1) === "span") out[`${k.slice(0, sep)}:span${i}`] = v;
+    }
+  });
+  return out;
+}
+function rowSpanBase(row: Row): Record<string, string> {
+  const out: Record<string, string> = {};
+  (row.columns ?? []).forEach((col, i) => {
+    out[`span${i}`] = String(col.span ?? 1);
+  });
+  return out;
+}
+function buildRowSpans(row: Row, p: Record<string, string>): string {
+  return `grid-template-columns:${(row.columns ?? []).map((_, i) => `${p[`span${i}`] ?? "1"}fr`).join(" ")}`;
+}
 ---
 
 <section
@@ -860,7 +892,7 @@ const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "
       <div
         class="ds-row"
         style={rowStyle(row, r === 0)}
-        data-vis={respId(`r${blockIndex}-${r}`, row)}
+        data-vis={respId(`r${blockIndex}-${r}`, row, rowSpanBp(row), rowSpanBase(row), (p) => buildRowSpans(row, p))}
       >
         {(row.columns ?? []).map((col, c) => (
           <div

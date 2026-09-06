@@ -29,6 +29,7 @@ export interface DesignerCtx {
   t: (k: Key) => string;
   bp: Bp;
   mode: "blocks" | "live";
+  kind: "page" | "blueprint" | "siteChrome";
   sel: Sel;
   setSel: (path: Sel) => void;
   blocks: Block[];
