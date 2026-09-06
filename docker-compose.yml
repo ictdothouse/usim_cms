@@ -16,6 +16,12 @@ services:
       POSTGRES_HOST_AUTH_METHOD: md5
     networks:
       - ucms-net
+    # Bounded so a spike elsewhere on the box can't trigger Linux's
+    # OOM-killer to pick Postgres at random — a predictable container
+    # restart (already auto-recovered by `restart: unless-stopped` +
+    # the healthcheck below) beats an unpredictable OOM kill. Raise
+    # DB_MEM_LIMIT in .env if a real tenant count needs more.
+    mem_limit: ${DB_MEM_LIMIT:-1g}
     volumes:
       - db-data:/var/lib/postgresql/data
       # Runs once, only on an empty data dir: creates the non-superuser
@@ -44,6 +50,7 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.2-p0
     restart: unless-stopped
+    mem_limit: ${PGBOUNCER_MEM_LIMIT:-128m}
     depends_on:
       db:
         condition: service_healthy
@@ -72,6 +79,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
     networks:
       - ucms-net
     healthcheck:
@@ -112,6 +120,10 @@ services:
     # cert-swap restart) on every restart after the first.
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     restart: unless-stopped
+    # Same OOM-avoidance reasoning as db's mem_limit above — Caddy itself
+    # is normally light, this just keeps it from being the OOM-killer's
+    # collateral damage during a spike elsewhere on the box.
+    mem_limit: ${PROXY_MEM_LIMIT:-256m}
     networks:
       - ucms-net
     ports:

@@ -23,6 +23,10 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    # Same OOM-avoidance reasoning as docker-compose.yml's db/proxy —
+    # bounded memory so a spike doesn't let Linux's OOM-killer pick
+    # this container at random; it just restarts cleanly instead.
+    mem_limit: ${API_MEM_LIMIT:-512m}
     networks:
       - default
       - ucms-net
@@ -79,6 +83,7 @@ services:
       context: .
       dockerfile: apps/frontend/Dockerfile
     restart: unless-stopped
+    mem_limit: ${FRONTEND_MEM_LIMIT:-512m}
     networks:
       - default
       - ucms-net
@@ -104,6 +109,7 @@ services:
         VITE_API_URL: ${VITE_API_URL:?set VITE_API_URL in .env, e.g. https://api.usim.edu.my}
         VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:?set VITE_FRONTEND_URL in .env}
     restart: unless-stopped
+    mem_limit: ${ADMIN_MEM_LIMIT:-128m}
     networks:
       - default
       - ucms-net
