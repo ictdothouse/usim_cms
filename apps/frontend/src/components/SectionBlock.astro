@@ -471,6 +471,24 @@ function hexToRgba(hex: string, alpha: number): string {
   const n = parseInt(full, 16) || 0;
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Number.isFinite(alpha) ? alpha : 1})`;
 }
+// Mirrors apps/admin/src/lib/utils.ts's bestTextColor/contrastRatio — can't
+// share code across the two apps (no shared package for this), so this is a
+// deliberate byte-for-byte-equivalent port, not a rewrite.
+function relativeLuminance(hex: string): number {
+  const clean = hex.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(clean.slice(i, i + 2), 16) / 255);
+  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+function contrastRatio(hexA: string, hexB: string): number {
+  const lA = relativeLuminance(hexA);
+  const lB = relativeLuminance(hexB);
+  const [lighter, darker] = lA > lB ? [lA, lB] : [lB, lA];
+  return (lighter + 0.05) / (darker + 0.05);
+}
+function bestTextColor(hex: string): string {
+  return contrastRatio("#ffffff", hex) >= contrastRatio("#000000", hex) ? "#ffffff" : "#000000";
+}
 function shadowToCss(raw?: string): string | null {
   if (!raw) return null;
   if (raw in LEGACY_SHADOW) return LEGACY_SHADOW[raw] ?? null;
@@ -1304,11 +1322,26 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                             // only previous way to get a solid-color slide was
                             // an accidental side effect of the overlay sitting
                             // over the page's own backdrop, not a real choice.
+                            // Default text color for this slide's nested
+                            // content (an element's own Typography color
+                            // still wins) — same "pick the readable side of
+                            // whatever we can actually see" logic as
+                            // apps/admin's canvas preview; a bare light
+                            // photo with no bgColor/overlay keeps the
+                            // classic white-on-dark-hero default from
+                            // .ds-slide's own CSS rule below.
+                            const slideTextColor =
+                              s.bgColor && HEX_RE.test(s.bgColor)
+                                ? bestTextColor(s.bgColor)
+                                : overlayOpacity > 0.3 && HEX_RE.test(s.overlayColor || "")
+                                  ? bestTextColor(s.overlayColor)
+                                  : null;
                             const slideStyle = [
                               bgUrl ? `background-image:url('${bgUrl}')` : null,
                               s.bgColor && HEX_RE.test(s.bgColor) ? `background-color:${s.bgColor}` : null,
                               `background-size:${bgSize === "repeat" || bgSize === "no-repeat" ? "auto" : bgSize}`,
                               `background-repeat:${bgSize === "repeat" ? "repeat" : "no-repeat"}`,
+                              slideTextColor ? `color:${slideTextColor}` : null,
                             ]
                               .filter(Boolean)
                               .join(";");
