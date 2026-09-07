@@ -236,7 +236,18 @@ function validateThemeSettings(settings: Record<string, unknown>): string | null
   return null;
 }
 
-const app = Fastify({ logger: true });
+// trustProxy: true — safe ONLY because this container publishes no host
+// port (docker-compose.release.yml's api service has no `ports:`); the sole
+// way anything reaches Fastify is through Caddy (or another same-network
+// container) over ucms-net, so the immediate connecting peer can never be an
+// external attacker forging X-Forwarded-For directly. Without this, req.ip
+// (isLoginRateLimited/recordLoginAttempt/insertAuditLog's `ip` field) always
+// resolved to Caddy's own docker-internal IP instead of the real visitor —
+// silently defeating both the login rate limit and the audit log's "who did
+// this" value for every deployment, with or without a CDN in front. Caddy
+// itself is the other half of getting this right when a CDN (Cloudflare) is
+// added later — see proxy-sync.ts's TRUSTED_PROXY_MODE.
+const app = Fastify({ logger: true, trustProxy: true });
 
 // Without this, one uncaught error anywhere takes down all 50 tenants at
 // once. Log and exit fast instead of continuing in a possibly-corrupt

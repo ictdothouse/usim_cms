@@ -119,6 +119,28 @@ test("isValidDialTargets rejects non-array and non-string entries", () => {
   assert.equal(isValidDialTargets(undefined), false);
 });
 
+test("buildCaddyConfig omits trusted_proxies by default (safe for a direct-connection, no-CDN deployment)", () => {
+  delete process.env.TRUSTED_PROXY_MODE;
+  const config = buildCaddyConfig([]);
+  const servers = (config as any).apps.http.servers.srv0;
+  assert.equal(servers.trusted_proxies, undefined);
+});
+
+test("buildCaddyConfig sets trusted_proxies to Cloudflare's ranges when TRUSTED_PROXY_MODE=cloudflare", async () => {
+  process.env.TRUSTED_PROXY_MODE = "cloudflare";
+  try {
+    // Re-import so the module re-reads process.env at load time, same as
+    // buildCaddyConfig's own TRUSTED_PROXY_MODE constant.
+    const mod = await import(`./proxy-sync.js?cachebust=${Date.now()}`);
+    const config = mod.buildCaddyConfig([]);
+    const servers = (config as any).apps.http.servers.srv0;
+    assert.equal(servers.trusted_proxies.source, "static");
+    assert.ok(servers.trusted_proxies.ranges.includes("173.245.48.0/20"));
+  } finally {
+    delete process.env.TRUSTED_PROXY_MODE;
+  }
+});
+
 test("parseCertExpiry rejects a malformed PEM", () => {
   // A deliberately truncated/invalid PEM body — exercises the same
   // rejection path apps/api's cert-upload route (Task 4) depends on to
