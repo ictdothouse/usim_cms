@@ -313,7 +313,16 @@ callouts before assuming any of this is speculative hardening.
   `POST /api/auth/login` checks the limit **before** even looking up the password (so a locked-out
   caller never gets a fresh timing oracle either) — 5 failed attempts per email OR per ip within 15
   minutes trips a 429. Old rows are pruned lazily on every write (24h retention), no separate cleanup
-  cron.
+  cron. **Only correct because `req.ip` actually resolves the real visitor** — `index.ts`'s `Fastify()`
+  sets `trustProxy: true`, safe here specifically because the api container publishes no host port (only
+  reachable via Caddy/another container on `ucms-net`), so the connecting peer can never be an external
+  attacker forging `X-Forwarded-For`. The other half is Caddy itself correctly resolving the real client
+  IP in the first place — see `proxy-sync.ts`'s `TRUSTED_PROXY_MODE` (`unset` = safe default for a
+  direct-connection deployment with no CDN in front, e.g. a government agency's own policy; `"cloudflare"`
+  once Cloudflare is genuinely proxying the domain's DNS, so Caddy trusts `X-Forwarded-For` only from
+  Cloudflare's own published edge ranges — never "trust everyone", which would let anyone reaching Caddy
+  directly forge their own IP and defeat this rate limit/the audit log's `ip` field below the same way the
+  missing `trustProxy` did before this fix).
 - **Audit log.** `audit_log` (control-plane) records who did what to instance-wide/cross-tenant state —
   currently wired into tenant delete, user delete, the mfaEnabled toggle, and a user's own MFA enable/
   disable. Deliberately not wired into every read/list route or every possible mutation — see the

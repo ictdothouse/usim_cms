@@ -68,6 +68,10 @@ services:
       MONITOR_URL: ${MONITOR_URL:-}
       MONITOR_USER: ${MONITOR_USER:-admin}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
+      # Unset (default) = safe for a direct-connection deployment (no CDN in
+      # front) — see proxy-sync.ts's own comment. Set to "cloudflare" only
+      # once Cloudflare is genuinely proxying this domain's DNS.
+      TRUSTED_PROXY_MODE: ${TRUSTED_PROXY_MODE:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

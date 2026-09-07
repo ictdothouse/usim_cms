@@ -25,6 +25,53 @@ const DEFAULT_ADMIN_UPSTREAM = process.env.ADMIN_UPSTREAM ?? "admin:80";
 const DEFAULT_API_UPSTREAM = process.env.API_UPSTREAM ?? "api:3000";
 const DEFAULT_FRONTEND_UPSTREAM = process.env.FRONTEND_UPSTREAM ?? "frontend:4321";
 
+// Some deployments of this CMS (a government agency's own policy, e.g. no
+// traffic may route through a foreign commercial CDN) never sit behind
+// Cloudflare; others (a private company standing up the same CMS) put
+// Cloudflare in front for TLS/caching/DDoS at the edge. Both must resolve
+// the real visitor IP correctly for isLoginRateLimited/insertAuditLog's
+// `ip` field (see index.ts's Fastify trustProxy comment) — the default
+// (unset/anything but "cloudflare") leaves Caddy's own behavior unchanged:
+// it does NOT trust any inbound X-Forwarded-For, so the directly-connecting
+// socket IS the real client, exactly right for the no-CDN case. Only when
+// TRUSTED_PROXY_MODE=cloudflare do we tell Caddy that connections genuinely
+// arriving from Cloudflare's own edge ranges are allowed to assert the real
+// client's IP via X-Forwarded-For — never "trust everyone", which would let
+// anyone who reaches Caddy directly (bypassing Cloudflare) forge their own
+// IP and defeat the rate limit/audit log the same way the missing trustProxy
+// fix above did.
+const TRUSTED_PROXY_MODE = process.env.TRUSTED_PROXY_MODE;
+
+// Cloudflare's own published edge ranges (https://www.cloudflare.com/ips/) —
+// a short, rarely-changing list; hardcoded rather than fetched at runtime to
+// keep this dependency-free (this project's "avoid heavy dependencies"
+// constraint) and avoid a network call on every config push. Refresh this
+// list (rare) if Cloudflare ever announces a range change.
+const CLOUDFLARE_IP_RANGES = [
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "188.114.96.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "104.16.0.0/13",
+  "104.24.0.0/14",
+  "172.64.0.0/13",
+  "131.0.72.0/22",
+  "2400:cb00::/32",
+  "2606:4700::/32",
+  "2803:f800::/32",
+  "2405:b500::/32",
+  "2405:8100::/32",
+  "2a06:98c0::/29",
+  "2c0f:f248::/32",
+];
+
 export interface TenantRouteInfo {
   host: string;
   active: boolean;
@@ -135,6 +182,13 @@ export function buildCaddyConfig(
           srv0: {
             listen: [":443", ":80"],
             routes: [...staticRoutes, ...tenantRoutes],
+            // Omitted entirely (not just an empty ranges list) when not in
+            // cloudflare mode — Caddy's own no-trusted-proxies default is
+            // exactly the safe, correct behavior for a direct-connection
+            // (no CDN) deployment, so there's nothing to configure there.
+            ...(TRUSTED_PROXY_MODE === "cloudflare"
+              ? { trusted_proxies: { source: "static", ranges: CLOUDFLARE_IP_RANGES } }
+              : {}),
           },
         },
       },
