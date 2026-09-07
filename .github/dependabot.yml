@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # pnpm workspace — root + all apps/* covered by one entry
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+    open-pull-requests-limit: 10
+
+  # Docker base images (node:22-alpine in each apps/*/Dockerfile)
+  - package-ecosystem: "docker"
+    directory: "/apps/api"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/apps/admin"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/apps/frontend"
+    schedule:
+      interval: "weekly"
+
+  # docker-compose image: tags (postgres, redis, caddy, pgbouncer)
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions versions in ci.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

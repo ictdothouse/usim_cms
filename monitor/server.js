@@ -43,6 +43,11 @@ const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
 const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || "";
 const ALERT_POLL_INTERVAL_MS = Number(process.env.ALERT_POLL_INTERVAL_MS) || 60_000;
 const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) || 85;
+// How often to `git fetch origin main` in the background looking for new commits (Dependabot
+// bumps included, once merged) — separate from ALERT_POLL_INTERVAL_MS since a git fetch is a
+// network call to GitHub and update freshness doesn't need 60s granularity. GET /api/update-check
+// (the dashboard's own on-demand refresh) always fetches fresh regardless of this interval.
+const UPDATE_CHECK_INTERVAL_MS = Number(process.env.UPDATE_CHECK_INTERVAL_MS) || 30 * 60_000;
 // Per-tenant uploads live in the named `ucms-uploads` docker volume (docker mode) or a
 // plain apps/api/uploads directory (bare-metal) — same resolution rule as
 // apps/api/scripts/backup-media.sh's UPLOADS_DIR, reused here so an operator who already
@@ -336,6 +341,53 @@ function sendAlert(text) {
 // fires a false "recovered" alert.
 let lastKnownUp = {};
 let lastDiskOver = false;
+let lastAlertedRemoteSha = null;
+
+// Fetches origin/main and reports how far HEAD is behind it — the only signal needed to answer
+// "is there something to update": anything merged to main (a green-CI'd Dependabot bump included,
+// see .github/dependabot.yml) shows up here the moment it lands, no GitHub token/API call needed.
+// null means the fetch itself failed (offline, GitHub down, etc) — callers treat that as
+// "unknown", never as "0 updates".
+function getRemoteUpdateInfo(cb) {
+  execFile("git", ["fetch", "origin", "main", "--quiet"], { cwd: REPO_DIR, timeout: 20_000 }, (fetchErr) => {
+    if (fetchErr) return cb(null);
+    execFile(
+      "git",
+      ["log", "--oneline", "HEAD..origin/main", "-20"],
+      { cwd: REPO_DIR, timeout: 10_000 },
+      (logErr, stdout) => {
+        if (logErr) return cb(null);
+        const commits = stdout.trim() ? stdout.trim().split("\n") : [];
+        execFile("git", ["rev-parse", "origin/main"], { cwd: REPO_DIR, timeout: 5_000 }, (shaErr, shaOut) => {
+          cb({ commitsBehind: commits.length, commits, remoteSha: shaErr ? null : shaOut.trim() });
+        });
+      },
+    );
+  });
+}
+
+function handleUpdateCheck(req, res) {
+  getRemoteUpdateInfo((info) => {
+    if (!info) return sendJson(res, 502, { error: "git fetch failed — check network/GitHub reachability" });
+    sendJson(res, 200, info);
+  });
+}
+
+// Edge-triggered on remoteSha the same way service up/down and disk-threshold alerts are above —
+// fires once when a new HEAD first appears on origin/main, not on every single poll while it's
+// still there unpulled. Piggybacks the existing ALERT_WEBHOOK_URL wiring (sendAlert no-ops when
+// unset), so this needs no new secret/config beyond what alerting already asks for.
+function pollForUpdateAlert() {
+  getRemoteUpdateInfo((info) => {
+    if (!info || info.commitsBehind === 0) return;
+    if (info.remoteSha === lastAlertedRemoteSha) return;
+    lastAlertedRemoteSha = info.remoteSha;
+    sendAlert(
+      `[usim_cms/${PUBLIC_HOST}] ${info.commitsBehind} update(s) available on main:\n` +
+        info.commits.slice(0, 5).join("\n"),
+    );
+  });
+}
 function pollForAlerts() {
   getStatus((err, services) => {
     if (err) return; // transient poll failure — not itself alert-worthy
@@ -736,6 +788,8 @@ const DASHBOARD_HTML = `<!doctype html>
 
 <div class="grid" id="hostGrid"></div>
 
+<div id="updateBanner" style="display:none; margin: 0.8rem 0; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;"></div>
+
 <div class="row">
   <button onclick="pull()">Pull latest &amp; deploy</button>
   <button class="secondary" onclick="rollback()">Rollback</button>
@@ -914,9 +968,31 @@ async function init() {
   refresh();
   refreshDb();
   refreshSites();
+  refreshUpdateCheck();
   setInterval(refresh, 5000);
   setInterval(refreshDb, 10000);
   setInterval(refreshSites, 30000);
+  setInterval(refreshUpdateCheck, 5 * 60000);
+}
+
+async function refreshUpdateCheck() {
+  const el = document.getElementById("updateBanner");
+  try {
+    const info = await api("/api/update-check");
+    if (info.commitsBehind > 0) {
+      el.style.display = "block";
+      el.innerHTML =
+        "🔔 <b>" + info.commitsBehind + " update" + (info.commitsBehind > 1 ? "s" : "") + " available</b> " +
+        "— click \"Pull latest &amp; deploy\" below to update (runs tests, health-checks before switching traffic, keeps the old version ready for one-click Rollback).<br>" +
+        "<span style=\\"font-size:0.8rem;opacity:0.85\\">" + info.commits.slice(0, 5).map(escapeHtml).join("<br>") + "</span>";
+    } else {
+      el.style.display = "none";
+    }
+  } catch (e) {
+    // git fetch failed (offline/GitHub down) — not alert-worthy on the dashboard itself,
+    // pollForUpdateAlert server-side already treats this as "unknown", same here.
+    el.style.display = "none";
+  }
 }
 
 async function refresh() {
@@ -1125,6 +1201,8 @@ const server = http.createServer((req, res) => {
       handleStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/sites") {
       handleSites(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/update-check") {
+      handleUpdateCheck(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "service" && parts[3]) {
       handleServiceAction(req, res, parts[2], parts[3]);
     } else if (req.method === "GET" && parts[0] === "api" && parts[1] === "logs" && parts[2]) {
@@ -1164,3 +1242,7 @@ if (ALERT_WEBHOOK_URL) {
   setInterval(pollForAlerts, ALERT_POLL_INTERVAL_MS);
   pollForAlerts();
 }
+
+console.log(`update checks: polling origin/main every ${UPDATE_CHECK_INTERVAL_MS}ms`);
+setInterval(pollForUpdateAlert, UPDATE_CHECK_INTERVAL_MS);
+pollForUpdateAlert();
