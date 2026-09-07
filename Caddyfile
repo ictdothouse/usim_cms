@@ -44,6 +44,9 @@
 # hostname) — a visitor's own tenant domain now serves its own uploads too,
 # same files, just proxied under the hostname they're actually looking at.
 {$TENANT_DOMAINS:tenant.localhost} {
+	# Caddy's reverse_proxy does not compress responses by default — without
+	# this, every HTML/CSS/JS/font response goes over the wire uncompressed.
+	encode zstd gzip
 	handle /uploads/* {
 		reverse_proxy ucms-blue-api-1:3000
 	}

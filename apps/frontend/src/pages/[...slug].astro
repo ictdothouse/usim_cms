@@ -57,6 +57,39 @@ const { enabled: siteLanguages, showHeaderSwitcher, switcherPosition, switcherSt
 const requestedLang = Astro.url.searchParams.get("lang");
 const layout = page ? resolvePageLayout(page, requestedLang) : [];
 const fonts = collectFonts(layout);
+// Performance: find the image that will actually become the page's LCP
+// element — only ever the very first element of the very first row/column
+// of the first section (SectionBlock.astro treats that same position as
+// "isFirst" and skips lazy-loading it) — so BaseLayout can <link
+// rel=preload fetchpriority=high> it. A slider's slides are stored as a
+// JSON string (see SectionBlock.astro's parseSlides); the legacy
+// pipe-delimited slide format is skipped here (best-effort hint only, not a
+// correctness requirement — a missed preload just means no LCP head start).
+function findLcpImageUrl(blocks: typeof layout): string | null {
+  const section = blocks[0];
+  if (!section || section.type !== "section") return null;
+  const rows = (section.props as Record<string, unknown> | undefined)?.rows;
+  const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+  const columns = row?.columns;
+  const col = Array.isArray(columns) ? (columns[0] as Record<string, unknown> | undefined) : undefined;
+  const elements = col?.elements;
+  const el = Array.isArray(elements) ? (elements[0] as Record<string, unknown> | undefined) : undefined;
+  if (!el) return null;
+  const p = (el.props ?? {}) as Record<string, unknown>;
+  if (el.type === "image" && typeof p.src === "string" && p.src) return p.src;
+  if (el.type === "slider" && typeof p.slides === "string") {
+    try {
+      const slides: unknown = JSON.parse(p.slides);
+      const firstSlide = Array.isArray(slides) ? (slides[0] as Record<string, unknown> | undefined) : undefined;
+      if (firstSlide && typeof firstSlide.imageUrl === "string" && firstSlide.imageUrl) return firstSlide.imageUrl;
+    } catch {
+      // Legacy pipe-delimited slide format — no cheap way to pull the first
+      // image out without duplicating SectionBlock.astro's whole parser.
+    }
+  }
+  return null;
+}
+const lcpImage = page ? findLcpImageUrl(layout) : null;
 const pageLangLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
 const availableCodes = page ? [page.language, ...Object.keys(page.translations)].filter((c): c is string => Boolean(c)) : [];
 const langSwitcher =
@@ -88,6 +121,7 @@ const { header: headerChrome, footer: footerChrome } = page
   footerChrome={footerChrome}
   tenantHost={tenantHost}
   requestedLang={requestedLang}
+  lcpImage={lcpImage}
 >
   {!page ? (
     <HeroBlock title="Halaman tidak dijumpai" subtitle="Kandungan ini belum tersedia atau telah dialihkan." />
