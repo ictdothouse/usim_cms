@@ -211,6 +211,20 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   only, `restart: unless-stopped` + compose healthchecks still do the actual crash-recovery; revisit
   with a real metrics stack if/when the instance carries enough tenants that this coarse a signal stops
   being enough.
+- **Update notifications** (`GET /api/update-check`, dashboard's yellow banner above the button row):
+  a background `git fetch origin main` (`UPDATE_CHECK_INTERVAL_MS`, default 30 min) compares HEAD
+  against `origin/main` — any green-CI'd merge to main (a Dependabot bump from `.github/
+  dependabot.yml` included, once its PR is merged) shows up here the moment it lands, no GitHub
+  token/API call needed. Edge-triggered on the remote SHA the same way the up/down and disk alerts
+  above are (`pollForUpdateAlert`, fires once per new HEAD, not every poll) and piggybacks the same
+  `ALERT_WEBHOOK_URL` — so a real push notification (Slack/Discord/etc) needs no separate wiring, just
+  that webhook already being set. The dashboard banner itself needs no webhook — `GET /api/update-check`
+  is called on load + every 5 min regardless. There is no separate "safe to update?"/"will this cause
+  downtime?" check beyond what already exists: clicking "Pull latest & deploy" runs the exact same
+  `git pull` → build → test-gate → health-check → promote (docker mode: `scripts/deploy.sh`) flow this
+  file documents above, which already aborts before touching the live color on a failed build/test/
+  health-check, and "Rollback" already flips back to the previously-live color with no rebuild — this
+  feature only adds the "something changed, go look" signal, it doesn't change what clicking Update does.
 - **`GET /api/sites`** (dashboard's "Sites" section) — per-tenant uploads folder size, one `du -sb` per
   top-level folder under the uploads dir (docker mode auto-resolves the named `ucms-uploads` volume's
   real host path via `docker volume inspect`; bare-metal defaults to `apps/api/uploads`; `UPLOADS_DIR`
