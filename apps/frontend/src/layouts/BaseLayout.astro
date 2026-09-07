@@ -43,6 +43,13 @@ interface Props {
   footerChrome?: SiteChrome | null;
   tenantHost?: string;
   requestedLang?: string | null;
+  // Performance: URL of whatever image the calling page determined is the
+  // real LCP candidate (e.g. the first slide of a hero slider, which is a
+  // CSS background-image and so can never get an <img fetchpriority> of its
+  // own) — preloaded with fetchpriority=high so the browser starts fetching
+  // it immediately instead of discovering it only once render-blocking
+  // CSS/fonts finish and the element's own background-image is computed.
+  lcpImage?: string | null;
 }
 const {
   title,
@@ -55,6 +62,7 @@ const {
   footerChrome = null,
   tenantHost = "",
   requestedLang = null,
+  lcpImage = null,
 } = Astro.props;
 
 function chromeLayout(chrome: SiteChrome) {
@@ -134,7 +142,20 @@ const fontsHref = allFonts.length
     <title>{title}</title>
     <meta property="og:title" content={title} />
     {ogImage && <meta property="og:image" content={ogImage} />}
-    {fontsHref && <link rel="stylesheet" href={fontsHref} />}
+    {lcpImage && <link rel="preload" as="image" fetchpriority="high" href={lcpImage} />}
+    {fontsHref && (
+      <>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        {/* Loaded non-render-blocking: the media="print" swapped to "all"
+           onload is the standard no-JS-framework way to stop a Google Fonts
+           stylesheet from blocking first paint (it still applies font-face
+           rules as soon as it arrives — display=swap on the URL already
+           covers the "text invisible while the font loads" case). */}
+        <link rel="stylesheet" href={fontsHref} media="print" onload="this.media='all'" />
+        <noscript><link rel="stylesheet" href={fontsHref} /></noscript>
+      </>
+    )}
     {faviconUrl && <link rel="icon" href={faviconUrl} />}
     <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
   </head>

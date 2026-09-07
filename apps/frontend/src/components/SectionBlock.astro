@@ -640,6 +640,32 @@ const safeCssUrl = (u?: string) => {
   return v && !/['";(){}\s]/.test(v) ? v : undefined;
 };
 
+// Fixed downsize policy — MUST match apps/api/src/image-variants.ts's own
+// SRCSET_WIDTHS exactly, or a candidate below points at a file that was
+// never generated (a broken srcset entry, which — unlike a plain <img src>
+// — a browser does NOT gracefully fall back from once it's picked that
+// candidate for the current viewport).
+const SRCSET_WIDTHS = [400, 800, 1200, 1600];
+// Builds a real responsive srcset purely from the URL's own self-describing
+// `?w=` query param — apps/api's upload pipeline (generateImageVariants)
+// appends `?w=&h=` to a raster upload's URL and writes matching
+// `<stem>-<width>w.webp` siblings next to the original at upload time; a
+// URL with no `?w=` (a legacy upload from before this pipeline existed, an
+// animated GIF, or a hand-typed external URL) safely renders with no
+// srcset at all rather than guessing at variants that don't exist.
+function buildSrcset(url: string): { srcset: string; sizes: string } | null {
+  const m = /[?&]w=(\d+)/.exec(url);
+  if (!m) return null;
+  const width = Number(m[1]);
+  const base = url.split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
+  if (candidates.length === 0) return null;
+  const entries = [...candidates.map((w) => `${stem}-${w}w.webp ${w}w`), `${base} ${width}w`];
+  return { srcset: entries.join(", "), sizes: "(min-width: 1024px) 800px, 100vw" };
+}
+
 function escapeHtml(s: string) {
   const map: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return s.replace(/[&<>"']/g, (c) => map[c]);
@@ -965,14 +991,28 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                       set:html={renderInline(p.text ?? "")}
                     />
                   );
-                case "image":
-                  return safeUrl(p.src) ? (
+                case "image": {
+                  // The very first element on the page (first section, first
+                  // row/column/element) is the one most likely to be the
+                  // LCP candidate — lazy-loading it (the old unconditional
+                  // behavior) is exactly what PageSpeed's "loading=lazy
+                  // should not apply to the LCP image" flag catches.
+                  // fetchpriority=high additionally tells the browser to
+                  // fetch it ahead of same-priority resources discovered
+                  // later in the document.
+                  const isFirst = blockIndex === 0 && r === 0 && c === 0 && e === 0;
+                  const imgSrc = safeUrl(p.src);
+                  const imgSrcset = imgSrc ? buildSrcset(imgSrc) : null;
+                  return imgSrc ? (
                     <div style={p.align ? `text-align:${p.align}` : null}>
                       <img
                         class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
-                        src={safeUrl(p.src)}
+                        src={imgSrc}
+                        srcset={imgSrcset?.srcset}
+                        sizes={imgSrcset ? imgSrcset.sizes : undefined}
                         alt={p.alt ?? ""}
-                        loading="lazy"
+                        loading={isFirst ? undefined : "lazy"}
+                        fetchpriority={isFirst ? "high" : undefined}
                         style={[
                           `border-radius:${elRadius(p)}`,
                           p.imgWidth ? `width:${p.imgWidth}` : null,
@@ -985,6 +1025,7 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                       />
                     </div>
                   ) : null;
+                }
                 case "button":
                   return p.label ? (
                     <div
@@ -1093,9 +1134,19 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                         .filter(Boolean)
                         .join(";")}
                     >
-                      {images.map((src) => (
-                        <img src={src} alt="" loading="lazy" style={`border-radius:${elRadius(p)}`} />
-                      ))}
+                      {images.map((src) => {
+                        const srcset = buildSrcset(src);
+                        return (
+                          <img
+                            src={src}
+                            srcset={srcset?.srcset}
+                            sizes={srcset ? srcset.sizes : undefined}
+                            alt=""
+                            loading="lazy"
+                            style={`border-radius:${elRadius(p)}`}
+                          />
+                        );
+                      })}
                     </div>
                   );
                 }
@@ -1249,11 +1300,15 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                         // told to fill it, or a resized box visibly does
                         // nothing to the actual picture.
                         const freePos = ep.position === "custom";
-                        return safeUrl(ep.src) ? (
+                        const epSrc = safeUrl(ep.src);
+                        const epSrcset = epSrc ? buildSrcset(epSrc) : null;
+                        return epSrc ? (
                           <div data-slide-el={el.id} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
                             <img
                               class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
-                              src={safeUrl(ep.src)}
+                              src={epSrc}
+                              srcset={epSrcset?.srcset}
+                              sizes={epSrcset ? epSrcset.sizes : undefined}
                               alt={ep.alt ?? ""}
                               loading="lazy"
                               style={[
@@ -1409,9 +1464,12 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                         .filter(Boolean)
                         .join(";")}
                     >
-                      {cards.map((c) => (
+                      {cards.map((c) => {
+                        const cardSrc = c.image ? safeUrl(c.image) : undefined;
+                        const cardSrcset = cardSrc ? buildSrcset(cardSrc) : null;
+                        return (
                         <div class="ds-card">
-                          {c.image && safeUrl(c.image) && <img src={safeUrl(c.image)} alt="" loading="lazy" />}
+                          {cardSrc && <img src={cardSrc} srcset={cardSrcset?.srcset} sizes={cardSrcset ? cardSrcset.sizes : undefined} alt="" loading="lazy" />}
                           <div class="ds-card-body">
                             {c.title && <h3 class="ds-card-title">{c.title}</h3>}
                             {c.description && <p class="ds-card-desc">{c.description}</p>}
@@ -1422,7 +1480,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                             )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 }
@@ -1506,11 +1565,14 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                   if (items.length === 0) return null;
                   return (
                     <div class={cls("ds-testimonial-grid", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "2"},1fr)`}>
-                      {items.map((it) => (
+                      {items.map((it) => {
+                        const avatarSrc = it.avatar ? safeUrl(it.avatar) : undefined;
+                        const avatarSrcset = avatarSrc ? buildSrcset(avatarSrc) : null;
+                        return (
                         <div class="ds-testimonial-card">
                           {it.quote && <p class="ds-testimonial-quote">“{it.quote}”</p>}
                           <div class="ds-testimonial-person">
-                            {it.avatar && safeUrl(it.avatar) && <img src={safeUrl(it.avatar)} alt="" loading="lazy" />}
+                            {avatarSrc && <img src={avatarSrc} srcset={avatarSrcset?.srcset} sizes={avatarSrcset ? avatarSrcset.sizes : undefined} alt="" loading="lazy" />}
                             <div>
                               {it.name && <p class="ds-testimonial-name">{it.name}</p>}
                               {(it.role || it.meta) && (
@@ -1519,7 +1581,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 }
@@ -1549,9 +1612,11 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                   return (
                     <div class={cls("ds-peoplegrid", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`}>
                       {items.map((it) => {
+                        const photoSrc = it.photo ? safeUrl(it.photo) : undefined;
+                        const photoSrcset = photoSrc ? buildSrcset(photoSrc) : null;
                         const card = (
                           <>
-                            {it.photo && safeUrl(it.photo) && <img src={safeUrl(it.photo)} alt="" loading="lazy" />}
+                            {photoSrc && <img src={photoSrc} srcset={photoSrcset?.srcset} sizes={photoSrcset ? photoSrcset.sizes : undefined} alt="" loading="lazy" />}
                             <p class="ds-people-name">{it.name}</p>
                             {it.role && <p class="ds-people-role">{it.role}</p>}
                             {it.department && <p class="ds-people-dept">{it.department}</p>}
@@ -1599,7 +1664,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                       {items.map((it) => {
                         const src = it.image ? safeUrl(it.image) : undefined;
                         if (!src) return null;
-                        const img = <img src={src} alt={it.alt ?? ""} loading="lazy" />;
+                        const logoSrcset = buildSrcset(src);
+                        const img = <img src={src} srcset={logoSrcset?.srcset} sizes={logoSrcset ? logoSrcset.sizes : undefined} alt={it.alt ?? ""} loading="lazy" />;
                         return it.href && safeUrl(it.href) ? <a href={safeUrl(it.href)}>{img}</a> : img;
                       })}
                     </div>

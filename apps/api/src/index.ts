@@ -1,6 +1,8 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { rm } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { buffer as streamToBuffer } from "node:stream/consumers";
 import Fastify from "fastify";
 import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
@@ -110,6 +112,7 @@ import {
 } from "./backup.js";
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
 import { translatePlainText, translateHtmlBody } from "./translate.js";
+import { generateImageVariants, deleteImageVariants } from "./image-variants.js";
 
 // Fixed permission matrix (resource.action) a superadmin composes into named
 // roles (schema.ts's roles.permissions) and assigns per webmaster user — see
@@ -289,7 +292,10 @@ await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 // Only serves files when STORAGE_DRIVER=local (default) — an S3-backed
 // upload returns a full external URL and doesn't need this at all.
 if (isLocalDriver) {
-  await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/" });
+  // maxAge/immutable is safe here because every uploaded filename is a fresh
+  // randomUUID() (see the upload routes below) — never reused/overwritten,
+  // so a long-lived cache can never go stale.
+  await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", maxAge: "1y", immutable: true });
 }
 
 app.get("/health", async () => ({ status: "ok" }));
@@ -2373,23 +2379,39 @@ await app.register(async (protectedScope) => {
       return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp only)` };
     }
     const safeTenant = tenantFolder(req.tenantHost);
-    const filename = `${randomUUID()}${path.extname(file.filename)}`;
-    const { url } = await uploadFile(safeTenant, filename, file.file);
+    const ext = path.extname(file.filename);
+    const stem = randomUUID();
+    const filename = `${stem}${ext}`;
+    // Buffered (not streamed straight to storage) so the same bytes can also
+    // feed sharp for the responsive-variant pipeline below — bounded by
+    // limits.maxUploadFileSizeMb, already enforced on the multipart parser
+    // above, so this never buffers more than a site's own configured cap.
+    const fileBuffer = await streamToBuffer(file.file);
     // Busboy truncates the stream at the multipart fileSize limit rather
-    // than erroring — detect it after the fact and refuse the partial file.
+    // than erroring — detect it once the stream is fully drained (buffer()
+    // just did that) and refuse the partial file before anything is
+    // uploaded, rather than uploading then deleting.
     if (file.file.truncated) {
-      await deleteFile(safeTenant, filename);
       reply.code(413);
       return { error: `file too large (max ${limits.maxUploadFileSizeMb} MB)` };
     }
     if (limits.maxTotalStorageMb !== null) {
       const [{ total }] = await req.db.select({ total: sql<string>`coalesce(sum(${schema.media.sizeBytes}), 0)` }).from(schema.media);
-      if (Number(total) + file.file.bytesRead > limits.maxTotalStorageMb * 1024 * 1024) {
-        await deleteFile(safeTenant, filename);
+      if (Number(total) + fileBuffer.byteLength > limits.maxTotalStorageMb * 1024 * 1024) {
         reply.code(413);
         return { error: `storage limit reached (${limits.maxTotalStorageMb} MB max for this site)` };
       }
     }
+    const { url: rawUrl } = await uploadFile(safeTenant, filename, Readable.from(fileBuffer));
+    // Responsive image pipeline: gif is skipped (animated — sharp would only
+    // read its first frame, silently breaking the animation in every
+    // generated variant). jpeg/png/webp get downsized WebP siblings plus
+    // their real pixel size embedded in the URL as `?w=&h=` — see
+    // image-variants.ts and SectionBlock.astro's buildSrcset for how the
+    // frontend reconstructs a real <img srcset> from that alone, no DB
+    // lookup needed at render time.
+    const meta = file.mimetype === "image/gif" ? null : await generateImageVariants(safeTenant, stem, fileBuffer);
+    const url = meta ? `${rawUrl}?w=${meta.width}&h=${meta.height}` : rawUrl;
     const [item] = await req.db
       .insert(schema.media)
       .values({
@@ -2397,7 +2419,9 @@ await app.register(async (protectedScope) => {
         originalName: file.filename,
         url,
         mimeType: file.mimetype,
-        sizeBytes: file.file.bytesRead,
+        sizeBytes: fileBuffer.byteLength,
+        width: meta?.width ?? null,
+        height: meta?.height ?? null,
         folderId,
         uploadedBy: req.user.userId,
         uploadedByEmail: req.user.email,
@@ -2484,7 +2508,9 @@ await app.register(async (protectedScope) => {
       reply.code(404);
       return { error: "not found" };
     }
-    await deleteFile(tenantFolder(req.tenantHost), row.filename);
+    const safeTenant = tenantFolder(req.tenantHost);
+    await deleteFile(safeTenant, row.filename);
+    await deleteImageVariants(safeTenant, path.parse(row.filename).name, row.width);
     return { deleted: true, id };
   });
 

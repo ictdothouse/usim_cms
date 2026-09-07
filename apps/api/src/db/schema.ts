@@ -229,6 +229,10 @@ export const media = pgTable("media", {
   url: text("url").notNull(),
   mimeType: text("mime_type").notNull(),
   sizeBytes: integer("size_bytes").notNull().default(0),
+  // Real pixel dimensions (sharp, on upload) -- null for a pre-pipeline row
+  // or a non-raster file. See migrations/0024_media_dimensions.sql.
+  width: integer("width"),
+  height: integer("height"),
   folderId: uuid("folder_id").references(() => mediaFolders.id, { onDelete: "set null" }),
   altText: text("alt_text"),
   // Sprint 4 UX audit: exempts this file from the admin's alt-text-required
