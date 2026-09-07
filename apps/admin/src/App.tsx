@@ -2091,14 +2091,17 @@ function ThemeForm({
     readability.tone === "good" ? "text-ok" : readability.tone === "ok" ? "text-amber-600" : "text-red-600";
 
   const colorField = (label: string, value: string, onChange: (v: string) => void) => (
-    <label className="block text-xs font-medium text-body">
-      {label}
-      <input
-        type="color"
-        className="mt-1 block h-9 w-16 cursor-pointer rounded border border-line/30"
-        value={value || "#000000"}
-        onChange={(e) => onChange(e.target.value)}
-      />
+    <label className="flex flex-col items-center gap-1.5 rounded-xl border border-line/30 bg-white px-2 py-2.5 text-center transition-colors hover:border-line/60">
+      <span className="text-[11px] font-medium text-body">{label}</span>
+      <span className="h-9 w-9 overflow-hidden rounded-lg border border-line/30 shadow-sm">
+        <input
+          type="color"
+          className="h-full w-full cursor-pointer border-0 p-0"
+          value={value || "#000000"}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </span>
+      <span className="font-mono text-[10px] uppercase text-sub">{value || "#000000"}</span>
     </label>
   );
 
@@ -2109,19 +2112,26 @@ function ThemeForm({
       </h2>
       {desc && <p className="text-xs text-sub">{desc}</p>}
       <div className="flex flex-wrap items-start gap-4">
-        <form onSubmit={submit} className={`${card} max-w-sm space-y-3 p-4`}>
-          <div>
-            <p className="mb-1 text-xs font-medium text-body">{t("theme-presets")}</p>
-            <div className="flex flex-wrap gap-1.5">
+        <form onSubmit={submit} className={`${card} max-w-sm space-y-4 p-5`}>
+          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+            <p className="text-xs font-medium text-body">{t("theme-presets")}</p>
+            <div className="flex flex-wrap gap-2">
               {THEME_PRESETS.map((p, i) => {
                 const colors = presetToColors(p);
+                const active =
+                  primaryColor === colors.primaryColor &&
+                  secondaryColor === colors.secondaryColor &&
+                  backgroundColor === colors.backgroundColor &&
+                  textColor === colors.textColor;
                 return (
                   <button
                     key={p.name}
                     type="button"
                     title={`${t("theme-presets")} ${i + 1}`}
                     onClick={() => applyPalette(colors)}
-                    className="h-7 w-7 overflow-hidden rounded-full border border-line/30"
+                    className={`h-9 w-9 shrink-0 overflow-hidden rounded-lg border shadow-sm transition-all hover:scale-110 hover:shadow-md ${
+                      active ? "border-accent ring-2 ring-accent ring-offset-2 ring-offset-canvas" : "border-line/30"
+                    }`}
                     style={{ background: `linear-gradient(135deg, ${colors.primaryColor} 50%, ${colors.secondaryColor} 50%)` }}
                   />
                 );
@@ -2131,19 +2141,22 @@ function ThemeForm({
                 title={t("theme-generate")}
                 aria-label={t("theme-generate")}
                 onClick={() => applyPalette(randomTheme())}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-line/50 text-sub hover:border-accent hover:text-accent"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-line/50 text-sub transition-all hover:scale-110 hover:border-accent hover:text-accent"
               >
-                <Sparkles className="h-3.5 w-3.5" />
+                <Sparkles className="h-4 w-4" />
               </button>
             </div>
           </div>
-          <div className="flex flex-wrap gap-3">
-            {colorField(t("theme-primary"), primaryColor, setPrimaryColor)}
-            {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor)}
-            {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
-            {colorField(t("theme-text"), textColor, setTextColor)}
+          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+            <p className="text-xs font-medium text-body">{t("theme-colors")}</p>
+            <div className="grid grid-cols-4 gap-2">
+              {colorField(t("theme-primary"), primaryColor, setPrimaryColor)}
+              {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor)}
+              {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
+              {colorField(t("theme-text"), textColor, setTextColor)}
+            </div>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-body">{t("theme-fonts")}</p>
               <button
@@ -2173,7 +2186,7 @@ function ThemeForm({
             </label>
             <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
           </div>
-          <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
             <label className="flex items-center gap-2 text-xs font-medium text-body">
               <input type="checkbox" checked={showPostTags !== "false"} onChange={(e) => setShowPostTags(e.target.checked ? "" : "false")} />
               {t("theme-show-tags")}
@@ -2191,7 +2204,7 @@ function ThemeForm({
               {t("theme-show-date")}
             </label>
           </div>
-          <div className="space-y-3 rounded-xl border border-line/20 p-3">
+          <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/40 p-3">
             <p className="text-xs font-semibold text-body">{t("theme-branding")}</p>
             {!previewTenantHost && <p className="text-[11px] text-muted-foreground">{t("theme-branding-global-hint")}</p>}
             {(
@@ -2221,10 +2234,12 @@ function ThemeForm({
               </label>
             ))}
           </div>
-          <button type="submit" className={btnPrimary}>
-            {t("theme-save")}
-          </button>
-          {saved && <span className="ml-2 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
+          <div className="flex items-center gap-2 pt-1">
+            <button type="submit" className={`${btnPrimary} w-full`}>
+              {t("theme-save")}
+            </button>
+            {saved && <span className="shrink-0 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
+          </div>
           <FormError>{error}</FormError>
         </form>
 
