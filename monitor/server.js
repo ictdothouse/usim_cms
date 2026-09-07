@@ -983,7 +983,7 @@ async function refreshUpdateCheck() {
       el.style.display = "block";
       el.innerHTML =
         "🔔 <b>" + info.commitsBehind + " update" + (info.commitsBehind > 1 ? "s" : "") + " available</b> " +
-        "— click \"Pull latest &amp; deploy\" below to update (runs tests, health-checks before switching traffic, keeps the old version ready for one-click Rollback).<br>" +
+        "— click &quot;Pull latest &amp; deploy&quot; below to update (runs tests, health-checks before switching traffic, keeps the old version ready for one-click Rollback).<br>" +
         "<span style=\\"font-size:0.8rem;opacity:0.85\\">" + info.commits.slice(0, 5).map(escapeHtml).join("<br>") + "</span>";
     } else {
       el.style.display = "none";
