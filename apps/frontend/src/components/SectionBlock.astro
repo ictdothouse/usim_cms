@@ -1224,7 +1224,13 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                             set:html={renderInline(ep.text ?? "")}
                           />
                         );
-                      case "image":
+                      case "image": {
+                        // posStyle(ep) sizes the WRAPPER div (posWidth/
+                        // posHeight from the admin canvas's free-position
+                        // resize handle) — the <img> itself must also be
+                        // told to fill it, or a resized box visibly does
+                        // nothing to the actual picture.
+                        const freePos = ep.position === "custom";
                         return safeUrl(ep.src) ? (
                           <div data-slide-el={el.id} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
                             <img
@@ -1234,7 +1240,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                               loading="lazy"
                               style={[
                                 `border-radius:${elRadius(ep)}`,
-                                ep.imgWidth ? `width:${ep.imgWidth}` : null,
+                                freePos && ep.posWidth ? "width:100%" : ep.imgWidth ? `width:${ep.imgWidth}` : null,
+                                freePos && ep.posHeight ? "height:100%;object-fit:cover" : null,
                                 marginStyle(ep),
                                 paddingStyle(ep),
                                 elBorderShadowStyle(ep),
@@ -1244,7 +1251,10 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                             />
                           </div>
                         ) : null;
-                      case "button":
+                      }
+                      case "button": {
+                        // Same free-position box-fill need as "image" above.
+                        const freePos = ep.position === "custom";
                         return ep.label ? (
                           <div
                             data-slide-el={el.id}
@@ -1253,12 +1263,20 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                             <a
                               class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
                               href={safeUrl(ep.href) ?? "#"}
-                              style={[ep.color ? `color:${ep.color}` : null, elBorderShadowStyle(ep)].filter(Boolean).join(";") || undefined}
+                              style={[
+                                ep.color ? `color:${ep.color}` : null,
+                                freePos && ep.posWidth ? "width:100%" : null,
+                                freePos && ep.posHeight ? "height:100%;display:flex;align-items:center;justify-content:center" : null,
+                                elBorderShadowStyle(ep),
+                              ]
+                                .filter(Boolean)
+                                .join(";") || undefined}
                             >
                               {ep.label}
                             </a>
                           </div>
                         ) : null;
+                      }
                       default:
                         return null;
                     }

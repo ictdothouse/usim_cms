@@ -326,7 +326,18 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             src={p.src}
             alt={p.alt ?? ""}
             className={elHoverClass(p)}
-            style={{ borderRadius: elRadius(p), width: p.imgWidth || undefined, maxWidth: "100%", ...elBorderShadowStyle(p) }}
+            style={{
+              borderRadius: elRadius(p),
+              // A free-positioned slide image's own box (posWidth/posHeight,
+              // set by the canvas corner-resize handle) sizes the WRAPPER div
+              // — the <img> itself still needs to be told to fill it, or the
+              // resize handle visibly does nothing to the actual picture.
+              width: p.position === "custom" && p.posWidth ? "100%" : p.imgWidth || undefined,
+              height: p.position === "custom" && p.posHeight ? "100%" : undefined,
+              objectFit: p.position === "custom" && p.posHeight ? "cover" : undefined,
+              maxWidth: "100%",
+              ...elBorderShadowStyle(p),
+            }}
           />
         </div>
       ) : (
@@ -334,21 +345,38 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           <ImageIcon className="h-6 w-6" />
         </div>
       );
-    case "button":
+    case "button": {
+      // Same free-position box-fill need as "image" above: a resized
+      // wrapper (posWidth/posHeight) means nothing unless the actual pill
+      // is told to fill it — otherwise the box grows but the button stays
+      // its small intrinsic size, floating in a corner of an invisible box.
+      const freeFill =
+        p.position === "custom"
+          ? {
+              ...(p.posWidth ? { width: "100%" } : {}),
+              ...(p.posHeight ? { height: "100%", display: "flex", alignItems: "center", justifyContent: "center" } : {}),
+            }
+          : {};
       return (
         <div style={align}>
           <span
             className={`inline-block rounded-full px-5 py-2 text-sm font-semibold ${elHoverClass(p) ?? ""}`}
             style={
               p.variant === "outline"
-                ? { border: "2px solid currentColor", color: p.color || undefined, ...elBorderShadowStyle(p) }
-                : { backgroundColor: "var(--color-primary, #0f62fe)", color: p.color || "var(--color-primary-content, #fff)", ...elBorderShadowStyle(p) }
+                ? { border: "2px solid currentColor", color: p.color || undefined, ...freeFill, ...elBorderShadowStyle(p) }
+                : {
+                    backgroundColor: "var(--color-primary, #0f62fe)",
+                    color: p.color || "var(--color-primary-content, #fff)",
+                    ...freeFill,
+                    ...elBorderShadowStyle(p),
+                  }
             }
           >
             {p.label || "Button"}
           </span>
         </div>
       );
+    }
     case "spacer":
       return (
         <div style={{ height: lengthValue(p.height, SPACE, SPACE.md) }} className="rounded border border-dashed border-line/30" />
