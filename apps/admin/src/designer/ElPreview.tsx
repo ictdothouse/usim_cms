@@ -54,6 +54,14 @@ const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length
 // including recursively for nested slide elements.
 function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: number) => void) {
   ev.stopPropagation();
+  // The slider element's own outer wrapper (Designer.tsx's column-elements
+  // map) is `draggable` for block reordering — that's native HTML5 drag,
+  // a separate mechanism from these pointer events, and stopPropagation()
+  // alone can't stop it. preventDefault() here blocks the native drag from
+  // ever starting so it can't hijack this pointer-drag (the whole slide
+  // dragging as one ghost image instead of just this one free-positioned
+  // child moving).
+  ev.preventDefault();
   const container = (ev.currentTarget as HTMLElement).closest(".ds-slide-canvas") as HTMLElement | null;
   if (!container) return;
   const rect = container.getBoundingClientRect();
@@ -66,6 +74,36 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
     const xPct = Math.min(100, Math.max(0, ((startLeft + (e.clientX - startX)) / rect.width) * 100));
     const yPct = Math.min(100, Math.max(0, ((startTop + (e.clientY - startY)) / rect.height) * 100));
     apply(Math.round(xPct * 10) / 10, Math.round(yPct * 10) / 10);
+  }
+  function up() {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+// Bottom-right-corner drag-resize for a free-positioned slide child — only
+// one corner, not all 4 (unlike the old heading/subtitle/button system this
+// replaced): resizing from any other corner would also need to shift x/y to
+// keep the opposite corner anchored, real complexity this narrow need
+// doesn't warrant. Reads the wrapper's actual rendered size as the drag's
+// starting point (not the stored posWidth/posHeight, which are often ""/
+// "auto") so a never-resized element starts from where it visibly is.
+function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heightPx: number) => void) {
+  ev.stopPropagation();
+  ev.preventDefault();
+  const wrapper = (ev.currentTarget as HTMLElement).parentElement as HTMLElement | null;
+  if (!wrapper) return;
+  const rect = wrapper.getBoundingClientRect();
+  const startW = rect.width;
+  const startH = rect.height;
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  function move(e: PointerEvent) {
+    const w = Math.max(20, Math.round(startW + (e.clientX - startX)));
+    const h = Math.max(20, Math.round(startH + (e.clientY - startY)));
+    apply(w, h);
   }
   function up() {
     window.removeEventListener("pointermove", move);
@@ -487,10 +525,12 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             }`}
           >
             {slide.rows.length === 0 ? (
-              <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-black/20 bg-black/10 px-4 py-6 text-center text-black/50">
-                <ImageIcon className="h-6 w-6" />
-                <span className="text-xs">{t("designer-slide-empty")}</span>
-              </div>
+              slide.imageUrl ? null : (
+                <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-black/20 bg-black/10 px-4 py-6 text-center text-black/50">
+                  <ImageIcon className="h-6 w-6" />
+                  <span className="text-xs">{t("designer-slide-empty")}</span>
+                </div>
+              )
             ) : (
               slide.rows.map((row, r) =>
                 row.columns.map((col, c) => (
@@ -539,6 +579,33 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                           }
                         >
                           {ElPreview({ ctx, el: childEl })}
+                          {selected && childIsFree && path && (
+                            <div
+                              onPointerDown={(ev) => {
+                                startFreeElResize(ev, (widthPx, heightPx) => {
+                                  mutate((bs) => {
+                                    const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
+                                    const currentSlides = parseSlides(target.props.slides);
+                                    const s0 = currentSlides[slideIdx];
+                                    if (!s0) return;
+                                    const wv = `${widthPx}px`;
+                                    const hv = `${heightPx}px`;
+                                    currentSlides[slideIdx] =
+                                      bp === "desktop"
+                                        ? updateSlideElementProps(s0, r, c, e, { posWidth: wv, posHeight: hv })
+                                        : updateSlideElementBp(s0, r, c, e, {
+                                            ...(childEl.bp ?? {}),
+                                            [`${bp}:posWidth`]: wv,
+                                            [`${bp}:posHeight`]: hv,
+                                          });
+                                    target.props.slides = stringifySlides(currentSlides);
+                                  });
+                                });
+                              }}
+                              title={t("designer-f-width")}
+                              className="absolute -bottom-1 -right-1 h-3 w-3 cursor-nwse-resize rounded-sm border border-white bg-accent shadow-sm"
+                            />
+                          )}
                         </div>
                       );
                     })}
