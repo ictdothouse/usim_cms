@@ -34,7 +34,23 @@ test("buildCaddyConfig defaults to one dial target per service when no upstreams
   assert.deepEqual(apiRoute.handle[0].upstreams, [{ dial: "api:3000" }]);
   const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
   const frontendRoute = tenantRoutes.find((r: any) => !r.match[0].path);
-  assert.deepEqual(frontendRoute.handle[0].upstreams, [{ dial: "frontend:4321" }]);
+  const frontendProxy = frontendRoute.handle.find((h: any) => h.handler === "reverse_proxy");
+  assert.deepEqual(frontendProxy.upstreams, [{ dial: "frontend:4321" }]);
+});
+
+test("buildCaddyConfig enables response compression on tenant routes but not admin/api", () => {
+  // proxy-sync.ts's own /load push is the ONLY thing that stays live after
+  // this proxy container's first boot (see buildCaddyConfig's comment) — the
+  // Caddyfile's `encode zstd gzip` for the tenant block has to be mirrored
+  // here or it silently regresses on every subsequent deploy.
+  const config = buildCaddyConfig([{ host: "dept-a.usim.edu.my", active: true }]);
+  const servers = (config as any).apps.http.servers.srv0;
+  const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
+  for (const route of tenantRoutes) {
+    assert.equal(route.handle[0].handler, "encode");
+  }
+  const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
+  assert.equal(apiRoute.handle[0].handler, "reverse_proxy");
 });
 
 test("buildCaddyConfig proxies a tenant's own /uploads/* to the api upstream, not the frontend", () => {
@@ -45,7 +61,8 @@ test("buildCaddyConfig proxies a tenant's own /uploads/* to the api upstream, no
   const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
   const uploadsRoute = tenantRoutes.find((r: any) => r.match[0].path?.[0] === "/uploads/*");
   assert.ok(uploadsRoute, "expected a dedicated /uploads/* route for the tenant host");
-  assert.deepEqual(uploadsRoute.handle[0].upstreams, [{ dial: "api:3000" }]);
+  const uploadsProxy = uploadsRoute.handle.find((h: any) => h.handler === "reverse_proxy");
+  assert.deepEqual(uploadsProxy.upstreams, [{ dial: "api:3000" }]);
   // Order matters: Caddy evaluates routes in list order and reverse_proxy is
   // terminal, so the path-specific route must come before the catch-all one.
   const uploadsIdx = servers.routes.indexOf(uploadsRoute);
@@ -68,12 +85,14 @@ test("buildCaddyConfig fans out to every replica dial target for a blue-green/sc
   ]);
   const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
   const frontendRoute = tenantRoutes.find((r: any) => !r.match[0].path);
-  assert.deepEqual(frontendRoute.handle[0].upstreams, [
+  const frontendProxy = frontendRoute.handle.find((h: any) => h.handler === "reverse_proxy");
+  assert.deepEqual(frontendProxy.upstreams, [
     { dial: "ucms-green-frontend-1:4321" },
     { dial: "ucms-green-frontend-2:4321" },
   ]);
   const uploadsRoute = tenantRoutes.find((r: any) => r.match[0].path?.[0] === "/uploads/*");
-  assert.deepEqual(uploadsRoute.handle[0].upstreams, [
+  const uploadsProxy = uploadsRoute.handle.find((h: any) => h.handler === "reverse_proxy");
+  assert.deepEqual(uploadsProxy.upstreams, [
     { dial: "ucms-green-api-1:3000" },
     { dial: "ucms-green-api-2:3000" },
   ]);
