@@ -33,6 +33,7 @@ import type { Block, El, Sel, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
+import { bestTextColor } from "../lib/utils";
 import { parseCards, parsePairs, parseRepeaterItems, parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
 import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
@@ -517,11 +518,26 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
       const resolvedHeight = p.height ? (SLIDER_HEIGHT[p.height] ?? p.height) : "";
       const overlayOpacityFrac = Math.min(100, Math.max(0, Number(slide.overlayOpacity) || 0)) / 100;
       const bgSize = slide.bgSize || "cover";
+      // Default text color for nested content that hasn't set its own
+      // Typography color override — was hardcoded white (fine for the
+      // classic dark-photo-hero look), but that's invisible whenever the
+      // slide's real backdrop is light (a light bgColor, or a light-tinted
+      // overlay, or a plain light photo with no overlay at all). Picks the
+      // readable side of whatever we can actually see: the flat bgColor if
+      // set, else a strong-enough overlay tint; a bare light photo with no
+      // overlay/bgColor still defaults white since there's no color to
+      // check contrast against (unchanged from before for that case).
+      const slideTextColor = slide.bgColor
+        ? bestTextColor(slide.bgColor)
+        : overlayOpacityFrac > 0.3
+          ? bestTextColor(slide.overlayColor)
+          : "#ffffff";
       return (
         <div
-          className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg text-white`}
+          className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg`}
           style={{
             height: resolvedHeight || undefined,
+            color: slideTextColor,
             backgroundColor: slide.bgColor || undefined,
             backgroundImage: slide.imageUrl ? `url(${slide.imageUrl})` : undefined,
             backgroundSize: bgSize === "repeat" || bgSize === "no-repeat" ? "auto" : bgSize,
@@ -603,7 +619,22 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                                   width: bpGetValue(childEl.props.posWidth, childEl.bp, "posWidth") || undefined,
                                   height: bpGetValue(childEl.props.posHeight, childEl.bp, "posHeight") || undefined,
                                 }
-                              : { ...elMarginStyle(childEl.props ?? {}), ...elPaddingStyle(childEl.props ?? {}) }
+                              : {
+                                  ...elMarginStyle(childEl.props ?? {}),
+                                  ...elPaddingStyle(childEl.props ?? {}),
+                                  // A locked/flow button renders as a small
+                                  // inline-block pill, but this selection
+                                  // wrapper is a plain block div — full
+                                  // container width by default, so the
+                                  // selected/hover outline drew a box far
+                                  // wider than the visible pill. Shrinking
+                                  // just the button case to its own content
+                                  // width fixes that; text/heading stay
+                                  // full-width on purpose (their own
+                                  // left/center/right align needs the full
+                                  // row to align within).
+                                  ...(childEl.type === "button" ? { width: "fit-content" } : {}),
+                                }
                           }
                         >
                           {ElPreview({ ctx, el: childEl })}
