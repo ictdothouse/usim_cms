@@ -334,9 +334,12 @@ export async function getLanguages(
   return apiGet("/api/languages", tenantHost);
 }
 
-// src/middleware.ts's own maintenance-mode gate — see that file.
-export async function getTenantStatus(tenantHost: string): Promise<{ maintenanceMode: boolean }> {
-  return apiGet("/api/tenant-status", tenantHost);
+// src/middleware.ts's own maintenance-mode gate — see that file. token, when
+// given, is a maintenance-bypass credential (apps/admin's Manage Site "View"
+// link) forwarded as a Bearer header; apps/api only ever honors it for this
+// same tenantHost, never cross-tenant.
+export async function getTenantStatus(tenantHost: string, token?: string): Promise<{ maintenanceMode: boolean; bypass?: boolean }> {
+  return apiGet("/api/tenant-status", tenantHost, token);
 }
 
 // token here is a theme-preview token (see apps/admin's getThemePreviewToken)

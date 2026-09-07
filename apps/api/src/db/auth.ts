@@ -105,6 +105,14 @@ export interface SessionPayload {
   // them for this request only, without writing to site_theme. Same
   // previewOnly/exp gating as a page-preview token.
   themePreview?: Record<string, string>;
+  // Set only on a maintenance-bypass token (see POST
+  // /api/portal/tenants/:host/maintenance-bypass-token) — lets Manage Site's
+  // "View" link keep browsing a tenant's real site while maintenanceMode is
+  // on; apps/frontend's middleware.ts checks this alongside tenantHost
+  // (below) matching the requested host, so a token minted for one tenant
+  // can't bypass another's gate. Same previewOnly/exp shape as every other
+  // short-lived credential here.
+  maintenanceBypass?: true;
   // Set only on the short-lived token POST /api/auth/login returns when the
   // user has TOTP enabled — proves the password check passed, but is
   // rejected everywhere else (verifySuperadmin/verifyAnyUser/

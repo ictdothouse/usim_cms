@@ -35,12 +35,18 @@ const FRONTEND_DEV_URL = import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:
 // previewToken (page-draft visibility vs not-yet-saved theme settings —
 // see getThemePreviewToken) — both can be present at once, each forwarded
 // by apps/frontend to the api route it actually applies to.
-export const previewUrl = (tenantHost: string, slug: string, previewToken?: string, themeToken?: string) => {
+// maintenanceBypassToken is a third, independent preview credential (see
+// getMaintenanceBypassToken below) — lets Manage Site's "View" link open a
+// tenant that's currently in maintenanceMode as the real site (plus a
+// banner), instead of the public maintenance notice every other visitor
+// gets. apps/frontend's middleware.ts is what actually checks it.
+export const previewUrl = (tenantHost: string, slug: string, previewToken?: string, themeToken?: string, maintenanceBypassToken?: string) => {
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
   const query = new URLSearchParams({
     ...(isLocal ? { __tenant: tenantHost } : {}),
     ...(previewToken ? { token: previewToken } : {}),
     ...(themeToken ? { themeToken } : {}),
+    ...(maintenanceBypassToken ? { _mbypass: maintenanceBypassToken } : {}),
   }).toString();
   // Scheme follows the admin panel's own protocol rather than a hardcoded
   // https — a tenant domain shares this instance's single proxy/TLS setup
@@ -858,6 +864,10 @@ export const setTenantMaintenanceMode = (token: string, host: string, maintenanc
     method: "PATCH",
     body: JSON.stringify({ maintenanceMode }),
   }) as Promise<{ host: string; maintenanceMode: boolean }>;
+
+// Mints previewUrl()'s maintenanceBypassToken — see that function's comment.
+export const getMaintenanceBypassToken = (token: string, host: string) =>
+  request(`/api/portal/tenants/${host}/maintenance-bypass-token`, null, token, { method: "POST" }).then((b) => b.token as string);
 
 export const listPortalRoles = (token: string) =>
   request("/api/portal/roles", null, token).then((b) => b.roles as Array<Record<string, unknown>>);

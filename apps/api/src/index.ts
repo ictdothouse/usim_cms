@@ -670,6 +670,27 @@ app.patch("/api/portal/tenants/:host/maintenance", async (req, reply) => {
   return { host, maintenanceMode };
 });
 
+// Mints a short-lived credential for Manage Site's "View" link so an admin
+// can keep browsing a tenant's real site while maintenanceMode is on —
+// apps/frontend's middleware.ts still shows every other visitor the
+// maintenance page. Any logged-in user may mint one for a host they're
+// actually scoped to (superadmin: any host; webmaster: their own
+// tenantHosts) — same authorization shape as the maintenance PATCH above,
+// just not superadmin-only, since a webmaster is exactly who'd want to keep
+// working on their own site during its maintenance window.
+app.post("/api/portal/tenants/:host/maintenance-bypass-token", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  const { host } = req.params as { host: string };
+  const allowedHosts = session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []);
+  if (session.role !== "superadmin" && !allowedHosts.includes(host)) {
+    reply.code(403);
+    return { error: "forbidden" };
+  }
+  const token = signSession({ ...session, tenantHost: host, previewOnly: true, maintenanceBypass: true, exp: Date.now() + 30 * 60 * 1000 });
+  return { token };
+});
+
 // Personal "my collection" of saved theme presets (admin's Theme panel) —
 // any logged-in user (superadmin or webmaster), scoped to their own userId,
 // not tenant-gated at all (see verifyAnyUser's comment).
@@ -2119,7 +2140,15 @@ await app.register(async (publicScope) => {
   // into /api/languages or /api/theme, so a maintenance check never depends
   // on either of those growing/changing shape.
   publicScope.get("/api/tenant-status", async (req) => {
-    return { maintenanceMode: await getTenantMaintenanceMode(req.tenantHost) };
+    const maintenanceMode = await getTenantMaintenanceMode(req.tenantHost);
+    // A valid maintenance-bypass token (see the mint route above) forwarded
+    // as a Bearer header, bound to THIS tenant — never accepted for a
+    // different host, so a token minted for one tenant can't bypass another.
+    const auth = req.headers.authorization;
+    const token = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
+    const payload = token ? verifySession(token) : null;
+    const bypass = Boolean(payload?.maintenanceBypass && payload.tenantHost === req.tenantHost);
+    return { maintenanceMode, bypass };
   });
 
   // Backs apps/frontend's blueprint-preview.astro (Designer's blueprint

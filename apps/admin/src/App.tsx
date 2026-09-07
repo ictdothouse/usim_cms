@@ -2457,14 +2457,40 @@ function TenantsPanel({ token, setSiteHost }: { token: string; setSiteHost: (hos
             )}
           </p>
           <div className="flex flex-wrap gap-2">
-            <a
-              href={api.previewUrl(managed.host as string, "home")}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${btnGhost} inline-flex items-center gap-1.5`}
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
-            </a>
+            {managed.maintenanceMode ? (
+              // Same "window.open then async-mint then redirect" shape as
+              // Designer's own draft preview (see preview() above) — the
+              // bypass token has to come back from apps/api before the real
+              // URL is known, so a plain <a href> can't be used here.
+              <button
+                onClick={async () => {
+                  const win = window.open("", "_blank", "noreferrer");
+                  if (!win) {
+                    setError(t("designer-preview-blocked"));
+                    return;
+                  }
+                  try {
+                    const bypassToken = await api.getMaintenanceBypassToken(token, managed.host as string);
+                    win.location.href = api.previewUrl(managed.host as string, "home", undefined, undefined, bypassToken);
+                  } catch (err) {
+                    win.close();
+                    setError((err as Error).message);
+                  }
+                }}
+                className={`${btnGhost} inline-flex items-center gap-1.5`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
+              </button>
+            ) : (
+              <a
+                href={api.previewUrl(managed.host as string, "home")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${btnGhost} inline-flex items-center gap-1.5`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> {t("tenants-view")}
+              </a>
+            )}
             <button
               onClick={() => {
                 setSiteHost(managed.host as string);
