@@ -91,16 +91,23 @@ export function buildCaddyConfig(
   // hostname a visitor actually sees. apps/admin's own write paths
   // (publicMediaBase in lib/api.ts) bake this same tenant hostname into a
   // saved image/logo/favicon URL instead of API_URL, so the two halves match.
+  // Caddy has no response-compression on by default — mirrors the Caddyfile's
+  // own `encode zstd gzip` for the tenant block, which only ever applies on
+  // this proxy container's first-ever boot (see the giant comment below);
+  // every subsequent /load push replaces the whole config with buildCaddyConfig's
+  // output, so this is the only copy of that setting that actually stays live.
+  const encodeHandler = { handler: "encode", encodings: { zstd: {}, gzip: {} }, prefer: ["zstd", "gzip"] };
+
   const tenantRoutes = tenants
     .filter((t) => t.active)
     .flatMap((t) => [
       {
         match: [{ host: [t.host], path: ["/uploads/*"] }],
-        handle: [{ handler: "reverse_proxy", upstreams: apiUpstreams }],
+        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: apiUpstreams }],
       },
       {
         match: [{ host: [t.host] }],
-        handle: [{ handler: "reverse_proxy", upstreams: frontendUpstreams }],
+        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: frontendUpstreams }],
       },
     ]);
 
