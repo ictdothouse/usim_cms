@@ -1,4 +1,4 @@
-import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import {
   CalendarDays,
@@ -50,10 +50,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Designer from "@/Designer";
-import { BlueprintGallery } from "./BlueprintGallery";
+// Designer (page-builder canvas), PostEditorPage (BlockNote rich-text editor)
+// and BlueprintGallery are the heaviest routed views — code-split so a
+// session that only ever opens Media/Menus/etc never downloads them.
+const Designer = lazy(() => import("@/Designer"));
+const BlueprintGallery = lazy(() => import("./BlueprintGallery").then((m) => ({ default: m.BlueprintGallery })));
 import CategoriesPanel from "./CategoriesPanel";
-import PostEditorPage from "./PostEditorPage";
+const PostEditorPage = lazy(() => import("./PostEditorPage"));
 import MenusPanel from "./MenusPanel";
 import HeaderFooterPanel from "./HeaderFooterPanel";
 import EventsPanel from "./EventsPanel";
@@ -3989,6 +3992,7 @@ function ContentManager({
             })}
           </nav>
           <div className="min-w-0 flex-1">
+          <Suspense fallback={<ListLoading />}>
           <Routes>
             <Route index element={<Navigate to="pages" replace />} />
             <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
@@ -4019,6 +4023,7 @@ function ContentManager({
               <Route path="events" element={<EventsPanel key={`events-${siteHost}`} tenantHost={siteHost} token={token} />} />
             )}
           </Routes>
+          </Suspense>
           </div>
         </div>
       )}
@@ -5184,6 +5189,7 @@ function Shell({
 
           <main className="flex-1 overflow-y-auto bg-white p-4 sm:p-8">
             <div className="mx-auto max-w-7xl space-y-6 pb-10">
+              <Suspense fallback={<ListLoading />}>
               <Routes>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<Dashboard session={session} />} />
@@ -5210,6 +5216,7 @@ function Shell({
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="security" element={<SecurityPanel token={session.token} />} />
               </Routes>
+              </Suspense>
             </div>
           </main>
         </div>

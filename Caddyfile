@@ -25,10 +25,15 @@
 }
 
 {$ADMIN_DOMAIN:admin.localhost} {
+	# Same reasoning as the tenant block's own encode below — without it the
+	# admin SPA bundle (React/Radix/Mantine/BlockNote) ships uncompressed.
+	encode zstd gzip
 	reverse_proxy ucms-blue-admin-1:80
 }
 
 {$API_DOMAIN:api.localhost} {
+	# JSON responses otherwise go over the wire uncompressed too.
+	encode zstd gzip
 	reverse_proxy ucms-blue-api-1:3000
 }
 
