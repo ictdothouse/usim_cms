@@ -565,6 +565,33 @@ ensure_reachable_or_selfheal() {
   return 1
 }
 
+# Keeps containers running (still serving traffic) across a dockerd
+# restart/crash/package-upgrade instead of them being killed and waiting for
+# dockerd to come back and re-start them — same self-heal spirit as compose's
+# own restart:unless-stopped, one layer down. Off by default in upstream
+# Docker; idempotent (no-ops if already set) and safe to call on every
+# install.sh run, including against an already-installed box. Only writes a
+# fresh file — a pre-existing /etc/docker/daemon.json (e.g. one already
+# carrying a registry mirror) is left alone rather than risk clobbering it
+# with a hand-rolled JSON merge; the operator is told to add the key by hand
+# in that case.
+ensure_docker_live_restore() {
+  local daemon_json="/etc/docker/daemon.json"
+  if [ -f "$daemon_json" ]; then
+    if grep -q '"live-restore"[[:space:]]*:[[:space:]]*true' "$daemon_json" 2>/dev/null; then
+      return 0
+    fi
+    if [ -s "$daemon_json" ]; then
+      echo "NOTE: $daemon_json already exists and doesn't set live-restore — leaving it alone." >&2
+      echo "      Add \"live-restore\": true to it by hand, then 'systemctl restart docker', to get this hardening." >&2
+      return 0
+    fi
+  fi
+  echo "Enabling Docker's live-restore (containers survive a dockerd restart)..."
+  printf '{\n  "live-restore": true\n}\n' > "$daemon_json"
+  systemctl restart docker
+}
+
 # ---------------------------------------------------------------------------
 # Docker mode
 # ---------------------------------------------------------------------------
@@ -576,6 +603,7 @@ install_docker_mode() {
   else
     echo "Docker already installed: $(docker --version)"
   fi
+  ensure_docker_live_restore
   if ! docker compose version >/dev/null 2>&1; then
     echo "Docker is installed but the 'compose' plugin is missing." >&2
     echo "Install it: https://docs.docker.com/compose/install/" >&2
@@ -841,6 +869,7 @@ install_production_mode() {
   else
     echo "Docker already installed: $(docker --version)"
   fi
+  ensure_docker_live_restore
   if ! docker compose version >/dev/null 2>&1; then
     echo "Docker is installed but the 'compose' plugin is missing." >&2
     echo "Install it: https://docs.docker.com/compose/install/" >&2

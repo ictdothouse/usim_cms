@@ -138,6 +138,20 @@ services:
       - caddy-data:/data
       - caddy-config:/config
       # - ./certs:/etc/caddy/certs:ro
+    # Without this, `docker compose ps`/monitor/server.js's getStatus() only
+    # ever see "running" — a wedged-but-not-exited Caddy (main goroutine
+    # deadlocked, config gone stale) would never trip `restart:
+    # unless-stopped` (that only fires on the process actually exiting) and
+    # would sit reported as "up" forever. The admin API (:2019) is served by
+    # the same process as the public listeners, so it not answering is a
+    # reasonable proxy for "Caddy itself isn't functioning" — see
+    # monitor/server.js's pollForAlerts for the self-heal restart this
+    # unhealthy status now feeds.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 # Named (not project-scoped) so docker-compose.release.yml's api/frontend/
 # admin — started under a DIFFERENT compose project name for blue-green —

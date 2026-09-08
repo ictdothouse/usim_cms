@@ -106,6 +106,39 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   switch off. This automation only ever applies to the docker-mode Caddy setup — bare-
   metal install mode has no reverse-proxy/TLS layer at all, and local dev has no proxy
   either; both are untouched by this switch.
+- **Single-VPS proxy resilience** (no second node/floating IP — that's the next tier up,
+  deliberately out of scope until a real multi-VPS/HA rollout is decided): three gaps
+  closed together, since `restart: unless-stopped` alone only fires when a container
+  actually **exits** — a Caddy process that's still running but wedged (deadlocked, config
+  gone stale) never trips it and would sit reported "up" forever. (1) `proxy` now has a
+  real healthcheck (`wget --spider` against Caddy's own admin API, `:2019/config/`) —
+  `docker-compose.yml`. (2) `monitor/server.js`'s `pollForAlerts` (already polling every
+  `ALERT_POLL_INTERVAL_MS`) now attempts one automatic `docker compose restart <service>`
+  the moment any docker-mode service (not just `proxy`) is seen down/unhealthy, cleared the
+  instant it's next seen up — one attempt per outage, not a retry loop, so a genuinely
+  broken config (bad Caddyfile edit) doesn't get restarted forever; same one-shot
+  philosophy as `install.sh`'s own `ensure_reachable_or_selfheal`. Fixed a real blind spot
+  in the same pass: `docker compose ps` reports an unhealthy container's state as "running
+  (**un**healthy)", which the old `/healthy/i` regex also matched as a substring — silently
+  treating a failing healthcheck as "up". (3) `install.sh`'s `ensure_docker_live_restore`
+  writes `/etc/docker/daemon.json` (`{"live-restore": true}`) so containers keep serving
+  traffic across a dockerd restart/crash/package-upgrade instead of being killed and
+  waiting for dockerd to come back — called from both docker-mode and production-mode
+  install, idempotent, and leaves an existing non-empty `daemon.json` alone rather than
+  risk clobbering an unrelated setting (e.g. a registry mirror) with a hand-rolled JSON
+  merge. **Caveat for an already-deployed instance**: (1) and (2) ship as ordinary app code
+  and reach a live box through "Pull latest & deploy" like anything else in `apps/api`/
+  `monitor` — but (3) is host-level provisioning, and `scripts/deploy.sh`'s blue-green flow
+  only ever touches the app tier (`api`/`frontend`/`admin`), never the base tier
+  (`db`/`pgbouncer`/`redis`/`proxy`) or the Docker daemon itself — so an already-live VPS
+  needs `docker compose up -d proxy` once (to pick up the new healthcheck) and either a
+  re-run of `install.sh` (safe, idempotent) or the `daemon.json` + `systemctl restart
+  docker` above done by hand, to actually get the live-restore hardening. None of this
+  protects against the VPS itself (or its host/network) going down — that's the real
+  single point of failure still open; closing it needs a second node (floating IP/
+  keepalived, DNS multi-A-record failover, or a dedicated load balancer in front — see the
+  paused multi-VPS/HA rollout brainstorm) and is a deliberate cost/complexity tradeoff, not
+  an oversight.
 - Tenant backup/restore/migration is `apps/api/src/backup.ts`, not `pg_dump`: JSON dump
   of a tenant's rows + its local uploads, zipped — restores across Postgres versions and
   onto a different server/host (rewrites `/uploads/<host>/` references on cross-host
