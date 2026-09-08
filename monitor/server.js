@@ -342,6 +342,40 @@ function sendAlert(text) {
 let lastKnownUp = {};
 let lastDiskOver = false;
 let lastAlertedRemoteSha = null;
+// Tracks whether a self-heal restart has already been fired for the current
+// outage of each service — cleared the moment it's next seen up. One
+// attempt per outage, not a retry loop, so a genuinely broken config (bad
+// Caddyfile edit, crashed migration) doesn't get restarted forever; same
+// one-shot philosophy as install.sh's own ensure_reachable_or_selfheal.
+let selfHealAttempted = {};
+
+// docker compose ps reports an unhealthy container's State as "running
+// (unhealthy)" — which the naive /healthy/i regex below would also match,
+// since "unhealthy" contains "healthy" as a substring. Checked first so a
+// container that's alive-but-failing its healthcheck (e.g. proxy's Caddy
+// admin-API probe, see docker-compose.yml) is correctly reported down
+// instead of silently passing as up.
+function isServiceUp(state) {
+  return !/unhealthy/i.test(state || "") && /running|healthy|active/i.test(state || "");
+}
+
+// docker-mode only: composeArgsFor already resolves the right compose
+// file/project per service (base docker-compose.yml vs the currently
+// promoted blue/green color) — restart:unless-stopped can't help here
+// because it only fires once a container actually exits, never for one
+// that's still running but wedged (see docker-compose.yml's proxy
+// healthcheck comment for why that gap mattered specifically for Caddy).
+function selfHealRestart(name) {
+  composeArgsFor(name, (args) => {
+    runCompose([...args, "restart", name], (err, stdout, stderr) => {
+      sendAlert(
+        err
+          ? `[usim_cms/${PUBLIC_HOST}] self-heal restart of ${name} FAILED: ${String(err.message || err)}`
+          : `[usim_cms/${PUBLIC_HOST}] self-healed ${name} (was down/unhealthy) via automatic restart`,
+      );
+    });
+  });
+}
 
 // Fetches origin/main and reports how far HEAD is behind it — the only signal needed to answer
 // "is there something to update": anything merged to main (a green-CI'd Dependabot bump included,
@@ -393,12 +427,21 @@ function pollForAlerts() {
     if (err) return; // transient poll failure — not itself alert-worthy
     for (const name of SERVICES) {
       const s = (services || []).find((x) => (x.Service || x.Name) === name);
-      const up = !!s && /running|healthy|active/i.test(s.State || s.Health || "");
+      const up = !!s && isServiceUp(s.State || s.Health || "");
       const prev = lastKnownUp[name];
       if (prev !== undefined && prev !== up) {
         sendAlert(`[usim_cms/${PUBLIC_HOST}] ${name} is ${up ? "back UP" : "DOWN"}`);
       }
       lastKnownUp[name] = up;
+
+      if (DEPLOY_MODE === "docker") {
+        if (!up && !selfHealAttempted[name]) {
+          selfHealAttempted[name] = true;
+          selfHealRestart(name);
+        } else if (up) {
+          selfHealAttempted[name] = false;
+        }
+      }
     }
   });
   // Edge-triggered the same way as the service up/down checks above — fires once on
