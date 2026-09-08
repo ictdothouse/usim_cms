@@ -29,6 +29,17 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # Postgres major-version bumps change the on-disk data format — a PR
+      # here looks exactly as routine as any other image bump, but merging
+      # and redeploying it blind crash-loops `db` ("database files are
+      # incompatible with server") since swapping docker-compose.yml's image
+      # tag doesn't migrate the volume; needs a deliberate backup (apps/api/
+      # scripts/backup.sh) + pg_upgrade/dump-restore pass instead. Minor/
+      # patch bumps (same data format, safe to just redeploy) still flow
+      # through normally — only major is excluded.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions versions in ci.yml
   - package-ecosystem: "github-actions"

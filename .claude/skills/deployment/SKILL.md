@@ -258,6 +258,15 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   file documents above, which already aborts before touching the live color on a failed build/test/
   health-check, and "Rollback" already flips back to the previously-live color with no rebuild — this
   feature only adds the "something changed, go look" signal, it doesn't change what clicking Update does.
+  **Postgres is the one exception**: `.github/dependabot.yml`'s `docker-compose` ecosystem entry
+  `ignore`s major-version bumps for the `postgres` image specifically — a major bump PR would look
+  exactly as routine as any other image-tag bump here, but merging + redeploying it blind crash-loops
+  `db` (the image refuses to start against an old-format data directory) since neither this update-
+  check flow nor `scripts/deploy.sh` migrates the volume; a real major upgrade needs a deliberate
+  backup (`apps/api/scripts/backup.sh`) + `pg_upgrade`/dump-restore pass first. Minor/patch Postgres
+  bumps (same on-disk format) still show up and flow through normally — same base-tier caveat as
+  below (needs `docker compose pull db && docker compose up -d db` by hand, "Pull latest & deploy"
+  doesn't touch base tier).
 - **`GET /api/sites`** (dashboard's "Sites" section) — per-tenant uploads folder size, one `du -sb` per
   top-level folder under the uploads dir (docker mode auto-resolves the named `ucms-uploads` volume's
   real host path via `docker volume inspect`; bare-metal defaults to `apps/api/uploads`; `UPLOADS_DIR`
