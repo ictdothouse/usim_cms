@@ -982,7 +982,10 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                     <div className="grid grid-cols-2 gap-1.5">
                       {(["x", "y", "posWidth", "posHeight"] as const).map((key) => (
                         <label key={key} className="space-y-0.5 text-[10px] text-sub">
-                          {key === "x" ? "X %" : key === "y" ? "Y %" : t(key === "posWidth" ? "designer-f-width" : "designer-f-height")}
+                          <span className="inline-flex items-center gap-1">
+                            {key === "x" ? "X %" : key === "y" ? "Y %" : t(key === "posWidth" ? "designer-f-width" : "designer-f-height")}
+                            <BpToggle active={bpKeysOverridden(childEl.bp, [key])} onToggle={() => childToggleOverride([key])} bp={bp} t={t} />
+                          </span>
                           <BufferedInput
                             className="w-full rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
                             value={bpGetValue(childEl.props[key], childEl.bp, key)}

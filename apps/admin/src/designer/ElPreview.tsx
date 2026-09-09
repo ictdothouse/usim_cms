@@ -54,6 +54,7 @@ const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length
 // hooks of its own (see file header) since it's called as a plain function,
 // including recursively for nested slide elements.
 function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: number) => void) {
+  if ((ev.currentTarget as HTMLElement).dataset.editing === "true") return;
   ev.stopPropagation();
   // The slider element's own outer wrapper (Designer.tsx's column-elements
   // map) is `draggable` for block reordering — that's native HTML5 drag,
@@ -71,9 +72,15 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
   const startTop = target.offsetTop;
   const startX = ev.clientX;
   const startY = ev.clientY;
+  // No 0-100 clamp: an author may deliberately want a component to bleed
+  // past the slide's own edge (e.g. a badge half-hanging off a photo) —
+  // the Inspector's own X/Y inputs already allowed typing an out-of-range
+  // number, this just gives drag the same freedom. The "safe area" overlay
+  // (this file's slider case, near `.ds-slide-canvas`) is the actual
+  // guardrail: a visual warning, not a hard limit.
   function move(e: PointerEvent) {
-    const xPct = Math.min(100, Math.max(0, ((startLeft + (e.clientX - startX)) / rect.width) * 100));
-    const yPct = Math.min(100, Math.max(0, ((startTop + (e.clientY - startY)) / rect.height) * 100));
+    const xPct = ((startLeft + (e.clientX - startX)) / rect.width) * 100;
+    const yPct = ((startTop + (e.clientY - startY)) / rect.height) * 100;
     apply(Math.round(xPct * 10) / 10, Math.round(yPct * 10) / 10);
   }
   function up() {
@@ -91,7 +98,12 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
 // doesn't warrant. Reads the wrapper's actual rendered size as the drag's
 // starting point (not the stored posWidth/posHeight, which are often ""/
 // "auto") so a never-resized element starts from where it visibly is.
-function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heightPx: number) => void) {
+// `widthRatio` (new width / width at drag start) lets a caller scale a
+// proportional value (a text child's font size, see the "slider" case's
+// call site) alongside the box itself — Canva-style "drag the corner,
+// the text grows with it" instead of the box just enclosing more
+// whitespace around a fixed-size font.
+function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heightPx: number, widthRatio: number) => void) {
   ev.stopPropagation();
   ev.preventDefault();
   const wrapper = (ev.currentTarget as HTMLElement).parentElement as HTMLElement | null;
@@ -104,7 +116,7 @@ function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heig
   function move(e: PointerEvent) {
     const w = Math.max(20, Math.round(startW + (e.clientX - startX)));
     const h = Math.max(20, Math.round(startH + (e.clientY - startY)));
-    apply(w, h);
+    apply(w, h, startW > 0 ? w / startW : 1);
   }
   function up() {
     window.removeEventListener("pointermove", move);
@@ -112,6 +124,21 @@ function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heig
   }
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
+}
+
+// Scales a free-form "length" field's numeric part by `ratio`, keeping
+// whatever unit (or lack of one) it already had — used by the slider
+// case's free-position resize handle to grow a text child's font size
+// proportionally with its box. Anything that doesn't parse as a plain
+// number+unit (e.g. a "%"-relative value, where "bigger" is meaningless)
+// is left untouched rather than guessed at.
+function scaleLength(value: string, ratio: number): string | null {
+  const m = /^(\d+(?:\.\d+)?)(px|rem|em)?$/.exec(value.trim());
+  if (!m) return null;
+  const num = Number(m[1]) * ratio;
+  const unit = m[2] ?? "px";
+  const rounded = unit === "px" ? Math.max(8, Math.round(num)) : Math.max(0.5, Math.round(num * 100) / 100);
+  return `${rounded}${unit}`;
 }
 
 function mergeElBp(
@@ -140,6 +167,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
   const {
     mode, kind, t, mutate, bp, availableMenus, availableCategories,
     sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
+    sliderInnerEditing, setSliderInnerEditing,
     editingText, bpGetValue, sel,
   } = ctx;
   // Merge el.bp's active tier onto the base props so a per-breakpoint
@@ -597,23 +625,50 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
               the author adds Text/Button/Image/Row (FieldInput.tsx's slides
               editor) — each nested element renders through ElPreview's own
               per-type switch above (real typography/colors/sizing, no
-              slide-specific duplicate rendering code), just without a
-              `path` (no canvas-direct inline-text-edit for nested content —
-              an accepted scope reduction). An element with props.position
-              === "custom" opts out of the row/column flow and into drag-to-
-              move (startFreeElDrag, below) — position is computed against
-              THIS div (`.ds-slide-canvas`), which must stay the nearest
+              slide-specific duplicate rendering code). A selected heading/
+              text child swaps to a contentEditable branch instead (below,
+              mirrors the top-level `editable` block earlier in this file)
+              once double-clicked into edit mode (`sliderInnerEditing`) — a
+              separate step from selection because a free-positioned child
+              also drags on plain pointerdown; only one of drag/type can
+              own a given click. An element with props.position === "custom"
+              opts out of the row/column flow and into drag-to-move
+              (startFreeElDrag, below) — position is computed against THIS
+              div (`.ds-slide-canvas`), which must stay the nearest
               `position:relative` ancestor so the on-canvas math matches the
               site's own `.ds-slide-content` containing block (see
               SectionBlock.astro's mirrored CSS). Clicking a nested element
               sets this slider's own `sliderInnerSel` so the Inspector shows
               that element's Content/Style fields instead of the slider's own. */}
-          <div
-            className={`ds-slide-canvas relative z-[1] w-full max-w-[36rem] space-y-2 p-6 ${
-              slide.textPosition === "left" ? "self-start" : slide.textPosition === "right" ? "self-end" : ""
-            }`}
-          >
-            {slide.rows.length === 0 ? (
+          {(() => {
+            const selectedChild = innerSel ? slide.rows[innerSel.r]?.columns[innerSel.c]?.elements[innerSel.e] : undefined;
+            const selectedChildFree = !!selectedChild && bpGetValue(selectedChild.props.position, selectedChild.bp, "position") === "custom";
+            const selX = selectedChild ? Number(bpGetValue(selectedChild.props.x, selectedChild.bp, "x") || "10") : 0;
+            const selY = selectedChild ? Number(bpGetValue(selectedChild.props.y, selectedChild.bp, "y") || "10") : 0;
+            // Origin-corner check only (not the far edge too, which would need
+            // converting posWidth/posHeight from px to a % of this box) — cheap
+            // and already catches the common "dragged mostly off the slide"
+            // case; a partial overflow on the far edge alone won't flag.
+            const selOutOfBounds = selectedChildFree && (selX < 0 || selX > 100 || selY < 0 || selY > 100);
+            return (
+              <div
+                className={`ds-slide-canvas relative z-[1] w-full max-w-[36rem] space-y-2 p-6 ${
+                  slide.textPosition === "left" ? "self-start" : slide.textPosition === "right" ? "self-end" : ""
+                }`}
+              >
+                {selectedChildFree && (
+                  <div
+                    className={`pointer-events-none absolute inset-0 rounded border-2 border-dashed ${
+                      selOutOfBounds ? "border-red-500" : "border-white/30"
+                    }`}
+                  />
+                )}
+                {selOutOfBounds && (
+                  <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-red-500 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                    {t("designer-slide-out-of-bounds")}
+                  </span>
+                )}
+                {slide.rows.length === 0 ? (
               slide.imageUrl ? null : (
                 <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-black/20 bg-black/10 px-4 py-6 text-center text-black/50">
                   <ImageIcon className="h-6 w-6" />
@@ -627,12 +682,34 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                     {col.elements.map((childEl, e) => {
                       const selected = innerSel?.r === r && innerSel?.c === c && innerSel?.e === e;
                       const childIsFree = bpGetValue(childEl.props.position, childEl.bp, "position") === "custom";
+                      const childTextType = childEl.type === "heading" || childEl.type === "text";
+                      const childEditing = selected && childTextType && !!sliderInnerEditing[childEl.id];
+                      if (childEditing && editingText.current[childEl.id] === undefined) {
+                        editingText.current[childEl.id] = childEl.props.text ?? "";
+                      }
+                      const commitChildText = (v: string) => {
+                        if (!path) return;
+                        mutate((bs) => {
+                          const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
+                          const currentSlides = parseSlides(target.props.slides);
+                          const s0 = currentSlides[slideIdx];
+                          if (!s0) return;
+                          currentSlides[slideIdx] = updateSlideElementProps(s0, r, c, e, { text: v });
+                          target.props.slides = stringifySlides(currentSlides);
+                        });
+                      };
                       return (
                         <div
                           key={childEl.id}
+                          data-editing={childEditing ? "true" : undefined}
                           onClick={() => setSliderInnerSel((m) => ({ ...m, [el.id]: { r, c, e } }))}
+                          onDoubleClick={
+                            childTextType
+                              ? () => setSliderInnerEditing((m) => ({ ...m, [childEl.id]: true }))
+                              : undefined
+                          }
                           onPointerDown={
-                            childIsFree && path
+                            childIsFree && path && !childEditing
                               ? (ev) => {
                                   startFreeElDrag(ev, (xPct, yPct) => {
                                     mutate((bs) => {
@@ -682,11 +759,38 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                                 }
                           }
                         >
-                          {ElPreview({ ctx, el: childEl })}
+                          {childEditing ? (
+                            <div
+                              contentEditable
+                              suppressContentEditableWarning
+                              ref={(node) => {
+                                if (node && document.activeElement !== node) node.focus();
+                              }}
+                              style={
+                                childEl.type === "heading"
+                                  ? { fontSize: H_SIZE[childEl.props.level ?? "2"], fontWeight: 700, lineHeight: 1.2 }
+                                  : { fontSize: lengthValue(childEl.props.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap", lineHeight: 1.65 }
+                              }
+                              className="outline-none"
+                              onInput={(ev) => commitChildText(ev.currentTarget.textContent ?? "")}
+                              onBlur={() => {
+                                delete editingText.current[childEl.id];
+                                setSliderInnerEditing((m) => {
+                                  const next = { ...m };
+                                  delete next[childEl.id];
+                                  return next;
+                                });
+                              }}
+                            >
+                              {editingText.current[childEl.id]}
+                            </div>
+                          ) : (
+                            ElPreview({ ctx, el: childEl })
+                          )}
                           {selected && childIsFree && path && (
                             <div
                               onPointerDown={(ev) => {
-                                startFreeElResize(ev, (widthPx, heightPx) => {
+                                startFreeElResize(ev, (widthPx, heightPx, widthRatio) => {
                                   mutate((bs) => {
                                     const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
                                     const currentSlides = parseSlides(target.props.slides);
@@ -694,13 +798,21 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                                     if (!s0) return;
                                     const wv = `${widthPx}px`;
                                     const hv = `${heightPx}px`;
+                                    // Canva-style: a text child's font size grows/
+                                    // shrinks with the box instead of just wrapping
+                                    // inside a bigger, still-small-looking box.
+                                    const scaledSize =
+                                      childEl.type === "text"
+                                        ? scaleLength(bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md, widthRatio)
+                                        : null;
+                                    const patch: Record<string, string> = { posWidth: wv, posHeight: hv };
+                                    if (scaledSize) patch.size = scaledSize;
                                     currentSlides[slideIdx] =
                                       bp === "desktop"
-                                        ? updateSlideElementProps(s0, r, c, e, { posWidth: wv, posHeight: hv })
+                                        ? updateSlideElementProps(s0, r, c, e, patch)
                                         : updateSlideElementBp(s0, r, c, e, {
                                             ...(childEl.bp ?? {}),
-                                            [`${bp}:posWidth`]: wv,
-                                            [`${bp}:posHeight`]: hv,
+                                            ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [`${bp}:${k}`, v])),
                                           });
                                     target.props.slides = stringifySlides(currentSlides);
                                   });
@@ -717,7 +829,9 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                 )),
               )
             )}
-          </div>
+              </div>
+            );
+          })()}
           {/* Real controls, not decoration — see sliderSlideIdx. The counter
               next to them exists because dots alone never made it obvious
               that the canvas shows ONE slide out of several. pointerDown is

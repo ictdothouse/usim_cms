@@ -86,6 +86,17 @@ export interface DesignerCtx {
       | Record<string, { r: number; c: number; e: number } | null>
       | ((prev: Record<string, { r: number; c: number; e: number } | null>) => Record<string, { r: number; c: number; e: number } | null>),
   ) => void;
+  // Whether a nested slide heading/text child is currently in canvas-direct
+  // contentEditable mode, keyed by that child element's own id (globally
+  // unique, unlike sliderInnerSel above which is keyed by the parent
+  // slider's id since it also needs to address which slide/row/col it's
+  // in). Entered via double-click, exited on blur — a separate step from
+  // selection (unlike the top-level editingText, which is editable the
+  // instant it's selected) because a free-positioned child also drags on
+  // plain pointerdown; gating drag-start on this flag lets the same click
+  // target either move the box or place a caret depending on mode.
+  sliderInnerEditing: Record<string, boolean>;
+  setSliderInnerEditing: (v: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
   availableMenus: api.Menu[];
   availableCategories: api.Category[];
