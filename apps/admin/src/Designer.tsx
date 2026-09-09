@@ -1252,6 +1252,10 @@ export default function Designer({
   // read by Inspector to show that nested element's own Content/Style tabs
   // instead of the slider's own fields.
   const [sliderInnerSel, setSliderInnerSel] = useState<Record<string, { r: number; c: number; e: number } | null>>({});
+  // Canvas-direct edit mode for a nested slide heading/text child, keyed by
+  // that child's own id — see designer/context.ts's DesignerCtx comment for
+  // why this can't just reuse sliderInnerSel/editingText directly.
+  const [sliderInnerEditing, setSliderInnerEditing] = useState<Record<string, boolean>>({});
   const frameARef = useRef<HTMLIFrameElement>(null);
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
@@ -2652,7 +2656,7 @@ export default function Designer({
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
-    sliderInnerSel, setSliderInnerSel, uploadImage,
+    sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing, uploadImage,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
