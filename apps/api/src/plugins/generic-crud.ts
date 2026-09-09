@@ -174,6 +174,13 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
         const [item] = await req.db.insert(table).values(data as never).returning();
         await config.hooks?.afterChange?.(item, accessArgs(req), req);
         await cacheInvalidate(`ucms:cache:${req.tenantHost}:${config.slug}:`);
+        // Same Redis instance, a sibling prefix: apps/frontend's rendered-HTML
+        // cache (src/lib/html-cache.ts) has no way to know which pages a
+        // write like this one affects (menus/theme/siteChrome writes can
+        // change every page's rendered header/footer), so a write to any
+        // collection drops the tenant's WHOLE html cache rather than trying
+        // to compute the affected page set.
+        await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
         reply.code(201);
         return { collection: config.slug, item };
       } catch (err) {
@@ -250,6 +257,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
     }
     await config.hooks?.afterChange?.(item, accessArgs(req), req);
     await cacheInvalidate(`ucms:cache:${req.tenantHost}:${config.slug}:`);
+    await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
     return { collection: config.slug, item };
   });
 
@@ -267,6 +275,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
         return { error: "not found" };
       }
       await cacheInvalidate(`ucms:cache:${req.tenantHost}:${config.slug}:`);
+      await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
       return { deleted: true, id };
     } catch (err) {
       // Postgres FK-violation (e.g. categories.id RESTRICTed by posts.category_id)

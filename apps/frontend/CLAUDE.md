@@ -33,7 +33,11 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   (503) rather than `context.rewrite()`-ing to a dedicated page, since a rewrite re-enters this same
   middleware against the new path and would loop; `/_astro/`, `/_image`, and `/uploads/` are excluded so
   the maintenance page's own assets (and any admin preview iframe) still load. Fails open on an apps/api
-  hiccup — a status-check failure never takes a healthy tenant's site down.
+  hiccup — a status-check failure never takes a healthy tenant's site down. **Same middleware also owns
+  the rendered-HTML edge cache** (`lib/html-cache.ts`, Redis-backed, see the deployment skill's own
+  paragraph on it) — checked right after the maintenance gate (so a maintenance response is never cached)
+  and written right before returning, skipped for anything carrying a preview/theme-preview/Live-Edit
+  token or a maintenance-bypass cookie.
 - **`chrome-preview.astro`** — apps/admin Designer's Header/Footer device-preview modal (`kind ===
   "siteChrome"`). Reads `?id=&kind=header|footer`, fetches that row via `getSiteChromeById` (now
   exported — no preview token needed, since `GET /api/siteChrome/:id` is already publicly readable

@@ -68,6 +68,28 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   fix live, no reinit/restart needed: `docker compose exec db sed -i 's/^host all all all
   scram-sha-256/host all all all md5/' /var/lib/postgresql/data/pg_hba.conf` then `docker compose
   exec db psql -U postgres -c "SELECT pg_reload_conf();"`.
+- **Connection budget, with real numbers** (Fasa 1's "dokumentasikan max_connections dan resource
+  requirement" — the one open item left in the architecture audit's phased roadmap). Nothing here
+  overrides Postgres's own config, so today's actual ceiling is the stock `postgres:16-alpine`
+  default: `max_connections = 100`, `superuser_reserved_connections = 3` → **97 usable backend
+  slots**. PgBouncer's per-dbname cap is `default_pool_size (8) + reserve_pool_size (2) = 10`
+  backend connections once a dbname is genuinely busy (reserve only kicks in after
+  `reserve_pool_timeout`). The control-plane dbname (`usim_cms`) counts as one such dbname on its
+  own, same as any tenant. Worst case — control plane plus every simultaneously-busy tenant dbname
+  each pinned at their 10-connection ceiling — is `10 + 10×N ≤ 97`, i.e. **N ≈ 8 tenant databases
+  can be fully saturated at once** before Postgres itself runs out of backend slots. Past that,
+  PgBouncer does not error (`max_client_conn = 500` still accepts the client) — it queues the
+  request until a backend connection frees up, so the real symptom is added latency on the 9th+
+  simultaneously-hot tenant, not a hard failure. At the ~100-tenant scale this project is aiming
+  for (see the multi-VPS/Compose-replica scaling notes), a rare all-tenants-busy-at-once spike
+  queues; the common case (a handful of departments getting real traffic at the same moment) stays
+  well under 8. **If a higher simultaneous-hot-tenant ceiling is ever needed**: raise Postgres's
+  `max_connections` (e.g. a mounted `postgresql.conf` override or `command: postgres -c
+  max_connections=200` on the `db` service) — check `DB_MEM_LIMIT` (default `1g`) has headroom
+  first, each extra connection costs a small fixed amount of backend memory — and/or lower
+  `default_pool_size` per tenant if most tenants are low-traffic and only a few need the full 8.
+  Not changed here: this is a documented number and a one-line lever, not a "the current default is
+  wrong" fix — nobody has reported it actually queuing in production yet.
 - **`redis`** (`docker-compose.yml`, always-on alongside `db`/`pgbouncer`/`proxy`) is a shared
   cache for public (anonymous) GETs — `apps/api/src/cache.ts`'s `cacheGet`/`cacheSet`/
   `cacheInvalidate`, wired into `generic-crud.ts`'s public list/`:id` routes (pages/posts/
@@ -89,6 +111,19 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   unset (default) makes every `cache.ts` function a no-op — a single-instance/local-dev deploy
   needs nothing, same opt-in shape as `pgbouncer`. No persisted volume — losing the cache on
   restart just means a cold refill, never data loss.
+- **Frontend rendered-HTML cache** (`apps/frontend/src/lib/html-cache.ts` + `middleware.ts`) — the
+  SAME `redis` instance, a sibling keyspace (`ucms:htmlcache:{tenantHost}:{pathname}{search}`),
+  closing the gap the bullet above never covered: that cache only ever held JSON API responses,
+  Astro's SSR render itself still ran on every request. `docker-compose.release.yml`'s `frontend`
+  service needs its own `REDIS_URL: redis://redis:6379` line for this to activate (added alongside
+  `api`'s existing one) — unset, same as `cache.ts`, is a silent no-op. Skipped entirely for a
+  non-GET request, a maintenance-bypass admin, or any `token`/`themeToken`/`designerEdit` query
+  param (preview/theme-preview/Live-Edit all ride one of those) — see `middleware.ts`'s
+  `cacheEligible`. Invalidated by `apps/api` itself: every `generic-crud.ts` create/update/delete,
+  `PUT /api/theme`, and `PUT /api/tenant-languages` additionally calls `cacheInvalidate` against
+  this `ucms:htmlcache:` prefix (same function, different prefix, same Redis instance) — a whole
+  tenant's cache drops on any of those writes rather than trying to compute which pages a menu/
+  theme/header-footer change actually touched; 60s TTL is the same backstop as the JSON cache.
 - `proxy` (`caddy:2-alpine`, config in `./Caddyfile`) is the public-facing reverse proxy
   and TLS terminator. Default behavior: automatic Let's Encrypt issuance/renewal for
   every domain in `ADMIN_DOMAIN`/`API_DOMAIN`/`TENANT_DOMAINS` (`.env.example`) — no

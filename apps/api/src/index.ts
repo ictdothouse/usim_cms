@@ -2631,6 +2631,9 @@ await app.register(async (protectedScope) => {
     }
     await setTenantTheme(req.tenantHost, settings);
     await cacheInvalidate(`ucms:cache:${req.tenantHost}:theme`);
+    // Sibling prefix, same Redis instance — see generic-crud.ts's own comment
+    // on this same pairing. Theme affects every page's rendered CSS/colors.
+    await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
     return { saved: true };
   });
 
@@ -2694,6 +2697,9 @@ await app.register(async (protectedScope) => {
       resolvedPosition,
       resolvedStyle,
     );
+    // Switcher visibility/position/style renders on every page's header/
+    // footer/topbar — same sibling-prefix invalidation as theme/collections.
+    await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
     return { saved: true };
   });
 

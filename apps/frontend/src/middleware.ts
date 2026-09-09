@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "astro";
 import { getTenantStatus } from "./lib/api";
+import { htmlCacheGet, htmlCacheSet } from "./lib/html-cache";
 
 // Per-tenant maintenance-mode gate (Manage Site's toggle, apps/admin) — one
 // central check instead of repeating it in every page under src/pages/,
@@ -87,6 +88,28 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
     return new Response(MAINTENANCE_HTML, { status: 503, headers: { "content-type": "text/html; charset=utf-8" } });
   }
 
+  // Edge/HTML cache — only for a request with no signal that it wants a
+  // non-default render: preview/theme-preview tokens and Live Edit's
+  // designerEdit always ride a `token`/`themeToken` query param (see
+  // [...slug].astro/posts/[slug].astro), and a maintenance-bypass admin
+  // already has their own bypassToken above. `?lang=` stays a distinct cache
+  // key automatically since it's part of `context.url.search`.
+  const cacheEligible =
+    context.request.method === "GET" &&
+    !status?.maintenanceMode &&
+    !bypassToken &&
+    !context.url.searchParams.has("token") &&
+    !context.url.searchParams.has("themeToken") &&
+    !context.url.searchParams.has("designerEdit");
+  const cacheKey = cacheEligible ? `ucms:htmlcache:${tenantHost}:${context.url.pathname}${context.url.search}` : null;
+
+  if (cacheKey) {
+    const cached = await htmlCacheGet(cacheKey);
+    if (cached !== undefined) {
+      return new Response(cached, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "x-ucms-cache": "hit" } });
+    }
+  }
+
   const response = await next();
   if (status?.maintenanceMode && status.bypass && response.headers.get("content-type")?.includes("text/html")) {
     const html = await response.text();
@@ -94,6 +117,12 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
       status: response.status,
       headers: response.headers,
     });
+  }
+  if (cacheKey && response.status === 200 && response.headers.get("content-type")?.includes("text/html")) {
+    // Fire-and-forget-shaped but awaited (best-effort write, cacheGet-style
+    // try/catch inside htmlCacheSet already swallows a failure) — clone
+    // first so the real response body is still readable by the caller.
+    await htmlCacheSet(cacheKey, await response.clone().text());
   }
   return response;
 };
