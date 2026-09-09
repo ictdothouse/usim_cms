@@ -305,6 +305,32 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       dotsStyle: "dots",
       transition: "slide",
       slidesPerView: "1",
+      // Layout/behaviour, nav-module and pagination-module customization —
+      // all real-site only (Swiper options / CSS custom properties), same
+      // admin-canvas-preview-cosmetic-only convention as navStyle/dotsStyle/
+      // transition/slidesPerView above. Empty string means "use Swiper's/the
+      // hand-rolled CSS's own built-in default", so a page saved before this
+      // upgrade renders pixel-identical until an author opts into a value.
+      direction: "horizontal",
+      slidesPerGroup: "1",
+      slidesRows: "1",
+      centeredSlides: "false",
+      spaceBetween: "",
+      initialSlide: "0",
+      autoHeight: "false",
+      grabCursor: "true",
+      slideToClickedSlide: "false",
+      navColor: "",
+      navSize: "",
+      navOffset: "",
+      navPlacement: "inside",
+      navIcon: "chevron",
+      paginationColor: "",
+      paginationPlacement: "inside",
+      paginationPosition: "center",
+      paginationOffset: "",
+      paginationBulletSize: "",
+      paginationBulletGap: "",
     },
     fields: [
       { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
@@ -329,6 +355,30 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       // .ds-slide DOM for all of them, no other field/CSS/canvas-preview
       // change needed to add one.
       { key: "transition", labelKey: "designer-f-slider-transition", kind: "select", options: ["slide", "fade", "coverflow", "cube", "flip", "cards"] },
+      // Layout/behaviour (Swiper options, ignored by a 3D effect transition
+      // same as slidesPerView above).
+      { key: "direction", labelKey: "designer-f-slider-direction", kind: "select", options: ["horizontal", "vertical"] },
+      { key: "slidesPerGroup", labelKey: "designer-f-slider-slidespergroup", kind: "select", options: ["1", "2", "3", "4"] },
+      { key: "slidesRows", labelKey: "designer-f-slider-slidesrows", kind: "select", options: ["1", "2", "3"] },
+      { key: "centeredSlides", labelKey: "designer-f-slider-centeredslides", kind: "select", options: ["true", "false"] },
+      { key: "spaceBetween", labelKey: "designer-f-slider-spacebetween", kind: "length" },
+      { key: "initialSlide", labelKey: "designer-f-slider-initialslide", kind: "length" },
+      { key: "autoHeight", labelKey: "designer-f-slider-autoheight", kind: "select", options: ["true", "false"] },
+      { key: "grabCursor", labelKey: "designer-f-slider-grabcursor", kind: "select", options: ["true", "false"] },
+      { key: "slideToClickedSlide", labelKey: "designer-f-slider-slidetoclick", kind: "select", options: ["true", "false"] },
+      // Navigation module (prev/next buttons) full customization.
+      { key: "navColor", labelKey: "designer-f-slider-navcolor", kind: "color" },
+      { key: "navSize", labelKey: "designer-f-slider-navsize", kind: "length" },
+      { key: "navOffset", labelKey: "designer-f-slider-navoffset", kind: "length" },
+      { key: "navPlacement", labelKey: "designer-f-slider-navplacement", kind: "select", options: ["inside", "outside"] },
+      { key: "navIcon", labelKey: "designer-f-slider-navicon", kind: "select", options: ["chevron", "arrow"] },
+      // Pagination module (dots) full customization.
+      { key: "paginationColor", labelKey: "designer-f-slider-paginationcolor", kind: "color" },
+      { key: "paginationPlacement", labelKey: "designer-f-slider-paginationplacement", kind: "select", options: ["inside", "outside"] },
+      { key: "paginationPosition", labelKey: "designer-f-slider-paginationposition", kind: "select", options: ["start", "center", "end"] },
+      { key: "paginationOffset", labelKey: "designer-f-slider-paginationoffset", kind: "length" },
+      { key: "paginationBulletSize", labelKey: "designer-f-slider-paginationbulletsize", kind: "length" },
+      { key: "paginationBulletGap", labelKey: "designer-f-slider-paginationbulletgap", kind: "length" },
     ],
   },
   // Drops a saved Menu (built in the Menus admin panel) into any page — the

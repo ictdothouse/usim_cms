@@ -110,6 +110,19 @@ export const ENUM_VALUES: Record<string, string[]> = {
   dotsStyle: ["dots", "lines", "numbers", "none"],
   transition: ["slide", "fade", "coverflow", "cube", "flip", "cards"],
   slidesPerView: ["1", "2", "3", "4"],
+  // Slider layout/behaviour + nav/pagination module customization
+  // (Designer.tsx's ELS.slider registry additions).
+  direction: ["horizontal", "vertical"],
+  slidesPerGroup: ["1", "2", "3", "4"],
+  slidesRows: ["1", "2", "3"],
+  centeredSlides: ["true", "false"],
+  autoHeight: ["true", "false"],
+  grabCursor: ["true", "false"],
+  slideToClickedSlide: ["true", "false"],
+  navPlacement: ["inside", "outside"],
+  navIcon: ["chevron", "arrow"],
+  paginationPlacement: ["inside", "outside"],
+  paginationPosition: ["start", "center", "end"],
   // menu element fields (Task 9: Designer.tsx menu integration)
   layout: ["horizontal", "vertical"],
   dropdownTrigger: ["hover", "click"],
@@ -168,6 +181,11 @@ export const LENGTH_KEYS = new Set([
   "marginY", "marginX", "marginTop", "marginBottom", "marginLeft", "marginRight",
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
   "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
+  // Slider layout (spaceBetween/initialSlide) and nav/pagination module
+  // customization (navSize/navOffset/paginationOffset/paginationBulletSize/
+  // paginationBulletGap) — all plain px lengths or bare indices, same
+  // LENGTH_RE unit-less branch as x/y below.
+  "spaceBetween", "initialSlide", "navSize", "navOffset", "paginationOffset", "paginationBulletSize", "paginationBulletGap",
   // image element's own resizable width (Designer.tsx canvas drag handle +
   // Inspector length field) — "" means natural/auto size. Named "imgWidth",
   // not "width": ENUM_VALUES.width below is Section's own contained/full
@@ -181,7 +199,7 @@ export const LENGTH_KEYS = new Set([
   // posHeight plain CSS lengths, same as any other size field.
   "x", "y", "posWidth", "posHeight",
 ]);
-export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor"]);
+export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
 // only the URI-scheme check applies — bgImage is handled separately above
 // since it's concatenated into raw CSS instead. button1Href/button2Href/

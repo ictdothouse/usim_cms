@@ -1287,6 +1287,15 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                   const navStyle = p.navStyle || "arrows";
                   const dotsStyle = p.dotsStyle || "dots";
                   const transition = p.transition || "slide";
+                  // Nav/pagination module customization — CSS custom
+                  // properties + a data attribute per knob, all optional
+                  // (empty = keep the existing hand-rolled default below).
+                  const navColor = p.navColor && HEX_RE.test(p.navColor) ? p.navColor : null;
+                  const navPlacement = p.navPlacement === "outside" ? "outside" : "inside";
+                  const navIcon = p.navIcon === "arrow" ? "arrow" : "chevron";
+                  const paginationColor = p.paginationColor && HEX_RE.test(p.paginationColor) ? p.paginationColor : null;
+                  const paginationPlacement = p.paginationPlacement === "outside" ? "outside" : "inside";
+                  const paginationPosition = ["start", "end"].includes(p.paginationPosition as string) ? p.paginationPosition : "center";
                   // Renders one nested element inside a slide's own mini
                   // canvas — heading/text/button/image only (the only types
                   // the admin's slides editor can ever add via its Add Text/
@@ -1410,18 +1419,60 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                         return null;
                     }
                   };
+                  // Pagination dots — built once, then placed either inside
+                  // the fixed-height box (absolute, over the image, today's
+                  // only behavior) or as a normal-flow sibling below it
+                  // (paginationPlacement "outside"), so the box's own height
+                  // never has to change shape for outside-mode nav buttons'
+                  // sake (they stay put, centered on the box either way).
+                  const dotsEl = dotsStyle !== "none" && (
+                    <div
+                      class={cls("ds-slider-dots", paginationPlacement === "outside" ? "ds-slider-dots-outside" : undefined)}
+                      data-style={dotsStyle}
+                      data-position={paginationPosition}
+                    >
+                      {slides.map((_, i) => (
+                        <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i}>
+                          {dotsStyle === "numbers" ? i + 1 : ""}
+                        </span>
+                      ))}
+                    </div>
+                  );
                   return (
                     <div
                       class={cls("ds-slider", p.cssClass)}
-                      style={[`height:${lengthValue(p.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`, marginStyle(p), paddingStyle(p)]
+                      style={[
+                        marginStyle(p),
+                        paddingStyle(p),
+                        navColor ? `--ds-nav-color:${navColor}` : null,
+                        p.navSize ? `--ds-nav-size:${p.navSize}` : null,
+                        p.navOffset ? `--ds-nav-offset:${p.navOffset}` : null,
+                        paginationColor ? `--ds-dot-color:${paginationColor}` : null,
+                        p.paginationOffset ? `--ds-dot-offset:${p.paginationOffset}` : null,
+                        p.paginationBulletSize ? `--ds-dot-size:${p.paginationBulletSize}` : null,
+                        p.paginationBulletGap ? `--ds-dot-gap:${p.paginationBulletGap}` : null,
+                      ]
                         .filter(Boolean)
                         .join(";")}
-                      data-autoplay={autoplayMs > 0 ? autoplayMs : undefined}
-                      data-nav={navStyle}
-                      data-pagination={dotsStyle}
-                      data-transition={transition}
-                      data-slides-per-view={p.slidesPerView || "1"}
+                      data-nav-placement={navPlacement}
                     >
+                      <div
+                        class="ds-slider-box"
+                        style={`height:${lengthValue(p.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`}
+                        data-autoplay={autoplayMs > 0 ? autoplayMs : undefined}
+                        data-nav={navStyle}
+                        data-transition={transition}
+                        data-slides-per-view={p.slidesPerView || "1"}
+                        data-direction={p.direction === "vertical" ? "vertical" : "horizontal"}
+                        data-slides-per-group={p.slidesPerGroup || "1"}
+                        data-slides-rows={p.slidesRows || "1"}
+                        data-centered-slides={p.centeredSlides === "true" ? "true" : undefined}
+                        data-space-between={p.spaceBetween || undefined}
+                        data-initial-slide={p.initialSlide || undefined}
+                        data-auto-height={p.autoHeight === "true" ? "true" : undefined}
+                        data-grab-cursor={p.grabCursor === "false" ? "false" : undefined}
+                        data-slide-to-clicked={p.slideToClickedSlide === "true" ? "true" : undefined}
+                      >
                       <div class="ds-slider-viewport">
                         <div class="ds-slider-track">
                           {slides.map((s) => {
@@ -1482,21 +1533,15 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                         <>
                           {navStyle !== "none" && (
                             <>
-                              <button type="button" class="ds-slider-prev" aria-label="Previous slide">‹</button>
-                              <button type="button" class="ds-slider-next" aria-label="Next slide">›</button>
+                              <button type="button" class="ds-slider-prev" aria-label="Previous slide">{navIcon === "arrow" ? "←" : "‹"}</button>
+                              <button type="button" class="ds-slider-next" aria-label="Next slide">{navIcon === "arrow" ? "→" : "›"}</button>
                             </>
                           )}
-                          {dotsStyle !== "none" && (
-                            <div class="ds-slider-dots">
-                              {slides.map((_, i) => (
-                                <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i}>
-                                  {dotsStyle === "numbers" ? i + 1 : ""}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                          {paginationPlacement === "inside" && dotsEl}
                         </>
                       )}
+                      </div>
+                      {slides.length > 1 && paginationPlacement === "outside" && dotsEl}
                     </div>
                   );
                 }
@@ -2080,6 +2125,14 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     display: block;
   }
   .ds-slider {
+    /* Auto-height wrapper — .ds-slider-box below carries the actual fixed
+       banner height, so an "outside" pagination strip (rendered as this
+       element's own last child, a normal-flow sibling of .ds-slider-box)
+       can add real space below the image instead of overlapping whatever
+       comes after it on the page. */
+    position: relative;
+  }
+  .ds-slider-box {
     position: relative;
     height: 100%;
   }
@@ -2165,57 +2218,95 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     position: absolute;
     top: 50%;
     z-index: 2;
-    width: 2.25rem;
-    height: 2.25rem;
+    width: var(--ds-nav-size, 2.25rem);
+    height: var(--ds-nav-size, 2.25rem);
     transform: translateY(-50%);
     border: none;
     border-radius: 9999px;
-    background: rgba(255, 255, 255, 0.85);
+    background: var(--ds-nav-color, rgba(255, 255, 255, 0.85));
     font-size: 1.25rem;
     line-height: 1;
     cursor: pointer;
   }
   .ds-slider-prev {
-    left: 1rem;
+    left: var(--ds-nav-offset, 1rem);
   }
   .ds-slider-next {
-    right: 1rem;
+    right: var(--ds-nav-offset, 1rem);
+  }
+  /* navPlacement "outside": buttons sit beyond the image edges instead of
+     overlaid on it — .ds-slider-box has no overflow:hidden of its own
+     (only .ds-slider-viewport does, around the slide track), so this never
+     gets clipped. */
+  .ds-slider[data-nav-placement="outside"] .ds-slider-prev {
+    left: calc(-1 * (var(--ds-nav-size, 2.25rem) + var(--ds-nav-offset, 1rem)));
+  }
+  .ds-slider[data-nav-placement="outside"] .ds-slider-next {
+    right: calc(-1 * (var(--ds-nav-size, 2.25rem) + var(--ds-nav-offset, 1rem)));
   }
   .ds-slider-dots {
     position: absolute;
-    bottom: 1rem;
+    bottom: var(--ds-dot-offset, 1rem);
     left: 50%;
     z-index: 2;
     display: flex;
-    gap: 0.4rem;
+    justify-content: center;
+    gap: var(--ds-dot-gap, 0.4rem);
     transform: translateX(-50%);
   }
+  /* paginationPlacement "outside": rendered as a normal-flow element below
+     .ds-slider-box (see the component above) instead of absolutely overlaid
+     — offset doubles as the gap above it instead of a distance from the
+     image's bottom edge. */
+  .ds-slider-dots.ds-slider-dots-outside {
+    position: static;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    margin-top: var(--ds-dot-offset, 0.75rem);
+  }
+  /* paginationPosition start/end — center is the default above. */
+  .ds-slider-dots[data-position="start"] {
+    left: 1rem;
+    justify-content: flex-start;
+    transform: none;
+  }
+  .ds-slider-dots[data-position="end"] {
+    left: auto;
+    right: 1rem;
+    justify-content: flex-end;
+    transform: none;
+  }
   .ds-slider-dot {
-    width: 0.5rem;
-    height: 0.5rem;
+    width: var(--ds-dot-size, 0.5rem);
+    height: var(--ds-dot-size, 0.5rem);
     border: none;
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.5);
     cursor: pointer;
   }
   .ds-slider-dot.is-active {
-    background: #fff;
+    background: var(--ds-dot-color, #fff);
   }
-  /* navStyle "minimal": plain chevron, no pill background. */
-  .ds-slider[data-nav="minimal"] .ds-slider-prev,
-  .ds-slider[data-nav="minimal"] .ds-slider-next {
+  /* navStyle "minimal": plain chevron, no pill background. Buttons always
+     live inside .ds-slider-box regardless of navPlacement (only their
+     left/right offset moves outside, see data-nav-placement above), so
+     scoping through the box here is safe either way. */
+  .ds-slider-box[data-nav="minimal"] .ds-slider-prev,
+  .ds-slider-box[data-nav="minimal"] .ds-slider-next {
     background: transparent;
-    color: #fff;
+    color: var(--ds-nav-color, #fff);
     font-size: 2rem;
   }
-  /* dotsStyle "lines": short bars instead of round dots. */
-  .ds-slider[data-pagination="lines"] .ds-slider-dot {
+  /* dotsStyle "lines"/"numbers" — a data attribute on .ds-slider-dots
+     itself (not an ancestor), since paginationPlacement "outside" renders
+     that element as a sibling of .ds-slider-box rather than a descendant. */
+  .ds-slider-dots[data-style="lines"] .ds-slider-dot {
     width: 1.5rem;
     height: 0.25rem;
     border-radius: 0.125rem;
   }
-  /* dotsStyle "numbers": show the slide number inside the pill. */
-  .ds-slider[data-pagination="numbers"] .ds-slider-dot {
+  .ds-slider-dots[data-style="numbers"] .ds-slider-dot {
     width: auto;
     height: auto;
     padding: 0.15rem 0.5rem;
@@ -2227,19 +2318,19 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   /* transition "fade": slides stack absolutely and crossfade via opacity
      instead of Swiper's horizontal scroll track — see the <script> below,
      which skips Swiper entirely for this mode and hand-rolls index/opacity. */
-  .ds-slider[data-transition="fade"] .ds-slider-track {
+  .ds-slider-box[data-transition="fade"] .ds-slider-track {
     display: block;
     position: relative;
     height: 100%;
   }
-  .ds-slider[data-transition="fade"] .ds-slide {
+  .ds-slider-box[data-transition="fade"] .ds-slide {
     position: absolute;
     inset: 0;
     opacity: 0;
     transition: opacity 0.5s ease;
     pointer-events: none;
   }
-  .ds-slider[data-transition="fade"] .ds-slide.is-active-fade {
+  .ds-slider-box[data-transition="fade"] .ds-slide.is-active-fade {
     opacity: 1;
     pointer-events: auto;
   }
@@ -2682,8 +2773,9 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
 
 <script>
   import Swiper from "swiper";
-  import { Autoplay, EffectCoverflow, EffectCube, EffectFlip, EffectCards } from "swiper/modules";
+  import { Autoplay, Grid, EffectCoverflow, EffectCube, EffectFlip, EffectCards } from "swiper/modules";
   import "swiper/css";
+  import "swiper/css/grid";
   import "swiper/css/effect-coverflow";
   import "swiper/css/effect-cube";
   import "swiper/css/effect-flip";
@@ -2748,11 +2840,18 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     cards: EffectCards,
   };
   document.querySelectorAll<HTMLElement>(".ds-slider").forEach((slider) => {
+    // Dataset (autoplay/transition/layout knobs) lives on .ds-slider-box,
+    // not this outer element — .ds-slider itself only wraps it plus an
+    // optional "outside"-placement pagination strip (see the component
+    // above), so it stays a plain auto-height box with no dataset of its
+    // own. .ds-slider-dot lookups stay scoped to the outer element though,
+    // since outside-mode dots render as its sibling, not the box's.
+    const box = slider.querySelector<HTMLElement>(".ds-slider-box");
     const viewport = slider.querySelector<HTMLElement>(".ds-slider-viewport");
     const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
-    if (!viewport) return;
-    const autoplayMs = Number(slider.dataset.autoplay || "0");
-    const transition = slider.dataset.transition || "slide";
+    if (!box || !viewport) return;
+    const autoplayMs = Number(box.dataset.autoplay || "0");
+    const transition = box.dataset.transition || "slide";
 
     // transition="fade": a real crossfade needs slides stacked absolutely
     // (CSS above), which Swiper's own EffectFade also does, but this
@@ -2776,20 +2875,30 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
 
     const effectModule = EFFECT_MODULES[transition];
     // A 3D effect (coverflow/cube/flip/cards) only ever makes sense one
-    // slide at a time — force 1 rather than let a leftover slidesPerView>1
-    // (e.g. author switches transition after already setting columns)
-    // render a broken multi-slide cube/flip.
-    const slidesPerView = effectModule ? 1 : Math.max(1, Number(slider.dataset.slidesPerView) || 1);
+    // slide at a time — force 1 rather than let a leftover slidesPerView>1/
+    // slidesRows>1 (e.g. author switches transition after already setting
+    // columns) render a broken multi-slide cube/flip.
+    const slidesPerView = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesPerView) || 1);
+    const slidesPerGroup = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesPerGroup) || 1);
+    const rows = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesRows) || 1);
+    const spaceBetweenAttr = box.dataset.spaceBetween;
+    const spaceBetween = spaceBetweenAttr && Number.isFinite(Number(spaceBetweenAttr)) ? Number(spaceBetweenAttr) : slidesPerView > 1 ? 16 : 0;
     const swiper = new Swiper(viewport, {
-      modules: effectModule ? [Autoplay, effectModule] : [Autoplay],
+      modules: [Autoplay, ...(effectModule ? [effectModule] : []), ...(rows > 1 ? [Grid] : [])],
       wrapperClass: "ds-slider-track",
       slideClass: "ds-slide",
       loop: true,
+      direction: box.dataset.direction === "vertical" ? "vertical" : "horizontal",
       effect: effectModule ? transition : "slide",
-      centeredSlides: transition === "coverflow",
+      centeredSlides: transition === "coverflow" || box.dataset.centeredSlides === "true",
       slidesPerView,
-      spaceBetween: slidesPerView > 1 ? 16 : 0,
-      grabCursor: true,
+      slidesPerGroup,
+      ...(rows > 1 ? { grid: { rows, fill: "row" } } : {}),
+      spaceBetween,
+      initialSlide: Math.max(0, Number(box.dataset.initialSlide) || 0),
+      autoHeight: box.dataset.autoHeight === "true",
+      grabCursor: box.dataset.grabCursor !== "false",
+      slideToClickedSlide: box.dataset.slideToClicked === "true",
       autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
     });
     const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));

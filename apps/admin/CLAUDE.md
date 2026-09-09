@@ -770,6 +770,31 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `opacity` transition covers it. This is Blocks-canvas-cosmetic-only for now — `ElPreview`'s slider case
   doesn't reflect `navStyle`/`dotsStyle`/`transition` (the canvas preview isn't a live carousel to begin
   with), so those 3 only visibly change anything on the real published/Live-Edit render.
+  Slider grew 20 more top-level fields (2026-09-09, same real-site-only/canvas-static convention as the 3
+  above), in 3 groups: **layout/behaviour** — `direction` ("horizontal"/"vertical"), `slidesPerGroup`/
+  `slidesRows` ("1"-"4"/"1"-"3", the latter via Swiper's `Grid` module), `centeredSlides`/`autoHeight`/
+  `grabCursor`/`slideToClickedSlide` ("true"/"false"), `spaceBetween`/`initialSlide` (plain numbers, `kind:
+  "length"`'s unit-less branch) — all passed straight through to `new Swiper(...)`'s own options in
+  `SectionBlock.astro`'s `<script>`, ignored by a 3D-effect transition the same way `slidesPerView` already
+  was (forced to 1); **nav module** — `navColor`/`navSize`/`navOffset`/`navPlacement` ("inside"/"outside")/
+  `navIcon` ("chevron"/"arrow"); **pagination module** — `paginationColor`/`paginationPlacement`
+  ("inside"/"outside")/`paginationPosition` ("start"/"center"/"end")/`paginationOffset`/
+  `paginationBulletSize`/`paginationBulletGap`. Nav/pagination are CSS-only (no Swiper Navigation/Pagination
+  modules adopted — still the pre-existing hand-rolled `.ds-slider-prev`/`-next`/`-dot` buttons), wired via
+  CSS custom properties (`--ds-nav-color`/`-size`/`-offset`, `--ds-dot-color`/`-offset`/`-size`/`-gap`) set
+  inline on the outer element, plus a `data-position`/`data-style` attribute directly on the dots element
+  itself (not an ancestor selector) since "outside" placement moves it out of the fixed-height box.
+  This forced one structural change: `.ds-slider` (the element root) is no longer the fixed-height box —
+  it's now an auto-height wrapper around a new inner `.ds-slider-box` (which carries the old inline
+  `height:${lengthValue(...)}` and holds the viewport/nav-buttons/inside-mode dots), so an "outside"
+  pagination strip renders as `.ds-slider-box`'s own normal-flow sibling and actually pushes real page
+  space below the image instead of overlapping whatever comes next — nav buttons stay children of
+  `.ds-slider-box` specifically so their `top:50%` centers on just the image, unaffected by that strip.
+  `data-nav`/`data-transition`/`data-slides-per-view`/`-per-group`/`-rows`/`-direction`/`-centered-slides`/
+  `-space-between`/`-initial-slide`/`-auto-height`/`-grab-cursor`/`-slide-to-clicked` all moved from
+  `.ds-slider` onto `.ds-slider-box` with them (the `<script>` reads them off a `box` lookup now, not
+  `slider` directly) — only `data-nav-placement` stays on the outer `.ds-slider`, since nav buttons'
+  inside/outside offset is a property of the whole component, not the box's internal Swiper state.
   Section/Row/Column/Element already had a per-breakpoint STYLE-override system (the `bp` toggle —
   `Monitor`/`Tablet`/`Smartphone` icons — routes Inspector field edits into each node's own `bp: Record
   <string,string>` bag, keyed `"tablet:<fieldKey>"`/`"mobile:<fieldKey>"`, resolved by `bpGetValue`/
