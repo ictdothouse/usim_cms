@@ -1420,7 +1420,7 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                       data-nav={navStyle}
                       data-pagination={dotsStyle}
                       data-transition={transition}
-                      data-engine={p.engine || "embla"}
+                      data-slides-per-view={p.slidesPerView || "1"}
                     >
                       <div class="ds-slider-viewport">
                         <div class="ds-slider-track">
@@ -2094,7 +2094,14 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   }
   .ds-slide {
     position: relative;
-    flex: 0 0 100%;
+    /* flex-shrink only (no flex-basis) — Swiper sets each slide's real
+       inline width via JS once it inits (updateSlidesSizes, driven by
+       data-slides-per-view below); a flex-basis here would out-rank that
+       inline width and pin every slide back to 100% regardless. width:100%
+       stays as the pre-JS/no-JS fallback (crops to slide 1, viewport's own
+       overflow:hidden hides the rest — same degrade-to-static behavior as
+       before this was multi-column-aware). */
+    flex-shrink: 0;
     min-width: 0;
     width: 100%;
     height: 100%;
@@ -2218,8 +2225,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     line-height: 1.2;
   }
   /* transition "fade": slides stack absolutely and crossfade via opacity
-     instead of Embla's horizontal scroll track — see the <script> below,
-     which skips Embla entirely for this mode and hand-rolls index/opacity. */
+     instead of Swiper's horizontal scroll track — see the <script> below,
+     which skips Swiper entirely for this mode and hand-rolls index/opacity. */
   .ds-slider[data-transition="fade"] .ds-slider-track {
     display: block;
     position: relative;
@@ -2674,10 +2681,13 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
 </style>
 
 <script>
-  import EmblaCarousel from "embla-carousel";
-  import Autoplay from "embla-carousel-autoplay";
   import Swiper from "swiper";
-  import { Autoplay as SwiperAutoplay } from "swiper/modules";
+  import { Autoplay, EffectCoverflow, EffectCube, EffectFlip, EffectCards } from "swiper/modules";
+  import "swiper/css";
+  import "swiper/css/effect-coverflow";
+  import "swiper/css/effect-cube";
+  import "swiper/css/effect-flip";
+  import "swiper/css/effect-cards";
 
   // Tabs: click a label -> activate its panel. Event-delegated on document
   // so one listener covers every .ds-tabs instance on the page (Astro
@@ -2723,23 +2733,32 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     holder.replaceWith(iframe);
   });
 
-  // Slider: Embla Carousel (headless, vanilla JS — see package.json) drives
-  // drag/swipe/momentum/looping; this just wires our own prev/next/dot
-  // buttons + an optional autoplay plugin (data-autoplay = ms, set only when
-  // the author picked something other than "off") to its API instead of
-  // hand-rolling scroll math. .ds-slider-viewport/.ds-slider-track/.ds-slide
-  // are exactly Embla's expected viewport > container > slide structure.
+  // Slider: Swiper (headless-enough, real 3D effect modules — see
+  // package.json) drives drag/swipe/momentum/looping/effects; this just
+  // wires our own prev/next/dot buttons + an optional autoplay plugin
+  // (data-autoplay = ms, set only when the author picked something other
+  // than "off") to its API instead of hand-rolling scroll math.
+  // wrapperClass/slideClass point Swiper at our own existing
+  // .ds-slider-track/.ds-slide instead of its default swiper-wrapper/
+  // swiper-slide, so no markup fork was needed to adopt it.
+  const EFFECT_MODULES: Record<string, typeof EffectCoverflow | undefined> = {
+    coverflow: EffectCoverflow,
+    cube: EffectCube,
+    flip: EffectFlip,
+    cards: EffectCards,
+  };
   document.querySelectorAll<HTMLElement>(".ds-slider").forEach((slider) => {
     const viewport = slider.querySelector<HTMLElement>(".ds-slider-viewport");
     const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
     if (!viewport) return;
     const autoplayMs = Number(slider.dataset.autoplay || "0");
+    const transition = slider.dataset.transition || "slide";
 
-    // transition="fade": Embla's own scroll track assumes a horizontal
-    // strip of slides, which can't crossfade — hand-roll index/opacity
-    // instead of pulling in a separate fade plugin (CSS above stacks every
-    // .ds-slide absolutely; this just toggles which one is opaque).
-    if (slider.dataset.transition === "fade") {
+    // transition="fade": a real crossfade needs slides stacked absolutely
+    // (CSS above), which Swiper's own EffectFade also does, but this
+    // hand-rolled version predates the Swiper switch and still works fine —
+    // no reason to churn it just to route through another module.
+    if (transition === "fade") {
       const slides = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slide"));
       let idx = 0;
       const show = (next: number) => {
@@ -2755,39 +2774,29 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
       return;
     }
 
-    // engine="swiper": same viewport>track>slide DOM as Embla above, just
-    // handed to Swiper instead — wrapperClass/slideClass point it at our own
-    // .ds-slider-track/.ds-slide instead of its default swiper-wrapper/
-    // swiper-slide, so no swiper/css import or markup fork is needed, same
-    // "headless engine + Autoplay module, we wire our own prev/next/dot
-    // buttons" shape as the Embla path.
-    if (slider.dataset.engine === "swiper") {
-      const swiper = new Swiper(viewport, {
-        modules: [SwiperAutoplay],
-        wrapperClass: "ds-slider-track",
-        slideClass: "ds-slide",
-        loop: true,
-        autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
-      });
-      const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
-      slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
-      slider.querySelector(".ds-slider-next")?.addEventListener("click", () => swiper.slideNext());
-      dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
-      swiper.on("slideChange", updateDots);
-      updateDots();
-      return;
-    }
-
-    const plugins = autoplayMs > 0 ? [Autoplay({ delay: autoplayMs, stopOnInteraction: false })] : [];
-    const embla = EmblaCarousel(viewport, { loop: true }, plugins);
-    const updateDots = () => {
-      const selected = embla.selectedScrollSnap();
-      dots.forEach((d, di) => d.classList.toggle("is-active", di === selected));
-    };
-    slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => embla.scrollPrev());
-    slider.querySelector(".ds-slider-next")?.addEventListener("click", () => embla.scrollNext());
-    dots.forEach((d, di) => d.addEventListener("click", () => embla.scrollTo(di)));
-    embla.on("select", updateDots);
+    const effectModule = EFFECT_MODULES[transition];
+    // A 3D effect (coverflow/cube/flip/cards) only ever makes sense one
+    // slide at a time — force 1 rather than let a leftover slidesPerView>1
+    // (e.g. author switches transition after already setting columns)
+    // render a broken multi-slide cube/flip.
+    const slidesPerView = effectModule ? 1 : Math.max(1, Number(slider.dataset.slidesPerView) || 1);
+    const swiper = new Swiper(viewport, {
+      modules: effectModule ? [Autoplay, effectModule] : [Autoplay],
+      wrapperClass: "ds-slider-track",
+      slideClass: "ds-slide",
+      loop: true,
+      effect: effectModule ? transition : "slide",
+      centeredSlides: transition === "coverflow",
+      slidesPerView,
+      spaceBetween: slidesPerView > 1 ? 16 : 0,
+      grabCursor: true,
+      autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
+    });
+    const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
+    slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
+    slider.querySelector(".ds-slider-next")?.addEventListener("click", () => swiper.slideNext());
+    dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
+    swiper.on("slideChange", updateDots);
     updateDots();
   });
 </script>

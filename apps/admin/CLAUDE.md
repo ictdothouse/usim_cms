@@ -446,13 +446,18 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (Designer.tsx) and their SectionBlock.astro mirror both accept **either** shape — `JSON.parse` first,
   falling back to the old pipe-line parse on failure — so a page saved before this change keeps
   rendering/saving untouched and silently upgrades to JSON the next time its slider is edited; never a
-  hard migration. Rendering uses **Embla Carousel** (`embla-carousel` + `embla-carousel-autoplay`,
-  apps/frontend's only real npm UI dependency beyond Tailwind/daisyUI — headless, ~6kb, vanilla JS, no
-  React) instead of the original hand-rolled `translateX()` script: `.ds-slider-viewport` >
-  `.ds-slider-track` > `.ds-slide` is exactly Embla's expected viewport/container/slide structure, giving
-  real touch/drag/swipe/momentum/loop for free. The `<script>` just wires the existing prev/next/dot
-  buttons + an optional autoplay plugin to Embla's API (`scrollPrev`/`scrollNext`/`scrollTo`/`on("select")`)
-  instead of computing scroll percentages by hand. `apps/api/src/collections/validate-layout.ts` validates
+  hard migration. Rendering uses **Swiper** (`swiper`, apps/frontend's only real npm UI dependency beyond
+  Tailwind/daisyUI) instead of the original hand-rolled `translateX()` script: `wrapperClass`/`slideClass`
+  point it at the existing `.ds-slider-track`/`.ds-slide` DOM instead of Swiper's own default class names,
+  so no markup fork was needed to adopt it, giving real touch/drag/swipe/momentum/loop for free. The
+  `<script>` just wires the existing prev/next/dot buttons + an optional autoplay plugin to Swiper's API
+  (`slidePrev`/`slideNext`/`slideToLoop`/`on("slideChange")`) instead of computing scroll percentages by
+  hand. `transition` (element field) doubles as the real Swiper `effect` when set to `coverflow`/`cube`/
+  `flip`/`cards` (their own Swiper modules + CSS, `SectionBlock.astro`'s `<script>`) — `"slide"`/`"fade"`
+  are the two original non-3D modes, `fade` a separate CSS-crossfade hand-roll predating the Swiper switch
+  (still used as-is, see below). (An earlier same-day pass added a separate Embla-vs-Swiper `engine`
+  picker field — removed same day once testing showed no reason to keep Embla as a second, unused engine;
+  Swiper alone covers both the original scroll behavior and the new effects.) `apps/api/src/collections/validate-layout.ts` validates
   every field the same way as every other prop — `slides`' new JSON shape gets its own
   `isSafeSlide`/`isSafeSlideButton` checks (image through the same `isSafeCssUrl` as `bgImage`, since both
   land in a raw `url(...)`; button `href` through `isSafeUrl`), with the same JSON-then-legacy-pipe
@@ -751,13 +756,15 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   The slider element also grew 3 more top-level fields (element props, not per-slide): `navStyle`
   ("arrows"/"minimal"/"none" — the prev/next button look, or hidden entirely), `dotsStyle`
   ("dots"/"lines"/"numbers"/"none" — the pagination indicator shape, or hidden), and `transition`
-  ("slide"/"fade"). All 3 are plain `"select"`-kind `SLIDER_FIELDS` entries validated the same generic way
-  as `autoplay`/`textPosition` (`validate-layout.ts`'s `ENUM_VALUES` map — closed allowlist, no pattern
-  needed for a closed enum) and rendered onto the real `.ds-slider` as `data-nav`/`data-pagination`/
+  ("slide"/"fade"/"coverflow"/"cube"/"flip"/"cards" — the last 4 real Swiper 3D effects, added once Swiper
+  replaced Embla, see above). All 3 are plain `"select"`-kind `SLIDER_FIELDS` entries validated the same
+  generic way as `autoplay`/`textPosition` (`validate-layout.ts`'s `ENUM_VALUES` map — closed allowlist, no
+  pattern needed for a closed enum) and rendered onto the real `.ds-slider` as `data-nav`/`data-pagination`/
   `data-transition` attributes, styled purely via CSS attribute selectors (no new classes to keep in sync).
-  `transition:"fade"` is a real branch in the `<script>`, not an Embla plugin — Embla's own
-  `.ds-slider-track` assumes a horizontal scroll strip, which can't crossfade, so fade mode skips
-  `EmblaCarousel(...)` entirely for that slider and hand-rolls index/opacity state instead (prev/next/dot
+  `transition:"fade"` is a real branch in the `<script>`, not a Swiper plugin — Swiper's own
+  `.ds-slider-track` assumes a horizontal scroll strip, which can't crossfade the way this hand-roll wants,
+  so fade mode skips `new Swiper(...)` entirely for that slider and hand-rolls index/opacity state instead
+  (predates the Swiper switch, kept as-is since it still works fine; prev/next/dot
   clicks and an optional `setInterval` autoplay all just call the same `show(next)`, toggling each
   `.ds-slide`'s `is-active-fade` class): rung-5-lazy, no new dependency, since CSS `position:absolute` +
   `opacity` transition covers it. This is Blocks-canvas-cosmetic-only for now — `ElPreview`'s slider case

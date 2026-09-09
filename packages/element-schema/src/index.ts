@@ -91,7 +91,6 @@ export const ENUM_VALUES: Record<string, string[]> = {
   borderStyle: ["solid", "dashed", "dotted"],
   variant: ["primary", "outline", "filled", "soft"],
   scale: ["sm", "md", "lg"],
-  engine: ["embla", "swiper"],
   ratio: ["16:9", "4:3", "1:1"],
   style: ["bullet", "numbered", "none"],
   // documentdownload is the one element offering a 1-column layout
@@ -109,7 +108,8 @@ export const ENUM_VALUES: Record<string, string[]> = {
   autoplay: ["0", "3", "5", "8"],
   navStyle: ["arrows", "minimal", "none"],
   dotsStyle: ["dots", "lines", "numbers", "none"],
-  transition: ["slide", "fade"],
+  transition: ["slide", "fade", "coverflow", "cube", "flip", "cards"],
+  slidesPerView: ["1", "2", "3", "4"],
   // menu element fields (Task 9: Designer.tsx menu integration)
   layout: ["horizontal", "vertical"],
   dropdownTrigger: ["hover", "click"],
