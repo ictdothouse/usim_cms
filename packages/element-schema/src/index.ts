@@ -89,7 +89,9 @@ export const ENUM_VALUES: Record<string, string[]> = {
   valign: ["top", "center", "bottom"],
   border: ["none", "thin", "thick"],
   borderStyle: ["solid", "dashed", "dotted"],
-  variant: ["primary", "outline"],
+  variant: ["primary", "outline", "filled", "soft"],
+  scale: ["sm", "md", "lg"],
+  engine: ["embla", "swiper"],
   ratio: ["16:9", "4:3", "1:1"],
   style: ["bullet", "numbered", "none"],
   // documentdownload is the one element offering a 1-column layout

@@ -2392,7 +2392,7 @@ await app.register(async (protectedScope) => {
   // folder. Served back publicly at the returned URL — that's expected for
   // site assets, not a tenant-isolation break (no read of any DB data here).
   // No svg in the allowlist on purpose: svg can carry scripts.
-  const ALLOWED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+  const ALLOWED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm"]);
   const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   protectedScope.post("/api/media", async (req, reply) => {
@@ -2420,7 +2420,7 @@ await app.register(async (protectedScope) => {
     }
     if (!ALLOWED_MEDIA_TYPES.has(file.mimetype)) {
       reply.code(415);
-      return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp only)` };
+      return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp/mp4/webm only)` };
     }
     const safeTenant = tenantFolder(req.tenantHost);
     const ext = path.extname(file.filename);
@@ -2454,7 +2454,10 @@ await app.register(async (protectedScope) => {
     // image-variants.ts and SectionBlock.astro's buildSrcset for how the
     // frontend reconstructs a real <img srcset> from that alone, no DB
     // lookup needed at render time.
-    const meta = file.mimetype === "image/gif" ? null : await generateImageVariants(safeTenant, stem, fileBuffer);
+    const meta =
+      file.mimetype.startsWith("image/") && file.mimetype !== "image/gif"
+        ? await generateImageVariants(safeTenant, stem, fileBuffer)
+        : null;
     const url = meta ? `${rawUrl}?w=${meta.width}&h=${meta.height}` : rawUrl;
     const [item] = await req.db
       .insert(schema.media)

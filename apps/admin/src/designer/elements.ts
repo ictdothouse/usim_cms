@@ -41,6 +41,7 @@ import {
   Radio,
   Share2,
   Star,
+  Tag,
   Type,
   Users,
   Video,
@@ -127,6 +128,29 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "entrance", labelKey: "designer-s-entrance", kind: "select", options: ["none", "fade", "slide-up", "zoom"] },
     ],
   },
+  // M3 chip / shadcn Badge — reuses button's own "variant"/"color"/"align"
+  // field keys verbatim (element-schema's ENUM_VALUES.variant just gained
+  // "filled"/"soft" alongside button's existing "primary"/"outline") rather
+  // than inventing badge-specific keys, so this element needed zero new
+  // i18n strings beyond its own labelKey and zero new FieldKind/validator
+  // branches — the smallest surface this registry's 4-touchpoint pattern
+  // (ELS/ElPreview/validator/SectionBlock) can add.
+  badge: {
+    labelKey: "designer-el-badge",
+    icon: Tag,
+    defaults: { label: "Badge", variant: "soft", align: "left", scale: "md", name: "" },
+    fields: [
+      { key: "label", labelKey: "designer-f-label", kind: "text" },
+      { key: "variant", labelKey: "designer-f-variant", kind: "select", options: ["filled", "outline", "soft"] },
+      { key: "scale", labelKey: "designer-f-scale", kind: "select", options: ["sm", "md", "lg"] },
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
+      // Optional leading icon — same key/kind/options as icon/infobox's own
+      // picker, so it needed zero new validator code ("name" is already a
+      // FREE_TEXT_KEYS entry, packages/element-schema).
+      { key: "name", labelKey: "designer-f-icon-name", kind: "icon", options: Object.keys(ICONS) },
+    ],
+  },
   spacer: {
     labelKey: "designer-el-spacer",
     icon: MoveVertical,
@@ -134,6 +158,19 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     fields: [{ key: "height", labelKey: "designer-f-height", kind: "text" }],
   },
   divider: { labelKey: "designer-el-divider", icon: Minus, defaults: {}, fields: [] },
+  video: {
+    labelKey: "designer-el-video",
+    icon: Video,
+    defaults: { src: "", radius: "" },
+    fields: [
+      { key: "src", labelKey: "designer-f-video-src", kind: "video" },
+      // radius edited via FourSideControl (element Inspector) — see ELS-radius branch.
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
+      { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+      { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+      { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+    ],
+  },
   embed: {
     labelKey: "designer-el-embed",
     icon: Video,
@@ -267,6 +304,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       navStyle: "arrows",
       dotsStyle: "dots",
       transition: "slide",
+      engine: "embla",
     },
     fields: [
       { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
@@ -277,6 +315,12 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "height", labelKey: "designer-f-slider-height", kind: "length" },
       { key: "navStyle", labelKey: "designer-f-slider-nav", kind: "select", options: ["arrows", "minimal", "none"] },
       { key: "dotsStyle", labelKey: "designer-f-slider-pagination", kind: "select", options: ["dots", "lines", "numbers", "none"] },
+      // Rendering engine, real-site only — SectionBlock.astro's slider
+      // <script> picks Embla (current default, unchanged behavior) or
+      // Swiper (swiper npm dep, apps/frontend/package.json) at init time;
+      // same .ds-slider-viewport/-track/.ds-slide DOM either way, so no
+      // other field/CSS/canvas-preview change needed for this switch.
+      { key: "engine", labelKey: "designer-f-slider-engine", kind: "select", options: ["embla", "swiper"] },
       { key: "transition", labelKey: "designer-f-slider-transition", kind: "select", options: ["slide", "fade"] },
     ],
   },
