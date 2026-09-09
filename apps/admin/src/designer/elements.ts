@@ -280,8 +280,8 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
   },
   // A JSON array of slide objects (image, heading, subtitle, text position,
   // overlay color/opacity, multiple buttons) — see parseSlides/stringifySlides
-  // (designer/parsers.ts). Rendered by SectionBlock.astro via Embla Carousel
-  // (headless, vanilla JS — drag/swipe/momentum/looping) instead of
+  // (designer/parsers.ts). Rendered by SectionBlock.astro via Swiper
+  // (drag/swipe/momentum/looping, plus real 3D effect modules) instead of
   // hand-rolled scroll math, with an optional autoplay plugin.
   slider: {
     labelKey: "designer-el-slider",
@@ -304,7 +304,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       navStyle: "arrows",
       dotsStyle: "dots",
       transition: "slide",
-      engine: "embla",
+      slidesPerView: "1",
     },
     fields: [
       { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
@@ -315,13 +315,20 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "height", labelKey: "designer-f-slider-height", kind: "length" },
       { key: "navStyle", labelKey: "designer-f-slider-nav", kind: "select", options: ["arrows", "minimal", "none"] },
       { key: "dotsStyle", labelKey: "designer-f-slider-pagination", kind: "select", options: ["dots", "lines", "numbers", "none"] },
-      // Rendering engine, real-site only — SectionBlock.astro's slider
-      // <script> picks Embla (current default, unchanged behavior) or
-      // Swiper (swiper npm dep, apps/frontend/package.json) at init time;
-      // same .ds-slider-viewport/-track/.ds-slide DOM either way, so no
-      // other field/CSS/canvas-preview change needed for this switch.
-      { key: "engine", labelKey: "designer-f-slider-engine", kind: "select", options: ["embla", "swiper"] },
-      { key: "transition", labelKey: "designer-f-slider-transition", kind: "select", options: ["slide", "fade"] },
+      // Real-site only, same admin-canvas-preview-cosmetic-only convention as
+      // navStyle/dotsStyle/transition above. Multi-column carousel (Swiper's
+      // own slidesPerView) — ignored when transition is a 3D effect
+      // (coverflow/cube/flip/cards), which only ever make sense one slide at
+      // a time; SectionBlock.astro's <script> forces 1 in that case.
+      { key: "slidesPerView", labelKey: "designer-f-slider-slidesperview", kind: "select", options: ["1", "2", "3", "4"] },
+      // Real-site only (canvas preview stays static, slide 1 only) — Swiper
+      // (apps/frontend/package.json) drives every mode except "fade" (its own
+      // pre-existing CSS-crossfade hand-roll, kept as-is). coverflow/cube/
+      // flip/cards are real Swiper effect modules, wired in
+      // SectionBlock.astro's <script> — same .ds-slider-viewport/-track/
+      // .ds-slide DOM for all of them, no other field/CSS/canvas-preview
+      // change needed to add one.
+      { key: "transition", labelKey: "designer-f-slider-transition", kind: "select", options: ["slide", "fade", "coverflow", "cube", "flip", "cards"] },
     ],
   },
   // Drops a saved Menu (built in the Menus admin panel) into any page — the
