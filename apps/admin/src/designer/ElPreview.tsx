@@ -175,9 +175,12 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         case "text":
           return p.text ?? "";
         case "button":
+        case "badge":
           return p.label ?? "";
         case "image":
           return p.alt || p.src || "";
+        case "video":
+          return p.src ?? "";
         case "icon":
           return p.name ?? "";
         case "embed":
@@ -346,6 +349,22 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           <ImageIcon className="h-6 w-6" />
         </div>
       );
+    case "video":
+      return p.src ? (
+        <video
+          src={p.src}
+          controls
+          style={{
+            borderRadius: elRadius(p),
+            maxWidth: "100%",
+            ...elBorderShadowStyle(p),
+          }}
+        />
+      ) : (
+        <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
+          <Video className="h-6 w-6" />
+        </div>
+      );
     case "button": {
       // Same free-position box-fill need as "image" above: a resized
       // wrapper (posWidth/posHeight) means nothing unless the actual pill
@@ -374,6 +393,32 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             }
           >
             {p.label || "Button"}
+          </span>
+        </div>
+      );
+    }
+    case "badge": {
+      const variantStyle: React.CSSProperties =
+        p.variant === "outline"
+          ? { border: "1.5px solid currentColor", color: p.color || undefined, background: "transparent" }
+          : p.variant === "filled"
+            ? { backgroundColor: "var(--color-primary, #0f62fe)", color: p.color || "var(--color-primary-content, #fff)" }
+            : {
+                backgroundColor: "color-mix(in srgb, var(--color-primary, #0f62fe) 15%, transparent)",
+                color: p.color || "var(--color-primary, #0f62fe)",
+              };
+      const BADGE_SCALE = {
+        sm: { cls: "px-2 py-0.5 text-[10px] gap-1", icon: 10 },
+        md: { cls: "px-3 py-0.5 text-xs gap-1", icon: 12 },
+        lg: { cls: "px-3.5 py-1 text-sm gap-1.5", icon: 14 },
+      } as const;
+      const scale = BADGE_SCALE[p.scale as keyof typeof BADGE_SCALE] ?? BADGE_SCALE.md;
+      const BadgeIcon = p.name ? ICONS[p.name] : undefined;
+      return (
+        <div style={align}>
+          <span className={`inline-flex items-center rounded-full font-semibold ${scale.cls}`} style={variantStyle}>
+            {BadgeIcon && <BadgeIcon style={{ width: scale.icon, height: scale.icon }} />}
+            {p.label || "Badge"}
           </span>
         </div>
       );

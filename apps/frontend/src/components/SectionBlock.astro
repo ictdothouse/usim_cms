@@ -1045,6 +1045,23 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                     </div>
                   ) : null;
                 }
+                case "video":
+                  return safeUrl(p.src) ? (
+                    <video
+                      class={cls(p.cssClass)}
+                      src={safeUrl(p.src)}
+                      controls
+                      style={[
+                        `border-radius:${elRadius(p)}`,
+                        "max-width:100%",
+                        marginStyle(p),
+                        paddingStyle(p),
+                        elBorderShadowStyle(p),
+                      ]
+                        .filter(Boolean)
+                        .join(";")}
+                    />
+                  ) : null;
                 case "button":
                   return p.label ? (
                     <div
@@ -1059,6 +1076,26 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                       </a>
                     </div>
                   ) : null;
+                case "badge": {
+                  if (!p.label) return null;
+                  const badgeIconSize = { sm: 10, md: 12, lg: 14 }[p.scale ?? "md"] ?? 12;
+                  const badgeIconPath = p.name ? ICON_PATHS[p.name] : undefined;
+                  return (
+                    <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+                      <span
+                        class={cls(`ds-badge ds-badge-${p.variant || "soft"} ds-badge-${p.scale || "md"}`, p.cssClass)}
+                        style={p.color ? `color:${p.color}` : undefined}
+                      >
+                        {badgeIconPath && (
+                          <svg width={badgeIconSize} height={badgeIconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d={badgeIconPath} />
+                          </svg>
+                        )}
+                        {p.label}
+                      </span>
+                    </div>
+                  );
+                }
                 case "spacer":
                   return <div style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} aria-hidden="true" />;
                 case "divider":
@@ -1383,6 +1420,7 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                       data-nav={navStyle}
                       data-pagination={dotsStyle}
                       data-transition={transition}
+                      data-engine={p.engine || "embla"}
                     >
                       <div class="ds-slider-viewport">
                         <div class="ds-slider-track">
@@ -1890,6 +1928,37 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   }
   .ds-btn-lg {
     font-size: 1.1rem;
+  }
+  .ds-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    border-radius: 9999px;
+    font-weight: 600;
+  }
+  .ds-badge-sm {
+    padding: 0.1em 0.6em;
+    font-size: 0.7rem;
+  }
+  .ds-badge-md {
+    padding: 0.15em 0.75em;
+    font-size: 0.8rem;
+  }
+  .ds-badge-lg {
+    padding: 0.2em 0.9em;
+    font-size: 0.9rem;
+  }
+  .ds-badge-filled {
+    background: var(--color-primary, #0f62fe);
+    color: var(--color-primary-content, #fff);
+  }
+  .ds-badge-outline {
+    border: 1.5px solid currentColor;
+    color: inherit;
+  }
+  .ds-badge-soft {
+    background: color-mix(in srgb, var(--color-primary, #0f62fe) 15%, transparent);
+    color: var(--color-primary, #0f62fe);
   }
   .ds-divider {
     border: none;
@@ -2607,6 +2676,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
 <script>
   import EmblaCarousel from "embla-carousel";
   import Autoplay from "embla-carousel-autoplay";
+  import Swiper from "swiper";
+  import { Autoplay as SwiperAutoplay } from "swiper/modules";
 
   // Tabs: click a label -> activate its panel. Event-delegated on document
   // so one listener covers every .ds-tabs instance on the page (Astro
@@ -2681,6 +2752,29 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
       dots.forEach((d, di) => d.addEventListener("click", () => show(di)));
       show(0);
       if (autoplayMs > 0) setInterval(() => show(idx + 1), autoplayMs);
+      return;
+    }
+
+    // engine="swiper": same viewport>track>slide DOM as Embla above, just
+    // handed to Swiper instead — wrapperClass/slideClass point it at our own
+    // .ds-slider-track/.ds-slide instead of its default swiper-wrapper/
+    // swiper-slide, so no swiper/css import or markup fork is needed, same
+    // "headless engine + Autoplay module, we wire our own prev/next/dot
+    // buttons" shape as the Embla path.
+    if (slider.dataset.engine === "swiper") {
+      const swiper = new Swiper(viewport, {
+        modules: [SwiperAutoplay],
+        wrapperClass: "ds-slider-track",
+        slideClass: "ds-slide",
+        loop: true,
+        autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
+      });
+      const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
+      slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
+      slider.querySelector(".ds-slider-next")?.addEventListener("click", () => swiper.slideNext());
+      dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
+      swiper.on("slideChange", updateDots);
+      updateDots();
       return;
     }
 

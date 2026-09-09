@@ -278,6 +278,25 @@ export function FieldInput({
         {value && <img src={value} alt="" className="h-16 rounded-lg object-cover" />}
       </div>
     );
+  if (field.kind === "video")
+    return (
+      <div className="space-y-1.5">
+        <BufferedInput className={base} value={value} placeholder="https://" onCommit={onChange} />
+        <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+          {uploading ? t("designer-uploading") : t("designer-upload")}
+          <input
+            type="file"
+            accept="video/mp4,video/webm"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadImage(f, onChange);
+            }}
+          />
+        </label>
+        {value && <video src={value} controls className="h-24 rounded-lg" />}
+      </div>
+    );
   if (field.kind === "length") {
     // vh/vw added alongside the original px/%/em/rem so a field like the
     // slider's height can express "50% of the viewport height" or "the
