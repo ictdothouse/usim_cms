@@ -74,6 +74,26 @@ function ensurePublicSchema(client: PoolClient): Promise<unknown> {
 // connection budget (PgBouncer in front caps the global total in deploys).
 const tenantPools = new Map<string, Pool>();
 
+// Raw pg Pool counters for GET /metrics — pool.totalCount/idleCount/
+// waitingCount are pg's own live gauges, no extra bookkeeping needed.
+export function getPoolStats(): {
+  control: { total: number; idle: number; waiting: number };
+  tenants: { total: number; idle: number; waiting: number; poolCount: number };
+} {
+  const tenants = [...tenantPools.values()].reduce(
+    (acc, p) => ({
+      total: acc.total + p.totalCount,
+      idle: acc.idle + p.idleCount,
+      waiting: acc.waiting + p.waitingCount,
+    }),
+    { total: 0, idle: 0, waiting: 0 },
+  );
+  return {
+    control: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+    tenants: { ...tenants, poolCount: tenantPools.size },
+  };
+}
+
 function getTenantPool(connectionString: string): Pool {
   let tp = tenantPools.get(connectionString);
   if (!tp) {

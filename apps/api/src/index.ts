@@ -14,6 +14,7 @@ import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
+import { recordRequest, renderMetrics } from "./metrics.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
 import { validateLayout, validateOverrides, isSafeUrl } from "./collections/validate-layout.js";
 import { validateMenuItems } from "./collections/validate-menu.js";
@@ -310,6 +311,38 @@ if (isLocalDriver) {
 }
 
 app.get("/health", async () => ({ status: "ok" }));
+
+// Records every request's status class + timing for GET /metrics below —
+// reply.elapsedTime (Fastify's own ms-since-request-start) needs no extra
+// timestamp bookkeeping of our own.
+app.addHook("onResponse", (_req, reply, done) => {
+  recordRequest(reply.statusCode, reply.elapsedTime);
+  done();
+});
+
+// Opt-in observability endpoint (architecture-audit gap: no request/error/
+// pool/cache metrics existed). Gated by a shared secret rather than a
+// session cookie — a Prometheus scraper has no browser session to send —
+// same timingSafeEqual pattern as /internal/deploy/promote's DEPLOY_SECRET
+// below. Unset METRICS_SECRET (default) disables the route entirely rather
+// than silently exposing it, matching this file's other opt-in-secret routes.
+const METRICS_SECRET = process.env.METRICS_SECRET;
+
+app.get("/metrics", async (req, reply) => {
+  if (!METRICS_SECRET) {
+    reply.code(503);
+    return { error: "METRICS_SECRET not configured — metrics endpoint is disabled" };
+  }
+  const provided = Buffer.from((req.headers["x-metrics-secret"] as string | undefined) ?? "");
+  const expected = Buffer.from(METRICS_SECRET);
+  const matches = provided.length === expected.length && timingSafeEqual(provided, expected);
+  if (!matches) {
+    reply.code(401);
+    return { error: "invalid metrics secret" };
+  }
+  reply.header("Content-Type", "text/plain; version=0.0.4");
+  return renderMetrics();
+});
 
 // First-run bootstrap: creates the very first superadmin (chicken-and-egg —
 // every other user-management route requires an existing superadmin token).

@@ -29,13 +29,31 @@ function getClient(): Redis | null {
 
 const TTL_SECONDS = 60;
 
+// Per-process counters for GET /metrics — reset on restart, same as every
+// other in-memory metric this app exposes (see metrics.ts).
+let hits = 0;
+let misses = 0;
+
+export function getCacheStats(): { hits: number; misses: number } {
+  return { hits, misses };
+}
+
 export async function cacheGet<T>(key: string): Promise<T | undefined> {
   const c = getClient();
-  if (!c) return undefined;
+  if (!c) {
+    misses++;
+    return undefined;
+  }
   try {
     const raw = await c.get(key);
-    return raw === null ? undefined : (JSON.parse(raw) as T);
+    if (raw === null) {
+      misses++;
+      return undefined;
+    }
+    hits++;
+    return JSON.parse(raw) as T;
   } catch {
+    misses++;
     return undefined;
   }
 }
