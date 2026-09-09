@@ -77,7 +77,7 @@ services:
   # Postgres every time (correct, just not load-reduced). No persisted
   # volume: it's a cache, losing it on restart just means a cold refill.
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     networks:
