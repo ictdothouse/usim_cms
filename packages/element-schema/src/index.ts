@@ -480,6 +480,12 @@ function validateValue(key: string, value: unknown): string | null {
   // menuId/categoryId are only ever used as parameterized DB lookup keys
   // (getMenu/postlist's category filter), never interpolated into CSS/HTML.
   if (key === "menuId" || key === "categoryId") return null;
+  // engine: legacy slider field (Embla-vs-Swiper picker), removed same day it
+  // shipped once Swiper-only replaced it. Pages saved during that window still
+  // carry the stale key in their persisted layout JSON; ignore it here rather
+  // than 400 every future save of that page — it drops for good next time the
+  // slider itself is edited and re-serialized without the field.
+  if (key === "engine") return null;
   if (COLOR_KEYS.has(key)) return HEX_COLOR_RE.test(value) ? null : `${key} must be a hex color`;
   if (LENGTH_KEYS.has(key)) return LENGTH_RE.test(value) ? null : `${key} must be a plain CSS length`;
   if (ENUM_VALUES[key]) return ENUM_VALUES[key].includes(value) ? null : `${key} has an unrecognized value`;
