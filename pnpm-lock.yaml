@@ -262,6 +262,9 @@ importers:
       embla-carousel-autoplay:
         specifier: ^8.6.0
         version: 8.6.0(embla-carousel@8.6.0)
+      ioredis:
+        specifier: ^5.4.2
+        version: 5.11.1
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
