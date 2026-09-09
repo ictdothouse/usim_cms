@@ -302,6 +302,25 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   now matches `srcset=` (splitting its comma-separated candidate list), not just `src=`/`href=`, so a
   future responsive-image `srcset` won't silently produce a static export missing half its own images.
 
+## Observability
+
+- **`GET /metrics`** (`apps/api/src/metrics.ts`) — hand-rolled Prometheus text-exposition format, no
+  `prom-client` dependency (same "avoid heavy dependencies" reasoning as MFA's `node:crypto`-only TOTP).
+  Closes the architecture audit's "no request count/error rate/DB pool/cache hit rate metrics" gap.
+  Exposes `ucms_http_requests_total{status="2xx|3xx|4xx|5xx"}`, `ucms_http_request_duration_seconds_sum`,
+  `ucms_cache_hits_total`/`ucms_cache_misses_total` (`cache.ts`'s `getCacheStats`), and
+  `ucms_db_pool_connections{pool="control"|"tenant",state="total"|"idle"|"waiting"}` +
+  `ucms_tenant_pools_active` (`tenant-pool.ts`'s `getPoolStats`, reading pg's own `Pool` gauges directly —
+  no separate bookkeeping). An `onResponse` hook in `index.ts` calls `recordRequest(reply.statusCode,
+  reply.elapsedTime)` on every request; counters are in-memory and reset on restart/per-replica (a real
+  Prometheus scrape aggregates across replicas itself, this process only needs to expose its own). Gated
+  by `METRICS_SECRET` (`.env.example`) checked via the same `timingSafeEqual` shared-secret pattern as
+  `/internal/deploy/promote`'s `DEPLOY_SECRET` — unset (default) disables the route with a 503 rather than
+  silently exposing it; a scraper sends the secret in `x-metrics-secret`. Load testing / a p95/p99
+  baseline and a formal `(control-pool × replicas) + (tenant-pool × tenants × replicas)` connection-budget
+  doc are still open per the same audit — this only adds the numbers a load test or budget calc would
+  need to read.
+
 ## Auth hardening (rate limiting, audit log, MFA)
 
 Built in response to a security audit's "wajib diperbaiki" (must-fix) findings — see the audit's own
