@@ -11,6 +11,7 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 COPY packages/element-schema/package.json packages/element-schema/package.json
+COPY packages/element-style/package.json packages/element-style/package.json
 RUN pnpm install --frozen-lockfile
 COPY packages/element-schema packages/element-schema
 COPY apps/api apps/api
