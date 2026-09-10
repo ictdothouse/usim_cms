@@ -65,6 +65,7 @@ export interface FieldGroupsProps {
       | ((prev: Record<string, { r: number; c: number; e: number } | null>) => Record<string, { r: number; c: number; e: number } | null>),
   ) => void;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
+  openMediaPicker: (onSelect: (url: string) => void) => void;
   bpGetValue: (base: string | undefined, overrides: Record<string, string> | undefined, key: string) => string;
   bpKeysOverridden: (bag: Record<string, string> | undefined, keys: string[]) => boolean;
   toggleBpKeys: (bag: Record<string, string> | undefined, keys: string[]) => Record<string, string>;
@@ -82,7 +83,7 @@ export function FieldGroups({
   collapsedGroups, toggleGroup, bp, t,
   iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
   sliderInnerSel, setSliderInnerSel,
-  uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey, availableMenus, availableCategories, ICONS,
+  uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey, availableMenus, availableCategories, ICONS,
 }: FieldGroupsProps) {
   const buckets: Partial<Record<FieldGroupKey, Field[]>> = {};
   for (const f of fields) {
@@ -125,7 +126,7 @@ export function FieldGroups({
                         field: f, value: getValue(f), onChange: (v) => setValue(f, v),
                         iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
                         sliderInnerSel, setSliderInnerSel,
-                        bp, t, uploadImage, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
+                        bp, t, uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
                         availableMenus, availableCategories, ICONS,
                       })}
                     </div>

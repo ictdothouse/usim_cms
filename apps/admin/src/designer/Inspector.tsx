@@ -298,7 +298,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
-    sliderInnerSel, setSliderInnerSel, uploadImage,
+    sliderInnerSel, setSliderInnerSel, uploadImage, openMediaPicker,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
@@ -663,6 +663,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           sliderInnerSel={sliderInnerSel}
           setSliderInnerSel={setSliderInnerSel}
           uploadImage={uploadImage}
+          openMediaPicker={openMediaPicker}
           bpGetValue={bpGetValue}
           bpKeysOverridden={bpKeysOverridden}
           toggleBpKeys={toggleBpKeys}
@@ -911,6 +912,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           sliderInnerSel={sliderInnerSel}
           setSliderInnerSel={setSliderInnerSel}
           uploadImage={uploadImage}
+          openMediaPicker={openMediaPicker}
           bpGetValue={bpGetValue}
           bpKeysOverridden={bpKeysOverridden}
           toggleBpKeys={toggleBpKeys}
@@ -1039,6 +1041,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           sliderInnerSel,
           setSliderInnerSel,
           uploadImage,
+          openMediaPicker,
           bpGetValue,
           bpKeysOverridden,
           toggleBpKeys,
@@ -1109,6 +1112,9 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                         </label>
                       ))}
                     </div>
+                  )}
+                  {childIsFree && (
+                    <p className="text-[10px] italic text-sub/70">{t("designer-align-inert-free")}</p>
                   )}
                 </div>
                 <BoxModel
@@ -1231,6 +1237,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
       sliderInnerSel,
       setSliderInnerSel,
       uploadImage,
+      openMediaPicker,
       bpGetValue,
       bpKeysOverridden,
       toggleBpKeys,
@@ -1355,16 +1362,20 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           >
             <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
           </button>
-          <button onClick={() => copyStyleElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
-            <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
-          </button>
-          <button
-            onClick={() => pasteStyleElement(b, r, c, e)}
-            disabled={!styleHas("element")}
-            className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
-          >
-            <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
-          </button>
+          {el.type !== "slider" && (
+            <>
+              <button onClick={() => copyStyleElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+                <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
+              </button>
+              <button
+                onClick={() => pasteStyleElement(b, r, c, e)}
+                disabled={!styleHas("element")}
+                className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              >
+                <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
+              </button>
+            </>
+          )}
         </div>
         <div className="flex gap-3">
           <button onClick={() => duplicateElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">

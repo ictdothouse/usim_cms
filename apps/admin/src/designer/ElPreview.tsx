@@ -335,6 +335,15 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             fontFamily: headingFontFamily(p.level),
             ...typoStyle(p),
             ...elBorderShadowStyle(p),
+            // A canvas-only placeholder ("Heading", shown until the author
+            // types real content) must stay legible regardless of ambient
+            // inherited color — a slide's own box defaults to white text
+            // (see SectionBlock.astro's .ds-slide), which made an empty
+            // heading/text placeholder here invisible against a light/no-bg
+            // slide (docs/SliderProblem.pdf #1). Only overrides when there's
+            // no real content yet; a typed heading still uses typoStyle's
+            // own color (or inherits, same as before) unchanged.
+            ...(!p.text ? { color: "#9ca3af" } : {}),
           }}
           dangerouslySetInnerHTML={{ __html: p.text ? renderInline(p.text) : "Heading" }}
         />
@@ -347,7 +356,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           dangerouslySetInnerHTML={{ __html: renderInline(p.text) }}
         />
       ) : (
-        <div style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md) }} className="opacity-40">
+        <div style={{ ...align, fontSize: lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md), color: "#9ca3af" }}>
           {t("designer-f-text")}…
         </div>
       );
