@@ -776,8 +776,21 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                                   // width fixes that; text/heading stay
                                   // full-width on purpose (their own
                                   // left/center/right align needs the full
-                                  // row to align within).
-                                  ...(childEl.type === "button" ? { width: "fit-content" } : {}),
+                                  // row to align within). But a fit-content
+                                  // block still needs its OWN position set —
+                                  // the button's inner text-align:center div
+                                  // (below) has no spare width left to center
+                                  // into once this wrapper already hugs it —
+                                  // so mirror the button's own align here via
+                                  // margin instead (site's own render has no
+                                  // such wrapper, so it never needed this).
+                                  ...(childEl.type === "button"
+                                    ? {
+                                        width: "fit-content",
+                                        marginLeft: childEl.props.align === "right" ? "auto" : childEl.props.align === "center" ? "auto" : undefined,
+                                        marginRight: childEl.props.align === "left" ? "auto" : childEl.props.align === "center" ? "auto" : undefined,
+                                      }
+                                    : {}),
                                 }
                           }
                         >
