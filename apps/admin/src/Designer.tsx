@@ -1476,6 +1476,29 @@ export default function Designer({
         setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0), y: rect.top + Number(e.data.y ?? 0) });
         return;
       }
+      if (e.data?.type === "designer:selectSlideEl") {
+        // Mirrors what a click inside apps/admin's own Blocks-mode slider
+        // canvas already does (ElPreview.tsx's slider case) — select the
+        // slider element itself so the Inspector switches into its context,
+        // then point sliderInnerSel/sliderSlideIdx at the exact slide/row/
+        // column/element the click landed on so Inspector shows THAT
+        // nested element's own fields, not the slider's.
+        const sliderPath = String(e.data.path ?? "")
+          .split(".")
+          .map(Number);
+        const slideSel = String(e.data.slideSel ?? "")
+          .split(".")
+          .map(Number);
+        if (sliderPath.length !== 4 || slideSel.length !== 4) return;
+        const [b, r, c, elIdx] = sliderPath;
+        const [slideIdx, sr, sc, se] = slideSel;
+        const sliderEl = (blocks[b]?.props as unknown as SectionProps | undefined)?.rows?.[r]?.columns?.[c]?.elements?.[elIdx];
+        if (!sliderEl || sliderEl.type !== "slider") return;
+        setSel(sliderPath);
+        setSliderSlideIdx((m) => ({ ...m, [sliderEl.id]: slideIdx }));
+        setSliderInnerSel((m) => ({ ...m, [sliderEl.id]: { r: sr, c: sc, e: se } }));
+        return;
+      }
       const path = String(e.data?.path ?? "")
         .split(".")
         .map(Number);
