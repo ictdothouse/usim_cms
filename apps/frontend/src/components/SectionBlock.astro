@@ -2194,7 +2194,13 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     width: 100%;
     max-width: 36rem;
     padding: 1.5rem;
-    color: #fff;
+    /* No color here — inherits from .ds-slide's own computed color (either
+       the dynamic slideTextColor contrast pick, or that rule's own white-on-
+       photo default). A hardcoded #fff here used to short-circuit that
+       entire computation for every nested heading/text, since an element's
+       own color rule always wins over an ancestor's inherited value
+       regardless of the ancestor's specificity — text stayed invisible
+       white-on-white even after .ds-slide got the right color. */
     text-align: center;
     /* Nested Text/Button/Image elements stack top-to-bottom with a small
        gap — the slide's own mini-canvas, one row/column group per
