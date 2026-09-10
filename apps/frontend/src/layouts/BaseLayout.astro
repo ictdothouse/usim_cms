@@ -282,6 +282,25 @@ const fontsHref = allFonts.length
               e.preventDefault();
               return;
             }
+            // A click inside a slider's own nested content (heading/text/
+            // image/button rendered by SectionBlock.astro's renderSlideEl)
+            // carries data-slide-sel ("slideIdx.r.c.e", the slide's OWN
+            // tree address) in addition to the slider element's own
+            // data-designer-path further up — route these separately so
+            // Designer.tsx can select into its existing sliderInnerSel/
+            // sliderSlideIdx state (the same state apps/admin's own
+            // Blocks-mode canvas already uses) instead of just selecting
+            // the whole slider element.
+            const slideNode = e.target.closest("[data-slide-sel]");
+            const sliderNode = slideNode && slideNode.closest("[data-designer-path]");
+            if (slideNode && sliderNode) {
+              e.preventDefault();
+              parent.postMessage(
+                { type: "designer:selectSlideEl", path: sliderNode.dataset.designerPath, slideSel: slideNode.dataset.slideSel },
+                targetOrigin,
+              );
+              return;
+            }
             const node = e.target.closest("[data-designer-path]");
             if (!node) return;
             e.preventDefault();
