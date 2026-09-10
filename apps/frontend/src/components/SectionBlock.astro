@@ -1498,7 +1498,11 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                                 ? bestTextColor(s.bgColor)
                                 : overlayOpacity > 0.3 && HEX_RE.test(s.overlayColor || "")
                                   ? bestTextColor(s.overlayColor)
-                                  : null;
+                                  // No image either — there's no dark photo backdrop to
+                                  // justify the white default, and the page behind it is
+                                  // typically light. Force dark instead of falling through
+                                  // to .ds-slide's white default.
+                                  : !bgUrl ? "#000000" : null;
                             const slideStyle = [
                               bgUrl ? `background-image:url('${bgUrl}')` : null,
                               s.bgColor && HEX_RE.test(s.bgColor) ? `background-color:${s.bgColor}` : null,
@@ -1515,13 +1519,18 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
                                 )}
                                 {s.rows.length > 0 && (
                                   <div class={cls("ds-slide-content", `ds-slide-${s.textPosition}`)}>
-                                    {s.rows.map((row) =>
-                                      (row.columns ?? []).map((col) => (
-                                        <div class="ds-slide-row">
-                                          {(col.elements ?? []).map((el) => renderSlideEl(el))}
-                                        </div>
-                                      )),
-                                    )}
+                                    {s.rows.map((row) => (
+                                      <div
+                                        class="ds-slide-cols"
+                                        style={`grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")}`}
+                                      >
+                                        {(row.columns ?? []).map((col) => (
+                                          <div class="ds-slide-row">
+                                            {(col.elements ?? []).map((el) => renderSlideEl(el))}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
                               </div>
@@ -2200,6 +2209,14 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     flex-direction: column;
     gap: 0.75rem;
   }
+  /* One .ds-slide-cols per slide row, one .ds-slide-row (above) per column
+     inside it — a slide's nested Row.columns finally lay out side-by-side
+     instead of every column flattening into another vertically-stacked
+     block, matching how a real Section's own Row/Column grid already works. */
+  .ds-slide-cols {
+    display: grid;
+    gap: 0.75rem;
+  }
   /* Auto margins on a flex item override justify-content:center for that
      item, pushing it to one edge without changing .ds-slide's own layout —
      center (no override) falls back to .ds-slide's own centering. */
@@ -2750,6 +2767,9 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   }
   @media (max-width: 768px) {
     .ds-row:not(header .ds-row) {
+      grid-template-columns: 1fr !important;
+    }
+    .ds-slide-cols {
       grid-template-columns: 1fr !important;
     }
     .ds-gallery {
