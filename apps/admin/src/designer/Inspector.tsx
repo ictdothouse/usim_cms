@@ -120,6 +120,136 @@ function FourSideControl({
   );
 }
 
+type Side = "top" | "right" | "bottom" | "left";
+const SIDES: Side[] = ["top", "right", "bottom", "left"];
+
+// One ring's worth of wiring for BoxModel — same shape FourSideControl's own
+// props already used (getSide/setSide/linked/hasOverride/hasLangOverride),
+// just without the icon/labelKey-render bits BoxModel itself now owns so one
+// ring config object can be built inline at each call site.
+interface RingConfig {
+  labelKey: Key;
+  linked: boolean;
+  onToggleLink: () => void;
+  getSide: (side: Side) => string;
+  setSide: (side: Side, v: string) => void;
+  hasOverride?: boolean;
+  onToggleOverride?: () => void;
+  hasLangOverride?: boolean;
+  onToggleLangOverride?: () => void;
+}
+
+function BoxModelRingHeader({ ring, icon: Icon, bp, t }: { ring: RingConfig; icon: typeof Frame; bp: Bp; t: (k: Key) => string }) {
+  return (
+    <div className="flex items-center justify-between px-0.5">
+      <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-sub/70">
+        <Icon className="h-3 w-3" /> {t(ring.labelKey)}
+        {ring.hasLangOverride !== undefined && ring.onToggleLangOverride && (
+          <LangToggle active={ring.hasLangOverride} onToggle={ring.onToggleLangOverride} t={t} />
+        )}
+        {ring.hasOverride !== undefined && ring.onToggleOverride && (
+          <BpToggle active={ring.hasOverride} onToggle={ring.onToggleOverride} bp={bp} t={t} />
+        )}
+      </span>
+      <button
+        type="button"
+        onClick={ring.onToggleLink}
+        title={t("designer-f-link-sides")}
+        className={`rounded p-0.5 ${ring.linked ? "text-accent" : "text-sub/50 hover:text-body"}`}
+      >
+        <Link2 className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+function BoxModelInput({ ring, side, corner }: { ring: RingConfig; side: Side; corner?: boolean }) {
+  return (
+    <BufferedInput
+      className={
+        corner
+          ? "w-7 rounded border border-line/40 bg-white px-0.5 py-0.5 text-center text-[9px] text-ink shadow-sm"
+          : "w-9 rounded border border-line/30 bg-white px-0.5 py-0.5 text-center text-[10px] text-ink"
+      }
+      value={ring.getSide(side)}
+      placeholder="0"
+      title={side}
+      onCommit={(v) => (ring.linked ? SIDES.forEach((s) => ring.setSide(s, v)) : ring.setSide(side, v))}
+    />
+  );
+}
+
+// Chrome-DevTools-style nested box-model diagram: a dashed Margin ring around
+// a solid Padding ring around a Content box, with optional corner-radius
+// handles floating on the content box's own 4 corners — replaces what used
+// to be 2-3 separate FourSideControl rows (a flat stack of labeled 4-input
+// grids) with one spatial diagram, so which number affects which side of the
+// element reads visually instead of needing the label text to disambiguate.
+function BoxModel({
+  padding,
+  margin,
+  radius,
+  bp,
+  t,
+}: {
+  padding: RingConfig;
+  margin: RingConfig;
+  radius?: RingConfig;
+  bp: Bp;
+  t: (k: Key) => string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="rounded-lg border border-dashed border-amber-300/60 bg-amber-50/40 p-1.5">
+        <BoxModelRingHeader ring={margin} icon={Frame} bp={bp} t={t} />
+        <div className="grid grid-cols-[2rem_1fr_2rem] grid-rows-[2rem_auto_2rem] items-center justify-items-center gap-1 pt-1">
+          <div />
+          <BoxModelInput ring={margin} side="top" />
+          <div />
+          <BoxModelInput ring={margin} side="left" />
+          <div className="col-start-2 row-start-2 w-full rounded-lg border border-sky-300/60 bg-sky-50/50 p-1.5">
+            <BoxModelRingHeader ring={padding} icon={SquareDashedBottom} bp={bp} t={t} />
+            <div className="grid grid-cols-[1.75rem_1fr_1.75rem] grid-rows-[1.75rem_auto_1.75rem] items-center justify-items-center gap-1 pt-1">
+              <div />
+              <BoxModelInput ring={padding} side="top" />
+              <div />
+              <BoxModelInput ring={padding} side="left" />
+              <div className="relative col-start-2 row-start-2 flex h-10 w-full items-center justify-center rounded bg-white text-[9px] font-medium text-sub/60">
+                {t("designer-content")}
+                {radius && (
+                  <>
+                    <div className="absolute -left-2 -top-2">
+                      <BoxModelInput ring={radius} side="top" corner />
+                    </div>
+                    <div className="absolute -right-2 -top-2">
+                      <BoxModelInput ring={radius} side="right" corner />
+                    </div>
+                    <div className="absolute -bottom-2 -right-2">
+                      <BoxModelInput ring={radius} side="bottom" corner />
+                    </div>
+                    <div className="absolute -bottom-2 -left-2">
+                      <BoxModelInput ring={radius} side="left" corner />
+                    </div>
+                  </>
+                )}
+              </div>
+              <BoxModelInput ring={padding} side="right" />
+              <div />
+              <BoxModelInput ring={padding} side="bottom" />
+              <div />
+            </div>
+          </div>
+          <BoxModelInput ring={margin} side="right" />
+          <div />
+          <BoxModelInput ring={margin} side="bottom" />
+          <div />
+        </div>
+      </div>
+      {radius && <BoxModelRingHeader ring={radius} icon={SquareDashedBottom} bp={bp} t={t} />}
+    </div>
+  );
+}
+
 type VisKey = "hideDesktop" | "hideTablet" | "hideMobile";
 const VIS_ITEMS: { key: VisKey; icon: typeof Monitor }[] = [
   { key: "hideDesktop", icon: Monitor },
@@ -445,57 +575,49 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
             })
           }
         />
-        <FourSideControl
-          labelKey="designer-s-padding"
-          icon={Frame}
-          linked={linkedPadding}
-          onToggleLink={() => setLinkedPadding((v) => !v)}
-          getSide={(side) => fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side])}
-          setSide={(side, v) => setFourSideValue(b, PADDING_SIDE_KEYS[side], v)}
-          hasOverride={bpKeysOverridden(sp.bp, Object.values(PADDING_SIDE_KEYS))}
-          onToggleOverride={() =>
-            mutate((bs) => {
-              const props = bs[b].props as unknown as SectionProps;
-              props.bp = toggleBpKeys(props.bp, Object.values(PADDING_SIDE_KEYS));
-            })
-          }
-          {...langOverrideProps(pathKey(b), Object.values(PADDING_SIDE_KEYS))}
-          bp={bp}
-          t={t}
-        />
-        <FourSideControl
-          labelKey="designer-f-radius"
-          icon={SquareDashedBottom}
-          linked={linkedRadius}
-          onToggleLink={() => setLinkedRadius((v) => !v)}
-          getSide={(side) => fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius")}
-          setSide={(side, v) => setFourSideValue(b, RADIUS_CORNER_KEYS[side], v)}
-          hasOverride={bpKeysOverridden(sp.bp, Object.values(RADIUS_CORNER_KEYS))}
-          onToggleOverride={() =>
-            mutate((bs) => {
-              const props = bs[b].props as unknown as SectionProps;
-              props.bp = toggleBpKeys(props.bp, Object.values(RADIUS_CORNER_KEYS));
-            })
-          }
-          {...langOverrideProps(pathKey(b), Object.values(RADIUS_CORNER_KEYS))}
-          bp={bp}
-          t={t}
-        />
-        <FourSideControl
-          labelKey="designer-f-marginy"
-          icon={Frame}
-          linked={linkedMargin}
-          onToggleLink={() => setLinkedMargin((v) => !v)}
-          getSide={(side) => fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
-          setSide={(side, v) => setFourSideValue(b, MARGIN_SIDE_KEYS[side], v)}
-          hasOverride={bpKeysOverridden(sp.bp, Object.values(MARGIN_SIDE_KEYS))}
-          onToggleOverride={() =>
-            mutate((bs) => {
-              const props = bs[b].props as unknown as SectionProps;
-              props.bp = toggleBpKeys(props.bp, Object.values(MARGIN_SIDE_KEYS));
-            })
-          }
-          {...langOverrideProps(pathKey(b), Object.values(MARGIN_SIDE_KEYS))}
+        <BoxModel
+          padding={{
+            labelKey: "designer-s-padding",
+            linked: linkedPadding,
+            onToggleLink: () => setLinkedPadding((v) => !v),
+            getSide: (side) => fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]),
+            setSide: (side, v) => setFourSideValue(b, PADDING_SIDE_KEYS[side], v),
+            hasOverride: bpKeysOverridden(sp.bp, Object.values(PADDING_SIDE_KEYS)),
+            onToggleOverride: () =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, Object.values(PADDING_SIDE_KEYS));
+              }),
+            ...langOverrideProps(pathKey(b), Object.values(PADDING_SIDE_KEYS)),
+          }}
+          radius={{
+            labelKey: "designer-f-radius",
+            linked: linkedRadius,
+            onToggleLink: () => setLinkedRadius((v) => !v),
+            getSide: (side) => fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius"),
+            setSide: (side, v) => setFourSideValue(b, RADIUS_CORNER_KEYS[side], v),
+            hasOverride: bpKeysOverridden(sp.bp, Object.values(RADIUS_CORNER_KEYS)),
+            onToggleOverride: () =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, Object.values(RADIUS_CORNER_KEYS));
+              }),
+            ...langOverrideProps(pathKey(b), Object.values(RADIUS_CORNER_KEYS)),
+          }}
+          margin={{
+            labelKey: "designer-f-marginy",
+            linked: linkedMargin,
+            onToggleLink: () => setLinkedMargin((v) => !v),
+            getSide: (side) => fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),
+            setSide: (side, v) => setFourSideValue(b, MARGIN_SIDE_KEYS[side], v),
+            hasOverride: bpKeysOverridden(sp.bp, Object.values(MARGIN_SIDE_KEYS)),
+            onToggleOverride: () =>
+              mutate((bs) => {
+                const props = bs[b].props as unknown as SectionProps;
+                props.bp = toggleBpKeys(props.bp, Object.values(MARGIN_SIDE_KEYS));
+              }),
+            ...langOverrideProps(pathKey(b), Object.values(MARGIN_SIDE_KEYS)),
+          }}
           bp={bp}
           t={t}
         />
@@ -701,57 +823,49 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
             }
           />
         </label>
-        <FourSideControl
-          labelKey="designer-s-padding"
-          icon={Frame}
-          linked={linkedPadding}
-          onToggleLink={() => setLinkedPadding((v) => !v)}
-          getSide={(side) => sideValue(col.props, col.bp, PADDING_SIDE_KEYS[side], "padding")}
-          setSide={(side, v) => setColSideValue(b, r, c, PADDING_SIDE_KEYS[side], v)}
-          hasOverride={bpKeysOverridden(col.bp, Object.values(PADDING_SIDE_KEYS))}
-          onToggleOverride={() =>
-            mutate((bs) => {
-              const target = section(bs, b).rows[r].columns[c];
-              target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
-            })
-          }
-          {...langOverrideProps(pathKey(b, r, c), Object.values(PADDING_SIDE_KEYS))}
-          bp={bp}
-          t={t}
-        />
-        <FourSideControl
-          labelKey="designer-f-radius"
-          icon={SquareDashedBottom}
-          linked={linkedRadius}
-          onToggleLink={() => setLinkedRadius((v) => !v)}
-          getSide={(side) => sideValue(col.props, col.bp, RADIUS_CORNER_KEYS[side], "radius")}
-          setSide={(side, v) => setColSideValue(b, r, c, RADIUS_CORNER_KEYS[side], v)}
-          hasOverride={bpKeysOverridden(col.bp, Object.values(RADIUS_CORNER_KEYS))}
-          onToggleOverride={() =>
-            mutate((bs) => {
-              const target = section(bs, b).rows[r].columns[c];
-              target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
-            })
-          }
-          {...langOverrideProps(pathKey(b, r, c), Object.values(RADIUS_CORNER_KEYS))}
-          bp={bp}
-          t={t}
-        />
-        <FourSideControl
-          labelKey="designer-f-marginy"
-          icon={Frame}
-          linked={linkedMargin}
-          onToggleLink={() => setLinkedMargin((v) => !v)}
-          getSide={(side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
-          setSide={(side, v) => setColSideValue(b, r, c, MARGIN_SIDE_KEYS[side], v)}
-          hasOverride={bpKeysOverridden(col.bp, Object.values(MARGIN_SIDE_KEYS))}
-          onToggleOverride={() =>
-            mutate((bs) => {
-              const target = section(bs, b).rows[r].columns[c];
-              target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
-            })
-          }
-          {...langOverrideProps(pathKey(b, r, c), Object.values(MARGIN_SIDE_KEYS))}
+        <BoxModel
+          padding={{
+            labelKey: "designer-s-padding",
+            linked: linkedPadding,
+            onToggleLink: () => setLinkedPadding((v) => !v),
+            getSide: (side) => sideValue(col.props, col.bp, PADDING_SIDE_KEYS[side], "padding"),
+            setSide: (side, v) => setColSideValue(b, r, c, PADDING_SIDE_KEYS[side], v),
+            hasOverride: bpKeysOverridden(col.bp, Object.values(PADDING_SIDE_KEYS)),
+            onToggleOverride: () =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
+              }),
+            ...langOverrideProps(pathKey(b, r, c), Object.values(PADDING_SIDE_KEYS)),
+          }}
+          radius={{
+            labelKey: "designer-f-radius",
+            linked: linkedRadius,
+            onToggleLink: () => setLinkedRadius((v) => !v),
+            getSide: (side) => sideValue(col.props, col.bp, RADIUS_CORNER_KEYS[side], "radius"),
+            setSide: (side, v) => setColSideValue(b, r, c, RADIUS_CORNER_KEYS[side], v),
+            hasOverride: bpKeysOverridden(col.bp, Object.values(RADIUS_CORNER_KEYS)),
+            onToggleOverride: () =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
+              }),
+            ...langOverrideProps(pathKey(b, r, c), Object.values(RADIUS_CORNER_KEYS)),
+          }}
+          margin={{
+            labelKey: "designer-f-marginy",
+            linked: linkedMargin,
+            onToggleLink: () => setLinkedMargin((v) => !v),
+            getSide: (side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),
+            setSide: (side, v) => setColSideValue(b, r, c, MARGIN_SIDE_KEYS[side], v),
+            hasOverride: bpKeysOverridden(col.bp, Object.values(MARGIN_SIDE_KEYS)),
+            onToggleOverride: () =>
+              mutate((bs) => {
+                const target = section(bs, b).rows[r].columns[c];
+                target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
+              }),
+            ...langOverrideProps(pathKey(b, r, c), Object.values(MARGIN_SIDE_KEYS)),
+          }}
           bp={bp}
           t={t}
         />
@@ -997,41 +1111,38 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
                     </div>
                   )}
                 </div>
-                <FourSideControl
-                  labelKey="designer-s-padding"
-                  icon={Frame}
-                  linked={linkedPadding}
-                  onToggleLink={() => setLinkedPadding((v) => !v)}
-                  getSide={(side) => sideValue(childEl.props, childEl.bp, PADDING_SIDE_KEYS[side], "padding")}
-                  setSide={(side, v) => childSetValue(PADDING_SIDE_KEYS[side], v)}
-                  hasOverride={bpKeysOverridden(childEl.bp, Object.values(PADDING_SIDE_KEYS))}
-                  onToggleOverride={() => childToggleOverride(Object.values(PADDING_SIDE_KEYS))}
-                  bp={bp}
-                  t={t}
-                />
-                {(childEl.type === "image" || childEl.type === "embed" || childEl.type === "gallery") && (
-                  <FourSideControl
-                    labelKey="designer-f-radius"
-                    icon={SquareDashedBottom}
-                    linked={linkedRadius}
-                    onToggleLink={() => setLinkedRadius((v) => !v)}
-                    getSide={(side) => sideValue(childEl.props, childEl.bp, RADIUS_CORNER_KEYS[side], "radius")}
-                    setSide={(side, v) => childSetValue(RADIUS_CORNER_KEYS[side], v)}
-                    hasOverride={bpKeysOverridden(childEl.bp, Object.values(RADIUS_CORNER_KEYS))}
-                    onToggleOverride={() => childToggleOverride(Object.values(RADIUS_CORNER_KEYS))}
-                    bp={bp}
-                    t={t}
-                  />
-                )}
-                <FourSideControl
-                  labelKey="designer-f-marginy"
-                  icon={Frame}
-                  linked={linkedMargin}
-                  onToggleLink={() => setLinkedMargin((v) => !v)}
-                  getSide={(side) => sideValue(childEl.props, childEl.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
-                  setSide={(side, v) => childSetValue(MARGIN_SIDE_KEYS[side], v)}
-                  hasOverride={bpKeysOverridden(childEl.bp, Object.values(MARGIN_SIDE_KEYS))}
-                  onToggleOverride={() => childToggleOverride(Object.values(MARGIN_SIDE_KEYS))}
+                <BoxModel
+                  padding={{
+                    labelKey: "designer-s-padding",
+                    linked: linkedPadding,
+                    onToggleLink: () => setLinkedPadding((v) => !v),
+                    getSide: (side) => sideValue(childEl.props, childEl.bp, PADDING_SIDE_KEYS[side], "padding"),
+                    setSide: (side, v) => childSetValue(PADDING_SIDE_KEYS[side], v),
+                    hasOverride: bpKeysOverridden(childEl.bp, Object.values(PADDING_SIDE_KEYS)),
+                    onToggleOverride: () => childToggleOverride(Object.values(PADDING_SIDE_KEYS)),
+                  }}
+                  radius={
+                    childEl.type === "image" || childEl.type === "embed" || childEl.type === "gallery"
+                      ? {
+                          labelKey: "designer-f-radius",
+                          linked: linkedRadius,
+                          onToggleLink: () => setLinkedRadius((v) => !v),
+                          getSide: (side) => sideValue(childEl.props, childEl.bp, RADIUS_CORNER_KEYS[side], "radius"),
+                          setSide: (side, v) => childSetValue(RADIUS_CORNER_KEYS[side], v),
+                          hasOverride: bpKeysOverridden(childEl.bp, Object.values(RADIUS_CORNER_KEYS)),
+                          onToggleOverride: () => childToggleOverride(Object.values(RADIUS_CORNER_KEYS)),
+                        }
+                      : undefined
+                  }
+                  margin={{
+                    labelKey: "designer-f-marginy",
+                    linked: linkedMargin,
+                    onToggleLink: () => setLinkedMargin((v) => !v),
+                    getSide: (side) => sideValue(childEl.props, childEl.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),
+                    setSide: (side, v) => childSetValue(MARGIN_SIDE_KEYS[side], v),
+                    hasOverride: bpKeysOverridden(childEl.bp, Object.values(MARGIN_SIDE_KEYS)),
+                    onToggleOverride: () => childToggleOverride(Object.values(MARGIN_SIDE_KEYS)),
+                  }}
                   bp={bp}
                   t={t}
                 />
@@ -1158,59 +1269,53 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
         )}
         {(!hasContentFields || inspectorTab === "style") && (
           <>
-            <FourSideControl
-              labelKey="designer-s-padding"
-              icon={Frame}
-              linked={linkedPadding}
-              onToggleLink={() => setLinkedPadding((v) => !v)}
-              getSide={(side) => sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding")}
-              setSide={(side, v) => setElSideValue(b, r, c, e, PADDING_SIDE_KEYS[side], v)}
-              hasOverride={bpKeysOverridden(el.bp, Object.values(PADDING_SIDE_KEYS))}
-              onToggleOverride={() =>
-                mutate((bs) => {
-                  const target = section(bs, b).rows[r].columns[c].elements[e];
-                  target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
-                })
-              }
-              {...langOverrideProps(pathKey(b, r, c, e), Object.values(PADDING_SIDE_KEYS))}
-              bp={bp}
-              t={t}
-            />
-            {(el.type === "image" || el.type === "embed" || el.type === "gallery") && (
-              <FourSideControl
-                labelKey="designer-f-radius"
-                icon={SquareDashedBottom}
-                linked={linkedRadius}
-                onToggleLink={() => setLinkedRadius((v) => !v)}
-                getSide={(side) => sideValue(el.props, el.bp, RADIUS_CORNER_KEYS[side], "radius")}
-                setSide={(side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v)}
-                hasOverride={bpKeysOverridden(el.bp, Object.values(RADIUS_CORNER_KEYS))}
-                onToggleOverride={() =>
+            <BoxModel
+              padding={{
+                labelKey: "designer-s-padding",
+                linked: linkedPadding,
+                onToggleLink: () => setLinkedPadding((v) => !v),
+                getSide: (side) => sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding"),
+                setSide: (side, v) => setElSideValue(b, r, c, e, PADDING_SIDE_KEYS[side], v),
+                hasOverride: bpKeysOverridden(el.bp, Object.values(PADDING_SIDE_KEYS)),
+                onToggleOverride: () =>
                   mutate((bs) => {
                     const target = section(bs, b).rows[r].columns[c].elements[e];
-                    target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
-                  })
-                }
-                {...langOverrideProps(pathKey(b, r, c, e), Object.values(RADIUS_CORNER_KEYS))}
-                bp={bp}
-                t={t}
-              />
-            )}
-            <FourSideControl
-              labelKey="designer-f-marginy"
-              icon={Frame}
-              linked={linkedMargin}
-              onToggleLink={() => setLinkedMargin((v) => !v)}
-              getSide={(side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side])}
-              setSide={(side, v) => setElSideValue(b, r, c, e, MARGIN_SIDE_KEYS[side], v)}
-              hasOverride={bpKeysOverridden(el.bp, Object.values(MARGIN_SIDE_KEYS))}
-              onToggleOverride={() =>
-                mutate((bs) => {
-                  const target = section(bs, b).rows[r].columns[c].elements[e];
-                  target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
-                })
+                    target.bp = toggleBpKeys(target.bp, Object.values(PADDING_SIDE_KEYS));
+                  }),
+                ...langOverrideProps(pathKey(b, r, c, e), Object.values(PADDING_SIDE_KEYS)),
+              }}
+              radius={
+                el.type === "image" || el.type === "embed" || el.type === "gallery"
+                  ? {
+                      labelKey: "designer-f-radius",
+                      linked: linkedRadius,
+                      onToggleLink: () => setLinkedRadius((v) => !v),
+                      getSide: (side) => sideValue(el.props, el.bp, RADIUS_CORNER_KEYS[side], "radius"),
+                      setSide: (side, v) => setElSideValue(b, r, c, e, RADIUS_CORNER_KEYS[side], v),
+                      hasOverride: bpKeysOverridden(el.bp, Object.values(RADIUS_CORNER_KEYS)),
+                      onToggleOverride: () =>
+                        mutate((bs) => {
+                          const target = section(bs, b).rows[r].columns[c].elements[e];
+                          target.bp = toggleBpKeys(target.bp, Object.values(RADIUS_CORNER_KEYS));
+                        }),
+                      ...langOverrideProps(pathKey(b, r, c, e), Object.values(RADIUS_CORNER_KEYS)),
+                    }
+                  : undefined
               }
-              {...langOverrideProps(pathKey(b, r, c, e), Object.values(MARGIN_SIDE_KEYS))}
+              margin={{
+                labelKey: "designer-f-marginy",
+                linked: linkedMargin,
+                onToggleLink: () => setLinkedMargin((v) => !v),
+                getSide: (side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),
+                setSide: (side, v) => setElSideValue(b, r, c, e, MARGIN_SIDE_KEYS[side], v),
+                hasOverride: bpKeysOverridden(el.bp, Object.values(MARGIN_SIDE_KEYS)),
+                onToggleOverride: () =>
+                  mutate((bs) => {
+                    const target = section(bs, b).rows[r].columns[c].elements[e];
+                    target.bp = toggleBpKeys(target.bp, Object.values(MARGIN_SIDE_KEYS));
+                  }),
+                ...langOverrideProps(pathKey(b, r, c, e), Object.values(MARGIN_SIDE_KEYS)),
+              }}
               bp={bp}
               t={t}
             />
