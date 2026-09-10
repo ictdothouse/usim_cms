@@ -98,6 +98,11 @@ export interface DesignerCtx {
   sliderInnerEditing: Record<string, boolean>;
   setSliderInnerEditing: (v: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
+  // Opens the shared MediaPickerModal (already-uploaded media library, not
+  // just "type a URL or upload a new file") — the callback receives the
+  // chosen file's public URL. Used by any "image" FieldKind control that
+  // wants a "browse library" option alongside its existing upload button.
+  openMediaPicker: (onSelect: (url: string) => void) => void;
   availableMenus: api.Menu[];
   availableCategories: api.Category[];
 

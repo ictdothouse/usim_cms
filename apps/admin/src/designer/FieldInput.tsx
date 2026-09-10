@@ -77,6 +77,7 @@ export interface FieldInputProps {
   bp: Bp;
   t: (k: Key) => string;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
+  openMediaPicker: (onSelect: (url: string) => void) => void;
   bpGetValue: (
     base: string | undefined,
     overrides: Record<string, string> | undefined,
@@ -109,6 +110,7 @@ export function FieldInput({
   bp,
   t,
   uploadImage,
+  openMediaPicker,
   bpGetValue,
   bpKeysOverridden,
   toggleBpKeys,
@@ -139,6 +141,7 @@ export function FieldInput({
     bp,
     t,
     uploadImage,
+    openMediaPicker,
     bpGetValue,
     bpKeysOverridden,
     toggleBpKeys,
@@ -252,6 +255,13 @@ export function FieldInput({
               }}
             />
           </label>
+          <button
+            type="button"
+            onClick={() => openMediaPicker(onChange)}
+            className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+          >
+            {t("designer-media-browse")}
+          </button>
           {/* Theme Settings' Branding logo/favicon (site_theme.settings) are
               just uploaded media URLs — reusing them here is a one-click copy
               into this element's own src, not a live binding, matching how
@@ -686,12 +696,19 @@ export function FieldInput({
                     }}
                   />
                 </label>
+                <button
+                  type="button"
+                  onClick={() => openMediaPicker((v) => patchSlide(i, { imageUrl: v }))}
+                  className="shrink-0 text-[10px] font-semibold text-accent"
+                >
+                  {t("designer-media-browse")}
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <label className="flex w-fit items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-bgcolor")}>
                   <input
                     type="color"
-                    value={s.bgColor || "#000000"}
+                    value={s.bgColor || "#ffffff"}
                     onChange={(e) => patchSlide(i, { bgColor: e.target.value })}
                     className="h-6 w-8 cursor-pointer rounded border border-line/30"
                   />
@@ -717,33 +734,37 @@ export function FieldInput({
                   </select>
                 )}
               </div>
-              <div className="flex gap-2">
-                <select
-                  className={`${base} w-1/2`}
-                  value={s.textPosition}
-                  onChange={(e) => patchSlide(i, { textPosition: e.target.value as SlideItem["textPosition"] })}
-                  title={t("designer-f-slider-textposition")}
-                >
-                  {(["left", "center", "right"] as const).map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="color"
-                  value={s.overlayColor || "#000000"}
-                  onChange={(e) => patchSlide(i, { overlayColor: e.target.value })}
-                  title={t("designer-f-slider-overlaycolor")}
-                  className="h-7 w-9 shrink-0 cursor-pointer rounded border border-line/30"
-                />
-                <BufferedInput
-                  type="number"
-                  className={`${base} w-1/2`}
-                  value={s.overlayOpacity}
-                  placeholder={t("designer-f-slider-overlayopacity")}
-                  onCommit={(v) => patchSlide(i, { overlayOpacity: v })}
-                />
+              <select
+                className={base}
+                value={s.textPosition}
+                onChange={(e) => patchSlide(i, { textPosition: e.target.value as SlideItem["textPosition"] })}
+                title={t("designer-f-slider-textposition")}
+              >
+                {(["left", "center", "right"] as const).map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-2">
+                <label className="flex w-fit items-center gap-1 text-[10px] text-sub">
+                  <input
+                    type="color"
+                    value={s.overlayColor || "#000000"}
+                    onChange={(e) => patchSlide(i, { overlayColor: e.target.value })}
+                    className="h-7 w-9 shrink-0 cursor-pointer rounded border border-line/30"
+                  />
+                  {t("designer-f-slider-overlaycolor")}
+                </label>
+                <label className="flex flex-1 items-center gap-1 text-[10px] text-sub">
+                  {t("designer-f-slider-overlayopacity")}
+                  <BufferedInput
+                    type="number"
+                    className={`${base} flex-1`}
+                    value={s.overlayOpacity}
+                    onCommit={(v) => patchSlide(i, { overlayOpacity: v })}
+                  />
+                </label>
               </div>
               {/* This slide's own mini-canvas content — nothing by default,
                   just Text/Button/Image/Row add buttons, matching how
@@ -806,13 +827,21 @@ export function FieldInput({
                   ))
                 )}
                 <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
-                  {(["text", "button", "image"] as const).map((t2) => (
+                  {(["heading", "text", "button", "image"] as const).map((t2) => (
                     <button
                       key={t2}
                       onClick={() => replaceSlide(i, addSlideElement(s, t2, { ...ELS[t2].defaults }))}
                       className="text-[10px] font-semibold text-accent"
                     >
-                      {t(t2 === "text" ? "designer-slide-add-text" : t2 === "button" ? "designer-slide-add-button" : "designer-slide-add-image")}
+                      {t(
+                        t2 === "heading"
+                          ? "designer-slide-add-heading"
+                          : t2 === "text"
+                            ? "designer-slide-add-text"
+                            : t2 === "button"
+                              ? "designer-slide-add-button"
+                              : "designer-slide-add-image",
+                      )}
                     </button>
                   ))}
                   <button onClick={() => replaceSlide(i, addSlideRow(s))} className="text-[10px] font-semibold text-accent">

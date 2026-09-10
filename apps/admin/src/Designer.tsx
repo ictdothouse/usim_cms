@@ -160,6 +160,7 @@ import { ElPreview } from "./designer/ElPreview";
 import { ELS } from "./designer/elements";
 import { ICONS } from "./designer/icons";
 import { BASE_LANG, type DesignerCtx } from "./designer/context";
+import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -2544,6 +2545,16 @@ export default function Designer({
   }
 
   // ---------- inspector ----------
+  // Media library picker (docs/SliderProblem.pdf #3 — an image field should
+  // let an author pick an already-uploaded file, not just paste a URL or
+  // upload a fresh one) — holds the pending onSelect callback for whichever
+  // field opened it; reuses the same MediaPickerModal PostEditorPage's own
+  // feature-image picker already renders.
+  const [mediaPickerCallback, setMediaPickerCallback] = useState<((url: string) => void) | null>(null);
+  function openMediaPicker(onSelect: (url: string) => void) {
+    setMediaPickerCallback(() => onSelect);
+  }
+
   async function uploadImage(file: File, setValue: (v: string) => void) {
     setUploading(true);
     try {
@@ -2716,13 +2727,26 @@ export default function Designer({
     }
     if (sel.length === 4) {
       const [b, r, c, e] = sel;
+      // Slider/Banner bundles ALL its real content+style inside one "slides"
+      // JSON blob, which styleCopy/CONTENT_KEYS treats wholesale as content
+      // (see docs/SliderProblem.pdf #4) — copy-style/paste-style would only
+      // ever carry the slider's few top-level settings (nav/dots/transition/
+      // height) across, silently doing nothing to what an author actually
+      // means by "style" here (per-slide colors/images/text). Hidden instead
+      // of shipped half-working, per explicit user call: "tak perlu copy
+      // style" for slider.
+      const elType = (blocks[b].props as unknown as SectionProps).rows[r].columns[c].elements[e].type;
       return (
         <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
           <button onClick={() => duplicateElement(b, r, c, e)} className={iconBtn} title={t("designer-duplicate")}><Copy className="h-3.5 w-3.5" /></button>
           <button onClick={() => copyElement(b, r, c, e)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
           <button onClick={() => pasteElement(b, r, c, e)} disabled={!clipHas("element")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
-          <button onClick={() => copyStyleElement(b, r, c, e)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
-          <button onClick={() => pasteStyleElement(b, r, c, e)} disabled={!styleHas("element")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+          {elType !== "slider" && (
+            <>
+              <button onClick={() => copyStyleElement(b, r, c, e)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
+              <button onClick={() => pasteStyleElement(b, r, c, e)} disabled={!styleHas("element")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
+            </>
+          )}
           <button onClick={() => deleteElement(b, r, c, e)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
         </div>
       );
@@ -2743,7 +2767,7 @@ export default function Designer({
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
-    sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing, uploadImage,
+    sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing, uploadImage, openMediaPicker,
     availableMenus, availableCategories,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
@@ -3906,6 +3930,18 @@ export default function Designer({
         </aside>
       </div>
 
+      {mediaPickerCallback && (
+        <MediaPickerModal
+          tenantHost={tenantHost}
+          token={token}
+          onSelect={(url) => {
+            mediaPickerCallback(url);
+            setMediaPickerCallback(null);
+          }}
+          onClose={() => setMediaPickerCallback(null)}
+        />
+      )}
+
       {previewModal &&
         (() => {
           const DEVICE_WIDTH: Record<"desktop" | "tablet" | "mobile", string> = {
@@ -4290,8 +4326,12 @@ export default function Designer({
                 {item(<Copy className="h-3.5 w-3.5" />, t("designer-duplicate"), () => duplicateElement(b, r, c, e))}
                 {item(<Clipboard className="h-3.5 w-3.5" />, t("designer-copy"), () => copyElement(b, r, c, e))}
                 {item(<ClipboardPaste className="h-3.5 w-3.5" />, t("designer-paste"), () => pasteElement(b, r, c, e), !clipHas("element"))}
-                {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () => copyStyleElement(b, r, c, e))}
-                {item(<Paintbrush className="h-3.5 w-3.5 opacity-50" />, t("designer-paste-style"), () => pasteStyleElement(b, r, c, e), !styleHas("element"))}
+                {el.type !== "slider" && (
+                  <>
+                    {item(<Paintbrush className="h-3.5 w-3.5" />, t("designer-copy-style"), () => copyStyleElement(b, r, c, e))}
+                    {item(<Paintbrush className="h-3.5 w-3.5 opacity-50" />, t("designer-paste-style"), () => pasteStyleElement(b, r, c, e), !styleHas("element"))}
+                  </>
+                )}
                 {divider}
                 {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b, r, c, e]))}
                 {divider}
