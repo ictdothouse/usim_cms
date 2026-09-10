@@ -104,11 +104,30 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   pointer listeners — `ElPreview` holds no hooks of its own and is called as a plain function, so this
   can't be a `useState`/`useRef`-driven drag the way a real component's would be) — resize stays
   numeric-only (Width/Height fields), no corner-drag handle, to avoid resurrecting the old smart-guide
-  system's snap/edge-detection complexity for a still-narrow need. The drag's percentage math and the
-  site's own CSS both resolve against `.ds-slide-canvas`/`.ds-slide-content` (the same box, already
-  `position:relative` for its z-index) — NOT the outer slide/`.ds-slide`, which is also
-  `position:relative` and would silently give a different containing block than the one the math assumes
-  if the class ever moved. **Still admin-canvas-preview-only** (real scope reduction that remains):
+  system's snap/edge-detection complexity for a still-narrow need. **Coordinate basis fixed
+  (2026-09-11)**: the drag's percentage math and the site's own CSS both resolve against the FULL
+  slide box (`.ds-slide-box` in `ElPreview.tsx`, `.ds-slide` in `SectionBlock.astro` — both already
+  `position:relative`), NOT the narrower `.ds-slide-canvas`/`.ds-slide-content` text column (max-width
+  36rem, centered) nested inside it. It used to be the other way round — both files' comments said so
+  explicitly — which made the "safe area" overlay hug a box far smaller than the actual slide and made
+  `x:90%` land only 90% across that skinny column instead of 90% across the real slide. Fixed by
+  dropping `position:relative` from `.ds-slide-canvas`/`.ds-slide-content` (both stay real, non-absolute
+  flex items of the outer box, so `z-index` alone still keeps them painting above the slide's own
+  overlay — flex items honor z-index at `position:static` too) and pointing `startFreeElDrag`'s
+  `closest()` at the new `.ds-slide-box` class instead. Existing saved `x`/`y` values were NOT migrated
+  (pre-launch, no real content yet per user's own call) — an already-positioned free element may need a
+  quick re-drag after this ships. The safe-area dashed-border guide (`ElPreview.tsx`'s slider case) now
+  insets 6% from the full slide's edges instead of hugging the old narrow box exactly — a real margin
+  guide, matching how "safe area" usually means top/left/right/bottom clearance, not "the box's own
+  edge." No frontend-visible safe-area overlay exists (editor-only aid); the CSS fix alone keeps
+  admin-canvas and published-site positioning in sync. Also fixed same day: a free-positioned
+  **button**'s selection/resize box (`posWidth`/`posHeight`) visibly grew on resize but the button pill
+  itself stayed its small intrinsic size top-left, dead space around it — `ElPreview.tsx`'s "button"
+  case already told the inner `<span>` to fill 100% width/height, but that span's own parent (`<div
+  style={align}>`) had no explicit height, so the span's `height:100%` resolved against an auto-height
+  box (i.e. did nothing); now that wrapper div also gets `width`/`height:100%` when free-positioned, so
+  it actually stretches to match the resized box like the real site's own render already did.
+  **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;
   only margin/padding/position get a real `bpStyleRules` CSS rule (`SectionBlock.astro`'s
