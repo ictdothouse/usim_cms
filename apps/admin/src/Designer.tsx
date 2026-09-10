@@ -1495,6 +1495,10 @@ export default function Designer({
         // and must be a no-op, never a guess at which branch to take.
         if (from.length !== to.length) return;
         if (from.length === 4) {
+          if (isSectionLocked(from[0]) || isSectionLocked(to[0])) {
+            toast.error(t("designer-section-locked-toast"));
+            return;
+          }
           mutate((bs) => {
             const [tb, tr, tc, te] = to;
             let idx = te + (e.data.position === "after" ? 1 : 0);
@@ -1510,6 +1514,10 @@ export default function Designer({
           // grid-template-columns and each column's span are only meaningful
           // there, same restriction the Layers tree's drag-reorder applies.
           if (from[0] !== to[0] || from[1] !== to[1]) return;
+          if (isSectionLocked(from[0])) {
+            toast.error(t("designer-section-locked-toast"));
+            return;
+          }
           let idx = to[2] + (e.data.position === "after" ? 1 : 0);
           if (from[2] < idx) idx--;
           mutate((bs) => moveColumn(bs, from[0], from[1], from[2], idx));
@@ -1703,6 +1711,10 @@ export default function Designer({
         return;
       }
       const b = sel[0];
+      if (isSectionLocked(b)) {
+        toast.error(t("designer-section-locked-toast"));
+        return;
+      }
       const index = sel.length >= 2 ? sel[1] + 1 : section(blocks, b).rows.length;
       mutate((bs) => section(bs, b).rows.splice(index, 0, clone(value) as Row));
     } else if (kind === "column" || kind === "element") {
@@ -1711,6 +1723,10 @@ export default function Designer({
         return;
       }
       const [b, r, c, e] = sel;
+      if (isSectionLocked(b)) {
+        toast.error(t("designer-section-locked-toast"));
+        return;
+      }
       if (kind === "column") {
         mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(value) as Col));
       } else {
@@ -1867,6 +1883,10 @@ export default function Designer({
   }
 
   function duplicateColumn(b: number, r: number, c: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(section(bs, b).rows[r].columns[c])));
     bumpStructural();
   }
@@ -1874,6 +1894,10 @@ export default function Designer({
     clipCopy("column", section(blocks, b).rows[r].columns[c]);
   }
   function pasteColumn(b: number, r: number, c: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const data = clipRead<Col>("column");
     if (data) {
       mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
@@ -1884,6 +1908,10 @@ export default function Designer({
     styleCopy("column", section(blocks, b).rows[r].columns[c].props ?? {});
   }
   function pasteStyleColumn(b: number, r: number, c: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const style = styleRead("column");
     if (style)
       mutate((bs) => {
@@ -1892,6 +1920,10 @@ export default function Designer({
       });
   }
   function deleteColumn(b: number, r: number, c: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => {
       const row = section(bs, b).rows[r];
       row.columns.splice(c, 1);
@@ -1906,6 +1938,10 @@ export default function Designer({
   // declaration (hoisted) shadow the import for the whole component body,
   // breaking the imported moveColumn's real call sites below.
   function nudgeColumn(b: number, r: number, c: number, dir: -1 | 1) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const target = c + dir;
     if (target < 0 || target >= section(blocks, b).rows[r].columns.length) return;
     mutate((bs) => {
@@ -1920,11 +1956,19 @@ export default function Designer({
   // at a time (deleteColumn only cascades to the row once its last column is
   // gone). This is the direct one-click equivalent.
   function deleteRow(b: number, r: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => section(bs, b).rows.splice(r, 1));
     setSel(null);
     bumpStructural();
   }
   function moveRow(b: number, r: number, dir: -1 | 1) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const target = r + dir;
     if (target < 0 || target >= section(blocks, b).rows.length) return;
     mutate((bs) => {
@@ -1935,6 +1979,10 @@ export default function Designer({
     bumpStructural();
   }
   function duplicateRow(b: number, r: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(section(bs, b).rows[r])));
     bumpStructural();
   }
@@ -1942,6 +1990,10 @@ export default function Designer({
     clipCopy("row", section(blocks, b).rows[r]);
   }
   function pasteRow(b: number, r: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const data = clipRead<Row>("row");
     if (data) {
       mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(data)));
@@ -1953,6 +2005,10 @@ export default function Designer({
     styleCopy("row", styleProps as unknown as Record<string, string>);
   }
   function pasteStyleRow(b: number, r: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const style = styleRead("row");
     if (style) mutate((bs) => Object.assign(section(bs, b).rows[r], style));
   }
@@ -1983,6 +2039,10 @@ export default function Designer({
   }
 
   function duplicateElement(b: number, r: number, c: number, e: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => {
       const src = section(bs, b).rows[r].columns[c].elements[e];
       section(bs, b).rows[r].columns[c].elements.splice(e + 1, 0, { ...clone(src), id: uid() });
@@ -1993,6 +2053,10 @@ export default function Designer({
     clipCopy("element", section(blocks, b).rows[r].columns[c].elements[e]);
   }
   function pasteElement(b: number, r: number, c: number, e: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const data = clipRead<El>("element");
     if (data) {
       mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
@@ -2004,6 +2068,10 @@ export default function Designer({
     styleCopy("element", el.props, el.type);
   }
   function pasteStyleElement(b: number, r: number, c: number, e: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const style = styleRead("element");
     if (style)
       mutate((bs) => {
@@ -2012,6 +2080,10 @@ export default function Designer({
       });
   }
   function deleteElement(b: number, r: number, c: number, e: number) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => {
       removeAt(bs, [b, r, c, e]);
     });
@@ -2019,6 +2091,10 @@ export default function Designer({
     bumpStructural();
   }
   function moveElement(b: number, r: number, c: number, e: number, dir: -1 | 1) {
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     const target = e + dir;
     if (target < 0 || target >= section(blocks, b).rows[r].columns[c].elements.length) return;
     mutate((bs) => {
@@ -2038,6 +2114,10 @@ export default function Designer({
     // the "move" (element) branch below, which would destructure this payload's
     // section/column path as if it were an element's [b, r, c, e] path.
     if (!d || d.kind === "tree-reorder") return;
+    if (isSectionLocked(colPath[0]) || (d.kind !== "new" && isSectionLocked(d.path[0]))) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
     mutate((bs) => {
       if (d.kind === "new") {
         insertEl(bs, colPath, newEl(d.type), index);
@@ -2357,8 +2437,15 @@ export default function Designer({
         const to = hint.pos === "before" ? path[path.length - 1] : path[path.length - 1] + 1;
         const from = d.path[d.path.length - 1];
         const adjustedTo = from < to ? to - 1 : to;
-        if (kind === "section") mutate((bs) => moveSection(bs, from, adjustedTo));
-        else mutate((bs) => moveColumn(bs, path[0], path[1], from, adjustedTo));
+        if (kind === "section") {
+          mutate((bs) => moveSection(bs, from, adjustedTo));
+        } else {
+          if (isSectionLocked(path[0])) {
+            toast.error(t("designer-section-locked-toast"));
+            return;
+          }
+          mutate((bs) => moveColumn(bs, path[0], path[1], from, adjustedTo));
+        }
       },
     };
   }
