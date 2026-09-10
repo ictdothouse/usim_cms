@@ -2190,7 +2190,16 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     inset: 0;
   }
   .ds-slide-content {
-    position: relative;
+    /* No position:relative here on purpose (used to have one) — a free-
+       positioned nested element's top/left % must resolve against the
+       FULL slide (.ds-slide, already position:relative), not this box's
+       own narrow 36rem column, or "drag to 90%" would only reach 90%
+       across a skinny centered box instead of 90% across the actual
+       slide. This box is still a real (non-absolute) flex item of
+       .ds-slide, so z-index alone keeps it painting above
+       .ds-slide-overlay — flex items honor z-index even at
+       position:static, so dropping position:relative loses nothing here
+       except the positioning context we don't want. */
     z-index: 1;
     /* width matters, it isn't redundant with max-width: as a flex item of
        .ds-slide this box would otherwise be shrink-to-fit and hug its own

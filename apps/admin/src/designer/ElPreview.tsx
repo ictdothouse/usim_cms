@@ -48,9 +48,15 @@ const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionPro
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
 // See its one call site (top of ElPreview) for why this exists.
-// Slide-nested free-position drag: percentage math against the slide's own
-// canvas box (`.ds-slide-canvas`, the "slider" case's outer position:relative
-// div). Plain imperative pointer listeners, not a hook — ElPreview holds no
+// Slide-nested free-position drag: percentage math against the FULL slide
+// box (`.ds-slide-box`, the "slider" case's outer position:relative div) —
+// NOT `.ds-slide-canvas` (the narrower 36rem text column nested inside it).
+// A free child's own `position:absolute` (see the childIsFree style branch)
+// makes its offsetLeft/offsetTop already resolve against `.ds-slide-box`
+// (the nearest positioned ancestor, since `.ds-slide-canvas` deliberately
+// lost `position:relative` — see that div's own comment), so `container`
+// here must match or the % this computes won't match what CSS renders.
+// Plain imperative pointer listeners, not a hook — ElPreview holds no
 // hooks of its own (see file header) since it's called as a plain function,
 // including recursively for nested slide elements.
 function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: number) => void) {
@@ -64,7 +70,7 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
   // dragging as one ghost image instead of just this one free-positioned
   // child moving).
   ev.preventDefault();
-  const container = (ev.currentTarget as HTMLElement).closest(".ds-slide-canvas") as HTMLElement | null;
+  const container = (ev.currentTarget as HTMLElement).closest(".ds-slide-box") as HTMLElement | null;
   if (!container) return;
   const rect = container.getBoundingClientRect();
   const target = ev.currentTarget as HTMLElement;
@@ -76,7 +82,7 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
   // past the slide's own edge (e.g. a badge half-hanging off a photo) —
   // the Inspector's own X/Y inputs already allowed typing an out-of-range
   // number, this just gives drag the same freedom. The "safe area" overlay
-  // (this file's slider case, near `.ds-slide-canvas`) is the actual
+  // (this file's slider case, near `.ds-slide-box`) is the actual
   // guardrail: a visual warning, not a hard limit.
   function move(e: PointerEvent) {
     const xPct = ((startLeft + (e.clientX - startX)) / rect.width) * 100;
@@ -414,8 +420,18 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
               ...(p.posHeight ? { height: "100%", display: "flex", alignItems: "center", justifyContent: "center" } : {}),
             }
           : {};
+      // The <span> above fills 100% of THIS div, not of the outer
+      // absolutely-positioned slide wrapper (a separate ancestor, see
+      // ElPreview's "slider" case) — without this, the span's own
+      // height:100% resolves against an auto-height parent (i.e. does
+      // nothing), which is exactly the bug: box grows on resize, pill
+      // stays put top-left with dead space around it.
+      const wrapFill =
+        p.position === "custom"
+          ? { ...(p.posWidth ? { width: "100%" } : {}), ...(p.posHeight ? { height: "100%" } : {}) }
+          : {};
       return (
-        <div style={align}>
+        <div style={{ ...align, ...wrapFill }}>
           <span
             className={`inline-block rounded-full px-5 py-2 text-sm font-semibold ${elHoverClass(p) ?? ""}`}
             style={
@@ -622,7 +638,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             : "#000000";
       return (
         <div
-          className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg`}
+          className={`ds-slide-box relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg`}
           style={{
             height: resolvedHeight || undefined,
             color: slideTextColor,
@@ -667,13 +683,27 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
             const selOutOfBounds = selectedChildFree && (selX < 0 || selX > 100 || selY < 0 || selY > 100);
             return (
               <div
-                className={`ds-slide-canvas relative z-[1] w-full max-w-[36rem] space-y-2 p-6 ${
+                // No `relative` here on purpose — a free-positioned child's
+                // top/left % must resolve against the FULL slide (the outer
+                // div a few lines up, already position:relative), not this
+                // box's own narrow 36rem column, or "drag to 90%" would only
+                // reach 90% across a skinny centered box instead of 90%
+                // across the actual slide. Still a real flex item of that
+                // outer div, so z-[1] alone keeps it painting above the
+                // overlay (flex items honor z-index at position:static too)
+                // — mirrors SectionBlock.astro's own `.ds-slide-content`.
+                className={`ds-slide-canvas z-[1] w-full max-w-[36rem] space-y-2 p-6 ${
                   slide.textPosition === "left" ? "self-start" : slide.textPosition === "right" ? "self-end" : ""
                 }`}
               >
                 {selectedChildFree && (
+                  // Inset by a real margin (not 0) now that this border
+                  // draws against the full slide — a "safe area" that
+                  // exactly hugged the slide's own edge was never actually
+                  // safe (it was also, before this fix, only the narrow
+                  // text column's edge, not the slide's).
                   <div
-                    className={`pointer-events-none absolute inset-0 rounded border-2 border-dashed ${
+                    className={`pointer-events-none absolute inset-[6%] rounded border-2 border-dashed ${
                       selOutOfBounds ? "border-red-500" : "border-white/30"
                     }`}
                   />
