@@ -578,6 +578,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   deliberately narrow the shared set (`infobox`'s `align` offers only `left`/`center`, not the
   3-value global enum), so a blind swap risks silently widening a field's real options; the test
   above already catches the direction that has actually broken production.
+  **`packages/element-style`** (2026-09-10, second shared workspace package alongside
+  `element-schema`) unifies the URL/HTML sanitizer that `designer/style.ts` (`escapeHtml`/
+  `safeHref`) and `apps/frontend/src/components/SectionBlock.astro` (`escapeHtml`/`safeUrl`)
+  had each hand-duplicated — the same regex copy-pasted twice, a real drift risk for
+  security-critical code. Exports just `escapeHtml(s)` and `sanitizeUrl(u): string | null`
+  (control-char stripping + http(s)-only scheme allowlist); each app keeps its own thin
+  call-site wrapper for what happens on an unsafe/empty URL (admin's `safeHref` still falls
+  back to `"#"` for an anchor, frontend's `safeUrl` still returns `undefined` so an
+  `<img>`/`bgImage` can skip rendering) — only the actual validation logic is single-sourced
+  now. Both Dockerfiles copy+build it before their own app build, same pattern as
+  `element-schema` (which already broke this image once from a missing build step — see that
+  package's own Dockerfile comments). Deliberately NOT attempted in the same pass: the CSS
+  style-computation helpers (`elMarginStyle`/`elPaddingStyle`/`typoStyle`/`elBorderShadowStyle`/
+  `elRadius`/`colStyle`, all still hand-duplicated between `style.ts` and `SectionBlock.astro`)
+  — these need real per-target serialization handling (React style objects vs CSS strings,
+  e.g. `typoStyle`'s `font-family` needs quotes only in the CSS-string form) that's a separate,
+  lower-urgency follow-up if this class of drift bug recurs for a style property instead of a
+  sanitizer.
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
