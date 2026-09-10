@@ -333,7 +333,13 @@ Any failure before promote succeeds leaves the previously-live color completely 
   `frontend:4321` names) for anyone running the old-style single-stack setup without
   blue-green. A blue-green/scaled deploy instead passes every live replica's own
   Compose-generated container name (`ucms-green-api-1`, `-2`, ...) — Caddy fans out
-  (round-robins + health-checks) across all of them.
+  (round-robins) across all of them. Each `reverse_proxy` handler also carries a real
+  active `health_checks` block (`/health` for api/frontend, `/` for admin's static SPA,
+  10s interval) — added 2026-09-10, since Docker's own HEALTHCHECK only gates whether a
+  replica is included at PROMOTE time; without Caddy's own active check, a replica that
+  crashed mid-operation (between deploys) kept receiving live traffic until the next
+  deploy overwrote the config. This is the actual "one replica crashing doesn't affect
+  the others" fault isolation, now real at Caddy's live-serving layer too.
 - **Branded uploads, no `api.<domain>` leak** (fix, not part of the original blue-green
   work above): `buildCaddyConfig` now emits TWO routes per tenant — a `{host, path:
   ["/uploads/*"]}` match to the api upstream, listed BEFORE the plain `{host}` match to
