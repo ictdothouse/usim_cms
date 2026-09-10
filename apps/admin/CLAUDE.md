@@ -66,7 +66,31 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   entry, `Inspector.tsx`'s `sel.length === 4` branch shows THAT nested element's own Content/Style
   fields (same `FieldGroups`/`FieldInput` call shape as a normal element) instead of the slider's own,
   writing through `parsers.ts`'s `updateSlideElementProps`/`updateSlideElementBp` (parse `slides` →
-  mutate the nested node → re-stringify). **Follow-up round (same day)** closed most of the original
+  mutate the nested node → re-stringify).
+  **Live Edit reaches into this too (2026-09-11)** — `sliderInnerSel`/`sliderSlideIdx` is now also
+  reachable from a click on the real published/preview page, not just Blocks-mode's own canvas.
+  `SectionBlock.astro`'s `renderSlideEl` threads `slideIdx`/`r`/`c`/`e` through and stamps
+  `data-slide-sel="slideIdx.r.c.e"` on each nested element's own rendered node (the slider element's
+  own `data-designer-path` from the generic per-element wrapper, above, still resolves the slider
+  itself — this is an ADDITIONAL, deeper address, not a replacement). `BaseLayout.astro`'s
+  `designerEdit` click bridge checks for `data-slide-sel` (plus the nearest ancestor's
+  `data-designer-path`) before falling through to its plain `designer:select` path, posting a new
+  `designer:selectSlideEl` message instead; `Designer.tsx`'s postMessage handler resolves the slider
+  element off `blocks[b]` and sets `sel`/`sliderSlideIdx`/`sliderInnerSel` — the SAME state
+  `ElPreview.tsx`'s own click handler already writes, so `Inspector.tsx` needs no changes to show the
+  clicked nested element's real fields. This does NOT touch the "investigated and abandoned" core
+  canvas rewrite above — `sliderInnerSel` was already a self-contained, non-core mechanism, so this
+  was purely a bridge-wiring addition (3 files, no mutation-path changes). Scope: SELECTION only
+  (so an author can click a slide's real heading/text/button in Live Edit and edit its fields in the
+  Inspector, with the real render as truth instead of Blocks-mode's approximation) — structural
+  edits (add/remove/reorder element or row, drag-position, resize) are NOT wired through this bridge
+  and still require Blocks-mode's canvas. Long-term intent: as Live Edit's slide coverage grows, any
+  future slider style/layout feature only ever needs to render correctly once
+  (`SectionBlock.astro`), not twice — see `packages/element-style`'s own paragraph below for the
+  first (sanitizer-only) step in the same direction. Ask the user before extending this further into
+  actual editing/structural operations, since dragging/resizing across an iframe boundary is real,
+  separate engineering work, not attempted here.
+  **Follow-up round (same day)** closed most of the original
   scope reductions above: nested elements now get real padding/margin (`FourSideControl`s in the
   Inspector's inner-selection branch, same as any top-level element) and a real `bp` override — `El.bp`
   was never actually excluded from the type, just unwired for nested content; `childSetValue` in
