@@ -145,27 +145,39 @@ export function buildCaddyConfig(
   // output, so this is the only copy of that setting that actually stays live.
   const encodeHandler = { handler: "encode", encodings: { zstd: {}, gzip: {} }, prefer: ["zstd", "gzip"] };
 
+  // Active health checks on each service's own upstream(s) — without this, a
+  // crashed replica within a scaled/multi-replica service (docker-compose.
+  // release.yml's API_REPLICAS/etc, see scripts/deploy.sh) keeps receiving
+  // round-robin traffic from Caddy until the NEXT deploy overwrites this
+  // config; Docker's own HEALTHCHECK only gates whether a replica is
+  // included when a NEW color is promoted, not live fault isolation for an
+  // already-promoted one. api/frontend already expose /health (docker-
+  // compose.release.yml's own HEALTHCHECK hits the same path); admin is a
+  // static SPA with no dedicated health route (no HEALTHCHECK either), so
+  // "/" (always 200) stands in for it.
+  const healthChecks = (uri: string) => ({ active: { uri, interval: "10s", timeout: "3s" } });
+
   const tenantRoutes = tenants
     .filter((t) => t.active)
     .flatMap((t) => [
       {
         match: [{ host: [t.host], path: ["/uploads/*"] }],
-        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: apiUpstreams }],
+        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: apiUpstreams, health_checks: healthChecks("/health") }],
       },
       {
         match: [{ host: [t.host] }],
-        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: frontendUpstreams }],
+        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: frontendUpstreams, health_checks: healthChecks("/health") }],
       },
     ]);
 
   const staticRoutes = [
     {
       match: [{ host: [ADMIN_DOMAIN] }],
-      handle: [{ handler: "reverse_proxy", upstreams: adminUpstreams }],
+      handle: [{ handler: "reverse_proxy", upstreams: adminUpstreams, health_checks: healthChecks("/") }],
     },
     {
       match: [{ host: [API_DOMAIN] }],
-      handle: [{ handler: "reverse_proxy", upstreams: apiUpstreams }],
+      handle: [{ handler: "reverse_proxy", upstreams: apiUpstreams, health_checks: healthChecks("/health") }],
     },
   ];
 
