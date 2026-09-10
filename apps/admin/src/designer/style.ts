@@ -1,4 +1,6 @@
 import { bestTextColor } from "@/lib/utils";
+import { escapeHtml, sanitizeUrl } from "@ucms/element-style";
+export { escapeHtml };
 
 // Style-computation pure helpers split out of Designer.tsx (Layer 0 of the
 // God Component refactor, see
@@ -188,23 +190,19 @@ export function elRadius(p: Record<string, string>): string {
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
 }
 
-export function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }) as Record<string, string>)[c]);
-}
+// Anchor-specific fallback convention (falls back to "#", never undefined) —
+// the actual scheme/control-char validation now lives once in
+// @ucms/element-style's sanitizeUrl, shared with apps/frontend's own
+// safeUrl (which instead returns undefined so an <img>/bgImage can skip
+// rendering rather than pointing at a broken URL).
 export function safeHref(u: string) {
-  // Browsers discard ASCII control/space chars (0x00-0x20) from anywhere in
-  // a URL before parsing its scheme, not just the ends — a bare .trim()
-  // left "java\tscript:alert(1)" able to slip past the scheme regex below
-  // while still executing as javascript: once rendered. Stripping them from
-  // the whole string (not just trimming) closes that, and also means the
-  // href we actually emit can't still be smuggling one.
-  const v = u.replace(/[\x00-\x20]+/g, "");
-  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : "#";
-  return v;
+  return sanitizeUrl(u) ?? "#";
 }
 // Small inline-markdown subset for heading/text: **bold**, *italic*, [label](url).
-// Duplicated (not shared) in SectionBlock.astro's own renderInline — same
-// convention as this file's PAD/RADIUS tables mirroring the frontend's.
+// renderInline itself is still hand-mirrored in SectionBlock.astro (same
+// convention as this file's PAD/RADIUS tables) — only its underlying
+// escapeHtml/sanitizeUrl now come from @ucms/element-style, not the whole
+// function.
 // ponytail: link regex stops at the first ")" in the URL, so a raw
 // unescaped "(" / ")" inside the URL itself truncates it — fine for normal
 // links/anchors, encode the parens if it ever matters.

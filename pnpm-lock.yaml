@@ -107,6 +107,9 @@ importers:
       '@ucms/element-schema':
         specifier: workspace:*
         version: link:../../packages/element-schema
+      '@ucms/element-style':
+        specifier: workspace:*
+        version: link:../../packages/element-style
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -250,6 +253,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+      '@ucms/element-style':
+        specifier: workspace:*
+        version: link:../../packages/element-style
       astro:
         specifier: ^7.1.1
         version: 7.1.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(@types/node@22.20.1)(ioredis@5.11.1)(jiti@2.7.0)(rollup@4.62.2)(tsx@4.23.0)(yaml@2.9.0)
@@ -274,6 +280,18 @@ importers:
         version: 5.9.3
 
   packages/element-schema:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.9.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.0
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  packages/element-style:
     devDependencies:
       '@types/node':
         specifier: ^22.9.0
