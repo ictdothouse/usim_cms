@@ -27,6 +27,7 @@ import {
   addSlideRow,
   deleteSlideElement,
   deleteSlideRow,
+  applySlidePreset,
 } from "./parsers";
 import { ELS } from "./elements";
 import { LEGACY_SHADOW } from "./style";
@@ -775,7 +776,25 @@ export function FieldInput({
                   without needing to select it first. */}
               <div className="space-y-1 rounded-lg border border-line/20 p-1.5">
                 {s.rows.length === 0 ? (
-                  <p className="px-1 py-2 text-center text-[10px] italic text-sub">{t("designer-slide-empty")}</p>
+                  <div className="space-y-1 px-1 py-2 text-center">
+                    <p className="text-[10px] italic text-sub">{t("designer-slide-empty")}</p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => replaceSlide(i, applySlidePreset(s, "stack"))}
+                        className="rounded border border-accent/40 px-2 py-1 text-[10px] font-semibold text-accent"
+                      >
+                        {t("designer-slide-preset-stack")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => replaceSlide(i, applySlidePreset(s, "split"))}
+                        className="rounded border border-accent/40 px-2 py-1 text-[10px] font-semibold text-accent"
+                      >
+                        {t("designer-slide-preset-split")}
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   s.rows.map((row, r) => (
                     <div key={r} className={s.rows.length > 1 ? "space-y-0.5 rounded border border-line/10 p-1" : "space-y-0.5"}>

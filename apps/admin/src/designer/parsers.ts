@@ -186,6 +186,41 @@ export function addSlideRow(slide: SlideItem): SlideItem {
   return { ...slide, rows: [...slide.rows, { columns: [{ span: 12, elements: [] }] }] };
 }
 
+// Quick-start presets — build a slide's whole rows tree in one click instead
+// of Add Text/Add Button one at a time. Only offered while a slide has no
+// rows yet (see FieldInput.tsx's call site) since both REPLACE rows outright.
+function presetTextStack(align: "left" | "center"): El[] {
+  return [
+    slideEl("heading", { text: "Heading", level: "2", align }),
+    slideEl("heading", { text: "Sub header", level: "4", align }),
+    slideEl("text", { text: "Supporting text goes here.", size: "1rem", align }),
+    slideEl("button", { label: "Button", href: "#", variant: "primary", align }),
+  ];
+}
+
+// Preset "stack": single column, everything centered — Heading + Sub header +
+// Text + Button.
+export function slidePresetStack(): Row[] {
+  return [{ columns: [{ span: 12, elements: presetTextStack("center") }] }];
+}
+
+// Preset "split": 2 columns — the same text stack on the left, an empty Image
+// slot (author uploads their own) on the right.
+export function slidePresetSplit(): Row[] {
+  return [
+    {
+      columns: [
+        { span: 6, elements: presetTextStack("left") },
+        { span: 6, elements: [slideEl("image", { src: "", alt: "", radius: "", imgWidth: "", align: "left" })] },
+      ],
+    },
+  ];
+}
+
+export function applySlidePreset(slide: SlideItem, kind: "stack" | "split"): SlideItem {
+  return { ...slide, rows: kind === "stack" ? slidePresetStack() : slidePresetSplit() };
+}
+
 // Removes one nested element at (r, c, e) — used by the slides editor's
 // per-layer delete button.
 export function deleteSlideElement(slide: SlideItem, r: number, c: number, e: number): SlideItem {

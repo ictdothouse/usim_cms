@@ -613,7 +613,13 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         ? bestTextColor(slide.bgColor)
         : overlayOpacityFrac > 0.3
           ? bestTextColor(slide.overlayColor)
-          : "#ffffff";
+          // No image either — a blank slide shows through to the canvas's own
+          // light background, so white text there is invisible until hovered/
+          // selected. Only default white when there's an actual (presumed-dark)
+          // photo backdrop with no bgColor/overlay override.
+          : slide.imageUrl
+            ? "#ffffff"
+            : "#000000";
       return (
         <div
           className={`relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg`}
@@ -685,10 +691,17 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                 </div>
               )
             ) : (
-              slide.rows.map((row, r) =>
-                row.columns.map((col, c) => (
-                  <div key={`${r}.${c}`} className="space-y-2">
-                    {col.elements.map((childEl, e) => {
+              slide.rows.map((row, r) => (
+                <div
+                  key={r}
+                  className="grid gap-3"
+                  style={{
+                    gridTemplateColumns: bp === "desktop" ? row.columns.map((c) => `${c.span ?? 1}fr`).join(" ") : "1fr",
+                  }}
+                >
+                  {row.columns.map((col, c) => (
+                    <div key={c} className="space-y-2">
+                      {col.elements.map((childEl, e) => {
                       const selected = innerSel?.r === r && innerSel?.c === c && innerSel?.e === e;
                       const childIsFree = bpGetValue(childEl.props.position, childEl.bp, "position") === "custom";
                       const childTextType = childEl.type === "heading" || childEl.type === "text";
@@ -834,9 +847,10 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                         </div>
                       );
                     })}
-                  </div>
-                )),
-              )
+                    </div>
+                  ))}
+                </div>
+              ))
             )}
               </div>
             );
