@@ -326,6 +326,17 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
 Built in response to a security audit's "wajib diperbaiki" (must-fix) findings — see the audit's own
 callouts before assuming any of this is speculative hardening.
 
+- **Per-tenant request budget (2026-09-11).** `rate-limit.ts`'s `isTenantRateLimited(tenantHost)`, checked
+  in `plugins/tenant.ts`'s shared preHandler hook (so it runs on every public AND protected route, before
+  a tenant DB connection is even acquired) — a fixed 60s window, `TENANT_RATE_LIMIT_PER_MIN` requests
+  (default 1200) per `tenantHost`, returns 429 once exceeded. Deliberately keyed on tenant only, not
+  IP/email — this protects the *other* tenants sharing this single instance from one tenant's spike or
+  attack against ordinary `/api/*` routes, a different problem from login rate limiting below (which
+  protects one account from brute force). Reuses `cache.ts`'s Redis connection (`getRedisClient`) when
+  `REDIS_URL` is set, so the budget is actually shared across blue-green/multi-replica processes; falls
+  back to a per-process in-memory `Map` otherwise (same "opt-in infrastructure" shape as the Redis cache
+  itself — real protection on a single instance, per-replica only without Redis). Fails open on a Redis
+  error, matching `cache.ts`'s own "optimization, never a hard dependency" stance.
 - **Login rate limiting.** `login_attempts` (control-plane, one row per attempt, both success and
   failure) backs `isLoginRateLimited(email, ip)`/`recordLoginAttempt` (`tenant-pool.ts`) — a DB table,
   not an in-memory counter, because blue-green/multi-replica means separate processes don't share memory.
