@@ -148,8 +148,15 @@ export function typoStyle(p: Record<string, string>): React.CSSProperties {
   const s: React.CSSProperties = {};
   if (p.fontFamily) s.fontFamily = p.fontFamily;
   if (p.color) s.color = p.color;
+  if (p.fontSize) s.fontSize = `${p.fontSize}px`;
   if (p.lineHeight) s.lineHeight = p.lineHeight;
-  if (p.letterSpacing) s.letterSpacing = p.letterSpacing;
+  // letterSpacing/wordSpacing need a real CSS length unit — a bare number
+  // string (what the old stepper control and this drag-number control both
+  // store) is an invalid CSS value on its own and browsers silently drop it,
+  // so appending "px" here isn't a behavior change for existing saved pages,
+  // it's what actually makes the property apply for the first time.
+  if (p.letterSpacing) s.letterSpacing = `${p.letterSpacing}px`;
+  if (p.wordSpacing) s.wordSpacing = `${p.wordSpacing}px`;
   if (p.fontWeight) s.fontWeight = p.fontWeight;
   if (p.textTransform) s.textTransform = p.textTransform as React.CSSProperties["textTransform"];
   if (p.fontStyle) s.fontStyle = p.fontStyle;

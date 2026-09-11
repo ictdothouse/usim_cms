@@ -3386,7 +3386,7 @@ export default function Designer({
                             </>
                           )}
                           <div
-                            className={`grid ${mode !== "live" ? "rounded-lg" : ""} ${selCls([b, r])}`}
+                            className={`${row.layoutMode === "flex" ? "flex" : "grid"} ${mode !== "live" ? "rounded-lg" : ""} ${selCls([b, r])}`}
                             onClick={(ev) => pick(ev, [b, r])}
                             onContextMenu={(ev) => {
                               ev.preventDefault();
@@ -3395,7 +3395,19 @@ export default function Designer({
                               setCtxMenu({ path: [b, r], x: ev.clientX, y: ev.clientY });
                             }}
                             style={{
-                              gridTemplateColumns: rowGridTemplate(row, bp),
+                              ...(row.layoutMode === "flex"
+                                ? {
+                                    // Mirrors rowGridTemplate's own "stack on
+                                    // tablet/mobile bp preview" convention
+                                    // (grid mode falls back to a single "1fr"
+                                    // track there) — flex mode stacks the
+                                    // same way via flex-direction:column.
+                                    flexDirection: bp === "desktop" ? (row.flexDirection ?? "row") : "column",
+                                    justifyContent: row.justifyContent ?? "flex-start",
+                                    alignItems: row.alignItems ?? "stretch",
+                                    flexWrap: row.flexWrap ?? "wrap",
+                                  }
+                                : { gridTemplateColumns: rowGridTemplate(row, bp) }),
                               gap: row.gap ?? pageSettings.gap ?? (mode === "live" ? "2rem" : "1rem"),
                               ...rowPaddingStyle(row),
                             }}
@@ -3410,7 +3422,19 @@ export default function Designer({
                               className={`relative min-h-[3rem] min-w-0 transition-colors ${
                                 mode === "live" ? "" : "rounded-lg border border-dashed p-1.5"
                               } ${selCls([b, r, c])} ${dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""}`}
-                              style={{ ...bpColStyle(col), borderColor: mode === "live" ? undefined : colOverlay.line, opacity: colHiddenAtBp ? 0.35 : undefined }}
+                              style={{
+                                ...bpColStyle(col),
+                                // Row's own `span` field is reused as this
+                                // column's flex-grow factor in flex mode
+                                // (same field, same author intent — "this
+                                // column is roughly twice as wide" — instead
+                                // of a grid fr-track) so flipping a row
+                                // between grid/flex never discards a
+                                // column's relative-width setting.
+                                ...(row.layoutMode === "flex" ? { flex: `${bpGetValue(String(col.span ?? 1), col.bp, "span")} 1 0%` } : {}),
+                                borderColor: mode === "live" ? undefined : colOverlay.line,
+                                opacity: colHiddenAtBp ? 0.35 : undefined,
+                              }}
                               onClick={(ev) => pick(ev, [b, r, c])}
                               onContextMenu={(ev) => {
                                 ev.preventDefault();

@@ -186,6 +186,58 @@ export function NumberStepper({
   );
 }
 
+// Elementor-style "slider + number" control — a native <input type="range">
+// (drag to scrub) synced with a small typable number box, side by side. Used
+// for typography's fontSize/lineHeight/letterSpacing/wordSpacing (see
+// TYPOGRAPHY_FIELDS in fields.ts) in place of the plain −/+ NumberStepper —
+// user explicitly asked to mirror Elementor's own drag-tarik numeric control
+// rather than click-repeat +/- buttons. The range input is the drag surface
+// (native browser behavior handles pointer capture/keyboard arrows for free,
+// no custom pointer-event math needed); typing in the number box works
+// independently and can go outside [min,max] since a real CSS value (e.g. a
+// deliberately huge letter-spacing) shouldn't be clamped just because the
+// slider's own visual range doesn't reach that far — only the slider thumb
+// itself gets clamped for display via the `Math.min(max, Math.max(min, n))`
+// below.
+export function DragNumber({
+  value,
+  min = 0,
+  max = 100,
+  step = 1,
+  unit,
+  onCommit,
+}: {
+  value: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  onCommit: (v: string) => void;
+}) {
+  const n = Number(value) || 0;
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={Math.min(max, Math.max(min, n))}
+        onChange={(e) => onCommit(e.target.value)}
+        className="h-1.5 w-full flex-1 cursor-ew-resize accent-accent"
+      />
+      <BufferedInput
+        type="number"
+        step={step}
+        value={value}
+        onCommit={onCommit}
+        className="w-14 shrink-0 rounded-lg border border-line/30 bg-canvas px-1 py-1 text-center text-[11px] outline-none focus:border-line"
+      />
+      {unit && <span className="w-5 shrink-0 text-[10px] text-sub">{unit}</span>}
+    </div>
+  );
+}
+
 // Elementor/Webflow-style per-field responsive toggle: a small Tablet/
 // Smartphone icon next to a setting's own label, filled/accent when THIS
 // field (or, for FourSideControl, any of its side keys) actually has an

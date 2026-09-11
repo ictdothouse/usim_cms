@@ -87,8 +87,17 @@ export const CSS_CLASS_FIELD: Field = { key: "cssClass", labelKey: "designer-f-c
 export const TYPOGRAPHY_FIELDS: Field[] = [
   { key: "fontFamily", labelKey: "designer-f-fontfamily", kind: "font" },
   { key: "color", labelKey: "designer-s-textcolor", kind: "color" },
-  { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "stepper", step: 0.1 },
-  { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "stepper", step: 0.5 },
+  // Elementor-style drag-slider numeric fields (see FieldControls.tsx's
+  // DragNumber) — fontSize/wordSpacing are new (this element type never had
+  // them before), lineHeight/letterSpacing existed as "stepper" (+/- buttons
+  // only) and are upgraded here to the same drag control for a consistent
+  // typography panel. Bare unitless numbers still stored the same way as
+  // before (e.g. lineHeight "1.5", letterSpacing "0.5") — `unit` is cosmetic
+  // display only, see the Field.unit comment in types.ts.
+  { key: "fontSize", labelKey: "designer-f-fontsize", kind: "drag-number", min: 8, max: 120, step: 1, unit: "px" },
+  { key: "lineHeight", labelKey: "designer-f-lineheight", kind: "drag-number", min: 0.8, max: 3, step: 0.05 },
+  { key: "letterSpacing", labelKey: "designer-f-letterspacing", kind: "drag-number", min: -5, max: 20, step: 0.5, unit: "px" },
+  { key: "wordSpacing", labelKey: "designer-f-wordspacing", kind: "drag-number", min: -10, max: 50, step: 1, unit: "px" },
   { key: "fontWeight", labelKey: "designer-f-fontweight", kind: "select", options: ["400", "500", "600", "700", "800"] },
   {
     key: "textTransform",
@@ -119,8 +128,8 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   // already falls back to "content" for any unmapped key (see the `?? "content"`
   // default in FieldGroups), so it lands in the same group either way.
   menuId: "content", dropdownTrigger: "content", megaMenuWidth: "content",
-  fontFamily: "typography", color: "typography", lineHeight: "typography",
-  letterSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
+  fontFamily: "typography", color: "typography", fontSize: "typography", lineHeight: "typography",
+  letterSpacing: "typography", wordSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
   textTransform: "typography", fontStyle: "typography", textDecoration: "typography",
   bg: "background", bgImage: "background", bgColor: "background", textColor: "background",
   paddingY: "spacing", paddingX: "spacing", padding: "spacing", marginY: "spacing",

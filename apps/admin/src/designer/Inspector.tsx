@@ -7,12 +7,23 @@
 // state it reads comes from `ctx`), so it's safe to call directly as a plain
 // function, same as FieldGroups/FieldInput already are.
 import {
+  AlignHorizontalJustifyCenter,
+  AlignHorizontalJustifyEnd,
+  AlignHorizontalJustifyStart,
+  AlignHorizontalSpaceAround,
+  AlignHorizontalSpaceBetween,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  AlignVerticalJustifyStart,
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Clipboard,
   ClipboardPaste,
   Copy,
   Frame,
+  LayoutGrid,
   LayoutTemplate,
   Link2,
   Lock,
@@ -22,6 +33,7 @@ import {
   RefreshCw,
   Smartphone,
   SquareDashedBottom,
+  StretchVertical,
   Tablet,
   Trash2,
 } from "lucide-react";
@@ -35,6 +47,44 @@ import { parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementP
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_FALLBACK, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS, gapPx } from "./style";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
+
+// Small icon-button-group row used by the Row Layout panel below (Direction/
+// Justify/Align) — mirrors the existing "align" FieldInput.tsx icon-button
+// pattern (text-align left/center/right/justify), just generalized to take
+// an arbitrary icon-per-option map since flex direction/justify/align each
+// need their own icon set. Not exported/shared beyond this file — it's a
+// one-panel control, not a general Field kind (Row isn't edited through the
+// Field[]/FieldInput system at all, see the sel.length===2 branch's own
+// setRowSide-based mutation instead of FieldInput's field/value/onChange).
+function FlexIconGroup<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; icon: typeof ArrowRight; title: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex gap-1">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          title={o.title}
+          className={`flex-1 rounded-lg border p-1.5 ${
+            value === o.value
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-line/30 text-sub hover:border-accent/40"
+          }`}
+        >
+          <o.icon className="mx-auto h-3.5 w-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function FourSideControl({
   labelKey,
@@ -691,6 +741,86 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           get={(k) => (row as unknown as Record<string, string>)[k] === "true"}
           set={(k, v) => setRowSide(k, v ? "true" : "")}
         />
+        <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-sub">{t("designer-row-layout")}</p>
+          <FlexIconGroup
+            value={row.layoutMode === "flex" ? "flex" : "grid"}
+            onChange={(v) => setRowSide("layoutMode", v)}
+            options={[
+              { value: "grid", icon: LayoutGrid, title: t("designer-row-layout-grid") },
+              { value: "flex", icon: LayoutTemplate, title: t("designer-row-layout-flex") },
+            ]}
+          />
+          {row.layoutMode === "flex" && (
+            <>
+              <label className="block text-[11px] font-medium text-body">
+                {t("designer-row-direction")}
+                <div className="mt-1">
+                  <FlexIconGroup
+                    value={row.flexDirection ?? "row"}
+                    onChange={(v) => setRowSide("flexDirection", v)}
+                    options={[
+                      { value: "row", icon: ArrowRight, title: "row" },
+                      { value: "column", icon: ArrowDown, title: "column" },
+                      { value: "row-reverse", icon: ArrowLeft, title: "row-reverse" },
+                      { value: "column-reverse", icon: ArrowUp, title: "column-reverse" },
+                    ]}
+                  />
+                </div>
+              </label>
+              <label className="block text-[11px] font-medium text-body">
+                {t("designer-row-justify")}
+                <div className="mt-1">
+                  <FlexIconGroup
+                    value={row.justifyContent ?? "flex-start"}
+                    onChange={(v) => setRowSide("justifyContent", v)}
+                    options={[
+                      { value: "flex-start", icon: AlignHorizontalJustifyStart, title: "flex-start" },
+                      { value: "center", icon: AlignHorizontalJustifyCenter, title: "center" },
+                      { value: "flex-end", icon: AlignHorizontalJustifyEnd, title: "flex-end" },
+                      { value: "space-between", icon: AlignHorizontalSpaceBetween, title: "space-between" },
+                      { value: "space-around", icon: AlignHorizontalSpaceAround, title: "space-around" },
+                    ]}
+                  />
+                </div>
+              </label>
+              <label className="block text-[11px] font-medium text-body">
+                {t("designer-row-align")}
+                <div className="mt-1">
+                  <FlexIconGroup
+                    value={row.alignItems ?? "stretch"}
+                    onChange={(v) => setRowSide("alignItems", v)}
+                    options={[
+                      { value: "flex-start", icon: AlignVerticalJustifyStart, title: "flex-start" },
+                      { value: "center", icon: AlignVerticalJustifyCenter, title: "center" },
+                      { value: "flex-end", icon: AlignVerticalJustifyEnd, title: "flex-end" },
+                      { value: "stretch", icon: StretchVertical, title: "stretch" },
+                    ]}
+                  />
+                </div>
+              </label>
+              <label className="block text-[11px] font-medium text-body">
+                {t("designer-row-wrap")}
+                <div className="mt-1 flex gap-1">
+                  {(["nowrap", "wrap"] as const).map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => setRowSide("flexWrap", w)}
+                      className={`flex-1 rounded-lg border px-2 py-1 text-[11px] font-medium ${
+                        (row.flexWrap ?? "wrap") === w
+                          ? "border-accent bg-accent/10 text-accent"
+                          : "border-line/30 text-sub hover:border-accent/40"
+                      }`}
+                    >
+                      {t(w === "nowrap" ? "designer-row-wrap-nowrap" : "designer-row-wrap-wrap")}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            </>
+          )}
+        </div>
         <label className="block text-[11px] font-medium text-body">
           {t("designer-row-gap")}
           <BufferedInput
