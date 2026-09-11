@@ -5,7 +5,17 @@ import { request as pwRequest } from "@playwright/test";
 // convention (3000) defaults to, since a shared/already-running instance
 // commonly occupies that port; override with E2E_API_URL if needed.
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
-const TENANT_HOST = "e2e.localhost";
+// createTenant() (apps/api's tenant-pool.ts) requires the host to have a REAL
+// DNS record (dns.resolve(), not dns.lookup() — an /etc/hosts entry does NOT
+// satisfy it) before it'll register — a security hardening added after this
+// test was first written with a plain "e2e.localhost" (which has no real DNS
+// record on any machine and always 400s). sslip.io is a public wildcard DNS
+// service: any "<anything>.<ip-with-dashes>.sslip.io" name really does
+// resolve to that IP via a real DNS query, so this passes the check for real
+// while every actual HTTP call in this file still goes to plain localhost
+// ports — the tenant host is only ever used as an opaque string identifier
+// (the x-tenant-host header), never as a real network destination.
+const TENANT_HOST = "e2e-127-0-0-1.sslip.io";
 const ADMIN_EMAIL = "e2e-admin@example.com";
 const ADMIN_PASSWORD = "E2ePassw0rd!1";
 
