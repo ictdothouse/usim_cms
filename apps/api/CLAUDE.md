@@ -543,14 +543,18 @@ callouts before assuming any of this is speculative hardening.
     minus category-name resolution (pages have no category). Restoring sets the page back to `"draft"`
     (never auto-republishes), same convention as posts. `apps/admin/src/lib/api.ts` gained
     `PageRevision`/`listPageRevisions`/`restorePageRevision` (mirrors `PostRevision`/
-    `listPostRevisions`/`restorePostRevision` exactly). **Not yet wired into Designer.tsx's own UI** —
-    `PostEditorPage.tsx`'s `PostHistory` component (a self-contained History panel + Restore button,
-    toggled from a sidebar button) has no equivalent inside Designer.tsx yet; the backend/API layer is
-    complete and independently testable/usable, but there is no "History" button in the page canvas
-    toolbar to trigger it. This is the deliberate scope cut for this pass — wiring it into Designer.tsx
-    needs tracing how `page`/`rawBlocks` state reloads after a restore (Designer.tsx is large and
-    hand-tuned; PostEditorPage's `bodyVersion`-bump-on-restore pattern is the reference to mirror), not
-    attempted here to avoid a rushed edit to that file's state management.
+    `listPostRevisions`/`restorePostRevision` exactly). **Wired into Designer.tsx's own UI (2026-09-11,
+    follow-up pass)** — a header "History" button (`kind === "page"` only, next to Page Settings) opens
+    a modal listing `page_revisions` (lazy-fetched on open, not on every render) with a Restore action per
+    row, mirroring `PostEditorPage.tsx`'s `PostHistory` panel's shape but as a modal rather than a sidebar
+    section (Designer's header is already button-dense). Unlike `PostEditorPage` — which reloads via a
+    `bodyVersion` counter that re-triggers a `post?.id`-keyed effect — Designer.tsx's `page` prop is a
+    plain mutable object, not owned React state (`rawBlocks`/`pageSettings` are the real canvas state,
+    seeded from `page.layout`/`page.settings` once on mount), so `restoreRevision()` instead writes the
+    restored row's `layout`/`settings`/`bannerImageUrl`/`status` directly back onto both `page` (so the
+    header's dirty/published badge and slug logic stay consistent) AND `setRawBlocks`/`setPageSettings`
+    (so the canvas re-renders the restored content immediately) — no page reload, no extra effect
+    dependency needed.
   - `menus` (`src/db/schema.ts`) is a named, ordered navigation tree — `name` + a single `items` jsonb
     column holding the whole nested structure (top-level items, each optionally `children` for a simple
     dropdown OR `megaMenu` for a multi-column rich menu, never both), the same "one row holds the whole

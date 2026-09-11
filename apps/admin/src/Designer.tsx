@@ -58,6 +58,7 @@ import {
   Headphones,
   Heart,
   HelpCircle,
+  History,
   Home,
   Image as ImageIcon,
   Images,
@@ -834,6 +835,13 @@ export default function Designer({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
+  // Page revision history (kind === "page" only — see api.PageRevision).
+  // Fetched lazily, only when the panel is actually opened, mirroring
+  // PostEditorPage's own PostHistory panel.
+  const [showHistory, setShowHistory] = useState(false);
+  const [revisions, setRevisions] = useState<api.PageRevision[]>([]);
+  const [revisionsLoaded, setRevisionsLoaded] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [clipTick, setClipTick] = useState(0); // bumped on every clipboard write, to re-render Paste button enabled-state
   // Modal device preview (Desktop/Tablet/Mobile) — separate from preview()'s
   // new-tab flow below: that one is a real browser navigation for a page's
@@ -2206,6 +2214,45 @@ export default function Designer({
     }
   }
 
+  async function loadHistory() {
+    setShowHistory(true);
+    if (revisionsLoaded) return;
+    try {
+      setRevisions(await api.listPageRevisions(tenantHost, token, page.id as string));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRevisionsLoaded(true);
+    }
+  }
+
+  // Restoring never re-publishes — mirrors the API's own restore route
+  // (always writes status:"draft"). Reloads rawBlocks/pageSettings straight
+  // from the restored row so the canvas reflects it immediately, same as
+  // PostEditorPage's bodyVersion-bump reload after a post restore.
+  async function restoreRevision(revisionId: string) {
+    if (!confirm(t("designer-restore-confirm"))) return;
+    setRestoring(true);
+    setError(null);
+    try {
+      const restored = await api.restorePageRevision(tenantHost, token, page.id as string, revisionId);
+      setRawBlocks(clone((restored.layout as Block[] | undefined) ?? []));
+      setPageSettings((restored.settings as PageSettings) ?? {});
+      page.status = restored.status as string;
+      page.layout = restored.layout;
+      page.settings = restored.settings;
+      page.bannerImageUrl = restored.bannerImageUrl;
+      setDirty(false);
+      setShowHistory(false);
+      setMsg(t("designer-saved"));
+      setTimeout(() => setMsg(null), 2500);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   // Blueprint's own save path — no slug/status/publish/translations concept,
   // just the layout + page-wide settings, PATCHed straight to the blueprint
   // row (apps/api's PATCH /api/blueprints/:id already accepts both).
@@ -2910,6 +2957,15 @@ export default function Designer({
             title={t("designer-page-settings")}
           >
             <Settings className="h-3.5 w-3.5" /> {t("designer-page-settings")}
+          </button>
+        )}
+        {kind === "page" && (
+          <button
+            onClick={() => void loadHistory()}
+            className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+            title={t("designer-history")}
+          >
+            <History className="h-3.5 w-3.5" /> {t("designer-history")}
           </button>
         )}
         {kind === "page" && (
@@ -4274,6 +4330,35 @@ export default function Designer({
                 {t("blueprints-save-as")}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowHistory(false)}>
+          <div className="w-[min(90vw,28rem)] rounded-xl bg-white p-4 shadow-xl" onClick={(ev) => ev.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="flex items-center gap-1.5 text-xs font-bold text-ink"><History className="h-3.5 w-3.5" /> {t("designer-history")}</p>
+              <button onClick={() => setShowHistory(false)} aria-label={t("designer-close")}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {!revisionsLoaded && <p className="text-[11px] text-sub">{t("designer-saving")}</p>}
+            {revisionsLoaded && revisions.length === 0 && <p className="text-[11px] text-sub">{t("designer-history-empty")}</p>}
+            <ul className="max-h-80 divide-y divide-line/20 overflow-y-auto">
+              {revisions.map((r) => (
+                <li key={r.id} className="flex items-center gap-3 py-1.5 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-sub">{new Date(r.createdAt).toLocaleString()} · {r.title}</span>
+                  <button
+                    onClick={() => void restoreRevision(r.id)}
+                    disabled={restoring}
+                    className="shrink-0 font-semibold text-accent hover:underline disabled:opacity-40"
+                  >
+                    {t("designer-restore")}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       )}
