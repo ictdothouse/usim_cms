@@ -61,6 +61,8 @@ import {
   setTenantCertInfo,
   getMfaEnabled,
   setMfaEnabled,
+  getEntraSettings,
+  setEntraSettings,
   getLanguageSwitcherDefaults,
   setLanguageSwitcherDefaults,
   findUserById,
@@ -99,6 +101,7 @@ import {
   generateCsrfToken,
 } from "./db/auth.js";
 import { setSessionCookie, clearSessionCookie } from "./lib/cookies.js";
+import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed } from "./entra.js";
 import {
   exportTenantBackup,
   importTenantBackup,
@@ -410,6 +413,14 @@ app.post("/api/auth/login", async (req, reply) => {
     reply.code(401);
     return { error: "invalid credentials" };
   }
+  // Entra-only mode: password login is for superadmin break-glass only (the
+  // person who flipped this toggle must still be able to get back in if
+  // Entra itself is misconfigured) — every other role must use Entra.
+  const { entraOnly } = await getEntraSettings();
+  if (!isPasswordLoginAllowed(user.role as "superadmin" | "webmaster", entraOnly)) {
+    reply.code(403);
+    return { error: "Password login is disabled — use Microsoft Entra ID to sign in" };
+  }
   const basePayload = {
     userId: user.id,
     email: user.email,
@@ -433,6 +444,92 @@ app.post("/api/auth/login", async (req, reply) => {
   const token = signSession({ ...basePayload, csrfToken, exp: Date.now() + SESSION_TTL_MS });
   setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
   return { csrfToken, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
+});
+
+// Public, unauthenticated — the login page needs to know which buttons to
+// show before anyone has signed in.
+app.get("/api/auth/login-methods", async () => {
+  const { entraEnabled, entraOnly } = await getEntraSettings();
+  return { mfaEnabled: await getMfaEnabled(), entraEnabled, entraOnly };
+});
+
+// One admin origin to redirect back to after the Entra round trip — the
+// first of ADMIN_ORIGIN's (possibly comma-separated) list, falling back to
+// the admin dev server's own default port in dev (mirrors the CORS
+// adminOrigins fallback above, which allows any origin in dev instead).
+const entraRedirectAdminOrigin = adminOrigins?.[0] ?? "http://localhost:5173";
+
+app.get("/api/auth/entra/login", async (req, reply) => {
+  const { entraEnabled, entraTenantId, entraClientId } = await getEntraSettings();
+  const redirectUri = process.env.ENTRA_REDIRECT_URI;
+  if (!entraEnabled || !entraTenantId || !entraClientId || !redirectUri) {
+    reply.code(404);
+    return { error: "Entra ID login is not enabled" };
+  }
+  const state = signSession({
+    userId: "",
+    email: "",
+    role: "webmaster",
+    tenantHost: null,
+    permissions: [],
+    entraState: true,
+    exp: Date.now() + 10 * 60 * 1000,
+  });
+  reply.redirect(getEntraAuthorizeUrl(entraTenantId, entraClientId, redirectUri, state));
+});
+
+app.get("/api/auth/entra/callback", async (req, reply) => {
+  const { code, state } = req.query as { code?: string; state?: string };
+  const loginPageUrl = `${entraRedirectAdminOrigin}/login`;
+  const statePayload = state ? verifySession(state) : null;
+  if (!code || !statePayload?.entraState) {
+    return reply.redirect(`${loginPageUrl}?entraError=invalid_state`);
+  }
+  const { entraEnabled, entraTenantId, entraClientId } = await getEntraSettings();
+  const clientSecret = process.env.ENTRA_CLIENT_SECRET;
+  const redirectUri = process.env.ENTRA_REDIRECT_URI;
+  if (!entraEnabled || !entraTenantId || !entraClientId || !clientSecret || !redirectUri) {
+    return reply.redirect(`${loginPageUrl}?entraError=not_configured`);
+  }
+  if (await isLoginRateLimited(`entra:${entraTenantId}`, req.ip)) {
+    return reply.redirect(`${loginPageUrl}?entraError=rate_limited`);
+  }
+  let email: string;
+  try {
+    const { idToken } = await exchangeEntraCode(entraTenantId, entraClientId, clientSecret, redirectUri, code);
+    const claims = await verifyEntraIdToken(idToken, entraTenantId, entraClientId);
+    email = claims.email.toLowerCase();
+  } catch (err) {
+    req.log.error({ err }, "entra callback failed");
+    await recordLoginAttempt("entra:unknown", req.ip, false);
+    return reply.redirect(`${loginPageUrl}?entraError=verification_failed`);
+  }
+  // No account is ever auto-created here — the users table (control-plane,
+  // ~40 rows for USIM) IS the allowlist. Entra only proves "this email
+  // really is who they say", never grants an account by itself; anyone else
+  // in the org's Entra tenant hits this branch and is turned away.
+  const user = await findUserByEmail(email);
+  await recordLoginAttempt(email, req.ip, !!user);
+  if (!user) {
+    return reply.redirect(`${loginPageUrl}?entraError=account_not_found`);
+  }
+  // Entra login skips the app's own TOTP MFA gate deliberately — this is
+  // already a real IdP authentication event, not a bare password.
+  const csrfToken = generateCsrfToken();
+  const token = signSession({
+    userId: user.id,
+    email: user.email,
+    role: user.role as "superadmin" | "webmaster",
+    tenantHost: user.tenantHost as string | null,
+    tenantHosts: (user.tenantHosts as string[] | null) ?? [],
+    permissions: mergePermissions(await getRolePermissions(user.roleId as string | null), user.extraPermissions as string[] | null),
+    csrfToken,
+    exp: Date.now() + SESSION_TTL_MS,
+  });
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  const tenantHosts = (user.tenantHosts as string[] | null) ?? [];
+  const params = new URLSearchParams({ csrfToken, role: user.role, tenantHost: user.tenantHost ?? "", tenantHosts: tenantHosts.join(",") });
+  return reply.redirect(`${entraRedirectAdminOrigin}/entra-callback?${params.toString()}`);
 });
 
 app.post("/api/auth/totp-verify", async (req, reply) => {
@@ -570,26 +667,50 @@ app.post("/api/auth/totp-disable", async (req, reply) => {
 // automation's on/off state is.
 app.get("/api/portal/login-settings", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
-  return { mfaEnabled: await getMfaEnabled() };
+  const entra = await getEntraSettings();
+  return { mfaEnabled: await getMfaEnabled(), ...entra };
 });
 
 app.put("/api/portal/login-settings", async (req, reply) => {
   const session = verifySuperadmin(req, reply);
   if (!session) return;
-  const { mfaEnabled } = req.body as { mfaEnabled?: boolean };
-  if (typeof mfaEnabled !== "boolean") {
-    reply.code(400);
-    return { error: "mfaEnabled must be a boolean" };
+  const { mfaEnabled, entraEnabled, entraOnly, entraTenantId, entraClientId } = req.body as {
+    mfaEnabled?: boolean;
+    entraEnabled?: boolean;
+    entraOnly?: boolean;
+    entraTenantId?: string | null;
+    entraClientId?: string | null;
+  };
+  if (mfaEnabled !== undefined) {
+    if (typeof mfaEnabled !== "boolean") {
+      reply.code(400);
+      return { error: "mfaEnabled must be a boolean" };
+    }
+    await setMfaEnabled(mfaEnabled);
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.mfa_toggle",
+      meta: { mfaEnabled },
+      ip: req.ip,
+    });
   }
-  await setMfaEnabled(mfaEnabled);
-  await insertAuditLog({
-    actorUserId: session.userId,
-    actorEmail: session.email,
-    action: "platform.mfa_toggle",
-    meta: { mfaEnabled },
-    ip: req.ip,
-  });
-  return { mfaEnabled };
+  const entraPatch: { entraEnabled?: boolean; entraOnly?: boolean; entraTenantId?: string | null; entraClientId?: string | null } = {};
+  if (entraEnabled !== undefined) entraPatch.entraEnabled = entraEnabled;
+  if (entraOnly !== undefined) entraPatch.entraOnly = entraOnly;
+  if (entraTenantId !== undefined) entraPatch.entraTenantId = entraTenantId;
+  if (entraClientId !== undefined) entraPatch.entraClientId = entraClientId;
+  if (Object.keys(entraPatch).length > 0) {
+    await setEntraSettings(entraPatch);
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.entra_config",
+      meta: entraPatch,
+      ip: req.ip,
+    });
+  }
+  return { mfaEnabled: await getMfaEnabled(), ...(await getEntraSettings()) };
 });
 
 // Cross-department aggregator (portal), reads public.shared_content directly

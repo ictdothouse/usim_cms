@@ -16,7 +16,18 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (`navigate(item.id)` right after quick-create, or a list row's Design/Edit button) — going back is a
   real `navigate("/content/pages")`/`navigate("/content/posts")`, not a `useState`-driven conditional
   mount the way `PagesPanel`'s `BlockBuilder` (the older inline page-block editor, still expand-under-row)
-  remains. The page builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit**
+  remains. **The `BrowserRouter` only wraps the post-session `Shell`** — `LoginForm`/`SetupWizard`
+  (pre-session) render with no router mounted at all, so `/entra-callback` (Microsoft Entra ID SSO,
+  2026-09-12 — see apps/api/CLAUDE.md's Auth hardening section for the backend half) is deliberately
+  NOT a `<Route>`: `App()`'s own `useEffect` reads `window.location.pathname`/`search` directly on
+  mount (the one place in this app that does), turns a `csrfToken`/`role`/... query string into a
+  `Session` the same shape the password-login path already produces, or an `entraError` shown by
+  `LoginForm`, then `history.replaceState`s the URL back to `/` — a plain query-string check, not
+  client-side routing, because there's no `<Routes>` to land it in at that point. `LoginForm` itself
+  fetches `GET /api/auth/login-methods` (public, pre-auth) to decide its 3 render modes:
+  password-only, both, or Entra-only (password form collapsed behind a disclosure link — never
+  removed, since a superadmin's break-glass password login still needs a way to reach the form; the
+  real enforcement is server-side, this is UX only). The page builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit**
   (opens by default — the real frontend page rendered in an iframe with click-to-select/inline editing via a postMessage
   bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
   actually activates), and a design template library. A page's slug is auto-derived from its title on

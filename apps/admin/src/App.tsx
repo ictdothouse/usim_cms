@@ -222,7 +222,7 @@ function SetupWizard({ onDone }: { onDone: (s: Session) => void }) {
 }
 
 // ---------- Login ----------
-function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
+function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; entraError?: string | null }) {
   const { t } = useT();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -232,6 +232,22 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
   // switches the form to the code-entry step instead of a second page/route.
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  // Entra ID mode — fetched before anyone signs in (public route), so the
+  // page knows which buttons/forms to show. entraOnly starts the password
+  // form collapsed behind a disclosure link (superadmin break-glass path,
+  // see apps/api/CLAUDE.md's Auth hardening section) rather than removing
+  // it — the login page has no idea yet who's about to type into it.
+  const [loginMethods, setLoginMethods] = useState<{ entraEnabled: boolean; entraOnly: boolean } | null>(null);
+  const [showPasswordForm, setShowPasswordForm] = useState(true);
+  useEffect(() => {
+    void api
+      .getLoginMethods()
+      .then((m) => {
+        setLoginMethods(m);
+        if (m.entraOnly) setShowPasswordForm(false);
+      })
+      .catch(() => setLoginMethods({ entraEnabled: false, entraOnly: false }));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -267,8 +283,31 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
     }
   }
 
+  const passwordFormVisible = !loginMethods?.entraOnly || pendingToken || showPasswordForm;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas font-sans text-ink antialiased">
+      <div className="w-full max-w-sm space-y-3">
+        {entraError && (
+          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            {entraError === "account_not_found" ? t("login-entra-error-account-not-found") : t("login-entra-error-generic")}
+          </p>
+        )}
+        {loginMethods?.entraEnabled && !pendingToken && (
+          <a href={api.entraLoginUrl()} className={`${btnPrimary} block w-full text-center`}>
+            {t("login-entra-button")}
+          </a>
+        )}
+        {loginMethods?.entraOnly && !pendingToken && !showPasswordForm && (
+          <button
+            type="button"
+            className="w-full text-center text-xs text-sub underline"
+            onClick={() => setShowPasswordForm(true)}
+          >
+            {t("login-password-toggle")}
+          </button>
+        )}
+        {passwordFormVisible && (
       <form
         onSubmit={pendingToken ? submitCode : submit}
         className="w-full max-w-sm space-y-4 rounded-2xl border border-line/30 bg-white p-8 shadow-sm"
@@ -347,6 +386,8 @@ function LoginForm({ onLogin }: { onLogin: (s: Session) => void }) {
           </>
         )}
       </form>
+        )}
+      </div>
     </div>
   );
 }
@@ -4207,6 +4248,12 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaErr, setMfaErr] = useState<string | null>(null);
   const [mfaBusy, setMfaBusy] = useState(false);
+  const [entraEnabled, setEntraEnabledState] = useState(false);
+  const [entraOnly, setEntraOnlyState] = useState(false);
+  const [entraTenantId, setEntraTenantIdState] = useState("");
+  const [entraClientId, setEntraClientIdState] = useState("");
+  const [entraErr, setEntraErr] = useState<string | null>(null);
+  const [entraBusy, setEntraBusy] = useState(false);
   const [switcherPosition, setSwitcherPosition] = useState<api.SwitcherPosition>("header");
   const [switcherStyle, setSwitcherStyle] = useState<api.SwitcherStyle>("text");
   const [switcherErr, setSwitcherErr] = useState<string | null>(null);
@@ -4285,7 +4332,16 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   }
 
   function reloadLoginSettings() {
-    void api.getLoginSettings(token).then((s) => setMfaEnabled(s.mfaEnabled)).catch((e) => setMfaErr((e as Error).message));
+    void api
+      .getLoginSettings(token)
+      .then((s) => {
+        setMfaEnabled(s.mfaEnabled);
+        setEntraEnabledState(s.entraEnabled);
+        setEntraOnlyState(s.entraOnly);
+        setEntraTenantIdState(s.entraTenantId ?? "");
+        setEntraClientIdState(s.entraClientId ?? "");
+      })
+      .catch((e) => setMfaErr((e as Error).message));
   }
   useEffect(reloadLoginSettings, [token]);
 
@@ -4293,12 +4349,54 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
     setMfaErr(null);
     setMfaBusy(true);
     try {
-      await api.setLoginSettings(token, enabled);
+      await api.setLoginSettings(token, { mfaEnabled: enabled });
       reloadLoginSettings();
     } catch (e) {
       setMfaErr((e as Error).message);
     } finally {
       setMfaBusy(false);
+    }
+  }
+
+  async function toggleEntraEnabled(enabled: boolean) {
+    setEntraErr(null);
+    setEntraBusy(true);
+    try {
+      await api.setLoginSettings(token, { entraEnabled: enabled });
+      reloadLoginSettings();
+    } catch (e) {
+      setEntraErr((e as Error).message);
+    } finally {
+      setEntraBusy(false);
+    }
+  }
+
+  async function toggleEntraOnly(only: boolean) {
+    setEntraErr(null);
+    setEntraBusy(true);
+    try {
+      await api.setLoginSettings(token, { entraOnly: only });
+      reloadLoginSettings();
+    } catch (e) {
+      setEntraErr((e as Error).message);
+    } finally {
+      setEntraBusy(false);
+    }
+  }
+
+  async function saveEntraConfig() {
+    setEntraErr(null);
+    setEntraBusy(true);
+    try {
+      await api.setLoginSettings(token, {
+        entraTenantId: entraTenantId.trim() || null,
+        entraClientId: entraClientId.trim() || null,
+      });
+      reloadLoginSettings();
+    } catch (e) {
+      setEntraErr((e as Error).message);
+    } finally {
+      setEntraBusy(false);
     }
   }
 
@@ -4665,12 +4763,58 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                   {t("settings-login-mfa")}
                 </label>
               </div>
-              <div className="flex items-center justify-between text-xs opacity-50">
-                <span className="font-medium text-ink">{t("settings-login-entra")}</span>
-                <span className="text-sub">{t("settings-login-coming-soon")}</span>
-              </div>
             </div>
             {mfaEnabled && <p className="text-xs text-sub">{t("settings-login-mfa-hint")}</p>}
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <ShieldCheck className="h-3.5 w-3.5 text-accent" /> {t("settings-login-entra")}
+            </h3>
+            <p className="text-xs text-sub">{t("settings-entra-desc")}</p>
+            {entraErr && <p className="text-xs text-red-600">{entraErr}</p>}
+            <div className="space-y-2 rounded-lg border border-line/40 p-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-ink">
+                <input
+                  type="checkbox"
+                  checked={entraEnabled}
+                  disabled={entraBusy}
+                  onChange={(e) => void toggleEntraEnabled(e.target.checked)}
+                />
+                {t("settings-entra-enable")}
+              </label>
+              {entraEnabled && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      className={inputCls}
+                      placeholder={t("settings-entra-tenant-id-placeholder")}
+                      value={entraTenantId}
+                      onChange={(e) => setEntraTenantIdState(e.target.value)}
+                    />
+                    <input
+                      className={inputCls}
+                      placeholder={t("settings-entra-client-id-placeholder")}
+                      value={entraClientId}
+                      onChange={(e) => setEntraClientIdState(e.target.value)}
+                    />
+                  </div>
+                  <button onClick={() => void saveEntraConfig()} disabled={entraBusy} className={btnGhost}>
+                    {t("settings-entra-save")}
+                  </button>
+                  <p className="text-[11px] text-sub">{t("settings-entra-secret-hint")}</p>
+                  <label className="flex items-center gap-2 text-xs font-medium text-ink">
+                    <input
+                      type="checkbox"
+                      checked={entraOnly}
+                      disabled={entraBusy}
+                      onChange={(e) => void toggleEntraOnly(e.target.checked)}
+                    />
+                    {t("settings-entra-only")}
+                  </label>
+                  {entraOnly && <p className="text-[11px] text-amber-700">{t("settings-entra-only-warning")}</p>}
+                </>
+              )}
+            </div>
           </div>
           <div className={`${card} space-y-3 p-5`}>
             <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
@@ -5231,6 +5375,37 @@ const IMPERSONATOR_KEY = "usim_cms_impersonator";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
+  // Entra login lands here as a real browser navigation (never a fetch —
+  // Microsoft's own login page needs a top-level redirect), so there's no
+  // JSON response to read: apps/api's entra/callback route redirects back
+  // to /entra-callback?csrfToken=...&role=...&tenantHost=...&tenantHosts=...
+  // (or ?entraError=... on failure) and this reads it straight off the URL,
+  // once, on mount — there's no client-side router mounted pre-login at all
+  // (see the BrowserRouter further down, only wrapping the post-session
+  // Shell), so this is a plain query-string check, not a routed page.
+  const [entraError, setEntraError] = useState<string | null>(null);
+  useEffect(() => {
+    if (window.location.pathname !== "/entra-callback") return;
+    const params = new URLSearchParams(window.location.search);
+    window.history.replaceState({}, "", "/");
+    const err = params.get("entraError");
+    if (err) {
+      setEntraError(err);
+      return;
+    }
+    const csrfToken = params.get("csrfToken");
+    const role = params.get("role");
+    if (csrfToken && (role === "superadmin" || role === "webmaster")) {
+      const newSession: Session = {
+        token: csrfToken,
+        role,
+        tenantHost: params.get("tenantHost") || null,
+        tenantHosts: (params.get("tenantHosts") ?? "").split(",").filter(Boolean),
+      };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
+      setSession(newSession);
+    }
+  }, []);
   // Set only while a superadmin is "viewing as" a webmaster — the stashed
   // superadmin session to restore on exit. Persisted so a page refresh
   // mid-impersonation doesn't strand the admin in the webmaster's view.
@@ -5284,7 +5459,7 @@ export default function App() {
   if (!session) {
     if (needsSetup === null) return null;
     if (needsSetup) return <SetupWizard onDone={setSession} />;
-    return <LoginForm onLogin={setSession} />;
+    return <LoginForm onLogin={setSession} entraError={entraError} />;
   }
   return (
     <BrowserRouter>

@@ -180,15 +180,43 @@ export async function verifyTotp(pendingToken: string, code: string): Promise<Se
 
 export interface LoginSettings {
   mfaEnabled: boolean;
+  entraEnabled: boolean;
+  entraOnly: boolean;
+  entraTenantId: string | null;
+  entraClientId: string | null;
+}
+
+function toLoginSettings(b: Record<string, unknown>): LoginSettings {
+  return {
+    mfaEnabled: b.mfaEnabled as boolean,
+    entraEnabled: b.entraEnabled as boolean,
+    entraOnly: b.entraOnly as boolean,
+    entraTenantId: (b.entraTenantId as string | null) ?? null,
+    entraClientId: (b.entraClientId as string | null) ?? null,
+  };
 }
 
 export const getLoginSettings = (token: string) =>
-  request("/api/portal/login-settings", null, token).then((b) => ({ mfaEnabled: b.mfaEnabled as boolean }));
+  request("/api/portal/login-settings", null, token).then(toLoginSettings);
 
-export const setLoginSettings = (token: string, mfaEnabled: boolean) =>
-  request("/api/portal/login-settings", null, token, { method: "PUT", body: JSON.stringify({ mfaEnabled }) }).then(
-    (b) => ({ mfaEnabled: b.mfaEnabled as boolean }),
-  );
+export const setLoginSettings = (token: string, patch: Partial<LoginSettings>) =>
+  request("/api/portal/login-settings", null, token, { method: "PUT", body: JSON.stringify(patch) }).then(toLoginSettings);
+
+// Public, unauthenticated — the login page needs this before anyone has
+// signed in, to decide which buttons/forms to show (see App.tsx's login page
+// and the mode-1/2/3 split documented in apps/api/CLAUDE.md's Auth
+// hardening section).
+export const getLoginMethods = () =>
+  request("/api/auth/login-methods", null, null).then((b) => ({
+    mfaEnabled: b.mfaEnabled as boolean,
+    entraEnabled: b.entraEnabled as boolean,
+    entraOnly: b.entraOnly as boolean,
+  }));
+
+// Full-page navigation target, never a fetch() — Microsoft's own login page
+// needs a real top-level redirect, which is also why this isn't routed
+// through request() (no JSON response to parse, no CSRF header to attach).
+export const entraLoginUrl = () => `${API_URL}/api/auth/entra/login`;
 
 export const totpSetup = (token: string) =>
   request("/api/auth/totp-setup", null, token, { method: "POST" }).then((b) => ({

@@ -1023,6 +1023,50 @@ export async function setMfaEnabled(enabled: boolean): Promise<void> {
   }
 }
 
+export interface EntraSettings {
+  entraEnabled: boolean;
+  entraOnly: boolean;
+  entraTenantId: string | null;
+  entraClientId: string | null;
+}
+
+// Same singleton-row pattern as getMfaEnabled/setMfaEnabled above — see
+// schema.ts's platformSettings comment for what entraOnly's break-glass
+// exemption means.
+export async function getEntraSettings(): Promise<EntraSettings> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.select().from(schema.platformSettings);
+    return {
+      entraEnabled: row?.entraEnabled ?? false,
+      entraOnly: row?.entraOnly ?? false,
+      entraTenantId: row?.entraTenantId ?? null,
+      entraClientId: row?.entraClientId ?? null,
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function setEntraSettings(patch: Partial<EntraSettings>): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .insert(schema.platformSettings)
+      .values({ id: "singleton", ...patch })
+      .onConflictDoUpdate({
+        target: schema.platformSettings.id,
+        set: { ...patch, updatedAt: new Date() },
+      });
+  } finally {
+    client.release();
+  }
+}
+
 // Shared by getLanguageSwitcherDefaults (its own client) and
 // getTenantLanguageSelection (an existing client, to resolve a tenant's
 // inherited value without a second DB round-trip).

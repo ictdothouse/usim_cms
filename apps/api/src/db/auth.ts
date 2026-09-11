@@ -119,6 +119,11 @@ export interface SessionPayload {
   // requireTenantAuth, same treatment as previewOnly) until POST
   // /api/auth/totp-verify exchanges it for a real session.
   pendingMfa?: true;
+  // Set only on the short-lived state token GET /api/auth/entra/login mints
+  // before redirecting to Microsoft — verified by GET /api/auth/entra/
+  // callback as CSRF/replay protection on the OAuth round trip (rejected
+  // everywhere else, same treatment as previewOnly/pendingMfa above).
+  entraState?: true;
   // Unix ms expiry. Optional only because a token predating this field
   // (signed before SESSION_TTL_MS existed) must still verify — every
   // signSession call today sets it, whether SESSION_TTL_MS (login/setup/
