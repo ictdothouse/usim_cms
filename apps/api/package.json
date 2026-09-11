@@ -33,11 +33,11 @@
     "sharp": "^0.33.5"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
+    "@types/node": "^26.5.0",
     "@types/pg": "^8.11.10",
     "@types/sanitize-html": "^2.16.1",
-    "drizzle-kit": "^0.28.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   }
 }
