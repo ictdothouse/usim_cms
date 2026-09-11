@@ -337,6 +337,23 @@ callouts before assuming any of this is speculative hardening.
   back to a per-process in-memory `Map` otherwise (same "opt-in infrastructure" shape as the Redis cache
   itself — real protection on a single instance, per-replica only without Redis). Fails open on a Redis
   error, matching `cache.ts`'s own "optimization, never a hard dependency" stance.
+- **Microsoft Entra ID SSO (2026-09-12).** Hand-rolled OIDC Authorization Code flow (`entra.ts` — no
+  `openid-client`/`jose` dependency, same call already made for TOTP via `node:crypto` instead of
+  `otplib`): `GET /api/auth/entra/login` 302s to Microsoft with a signed `entraState` token (reuses
+  `signSession`/`SessionPayload`, same shape as `pendingMfa`/`previewOnly`); `GET
+  /api/auth/entra/callback` exchanges the code, verifies the `id_token`'s RS256 signature against
+  Microsoft's own JWKS (`node:crypto`'s `createPublicKey({format:"jwk"})`/`verify`, cached ~24h per
+  tenantId), checks `iss`/`aud`/`exp`, then calls `findUserByEmail` (lowercased) — **never
+  auto-provisions an account**. This is the actual access-control mechanism, not an incidental choice:
+  USIM has ~1,000 staff with Entra ID but only ~40 CMS accounts, so the `users` table itself is the
+  allowlist — Entra only proves identity, the `users` row is what grants access. Three
+  superadmin-toggleable modes (`platformSettings.entraEnabled`/`entraOnly`, Settings > Login Methods,
+  `GET /api/auth/login-methods` exposes them pre-login): password-only (today's default), both side by
+  side, or Entra-only — the last disables password login for every role EXCEPT `superadmin`
+  (`isPasswordLoginAllowed` in `entra.ts`, unit-tested directly), a deliberate break-glass exemption so
+  the superadmin who flipped the toggle can't lock themselves out if Entra is ever misconfigured. The
+  client secret and exact redirect URI are `ENTRA_CLIENT_SECRET`/`ENTRA_REDIRECT_URI` env vars only,
+  never stored in the DB — same env-vs-DB split as `SESSION_SECRET`/`ADMIN_ORIGIN`.
 - **Login rate limiting.** `login_attempts` (control-plane, one row per attempt, both success and
   failure) backs `isLoginRateLimited(email, ip)`/`recordLoginAttempt` (`tenant-pool.ts`) — a DB table,
   not an in-memory counter, because blue-green/multi-replica means separate processes don't share memory.

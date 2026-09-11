@@ -37,6 +37,14 @@ ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "mfa_enabled" 
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "switcher_position" text DEFAULT 'header' NOT NULL;
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "switcher_style" text DEFAULT 'text' NOT NULL;
 
+-- Entra ID SSO (Settings "Login Methods" card, extension point mfa_enabled's
+-- own comment already flagged) — see schema.ts's platformSettings comment
+-- for what each column means.
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_enabled" boolean DEFAULT false NOT NULL;
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_only" boolean DEFAULT false NOT NULL;
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_tenant_id" text;
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_client_id" text;
+
 -- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
 -- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
 -- counter table.

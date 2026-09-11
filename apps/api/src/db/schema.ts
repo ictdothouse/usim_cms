@@ -325,6 +325,23 @@ export const platformSettings = pgTable("platform_settings", {
   // just see the "Set up MFA" prompt appear in their own Security tab. This
   // is the extension point for Entra ID/SSO later — see users table comment.
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
+  // Entra ID SSO — the extension point the comment above already flagged.
+  // entraEnabled: Entra login available at all (login page shows the
+  // button). entraOnly: password login disabled for every role EXCEPT
+  // superadmin (a superadmin's password still works as a break-glass path
+  // if Entra is ever misconfigured — see index.ts's POST /api/auth/login
+  // guard) — only meaningful when entraEnabled is true. entraTenantId/
+  // entraClientId are the non-secret half of the Azure app registration;
+  // the client secret and redirect URI are env vars only (ENTRA_CLIENT_
+  // SECRET/ENTRA_REDIRECT_URI), never stored here. Account provisioning is
+  // NEVER automatic in any mode — see entra.ts/index.ts's callback route,
+  // which only ever authenticates an email that already has a users row;
+  // this table has no allowlist of its own because the users table already
+  // is one.
+  entraEnabled: boolean("entra_enabled").notNull().default(false),
+  entraOnly: boolean("entra_only").notNull().default(false),
+  entraTenantId: text("entra_tenant_id"),
+  entraClientId: text("entra_client_id"),
   // Instance-wide default for the language switcher's placement/style —
   // the seed value a tenant with no explicit override (tenant_languages.
   // switcherPosition/switcherStyle both null) resolves to. Settings tab's
