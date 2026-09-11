@@ -315,11 +315,23 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   still take the same args), so `Inspector.tsx`, `context.ts`, `FieldInput.tsx`, and the Live Edit
   dotted-path protocol needed no changes at all. `designerTree.selfcheck.ts` (a plain `node:assert`
   script, run via `npx tsx src/designerTree.selfcheck.ts` — no test framework wired into `package.json`
-  scripts) was extended to cover the new primitives directly, since Designer.tsx itself still has no
-  automated test coverage. This was previously attempted and abandoned as too risky; scoping it as a
+  scripts) was extended to cover the new primitives directly, since Designer.tsx itself had no automated
+  test coverage at the time. This was previously attempted and abandoned as too risky; scoping it as a
   behavior-preserving internal refactor (no data-model change, no new Container element, no UI change)
   is what made it safe to actually ship. A recursive Container element is still real, separate, unplanned
   future work — this just removes its main prerequisite blocker.
+  **First real Designer.tsx test coverage (2026-09-11):** `@playwright/test` (devDependency) +
+  `apps/admin/playwright.config.ts` + `e2e/seed.ts`/`e2e/designer-smoke.spec.ts` — one E2E smoke test
+  (`pnpm --filter @ucms/admin test:e2e`): seeds a disposable tenant+superadmin+draft page directly
+  against a running `apps/api` (`POST /api/setup`, idempotent), injects the resulting session cookie/CSRF
+  token into the browser context (bypassing the login form), then drives the real UI — add a section,
+  drag a Heading element from the palette into its column, Save draft, reload, assert the heading
+  persisted. Needs a live `apps/api` + Postgres + the admin dev server running (`E2E_API_URL`/
+  `E2E_ADMIN_URL` env vars override the defaults, `http://localhost:3001`/`:5173`) — not wired into the
+  Dockerfile build-time test gate (`RUN pnpm --filter @ucms/admin test`, unit tests only) since a live
+  DB+browser can't run inside that step; run it manually or from a separate CI job. Not exhaustive — one
+  path (add+save+reload), not full coverage — but it's the safety net the refactor-design doc's own
+  "testing gap" section asked for before anyone attempts Layer 2 on top of this file.
   `startMove`'s smart guides gained sibling-to-sibling center alignment (a pink line, distinct from the
   red page-center/spacing-tick lines) — before this, `vCenter`/`hCenter` only snapped to the slide box's
   own 50% center; now, while dragging any item, its center is also compared against every OTHER item's
