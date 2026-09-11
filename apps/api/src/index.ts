@@ -1685,6 +1685,26 @@ const pagesAfterRead = (items: unknown[]) =>
     };
   });
 
+// Snapshots the page into page_revisions whenever a request explicitly
+// publishes it (req.body.status, the raw incoming payload — not just
+// "happens to already be published", so a plain content edit via Designer's
+// Save never re-snapshots). Mirrors postsAfterChange exactly, minus the
+// "private" branch — pages have no equivalent status.
+const pagesAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRequest) => {
+  const requested = (req.body as Record<string, unknown>)?.status;
+  if (requested !== "published") return;
+  const row = item as Record<string, unknown>;
+  await req.db.insert(schema.pageRevisions).values({
+    pageId: row.id as string,
+    title: row.title as string,
+    layout: (row.layout as unknown[]) ?? [],
+    settings: (row.settings as Record<string, unknown>) ?? {},
+    bannerImageUrl: row.bannerImageUrl as string | null,
+    status: row.status as string,
+    publishedAt: row.publishedAt as Date | null,
+  });
+};
+
 const pagesCollection: CollectionConfig = {
   slug: "pages",
   table: schema.pages,
@@ -1726,6 +1746,7 @@ const pagesCollection: CollectionConfig = {
   },
   hooks: {
     beforeChange: pagesBeforeChange,
+    afterChange: pagesAfterChange,
     afterRead: pagesAfterRead,
   },
 };
@@ -2332,6 +2353,57 @@ await app.register(async (protectedScope) => {
         updatedAt: new Date(),
       })
       .where(eq(schema.posts.id, id))
+      .returning();
+    return { item };
+  });
+
+  // History/restore for pages — same reasoning as the posts revision routes
+  // above (a page-specific feature the generic CRUD mechanism doesn't cover),
+  // mirrored exactly minus the category-name resolution posts' restore does
+  // (pages have no category concept).
+  protectedScope.get("/api/pages/:id/revisions", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    const { id } = req.params as { id: string };
+    const items = await req.db
+      .select()
+      .from(schema.pageRevisions)
+      .where(eq(schema.pageRevisions.pageId, id))
+      .orderBy(desc(schema.pageRevisions.createdAt));
+    return { items };
+  });
+
+  // Copies a snapshot's content fields back onto the live page as a new
+  // draft — never auto-republishes it, so restoring an old version always
+  // goes through a deliberate re-publish click, same as any other edit.
+  protectedScope.post("/api/pages/:id/revisions/:revisionId/restore", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    const { id, revisionId } = req.params as { id: string; revisionId: string };
+    const [revision] = await req.db
+      .select()
+      .from(schema.pageRevisions)
+      .where(and(eq(schema.pageRevisions.id, revisionId), eq(schema.pageRevisions.pageId, id)));
+    if (!revision) {
+      reply.code(404);
+      return { error: "not found" };
+    }
+    const [item] = await req.db
+      .update(schema.pages)
+      .set({
+        title: revision.title,
+        layout: revision.layout,
+        settings: revision.settings,
+        bannerImageUrl: revision.bannerImageUrl,
+        status: "draft",
+        publishedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.pages.id, id))
       .returning();
     return { item };
   });

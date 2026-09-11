@@ -531,6 +531,26 @@ callouts before assuming any of this is speculative hardening.
     collection-route mechanism doesn't cover, not a general stub state. Restoring a revision always sets
     the post back to `"draft"` (never auto-republishes) so a restored old version goes live only via a
     deliberate re-publish click.
+  - **Page revisions/rollback (2026-09-11)** — pages had no equivalent of the posts history above until
+    now (a real gap: pages are the Designer canvas, i.e. the actual defacement target, and had no
+    "restore to last known good" at all). `page_revisions` (`schema.ts`, migration
+    `0025_page_revisions.sql`, same admin-only RLS shape as `post_revisions`) snapshots `title`/`layout`/
+    `settings`/`bannerImageUrl`/`status`/`publishedAt` every time `pagesAfterChange` sees a request
+    explicitly set `status: "published"` — pages have no `"private"` status, so this is a single-branch
+    version of `postsAfterChange`, not a plain content edit via Designer's Save. `GET
+    /api/pages/:id/revisions` + `POST /api/pages/:id/revisions/:id/restore` (hand-written, same
+    reasoning as the posts routes — `pages.update` permission-gated) mirror the posts routes exactly
+    minus category-name resolution (pages have no category). Restoring sets the page back to `"draft"`
+    (never auto-republishes), same convention as posts. `apps/admin/src/lib/api.ts` gained
+    `PageRevision`/`listPageRevisions`/`restorePageRevision` (mirrors `PostRevision`/
+    `listPostRevisions`/`restorePostRevision` exactly). **Not yet wired into Designer.tsx's own UI** —
+    `PostEditorPage.tsx`'s `PostHistory` component (a self-contained History panel + Restore button,
+    toggled from a sidebar button) has no equivalent inside Designer.tsx yet; the backend/API layer is
+    complete and independently testable/usable, but there is no "History" button in the page canvas
+    toolbar to trigger it. This is the deliberate scope cut for this pass — wiring it into Designer.tsx
+    needs tracing how `page`/`rawBlocks` state reloads after a restore (Designer.tsx is large and
+    hand-tuned; PostEditorPage's `bodyVersion`-bump-on-restore pattern is the reference to mirror), not
+    attempted here to avoid a rushed edit to that file's state management.
   - `menus` (`src/db/schema.ts`) is a named, ordered navigation tree — `name` + a single `items` jsonb
     column holding the whole nested structure (top-level items, each optionally `children` for a simple
     dropdown OR `megaMenu` for a multi-column rich menu, never both), the same "one row holds the whole
