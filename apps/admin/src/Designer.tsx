@@ -144,7 +144,7 @@ import {
 import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
-import { moveSection, moveColumn } from "./designerTree";
+import { moveSection, moveColumn, childrenOf, getNode, removeAt, insertAt, moveWithin } from "./designerTree";
 import type { Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem, Sel, PageSettings } from "./designer/types";
 import { parsePairs, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
 import { TemplatePreview } from "./designer/TemplatePreview";
@@ -1531,7 +1531,7 @@ export default function Designer({
             // block-canvas drag.
             if (from[0] === tb && from[1] === tr && from[2] === tc && from[3] < idx) idx--;
             const el = removeAt(bs, from);
-            insertEl(bs, [tb, tr, tc], el, idx);
+            insertAt(bs, [tb, tr, tc], el, idx);
           });
         } else if (from.length === 3) {
           // Column reorder is scoped to within its own row — a row's
@@ -1755,7 +1755,7 @@ export default function Designer({
         mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(value) as Col));
       } else {
         const index = sel.length === 4 ? e + 1 : section(blocks, b).rows[r].columns[c].elements.length;
-        mutate((bs) => insertEl(bs, [b, r, c], { ...(clone(value) as El), id: uid() }, index));
+        mutate((bs) => insertAt(bs, [b, r, c], { ...(clone(value) as El), id: uid() }, index));
       }
     } else {
       mutate((bs) => bs.push(clone(value) as unknown as Block));
@@ -1840,17 +1840,6 @@ export default function Designer({
 
   const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionProps;
 
-  function removeAt(bs: Block[], path: number[]): El {
-    const [b, r, c, e] = path;
-    return section(bs, b).rows[r].columns[c].elements.splice(e, 1)[0];
-  }
-
-  function insertEl(bs: Block[], colPath: number[], el: El, index?: number) {
-    const [b, r, c] = colPath;
-    const list = section(bs, b).rows[r].columns[c].elements;
-    list.splice(index ?? list.length, 0, el);
-  }
-
   // Extracted from BlockControls/Inspector's inline closures so both those
   // and LiveEditToolbar (Live Edit mode) call one shared implementation per
   // action+level instead of re-deriving the same splice/clip logic.
@@ -1867,7 +1856,7 @@ export default function Designer({
     return !isSuper && (blocks[b]?.props as unknown as SectionProps | undefined)?.locked === "true";
   }
   function duplicateSection(b: number) {
-    mutate((bs) => bs.splice(b + 1, 0, clone(bs[b])));
+    mutate((bs) => insertAt(bs, [], clone(getNode(bs, [b])), b + 1));
     bumpStructural();
   }
   function copySection(b: number) {
@@ -1876,7 +1865,7 @@ export default function Designer({
   function pasteSection(b: number) {
     const data = clipRead<Block>("section");
     if (data) {
-      mutate((bs) => bs.splice(b + 1, 0, clone(data)));
+      mutate((bs) => insertAt(bs, [], clone(data), b + 1));
       bumpStructural();
     }
   }
@@ -1900,7 +1889,7 @@ export default function Designer({
       return;
     }
     mutate((bs) => {
-      bs.splice(b, 1);
+      removeAt(bs, [b]);
     });
     setSel(null);
     bumpStructural();
@@ -1911,11 +1900,11 @@ export default function Designer({
       toast.error(t("designer-section-locked-toast"));
       return;
     }
-    mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(section(bs, b).rows[r].columns[c])));
+    mutate((bs) => insertAt(bs, [b, r], clone(getNode(bs, [b, r, c]) as Col), c + 1));
     bumpStructural();
   }
   function copyColumn(b: number, r: number, c: number) {
-    clipCopy("column", section(blocks, b).rows[r].columns[c]);
+    clipCopy("column", getNode(blocks, [b, r, c]) as Col);
   }
   function pasteColumn(b: number, r: number, c: number) {
     if (isSectionLocked(b)) {
@@ -1924,12 +1913,12 @@ export default function Designer({
     }
     const data = clipRead<Col>("column");
     if (data) {
-      mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(data)));
+      mutate((bs) => insertAt(bs, [b, r], clone(data), c + 1));
       bumpStructural();
     }
   }
   function copyStyleColumn(b: number, r: number, c: number) {
-    styleCopy("column", section(blocks, b).rows[r].columns[c].props ?? {});
+    styleCopy("column", (getNode(blocks, [b, r, c]) as Col).props ?? {});
   }
   function pasteStyleColumn(b: number, r: number, c: number) {
     if (isSectionLocked(b)) {
@@ -1939,7 +1928,7 @@ export default function Designer({
     const style = styleRead("column");
     if (style)
       mutate((bs) => {
-        const target = section(bs, b).rows[r].columns[c];
+        const target = getNode(bs, [b, r, c]) as Col;
         target.props = { ...(target.props ?? {}), ...style };
       });
   }
@@ -1949,9 +1938,8 @@ export default function Designer({
       return;
     }
     mutate((bs) => {
-      const row = section(bs, b).rows[r];
-      row.columns.splice(c, 1);
-      if (row.columns.length === 0) section(bs, b).rows.splice(r, 1);
+      removeAt(bs, [b, r, c]);
+      if ((childrenOf(bs, [b, r]) as Col[]).length === 0) removeAt(bs, [b, r]);
     });
     setSel(null);
     bumpStructural();
@@ -1967,11 +1955,8 @@ export default function Designer({
       return;
     }
     const target = c + dir;
-    if (target < 0 || target >= section(blocks, b).rows[r].columns.length) return;
-    mutate((bs) => {
-      const cols = section(bs, b).rows[r].columns;
-      cols.splice(target, 0, cols.splice(c, 1)[0]);
-    });
+    if (target < 0 || target >= (childrenOf(blocks, [b, r]) as Col[]).length) return;
+    mutate((bs) => moveWithin(bs, [b, r], c, target));
     setSel([b, r, target]);
     bumpStructural();
   }
@@ -1984,7 +1969,7 @@ export default function Designer({
       toast.error(t("designer-section-locked-toast"));
       return;
     }
-    mutate((bs) => section(bs, b).rows.splice(r, 1));
+    mutate((bs) => removeAt(bs, [b, r]));
     setSel(null);
     bumpStructural();
   }
@@ -1994,11 +1979,8 @@ export default function Designer({
       return;
     }
     const target = r + dir;
-    if (target < 0 || target >= section(blocks, b).rows.length) return;
-    mutate((bs) => {
-      const rows = section(bs, b).rows;
-      rows.splice(target, 0, rows.splice(r, 1)[0]);
-    });
+    if (target < 0 || target >= (childrenOf(blocks, [b]) as Row[]).length) return;
+    mutate((bs) => moveWithin(bs, [b], r, target));
     setSel([b, target]);
     bumpStructural();
   }
@@ -2007,11 +1989,11 @@ export default function Designer({
       toast.error(t("designer-section-locked-toast"));
       return;
     }
-    mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(section(bs, b).rows[r])));
+    mutate((bs) => insertAt(bs, [b], clone(getNode(bs, [b, r]) as Row), r + 1));
     bumpStructural();
   }
   function copyRow(b: number, r: number) {
-    clipCopy("row", section(blocks, b).rows[r]);
+    clipCopy("row", getNode(blocks, [b, r]) as Row);
   }
   function pasteRow(b: number, r: number) {
     if (isSectionLocked(b)) {
@@ -2020,12 +2002,12 @@ export default function Designer({
     }
     const data = clipRead<Row>("row");
     if (data) {
-      mutate((bs) => section(bs, b).rows.splice(r + 1, 0, clone(data)));
+      mutate((bs) => insertAt(bs, [b], clone(data), r + 1));
       bumpStructural();
     }
   }
   function copyStyleRow(b: number, r: number) {
-    const { columns: _columns, ...styleProps } = section(blocks, b).rows[r];
+    const { columns: _columns, ...styleProps } = getNode(blocks, [b, r]) as Row;
     styleCopy("row", styleProps as unknown as Record<string, string>);
   }
   function pasteStyleRow(b: number, r: number) {
@@ -2034,11 +2016,11 @@ export default function Designer({
       return;
     }
     const style = styleRead("row");
-    if (style) mutate((bs) => Object.assign(section(bs, b).rows[r], style));
+    if (style) mutate((bs) => Object.assign(getNode(bs, [b, r]) as Row, style));
   }
   function setRowGap(b: number, r: number, gap: string | undefined) {
     mutate((bs) => {
-      section(bs, b).rows[r].gap = gap;
+      (getNode(bs, [b, r]) as Row).gap = gap;
     });
   }
   function setPageGap(gap: string | undefined) {
@@ -2068,13 +2050,13 @@ export default function Designer({
       return;
     }
     mutate((bs) => {
-      const src = section(bs, b).rows[r].columns[c].elements[e];
-      section(bs, b).rows[r].columns[c].elements.splice(e + 1, 0, { ...clone(src), id: uid() });
+      const src = getNode(bs, [b, r, c, e]) as El;
+      insertAt(bs, [b, r, c], { ...clone(src), id: uid() }, e + 1);
     });
     bumpStructural();
   }
   function copyElement(b: number, r: number, c: number, e: number) {
-    clipCopy("element", section(blocks, b).rows[r].columns[c].elements[e]);
+    clipCopy("element", getNode(blocks, [b, r, c, e]) as El);
   }
   function pasteElement(b: number, r: number, c: number, e: number) {
     if (isSectionLocked(b)) {
@@ -2083,12 +2065,12 @@ export default function Designer({
     }
     const data = clipRead<El>("element");
     if (data) {
-      mutate((bs) => insertEl(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
+      mutate((bs) => insertAt(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
       bumpStructural();
     }
   }
   function copyStyleElement(b: number, r: number, c: number, e: number) {
-    const el = section(blocks, b).rows[r].columns[c].elements[e];
+    const el = getNode(blocks, [b, r, c, e]) as El;
     styleCopy("element", el.props, el.type);
   }
   function pasteStyleElement(b: number, r: number, c: number, e: number) {
@@ -2099,7 +2081,7 @@ export default function Designer({
     const style = styleRead("element");
     if (style)
       mutate((bs) => {
-        const target = section(bs, b).rows[r].columns[c].elements[e];
+        const target = getNode(bs, [b, r, c, e]) as El;
         target.props = { ...target.props, ...style };
       });
   }
@@ -2120,11 +2102,8 @@ export default function Designer({
       return;
     }
     const target = e + dir;
-    if (target < 0 || target >= section(blocks, b).rows[r].columns[c].elements.length) return;
-    mutate((bs) => {
-      const els = section(bs, b).rows[r].columns[c].elements;
-      els.splice(target, 0, els.splice(e, 1)[0]);
-    });
+    if (target < 0 || target >= (childrenOf(blocks, [b, r, c]) as El[]).length) return;
+    mutate((bs) => moveWithin(bs, [b, r, c], e, target));
     setSel([b, r, c, target]);
     bumpStructural();
   }
@@ -2144,7 +2123,7 @@ export default function Designer({
     }
     mutate((bs) => {
       if (d.kind === "new") {
-        insertEl(bs, colPath, newEl(d.type), index);
+        insertAt(bs, colPath, newEl(d.type), index);
         return;
       }
       const [sb, sr, sc, se] = d.path;
@@ -2152,7 +2131,7 @@ export default function Designer({
       // same-column move: removing the source first shifts later indexes down
       if (idx !== undefined && sb === colPath[0] && sr === colPath[1] && sc === colPath[2] && se < idx) idx--;
       const el = removeAt(bs, d.path);
-      insertEl(bs, colPath, el, idx);
+      insertAt(bs, colPath, el, idx);
     });
     setSel(null);
   }

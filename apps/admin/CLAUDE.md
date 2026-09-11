@@ -302,11 +302,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   Per-breakpoint column-span overrides still only drive grid-template-columns (`buildRowSpans` in
   SectionBlock.astro), not flex-grow — a harmless no-op in flex mode, not wired up as a follow-up unless
   actually asked for. **Scoped deliberately to the existing `Row` primitive, not a new arbitrary-nestable
-  Container element** (the Webflow/Framer/Figma-Auto-Layout/FlutterFlow model) — that would need
-  `Designer.tsx`'s `sel: number[]` fixed-depth selection/mutation system rewritten to relative/composable
-  paths first, which a prior session already attempted and abandoned as too risky to rush; the user asked
-  for that refactor to eventually happen but explicitly as separate, properly-planned work, not bundled
-  into this feature.
+  Container element** (the Webflow/Framer/Figma-Auto-Layout/FlutterFlow model) — that would still need a
+  recursive data model + Inspector/Live-Edit/schema changes no one has built yet, but the underlying
+  path-hardcoding blocker (see next paragraph) is now fixed.
+  **Selection-path mutation layer de-hardcoded (2026-09-11):** `designerTree.ts` gained generic,
+  depth-agnostic path primitives — `childrenOf(blocks, parentPath)` (the ONE place the fixed
+  Block→rows→Row→columns→Col→elements shape is hardcoded), `locate`/`getNode`/`removeAt`/`insertAt`/
+  `moveWithin` built on top of it. Every one of Designer.tsx's ~40 delete/move/duplicate/copy/paste/
+  copy-style/paste-style functions (`deleteRow`, `moveElement`, `duplicateColumn`, etc.) was migrated to
+  delegate to these instead of hand-writing its own `section(bs,b).rows[r].columns[c].elements[e]`-style
+  indexing chain — a pure internal refactor, **zero external signature changes** (`deleteRow(b, r)` etc.
+  still take the same args), so `Inspector.tsx`, `context.ts`, `FieldInput.tsx`, and the Live Edit
+  dotted-path protocol needed no changes at all. `designerTree.selfcheck.ts` (a plain `node:assert`
+  script, run via `npx tsx src/designerTree.selfcheck.ts` — no test framework wired into `package.json`
+  scripts) was extended to cover the new primitives directly, since Designer.tsx itself still has no
+  automated test coverage. This was previously attempted and abandoned as too risky; scoping it as a
+  behavior-preserving internal refactor (no data-model change, no new Container element, no UI change)
+  is what made it safe to actually ship. A recursive Container element is still real, separate, unplanned
+  future work — this just removes its main prerequisite blocker.
   `startMove`'s smart guides gained sibling-to-sibling center alignment (a pink line, distinct from the
   red page-center/spacing-tick lines) — before this, `vCenter`/`hCenter` only snapped to the slide box's
   own 50% center; now, while dragging any item, its center is also compared against every OTHER item's
