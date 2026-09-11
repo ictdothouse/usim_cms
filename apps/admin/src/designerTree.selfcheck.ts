@@ -70,4 +70,28 @@ function fixture(): Block[] {
   assert.strictEqual(getNode(blocks, [0, 0]), row);
 }
 
+// Recursive container: childrenOf/getNode/insertAt/removeAt/moveWithin at
+// depth 4+ (a container's own `children`, and one level deeper for a
+// container nested inside a container) — the extension point childrenOf's
+// own doc comment always called out.
+{
+  const blocks = fixture();
+  // e1 (depth [0,0,0,0]) is type "text", not a container — still throws.
+  assert.throws(() => childrenOf(blocks, [0, 0, 0, 0]));
+  const col0 = getNode(blocks, [0, 0, 0]) as { elements: unknown[] };
+  col0.elements.push({ id: "c1", type: "container", props: {}, children: [{ id: "c1a", type: "text", props: {} }] });
+  // Depth 4: a container's own children.
+  assert.deepStrictEqual(childrenOf(blocks, [0, 0, 0, 1]), [{ id: "c1a", type: "text", props: {} }]);
+  assert.strictEqual((getNode(blocks, [0, 0, 0, 1, 0]) as { id: string }).id, "c1a");
+  // Depth 5: insert a nested container one level deeper, then address its
+  // own (empty) children at depth 6.
+  insertAt(blocks, [0, 0, 0, 1], { id: "c1b", type: "container", props: {}, children: [] });
+  assert.deepStrictEqual(childrenOf(blocks, [0, 0, 0, 1, 1]), []);
+  moveWithin(blocks, [0, 0, 0, 1], 0, 1);
+  assert.strictEqual((getNode(blocks, [0, 0, 0, 1, 0]) as { id: string }).id, "c1b");
+  const removed = removeAt(blocks, [0, 0, 0, 1, 1]) as { id: string };
+  assert.strictEqual(removed.id, "c1a");
+  assert.strictEqual((getNode(blocks, [0, 0, 0, 1]) as { children: unknown[] }).children.length, 1);
+}
+
 console.log("designerTree self-check passed");

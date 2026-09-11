@@ -81,6 +81,9 @@ function isSafeShadow(v: string): boolean {
 export const ENUM_VALUES: Record<string, string[]> = {
   level: ["1", "2", "3", "4"],
   flexDirection: ["row", "column", "row-reverse", "column-reverse"],
+  justifyContent: ["flex-start", "center", "flex-end", "space-between", "space-around"],
+  alignItems: ["flex-start", "center", "flex-end", "stretch"],
+  flexWrap: ["nowrap", "wrap"],
   align: ["left", "center", "right"],
   fontWeight: ["400", "500", "600", "700", "800"],
   textTransform: ["none", "uppercase", "lowercase", "capitalize"],
@@ -538,7 +541,19 @@ function validateBp(bp: unknown, path: string): string | null {
 function validateElement(el: unknown, path: string): string | null {
   if (typeof el !== "object" || el === null) return `${path} must be an object`;
   const e = el as Record<string, unknown>;
-  return validatePropsBag(e.props, path) ?? validateBp(e.bp, path);
+  const err = validatePropsBag(e.props, path) ?? validateBp(e.bp, path);
+  if (err) return err;
+  // Recursive container's own children — only ever populated when
+  // type==="container", but validated generically for any element (an El
+  // with no `children` key just skips this, same as every other optional
+  // field here).
+  if (e.children === undefined) return null;
+  if (!Array.isArray(e.children)) return `${path}.children must be an array`;
+  for (let i = 0; i < e.children.length; i++) {
+    const childErr = validateElement(e.children[i], `${path}.children[${i}]`);
+    if (childErr) return childErr;
+  }
+  return null;
 }
 
 function validateColumn(col: unknown, path: string): string | null {

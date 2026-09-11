@@ -14,6 +14,9 @@ interface El {
   type: string;
   props?: Record<string, string>;
   bp?: Record<string, string>;
+  // Recursive container's own children (see apps/admin's designer/types.ts
+  // El.children) — only ever set/read when type==="container".
+  children?: El[];
 }
 interface Col {
   span?: number;
@@ -1931,6 +1934,172 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                           ),
                         )}
                       </div>
+                    </div>
+                  );
+                }
+                case "container": {
+                  // Recursive container (Webflow/Figma-style nested-anywhere
+                  // box) — v1 scope, curated child types only (mirrors
+                  // renderSlideEl's own curated heading/text/image/button
+                  // set above, plus badge/spacer/divider/icon/container for
+                  // recursion), no real per-breakpoint style override for
+                  // children yet (admin-preview-only there, same as most
+                  // Element bp — see CLAUDE.md). Redefined per container
+                  // instance, same convention as renderSlideEl.
+                  const renderContainerChild = (child: El, childPath: string): unknown => {
+                    const cp = child.props ?? {};
+                    switch (child.type) {
+                      case "heading": {
+                        const Tag = headingTag(cp.level) as "h1";
+                        return (
+                          <Tag
+                            class={cls("ds-h", `ds-h${cp.level ?? "2"}`, cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp), typoStyle(cp), elBorderShadowStyle(cp)]
+                              .filter(Boolean)
+                              .join(";")}
+                            set:html={cp.text ? renderInline(cp.text) : ""}
+                          />
+                        );
+                      }
+                      case "text":
+                        return (
+                          <p
+                            class={cls("ds-text", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            style={[
+                              `font-size:${fluidTextSize(lengthValue(cp.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+                              cp.align ? `text-align:${cp.align}` : null,
+                              marginStyle(cp),
+                              paddingStyle(cp),
+                              typoStyle(cp),
+                              elBorderShadowStyle(cp),
+                            ]
+                              .filter(Boolean)
+                              .join(";")}
+                            set:html={renderInline(cp.text ?? "")}
+                          />
+                        );
+                      case "image": {
+                        const cpSrc = safeUrl(cp.src);
+                        const cpSrcset = cpSrc ? buildSrcset(cpSrc) : null;
+                        return cpSrc ? (
+                          <img
+                            class={cls("ds-img", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            src={cpSrc}
+                            srcset={cpSrcset?.srcset}
+                            sizes={cpSrcset ? cpSrcset.sizes : undefined}
+                            alt={cp.alt ?? ""}
+                            loading="lazy"
+                            style={[`border-radius:${elRadius(cp)}`, cp.imgWidth ? `width:${cp.imgWidth}` : null, marginStyle(cp), paddingStyle(cp), elBorderShadowStyle(cp)]
+                              .filter(Boolean)
+                              .join(";")}
+                          />
+                        ) : null;
+                      }
+                      case "button":
+                        return cp.label ? (
+                          <div
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
+                          >
+                            <a
+                              class={cls(cp.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
+                              href={safeUrl(cp.href) ?? "#"}
+                              style={[cp.color ? `color:${cp.color}` : null, elBorderShadowStyle(cp)].filter(Boolean).join(";") || undefined}
+                            >
+                              {cp.label}
+                            </a>
+                          </div>
+                        ) : null;
+                      case "badge": {
+                        const badgeIconPath = cp.name ? ICON_PATHS[cp.name] : undefined;
+                        const badgeIconSize = { sm: "14", md: "16", lg: "20" }[cp.scale ?? "md"] ?? "16";
+                        return (
+                          <div
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
+                          >
+                            <span class={cls(`ds-badge ds-badge-${cp.variant || "soft"} ds-badge-${cp.scale || "md"}`, cp.cssClass)} style={cp.color ? `color:${cp.color}` : undefined}>
+                              {badgeIconPath && (
+                                <svg width={badgeIconSize} height={badgeIconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                  <path d={badgeIconPath} />
+                                </svg>
+                              )}
+                              {cp.label}
+                            </span>
+                          </div>
+                        );
+                      }
+                      case "spacer":
+                        return <div data-designer-path={designerEdit ? childPath : undefined} style={`height:${lengthValue(cp.height, SPACE, SPACE.md)}`} />;
+                      case "divider":
+                        return <hr data-designer-path={designerEdit ? childPath : undefined} class="ds-divider" style={[marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")} />;
+                      case "icon": {
+                        const iconPath = ICON_PATHS[cp.name ?? "check"] ?? ICON_PATHS.check;
+                        const iconSize = lengthValue(cp.size, ICON_SIZE, ICON_SIZE.md);
+                        return (
+                          <div
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
+                          >
+                            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={cp.color || "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d={iconPath} />
+                            </svg>
+                          </div>
+                        );
+                      }
+                      case "container": {
+                        const grandchildren = child.children ?? [];
+                        return (
+                          <div
+                            data-designer-path={designerEdit ? childPath : undefined}
+                            style={[
+                              "display:flex",
+                              `flex-direction:${cp.flexDirection || "row"}`,
+                              `justify-content:${cp.justifyContent || "flex-start"}`,
+                              `align-items:${cp.alignItems || "stretch"}`,
+                              `flex-wrap:${cp.flexWrap || "wrap"}`,
+                              `gap:${cp.gap || "1rem"}`,
+                              cp.bg ? `background:${cp.bg}` : null,
+                              `border-radius:${elRadius(cp)}`,
+                              marginStyle(cp),
+                              paddingStyle(cp),
+                              elBorderShadowStyle(cp),
+                            ]
+                              .filter(Boolean)
+                              .join(";")}
+                          >
+                            {grandchildren.map((gc, gi) => renderContainerChild(gc, `${childPath}.${gi}`))}
+                          </div>
+                        );
+                      }
+                      default:
+                        return null;
+                    }
+                  };
+                  const elDottedPath = `${blockIndex}.${r}.${c}.${e}`;
+                  return (
+                    <div
+                      class={p.cssClass}
+                      style={[
+                        "display:flex",
+                        `flex-direction:${p.flexDirection || "row"}`,
+                        `justify-content:${p.justifyContent || "flex-start"}`,
+                        `align-items:${p.alignItems || "stretch"}`,
+                        `flex-wrap:${p.flexWrap || "wrap"}`,
+                        `gap:${p.gap || "1rem"}`,
+                        p.bg ? `background:${p.bg}` : null,
+                        `border-radius:${elRadius(p)}`,
+                        marginStyle(p),
+                        paddingStyle(p),
+                        elBorderShadowStyle(p),
+                      ]
+                        .filter(Boolean)
+                        .join(";")}
+                    >
+                      {(el.children ?? []).map((child, i) => renderContainerChild(child, `${elDottedPath}.${i}`))}
                     </div>
                   );
                 }

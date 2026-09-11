@@ -150,7 +150,16 @@ export type ElType =
   | "documentdownload"
   | "googlemap"
   | "announcementticker"
-  | "eventlist";
+  | "eventlist"
+  // Recursive container (Webflow/Figma-style "Frame in a Frame") — a flex box
+  // that can hold any other element, including another container, nested
+  // arbitrarily deep via El.children below. v1 scope: canvas/site render +
+  // real save/validate + generic path-based selection reusing `sel:
+  // number[]`'s already-arbitrary length; NOT drag-reorder/resize chrome for
+  // nested children (Inspector list buttons instead) or a palette drag-drop
+  // target — see Inspector.tsx's container panel and ElPreview.tsx's
+  // "container" case for what v1 actually covers.
+  | "container";
 
 // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) "card grid" element —
 // items is a JSON array of these, stored as a string in El.props.cards (see
@@ -173,6 +182,13 @@ export interface El {
   // toggle) — keyed "tablet:<fieldKey>" / "mobile:<fieldKey>", falling back
   // to props[fieldKey] when absent. Never read by apps/frontend.
   bp?: Record<string, string>;
+  // Recursive container's own children (only ever set/read when
+  // type==="container" — every other element type ignores this). A child
+  // can itself be a container, nesting arbitrarily deep. Addressed by
+  // `sel`/mutation paths as one more index past the parent container's own
+  // path (e.g. a container at [b,r,c,e] has children at [b,r,c,e,0],
+  // [b,r,c,e,1], ... — see designerTree.ts's childrenOf()).
+  children?: El[];
 }
 export interface Col {
   span: number;
