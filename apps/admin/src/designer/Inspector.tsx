@@ -38,7 +38,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { Key } from "@/i18n";
-import type { Bp, Block, Field, SectionProps } from "./types";
+import type { Bp, Block, Field, Row, SectionProps } from "./types";
 import { BASE_LANG, type DesignerCtx } from "./context";
 import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
@@ -754,11 +754,30 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           {row.layoutMode === "flex" && (
             <>
               <label className="block text-[11px] font-medium text-body">
-                {t("designer-row-direction")}
+                <span className="inline-flex items-center gap-1">
+                  {t("designer-row-direction")}
+                  <BpToggle
+                    active={bpKeysOverridden(row.bp, ["flexDirection"])}
+                    onToggle={() =>
+                      mutate((bs) => {
+                        const target = section(bs, b).rows[r];
+                        target.bp = toggleBpKeys(target.bp, ["flexDirection"]);
+                      })
+                    }
+                    bp={bp}
+                    t={t}
+                  />
+                </span>
                 <div className="mt-1">
                   <FlexIconGroup
-                    value={row.flexDirection ?? "row"}
-                    onChange={(v) => setRowSide("flexDirection", v)}
+                    value={bpGetValue(row.flexDirection ?? "row", row.bp, "flexDirection")}
+                    onChange={(v) =>
+                      mutate((bs) => {
+                        const target = section(bs, b).rows[r];
+                        if (bp === "desktop") target.flexDirection = v as Row["flexDirection"];
+                        else target.bp = { ...(target.bp ?? {}), [bpKey("flexDirection")]: v };
+                      })
+                    }
                     options={[
                       { value: "row", icon: ArrowRight, title: "row" },
                       { value: "column", icon: ArrowDown, title: "column" },

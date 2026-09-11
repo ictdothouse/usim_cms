@@ -42,6 +42,7 @@ interface Row {
   justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around";
   alignItems?: "flex-start" | "center" | "flex-end" | "stretch";
   flexWrap?: "nowrap" | "wrap";
+  bp?: Record<string, string>;
 }
 interface Props {
   bg?: string;
@@ -915,9 +916,9 @@ const rowStyle = (row: Row, isFirst: boolean) => {
   // Elementor-style flex container mode — unset/"grid" keeps the exact same
   // grid-template-columns output this function always emitted (no visual
   // change for any row saved before this existed). "flex" mode's own mobile
-  // stacking is handled by the `.ds-row[data-layout="flex"]` media-query
-  // override below (mirrors the existing `!important` grid-template-columns
-  // override for grid rows), not by anything computed here.
+  // stacking (and any per-breakpoint override) is handled by the real
+  // bpStyleRules() output pushed from the row's own render below
+  // (rowFlexBp/rowFlexBase/buildRowOverride), not by anything computed here.
   const layout =
     row.layoutMode === "flex"
       ? `display:flex;flex-direction:${row.flexDirection ?? "row"};justify-content:${row.justifyContent ?? "flex-start"};align-items:${row.alignItems ?? "stretch"};flex-wrap:${row.flexWrap ?? "wrap"}`
@@ -957,6 +958,26 @@ function rowSpanBase(row: Row): Record<string, string> {
 function buildRowSpans(row: Row, p: Record<string, string>): string {
   return `grid-template-columns:${(row.columns ?? []).map((_, i) => `${p[`span${i}`] ?? "1"}fr`).join(" ")}`;
 }
+// Flex mode's own per-bp direction override, merged onto the same bag as the
+// column-span override above so one respId()/data-vis id covers both. Mobile
+// always gets a synthetic default of "column" (the old hardcoded stack, see
+// the removed `.ds-row[data-layout="flex"]` media rule below) unless the
+// row's own `bp` explicitly overrides it — real, not admin-preview-only.
+function rowFlexBp(row: Row): Record<string, string> {
+  const out = rowSpanBp(row);
+  if (row.layoutMode === "flex") {
+    out["mobile:flexDirection"] = row.bp?.["mobile:flexDirection"] ?? "column";
+    if (row.bp?.["tablet:flexDirection"] !== undefined) out["tablet:flexDirection"] = row.bp["tablet:flexDirection"];
+  }
+  return out;
+}
+function rowFlexBase(row: Row): Record<string, string> {
+  return { ...rowSpanBase(row), flexDirection: row.flexDirection ?? "row" };
+}
+function buildRowOverride(row: Row, p: Record<string, string>): string {
+  if (row.layoutMode === "flex") return `flex-direction:${p.flexDirection}`;
+  return buildRowSpans(row, p);
+}
 ---
 
 <section
@@ -967,12 +988,26 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   data-vis={respId(`s${blockIndex}`, { hideDesktop, hideTablet, hideMobile }, sectionBp, baseSectionProps, buildSectionStyle)}
 >
   <div class={(width ?? pageContentWidth) === "full" ? "ds-inner ds-full" : "ds-inner"}>
-    {rows.map((row, r) => (
+    {rows.map((row, r) => {
+      const rowVisId = respId(`r${blockIndex}-${r}`, row, rowFlexBp(row), rowFlexBase(row), (p) => buildRowOverride(row, p));
+      // Flex mode's mobile/tablet stack needs each column's own flex-basis
+      // reset too (same override the old hardcoded `.ds-row[data-layout=
+      // "flex"] > .ds-col` media rule always applied) — a separate rule since
+      // it targets a different selector (the columns, not the row itself),
+      // scoped to whichever tier's resolved direction actually stacks.
+      if (row.layoutMode === "flex" && rowVisId) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${rowVisId}"] > .ds-col`, rowFlexBp(row), rowFlexBase(row), (p) =>
+            (p.flexDirection ?? "").startsWith("column") ? "flex:1 1 100%" : "",
+          ),
+        );
+      }
+      return (
       <div
         class="ds-row"
         data-layout={row.layoutMode === "flex" ? "flex" : undefined}
         style={rowStyle(row, r === 0)}
-        data-vis={respId(`r${blockIndex}-${r}`, row, rowSpanBp(row), rowSpanBase(row), (p) => buildRowSpans(row, p))}
+        data-vis={rowVisId}
       >
         {(row.columns ?? []).map((col, c) => (
           <div
@@ -1943,7 +1978,8 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
           </div>
         ))}
       </div>
-    ))}
+      );
+    })}
   </div>
   {responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 </section>
@@ -2815,12 +2851,6 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   @media (max-width: 768px) {
     .ds-row:not(header .ds-row) {
       grid-template-columns: 1fr !important;
-    }
-    .ds-row[data-layout="flex"]:not(header .ds-row) {
-      flex-direction: column !important;
-    }
-    .ds-row[data-layout="flex"]:not(header .ds-row) > .ds-col {
-      flex: 1 1 100% !important;
     }
     .ds-slide-cols {
       grid-template-columns: 1fr !important;
