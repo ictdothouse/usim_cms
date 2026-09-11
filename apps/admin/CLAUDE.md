@@ -280,6 +280,33 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   X/Y/blur/spread fields already used via `NumberStepper`, inlined here without that component's own
   `<label>` wrapper since `FieldInput`'s other kinds are all bare controls (FieldGroups/
   renderTypographyFields already render each field's label above it).
+  **Elementor-style drag-slider numeric fields (2026-09-11):** `lineHeight`/`letterSpacing` were upgraded
+  from `"stepper"` to a new `"drag-number"` `FieldKind` (`Field` gained `min`/`max`/`unit`) — a native
+  `<input type="range">` synced with a small number box (`DragNumber` in `FieldControls.tsx`), matching
+  the user's Elementor screenshot. `TYPOGRAPHY_FIELDS` also gained `fontSize` and `wordSpacing`, which this
+  element type never had before. Fixing this surfaced a real pre-existing bug: `letterSpacing` (a bare
+  number string like `"0.5"`) was assigned directly to the CSS `letter-spacing` property with no unit —
+  invalid CSS, silently dropped by the browser — so it had **no visual effect at all** before this fix, in
+  both `style.ts`'s `typoStyle` (admin canvas) and `SectionBlock.astro`'s own `typoStyle` (real site). Both
+  now append `px`; `fontSize`/`wordSpacing` are wired the same way.
+  **Row flex container (2026-09-11):** `Row` gained `layoutMode?: "grid"|"flex"` plus `flexDirection`/
+  `justifyContent`/`alignItems`/`flexWrap` — unset/`"grid"` is byte-identical to the old fixed
+  grid-template-columns behavior (no data migration for existing pages). In `"flex"` mode each column's
+  own `span` is reused as its flex-grow factor instead of a grid track size, so flipping a row between the
+  two modes keeps its columns' relative widths. Rendered in Designer.tsx's real Section>Row>Column canvas
+  block (shared by normal-canvas and Live-Edit "live" mode) and in `SectionBlock.astro`'s `rowStyle()` + a
+  new `.ds-row[data-layout="flex"]` mobile media-query override (mirrors the existing grid-template-columns
+  stack-to-one-column-on-mobile rule). Inspector's Row panel gained a "Layout" section (Grid/Flex toggle,
+  then Direction/Justify/Align icon-button groups + a Wrap toggle) using a new local `FlexIconGroup`
+  component in `Inspector.tsx` — not a shared/exported control, this one panel is its only caller.
+  Per-breakpoint column-span overrides still only drive grid-template-columns (`buildRowSpans` in
+  SectionBlock.astro), not flex-grow — a harmless no-op in flex mode, not wired up as a follow-up unless
+  actually asked for. **Scoped deliberately to the existing `Row` primitive, not a new arbitrary-nestable
+  Container element** (the Webflow/Framer/Figma-Auto-Layout/FlutterFlow model) — that would need
+  `Designer.tsx`'s `sel: number[]` fixed-depth selection/mutation system rewritten to relative/composable
+  paths first, which a prior session already attempted and abandoned as too risky to rush; the user asked
+  for that refactor to eventually happen but explicitly as separate, properly-planned work, not bundled
+  into this feature.
   `startMove`'s smart guides gained sibling-to-sibling center alignment (a pink line, distinct from the
   red page-center/spacing-tick lines) — before this, `vCenter`/`hCenter` only snapped to the slide box's
   own 50% center; now, while dragging any item, its center is also compared against every OTHER item's

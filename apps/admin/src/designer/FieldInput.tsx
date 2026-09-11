@@ -12,7 +12,7 @@ import type { Menu, Category } from "@/lib/api";
 import type { Key } from "@/i18n";
 import type { Field, Bp, SlideItem, Block, SectionProps } from "./types";
 import { SHADOW_DEFAULT_PARTS } from "./fields";
-import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, BpToggle } from "./FieldControls";
+import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, DragNumber, BpToggle } from "./FieldControls";
 import {
   parsePairs,
   parseSlides,
@@ -347,6 +347,18 @@ export function FieldInput({
     );
   }
   if (field.kind === "font") return <FontPickerInput value={value} onChange={onChange} className={base} />;
+  if (field.kind === "drag-number") {
+    return (
+      <DragNumber
+        value={value}
+        min={field.min}
+        max={field.max}
+        step={field.step}
+        unit={field.unit}
+        onCommit={onChange}
+      />
+    );
+  }
   if (field.kind === "stepper") {
     const step = field.step ?? 1;
     const n = Number(value) || 0;

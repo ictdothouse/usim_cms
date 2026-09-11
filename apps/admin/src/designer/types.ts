@@ -52,6 +52,7 @@ export type FieldKind =
   | "cards"
   | "font"
   | "stepper"
+  | "drag-number"
   | "menu-select"
   | "category-select"
   | "repeater";
@@ -78,8 +79,15 @@ export interface Field {
   options?: string[];
   // "pairs" kind only: i18n keys for the two sub-field placeholders (e.g. Question/Answer vs Label/Content).
   subLabels?: [Key, Key];
-  // "stepper" kind only: +/- nudge amount (default 1 if omitted).
+  // "stepper"/"drag-number" kind only: +/- nudge amount (default 1 if omitted).
   step?: number;
+  // "drag-number" kind only: slider bounds (defaults 0/100) and an optional
+  // unit suffix drawn next to the number box (e.g. "px") — purely cosmetic,
+  // the stored value itself is still a bare number string like every other
+  // numeric field here (fontSize/lineHeight/etc.), no unit is appended.
+  min?: number;
+  max?: number;
+  unit?: string;
   // "repeater" kind only: the per-item sub-field schema.
   itemFields?: RepeaterItemField[];
 }
@@ -197,6 +205,19 @@ export interface Row {
   hideDesktop?: string;
   hideTablet?: string;
   hideMobile?: string;
+  // Elementor-style flex container mode — unset/"grid" keeps this row's
+  // existing behavior (columns sized by their own `span` as CSS grid
+  // fr-tracks, see rowStyle()/ElPreview's "row" case) completely untouched;
+  // no data migration needed for rows saved before this existed. "flex"
+  // switches the row itself to `display:flex` and repurposes each column's
+  // own `span` as its flex-grow factor instead of a grid track size (same
+  // field, so a row can be flipped between the two modes without losing its
+  // columns' relative-width intent).
+  layoutMode?: "grid" | "flex";
+  flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
+  justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around";
+  alignItems?: "flex-start" | "center" | "flex-end" | "stretch";
+  flexWrap?: "nowrap" | "wrap";
 }
 export interface SectionProps {
   bg?: string;

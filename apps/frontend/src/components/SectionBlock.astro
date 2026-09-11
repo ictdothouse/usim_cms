@@ -33,6 +33,15 @@ interface Row {
   hideDesktop?: string;
   hideTablet?: string;
   hideMobile?: string;
+  // Mirrors apps/admin/src/designer/types.ts's own Row.layoutMode/etc — kept
+  // as a separate local interface here like the rest of this file's types
+  // (no shared schema package between admin/frontend for these), so this
+  // list must be kept in sync with admin's Row by hand.
+  layoutMode?: "grid" | "flex";
+  flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
+  justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around";
+  alignItems?: "flex-start" | "center" | "flex-end" | "stretch";
+  flexWrap?: "nowrap" | "wrap";
 }
 interface Props {
   bg?: string;
@@ -741,8 +750,14 @@ function typoStyle(p: Record<string, string>) {
   return [
     p.fontFamily ? `font-family:'${p.fontFamily}'` : null,
     p.color ? `color:${p.color}` : null,
+    p.fontSize ? `font-size:${p.fontSize}px` : null,
     p.lineHeight ? `line-height:${p.lineHeight}` : null,
-    p.letterSpacing ? `letter-spacing:${p.letterSpacing}` : null,
+    // Bare number strings (what the drag-number control stores) are invalid
+    // CSS without a unit — browsers silently drop them, so this was
+    // previously a no-op field on the real site too. Mirrors the same fix in
+    // apps/admin's style.ts typoStyle().
+    p.letterSpacing ? `letter-spacing:${p.letterSpacing}px` : null,
+    p.wordSpacing ? `word-spacing:${p.wordSpacing}px` : null,
     p.fontWeight ? `font-weight:${p.fontWeight}` : null,
     p.textTransform ? `text-transform:${p.textTransform}` : null,
     p.fontStyle ? `font-style:${p.fontStyle}` : null,
@@ -897,7 +912,17 @@ const rowStyle = (row: Row, isFirst: boolean) => {
     row.paddingTop || row.paddingRight || row.paddingBottom || row.paddingLeft
       ? `padding:${row.paddingTop ?? "0"} ${row.paddingRight ?? "0"} ${row.paddingBottom ?? "0"} ${row.paddingLeft ?? "0"};`
       : "";
-  return `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
+  // Elementor-style flex container mode — unset/"grid" keeps the exact same
+  // grid-template-columns output this function always emitted (no visual
+  // change for any row saved before this existed). "flex" mode's own mobile
+  // stacking is handled by the `.ds-row[data-layout="flex"]` media-query
+  // override below (mirrors the existing `!important` grid-template-columns
+  // override for grid rows), not by anything computed here.
+  const layout =
+    row.layoutMode === "flex"
+      ? `display:flex;flex-direction:${row.flexDirection ?? "row"};justify-content:${row.justifyContent ?? "flex-start"};align-items:${row.alignItems ?? "stretch"};flex-wrap:${row.flexWrap ?? "wrap"}`
+      : `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")}`;
+  return `${layout};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
 };
 const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
 // Column width (Col.span) is edited per-breakpoint in the Inspector (col.bp's
@@ -945,13 +970,14 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
     {rows.map((row, r) => (
       <div
         class="ds-row"
+        data-layout={row.layoutMode === "flex" ? "flex" : undefined}
         style={rowStyle(row, r === 0)}
         data-vis={respId(`r${blockIndex}-${r}`, row, rowSpanBp(row), rowSpanBase(row), (p) => buildRowSpans(row, p))}
       >
         {(row.columns ?? []).map((col, c) => (
           <div
             class={cls("ds-col", col.props?.cssClass)}
-            style={colStyle(col.props)}
+            style={`${colStyle(col.props) ?? ""}${row.layoutMode === "flex" ? `;flex:${col.span ?? 1} 1 0%;min-width:0` : ""}`}
             data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}` : undefined}
             data-vis={respId(`c${blockIndex}-${r}-${c}`, col.props ?? {}, col.bp, col.props ?? {}, (p) => colStyle(p) ?? "")}
           >
@@ -2789,6 +2815,12 @@ function buildRowSpans(row: Row, p: Record<string, string>): string {
   @media (max-width: 768px) {
     .ds-row:not(header .ds-row) {
       grid-template-columns: 1fr !important;
+    }
+    .ds-row[data-layout="flex"]:not(header .ds-row) {
+      flex-direction: column !important;
+    }
+    .ds-row[data-layout="flex"]:not(header .ds-row) > .ds-col {
+      flex: 1 1 100% !important;
     }
     .ds-slide-cols {
       grid-template-columns: 1fr !important;
