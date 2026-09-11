@@ -80,6 +80,7 @@ function isSafeShadow(v: string): boolean {
 // pattern — strictly tighter, and there's no room for injection at all.
 export const ENUM_VALUES: Record<string, string[]> = {
   level: ["1", "2", "3", "4"],
+  flexDirection: ["row", "column", "row-reverse", "column-reverse"],
   align: ["left", "center", "right"],
   fontWeight: ["400", "500", "600", "700", "800"],
   textTransform: ["none", "uppercase", "lowercase", "capitalize"],

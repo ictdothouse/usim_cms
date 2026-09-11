@@ -788,6 +788,18 @@ export default function Designer({
     if (hasOverride) return cols.map((cc) => `${bpGetValue(String(cc.span ?? 1), cc.bp, "span")}fr`).join(" ");
     return atBp === "mobile" ? "1fr" : cols.map((cc) => `${cc.span ?? 1}fr`).join(" ");
   }
+  // Flex mode's own per-bp direction override — mirrors rowGridTemplate's
+  // "explicit override opts a row out of the forced-stack default" shape.
+  // Mobile's default (no explicit row.bp["mobile:flexDirection"]) stays the
+  // old hardcoded stack-to-column; tablet has no forced default of its own
+  // (inherits the desktop flexDirection unless explicitly overridden) — real,
+  // not admin-preview-only, mirrored in SectionBlock.astro's own copy.
+  function rowFlexDirectionAtBp(row: Row, atBp: Bp): string {
+    if (atBp === "desktop") return row.flexDirection ?? "row";
+    const ov = row.bp?.[`${atBp}:flexDirection`];
+    if (ov !== undefined) return ov;
+    return atBp === "mobile" ? "column" : row.flexDirection ?? "row";
+  }
   const [treeDropHint, setTreeDropHint] = useState<{ key: string; pos: "before" | "after" } | null>(null);
   // Reported by BaseLayout.astro's designer:selectedRect message — the
   // selected node's on-screen box inside the iframe, used to position
@@ -3376,12 +3388,12 @@ export default function Designer({
                             style={{
                               ...(row.layoutMode === "flex"
                                 ? {
-                                    // Mirrors rowGridTemplate's own "stack on
-                                    // tablet/mobile bp preview" convention
-                                    // (grid mode falls back to a single "1fr"
-                                    // track there) — flex mode stacks the
-                                    // same way via flex-direction:column.
-                                    flexDirection: bp === "desktop" ? (row.flexDirection ?? "row") : "column",
+                                    // Mirrors rowGridTemplate's own per-bp
+                                    // convention — rowFlexDirectionAtBp
+                                    // defaults mobile to "column" (the old
+                                    // hardcoded stack) unless the row's own
+                                    // bp bag explicitly overrides it.
+                                    flexDirection: rowFlexDirectionAtBp(row, bp) as React.CSSProperties["flexDirection"],
                                     justifyContent: row.justifyContent ?? "flex-start",
                                     alignItems: row.alignItems ?? "stretch",
                                     flexWrap: row.flexWrap ?? "wrap",
@@ -3410,7 +3422,15 @@ export default function Designer({
                                 // of a grid fr-track) so flipping a row
                                 // between grid/flex never discards a
                                 // column's relative-width setting.
-                                ...(row.layoutMode === "flex" ? { flex: `${bpGetValue(String(col.span ?? 1), col.bp, "span")} 1 0%` } : {}),
+                                ...(row.layoutMode === "flex"
+                                  ? rowFlexDirectionAtBp(row, bp).startsWith("column")
+                                    ? // Stacked (column/column-reverse) — full flex-basis, same
+                                      // override the old hardcoded-column CSS always applied,
+                                      // now conditional on the resolved direction instead of
+                                      // unconditional on any non-desktop bp.
+                                      { flex: "1 1 100%" }
+                                    : { flex: `${bpGetValue(String(col.span ?? 1), col.bp, "span")} 1 0%` }
+                                  : {}),
                                 borderColor: mode === "live" ? undefined : colOverlay.line,
                                 opacity: colHiddenAtBp ? 0.35 : undefined,
                               }}

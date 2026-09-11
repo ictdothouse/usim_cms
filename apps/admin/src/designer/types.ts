@@ -218,6 +218,12 @@ export interface Row {
   justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around";
   alignItems?: "flex-start" | "center" | "flex-end" | "stretch";
   flexWrap?: "nowrap" | "wrap";
+  // Per-breakpoint override for flexDirection only (not a general style bag
+  // like El/Col's `bp` — Row's other flex fields stay desktop-only, see
+  // CLAUDE.md). Keyed "tablet:flexDirection"/"mobile:flexDirection", same
+  // convention as every other bp bag. Real, not admin-preview-only: mobile
+  // defaults to "column" (the old hardcoded stack) unless overridden here.
+  bp?: Record<string, string>;
 }
 export interface SectionProps {
   bg?: string;
