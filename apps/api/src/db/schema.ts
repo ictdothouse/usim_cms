@@ -208,6 +208,27 @@ export const postRevisions = pgTable("post_revisions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Full content snapshot taken every time a page is explicitly published
+// (pagesCollection's afterChange hook in index.ts) — not on every edit. Pages
+// have no "private" status (unlike posts), so this only ever fires on a
+// "published" transition. Mirrors post_revisions above (same admin "History"
+// panel / "Restore" shape) but snapshots `layout`/`settings` instead of
+// `body`/`excerpt`/`category`/`tags` — a page's real content is its block
+// tree, not prose fields. Same tenant DB as pages, so a real FK here.
+export const pageRevisions = pgTable("page_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  pageId: uuid("page_id")
+    .notNull()
+    .references(() => pages.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  layout: jsonb("layout").notNull().default([]),
+  settings: jsonb("settings").notNull().default({}),
+  bannerImageUrl: text("banner_image_url"),
+  status: text("status").notNull(), // "published" — the only page status this ever snapshots
+  publishedAt: timestamp("published_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Flat, non-nested folders for organizing the media library — a name only,
 // membership lives on media.folderId. No parentId: nobody asked for nested
 // folders, and flat is one JOIN instead of a recursive query.

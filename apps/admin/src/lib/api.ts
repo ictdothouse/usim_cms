@@ -302,6 +302,26 @@ export const restorePostRevision = (tenantHost: string, token: string, postId: s
     (b) => b.item as Record<string, unknown>,
   );
 
+export interface PageRevision {
+  id: string;
+  pageId: string;
+  title: string;
+  layout: unknown[];
+  settings: Record<string, unknown>;
+  bannerImageUrl: string | null;
+  status: string;
+  publishedAt: string | null;
+  createdAt: string;
+}
+
+export const listPageRevisions = (tenantHost: string, token: string, pageId: string) =>
+  request(`/api/pages/${pageId}/revisions`, tenantHost, token).then((b) => b.items as PageRevision[]);
+
+export const restorePageRevision = (tenantHost: string, token: string, pageId: string, revisionId: string) =>
+  request(`/api/pages/${pageId}/revisions/${revisionId}/restore`, tenantHost, token, { method: "POST" }).then(
+    (b) => b.item as Record<string, unknown>,
+  );
+
 export interface ContentSearchResult {
   type: "post" | "page";
   id: string;
