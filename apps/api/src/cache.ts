@@ -27,6 +27,13 @@ function getClient(): Redis | null {
   return client;
 }
 
+// Shared connection reused by rate-limit.ts's per-tenant budget — same
+// REDIS_URL opt-in, no reason to open a second connection for one more
+// counter alongside this module's own cache reads/writes.
+export function getRedisClient(): Redis | null {
+  return getClient();
+}
+
 const TTL_SECONDS = 60;
 
 // Per-process counters for GET /metrics — reset on restart, same as every

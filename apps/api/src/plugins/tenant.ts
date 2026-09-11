@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { sql } from "drizzle-orm";
 import { getTenantConnection, UnknownTenantError, type TenantDb } from "../db/tenant-pool.js";
+import { isTenantRateLimited } from "../rate-limit.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -17,6 +18,11 @@ export async function tenantPlugin(app: FastifyInstance) {
       return reply.code(400).send({ error: "Missing x-tenant-host header" });
     }
     req.tenantHost = tenantHost;
+    // Checked before touching the DB pool at all, so a throttled tenant
+    // can't also exhaust tenant-pool connections while it's over budget.
+    if (await isTenantRateLimited(tenantHost)) {
+      return reply.code(429).send({ error: "Too many requests" });
+    }
     try {
       const { db, release } = await getTenantConnection(tenantHost);
       req.db = db;
