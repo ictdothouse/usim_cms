@@ -50,10 +50,35 @@ function serveStatic(req, res) {
 // ADMIN_ORIGIN is actually set, so an install that hasn't wired it yet sees
 // no behavior change.
 const frameAncestors = process.env.ADMIN_ORIGIN ? `'self' ${process.env.ADMIN_ORIGIN}` : null;
+// 'unsafe-inline' on script-src/style-src is a deliberate, not accidental,
+// choice: Designer elements render inline style="" everywhere (no build-time
+// nonce plumbing through Astro's own renderer) and the tabs/slider/menu
+// elements each ship one inline <script> (see SectionBlock.astro/
+// MenuBlock.astro's own comments) — same trust boundary as the Custom HTML
+// element, which can itself contain a <script> tag by design. What this CSP
+// still buys: no injected <script src="https://attacker.example/x.js"> can
+// ever load (script-src has no external host in it), and no injected code
+// can exfiltrate via fetch/XHR to an attacker's own server (connect-src
+// 'self'). fonts.googleapis.com/fonts.gstatic.com are BaseLayout.astro's own
+// Google Fonts <link>; img-src/frame-src stay open to any https: host since
+// a webmaster can point an image/bgImage/Custom-HTML iframe at any external
+// URL by design (safeUrl only checks scheme, never domain).
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: https:",
+  "frame-src 'self' https:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  ...(frameAncestors ? [`frame-ancestors ${frameAncestors}`] : []),
+].join("; ");
 function setSecurityHeaders(res) {
   res.setHeader("x-content-type-options", "nosniff");
   res.setHeader("referrer-policy", "strict-origin-when-cross-origin");
-  if (frameAncestors) res.setHeader("content-security-policy", `frame-ancestors ${frameAncestors}`);
+  res.setHeader("content-security-policy", CSP);
 }
 
 const server = http.createServer((req, res) => {

@@ -19,13 +19,24 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   "avoid heavy dependencies" constraint.
 - **Security response headers** (`server.mjs`'s `setSecurityHeaders`, added after a security audit
   found none set anywhere): `X-Content-Type-Options: nosniff` and `Referrer-Policy:
-  strict-origin-when-cross-origin` on every response — defense-in-depth around the Custom HTML
-  element's documented raw-HTML trust boundary, not a substitute for it. `frame-ancestors` (clickjacking
-  protection) is only emitted once `ADMIN_ORIGIN` is set on this container (wired through both
-  docker-compose.release.yml and docker-compose.trial.yml, empty-default) — it scopes framing to the
-  admin panel's own origin, the one legitimate consumer (Designer's Live Edit preview iframe), instead of
-  leaving every tenant page framable by any site. An install that hasn't set `ADMIN_ORIGIN` on the
-  frontend container yet sees no behavior change.
+  strict-origin-when-cross-origin` on every response, plus a real `Content-Security-Policy` (added
+  2026-09-11 — `apps/api`'s own `@fastify/helmet` deliberately sets `contentSecurityPolicy: false` and
+  says this file is the real CSP surface, but no CSP existed here until now). Both are defense-in-depth
+  around the Custom HTML element's documented raw-HTML trust boundary, not a substitute for it —
+  `script-src`/`style-src` keep `'unsafe-inline'` on purpose (Designer's inline `style=""` everywhere, the
+  tabs/slider/menu elements' own inline `<script>`, and Custom HTML's own script tags all rely on it), so
+  this CSP's real value is blocking an injected `<script src="https://attacker.example/...">` from ever
+  loading (no external host in `script-src`) and blocking exfiltration via `fetch`/`XHR` to a third-party
+  server (`connect-src 'self'`) — not stopping inline script outright. `img-src`/`frame-src` stay open to
+  any `https:` host since a webmaster can point an image/bgImage/Custom-HTML iframe at any external URL
+  by design; `style-src`/`font-src` allow exactly `fonts.googleapis.com`/`fonts.gstatic.com`
+  (`BaseLayout.astro`'s Google Fonts `<link>`), nothing broader. `frame-ancestors` (clickjacking
+  protection) is only appended to the same header once `ADMIN_ORIGIN` is set on this container (wired
+  through both docker-compose.release.yml and docker-compose.trial.yml, empty-default) — it scopes
+  framing to the admin panel's own origin, the one legitimate consumer (Designer's Live Edit preview
+  iframe), instead of leaving every tenant page framable by any site. An install that hasn't set
+  `ADMIN_ORIGIN` on the frontend container yet sees the same CSP minus that one directive, not a full
+  behavior change.
 - **`src/middleware.ts`** — the one place that gates every request on a tenant's maintenance-mode flag
   (`GET /api/tenant-status`, apps/api). Deliberately not a per-page check duplicated across
   `[...slug].astro`/`posts/[slug].astro`/etc (which already each duplicate their own Host-header
