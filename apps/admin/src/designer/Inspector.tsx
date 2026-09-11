@@ -30,6 +30,7 @@ import {
   Monitor,
   Move,
   Paintbrush,
+  Plus,
   RefreshCw,
   Smartphone,
   SquareDashedBottom,
@@ -37,8 +38,9 @@ import {
   Tablet,
   Trash2,
 } from "lucide-react";
+import { useState } from "react";
 import type { Key } from "@/i18n";
-import type { Bp, Block, Field, Row, SectionProps } from "./types";
+import type { Bp, Block, El, ElType, Field, Row, SectionProps } from "./types";
 import { BASE_LANG, type DesignerCtx } from "./context";
 import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
@@ -47,6 +49,114 @@ import { parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementP
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_FALLBACK, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS, gapPx } from "./style";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
+import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
+
+// Duplicated from Designer.tsx's own module-level `uid`/`newEl` (designer/
+// files can't import back from Designer.tsx — see designer/types.ts's own
+// note) — same tiny id generator + "new element with its type's defaults"
+// factory, needed here only for the recursive container's "Add element"
+// control.
+const uid = () => Math.random().toString(36).slice(2, 10);
+const newEl = (type: ElType): El => ({ id: uid(), type, props: { ...ELS[type].defaults } });
+// Container children are curated to types that make sense freely nested and
+// already render generically (no slider/menu/accordion-style special canvas
+// wiring) — a deliberate v1 scope line, not every ElType. Expand this list
+// once each additional type's container-child behavior has actually been
+// checked, rather than opening the picker to all ~30 types up front.
+const CONTAINER_CHILD_TYPES: ElType[] = [
+  "heading", "text", "image", "button", "badge", "spacer", "divider", "icon", "container",
+];
+
+// A recursive container's own "Add element" + children list, shared by the
+// top-level container panel (sel.length===4) and the nested-child panel
+// below (sel.length>4, any depth) — both address the container the same
+// way, by its own `path`. A real component (not a plain function call like
+// ElPreview/FieldGroups) since it holds its own `addType` dropdown state.
+function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; path: number[]; el: El }) {
+  const { t, mutate, setSel, sel } = ctx;
+  const [addType, setAddType] = useState<ElType>("heading");
+  const children = el.children ?? [];
+  const pathEq = (a: number[]) => sel !== null && sel.length === a.length && a.every((v, i) => sel[i] === v);
+  return (
+    <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-sub">{t("designer-container-children")}</p>
+      {children.length > 0 && (
+        <div className="space-y-1">
+          {children.map((child, i) => {
+            const childPath = [...path, i];
+            return (
+              <div
+                key={child.id}
+                className={`flex items-center gap-1 rounded px-1.5 py-1 text-[11px] ${pathEq(childPath) ? "bg-accent/10 text-accent" : "text-body"}`}
+              >
+                <button onClick={() => setSel(childPath)} className="flex-1 truncate text-left font-medium">
+                  {t(ELS[child.type].labelKey)}
+                </button>
+                <button
+                  onClick={() => mutate((bs) => moveWithin(bs, path, i, i - 1))}
+                  disabled={i === 0}
+                  className="disabled:opacity-30"
+                  aria-label={t("designer-move-element-up")}
+                >
+                  <ArrowUp className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => mutate((bs) => moveWithin(bs, path, i, i + 1))}
+                  disabled={i === children.length - 1}
+                  className="disabled:opacity-30"
+                  aria-label={t("designer-move-element-down")}
+                >
+                  <ArrowDown className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() =>
+                    mutate((bs) => {
+                      const parent = getNode(bs, path) as El;
+                      parent.children = parent.children ?? [];
+                      insertAt(bs, path, structuredClone(parent.children[i]), i + 1);
+                    })
+                  }
+                  aria-label={t("designer-duplicate")}
+                >
+                  <Copy className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => {
+                    mutate((bs) => removeAt(bs, childPath));
+                    if (pathEq(childPath)) setSel(path);
+                  }}
+                  className="text-red-500"
+                  aria-label={t("designer-delete")}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <select
+          value={addType}
+          onChange={(ev) => setAddType(ev.target.value as ElType)}
+          className="min-w-0 flex-1 rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
+        >
+          {CONTAINER_CHILD_TYPES.map((ty) => (
+            <option key={ty} value={ty}>
+              {t(ELS[ty].labelKey)}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => mutate((bs) => insertAt(bs, path, newEl(addType)))}
+          className="flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-[11px] font-semibold text-white"
+        >
+          <Plus className="h-3.5 w-3.5" /> {t("designer-add")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Small icon-button-group row used by the Row Layout panel below (Direction/
 // Justify/Align) — mirrors the existing "align" FieldInput.tsx icon-button
@@ -1479,6 +1589,9 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           </>
         )}
         {hasContentFields && inspectorTab === "content" && <FieldGroups {...fieldGroupsProps} only="content" />}
+        {el.type === "container" && (
+          <ContainerChildrenPanel ctx={ctx} path={[b, r, c, e]} el={el} />
+        )}
         <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
         <div className="flex flex-wrap gap-3">
           <button
@@ -1534,6 +1647,156 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
             <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
           </button>
         </div>
+        </div>
+      </div>
+    );
+  }
+  // Recursive container's own children — sel one (or more) levels past a
+  // container's own [b,r,c,e] path, addressing arbitrarily deep nesting.
+  // A deliberately SIMPLER v1 panel than the top-level element branch above
+  // (no per-language override — the same "not attempted" scope line the
+  // codebase already draws elsewhere for nested content) but real bp-aware
+  // Content/Style editing via the same generic path (getNode) instead of a
+  // literal [b,r,c,e] tuple, so it works at any depth without a new branch
+  // per level.
+  if (sel.length > 4) {
+    const node = getNode(blocks, sel) as El | undefined;
+    if (!node) return null;
+    const parentPath = sel.slice(0, -1);
+    const parent = getNode(blocks, parentPath) as El;
+    const idx = sel[sel.length - 1];
+    const siblingCount = parent.children?.length ?? 0;
+    const def = ELS[node.type];
+    const nodeFields = [...def.fields, CSS_CLASS_FIELD];
+    const nodeHasContent = nodeFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
+    const setValue = (key: string, v: string) =>
+      mutate((bs) => {
+        const target = getNode(bs, sel) as El;
+        if (bp === "desktop") target.props[key] = v;
+        else target.bp = { ...(target.bp ?? {}), [bpKey(key)]: v };
+      });
+    const toggleOverride = (keys: string[]) =>
+      mutate((bs) => {
+        const target = getNode(bs, sel) as El;
+        target.bp = toggleBpKeys(target.bp, keys);
+      });
+    const nodeFieldGroupsProps = {
+      fields: nodeFields,
+      getValue: (f: Field) => bpGetValue(node.props[f.key], node.bp, f.key),
+      setValue: (f: Field, v: string) => setValue(f.key, v),
+      hasOverride: (f: Field) => bpKeysOverridden(node.bp, [f.key]),
+      onToggleOverride: (f: Field) => toggleOverride([f.key]),
+      collapsedGroups, toggleGroup, bp, t, iconSearch, setIconSearch, uploading, siteTheme,
+      sel, blocks, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
+      uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
+      availableMenus, availableCategories, ICONS,
+    };
+    return (
+      <div className="space-y-3">
+        <Breadcrumb />
+        <p className="text-xs font-bold text-ink">{t(def.labelKey)}</p>
+        <VisibilityToggle
+          t={t}
+          get={(k) => node.props[k] === "true"}
+          set={(k, v) =>
+            mutate((bs) => {
+              (getNode(bs, sel) as El).props[k] = v ? "true" : "";
+            })
+          }
+        />
+        {nodeHasContent && (
+          <div className="flex gap-1 rounded-full bg-canvas p-0.5">
+            {(["content", "style"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setInspectorTab(tab)}
+                className={`flex-1 rounded-full py-1 text-[11px] font-semibold ${
+                  inspectorTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
+                }`}
+              >
+                {t(tab === "content" ? "designer-inspector-tab-content" : "designer-inspector-tab-style")}
+              </button>
+            ))}
+          </div>
+        )}
+        {(!nodeHasContent || inspectorTab === "style") && (
+          <>
+            <BoxModel
+              padding={{
+                labelKey: "designer-s-padding",
+                linked: linkedPadding,
+                onToggleLink: () => setLinkedPadding((v) => !v),
+                getSide: (side) => sideValue(node.props, node.bp, PADDING_SIDE_KEYS[side], "padding"),
+                setSide: (side, v) => setValue(PADDING_SIDE_KEYS[side], v),
+                hasOverride: bpKeysOverridden(node.bp, Object.values(PADDING_SIDE_KEYS)),
+                onToggleOverride: () => toggleOverride(Object.values(PADDING_SIDE_KEYS)),
+              }}
+              radius={
+                node.type === "image" || node.type === "container"
+                  ? {
+                      labelKey: "designer-f-radius",
+                      linked: linkedRadius,
+                      onToggleLink: () => setLinkedRadius((v) => !v),
+                      getSide: (side) => sideValue(node.props, node.bp, RADIUS_CORNER_KEYS[side], "radius"),
+                      setSide: (side, v) => setValue(RADIUS_CORNER_KEYS[side], v),
+                      hasOverride: bpKeysOverridden(node.bp, Object.values(RADIUS_CORNER_KEYS)),
+                      onToggleOverride: () => toggleOverride(Object.values(RADIUS_CORNER_KEYS)),
+                    }
+                  : undefined
+              }
+              margin={{
+                labelKey: "designer-f-marginy",
+                linked: linkedMargin,
+                onToggleLink: () => setLinkedMargin((v) => !v),
+                getSide: (side) => sideValue(node.props, node.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),
+                setSide: (side, v) => setValue(MARGIN_SIDE_KEYS[side], v),
+                hasOverride: bpKeysOverridden(node.bp, Object.values(MARGIN_SIDE_KEYS)),
+                onToggleOverride: () => toggleOverride(Object.values(MARGIN_SIDE_KEYS)),
+              }}
+              bp={bp}
+              t={t}
+            />
+            <FieldGroups {...nodeFieldGroupsProps} only={nodeHasContent ? "style" : undefined} />
+          </>
+        )}
+        {nodeHasContent && inspectorTab === "content" && <FieldGroups {...nodeFieldGroupsProps} only="content" />}
+        {node.type === "container" && <ContainerChildrenPanel ctx={ctx} path={sel} el={node} />}
+        <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => mutate((bs) => moveWithin(bs, parentPath, idx, idx - 1))}
+              disabled={idx === 0}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-element-up")}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => mutate((bs) => moveWithin(bs, parentPath, idx, idx + 1))}
+              disabled={idx === siblingCount - 1}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              aria-label={t("designer-move-element-down")}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => mutate((bs) => insertAt(bs, parentPath, structuredClone(getNode(bs, sel)), idx + 1))}
+              className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+            >
+              <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
+            </button>
+            <button
+              onClick={() => {
+                mutate((bs) => removeAt(bs, sel));
+                setSel(parentPath);
+              }}
+              className="flex items-center gap-1 text-[11px] font-semibold text-red-500"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
+            </button>
+          </div>
         </div>
       </div>
     );

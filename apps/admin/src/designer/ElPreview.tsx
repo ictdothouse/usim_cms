@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import type { Block, El, Sel, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
+import { getNode } from "../designerTree";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
 import { bestTextColor } from "../lib/utils";
@@ -274,6 +275,10 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           const n = parseRepeaterItems(p.tickerItems).length;
           return n ? `${n} item${n === 1 ? "" : "s"}` : "";
         }
+        case "container": {
+          const n = (el.children ?? []).length;
+          return n ? `${n} element${n === 1 ? "" : "s"}` : "";
+        }
         default:
           return "";
       }
@@ -298,8 +303,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
     if (editingText.current[el.id] === undefined) editingText.current[el.id] = p.text ?? "";
     const commit = (v: string) =>
       mutate((bs) => {
-        const [b, r, c, e] = path;
-        section(bs, b).rows[r].columns[c].elements[e].props.text = v;
+        (getNode(bs, path) as El).props.text = v;
       });
     const sharedStyle =
       el.type === "heading"
@@ -1162,6 +1166,50 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
         >
           <Radio className="h-3.5 w-3.5 shrink-0" />
           <span>{items.map((it) => it.text).join(" • ") || t("designer-el-announcementticker")}</span>
+        </div>
+      );
+    }
+    case "container": {
+      const children = el.children ?? [];
+      return (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: (p.flexDirection as React.CSSProperties["flexDirection"]) || "row",
+            justifyContent: p.justifyContent || "flex-start",
+            alignItems: p.alignItems || "stretch",
+            flexWrap: (p.flexWrap as React.CSSProperties["flexWrap"]) || "wrap",
+            gap: p.gap || "1rem",
+            background: p.bg || undefined,
+            borderRadius: elRadius(p),
+            minHeight: children.length ? undefined : "3rem",
+            ...elBorderShadowStyle(p),
+          }}
+        >
+          {children.length === 0 && (
+            <p className="w-full py-2 text-center text-[11px] italic text-sub/60">{t("designer-container-empty")}</p>
+          )}
+          {children.map((child, i) => {
+            const childPath = path ? [...path, i] : undefined;
+            const childSelected = mode !== "live" && !!childPath && selEq(sel, childPath);
+            const childP = mergeElBp(child.type, child.props, child.bp, bp, bpGetValue);
+            return (
+              <div
+                key={child.id}
+                onClick={(ev) => {
+                  if (!childPath) return;
+                  ev.stopPropagation();
+                  ctx.setSel(childPath);
+                }}
+                className={`relative min-w-0 ${
+                  mode !== "live" ? `cursor-pointer rounded ${childSelected ? "outline outline-2 outline-accent outline-offset-2" : ""}` : ""
+                }`}
+                style={{ ...elMarginStyle(childP), ...elPaddingStyle(childP) }}
+              >
+                {ElPreview({ ctx, el: child, path: childPath })}
+              </div>
+            );
+          })}
         </div>
       );
     }

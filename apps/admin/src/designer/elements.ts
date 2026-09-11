@@ -21,6 +21,7 @@ import {
   ChevronsUpDown,
   Code2,
   FileText,
+  Frame,
   GalleryHorizontal,
   Heading1,
   History,
@@ -725,6 +726,32 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "speed", labelKey: "designer-f-ticker-speed", kind: "select", options: ["slow", "normal", "fast"] },
       { key: "bgColor", labelKey: "designer-s-bg", kind: "color" },
       { key: "textColor", labelKey: "designer-s-textcolor", kind: "color" },
+    ],
+  },
+  // Recursive container (Webflow/Figma-style "Frame in a Frame") — see
+  // designer/types.ts's ElType.container comment. Always a flex box (no
+  // grid variant, unlike Row) since its whole point is free nesting, not
+  // reproducing Row/Column's grid-track model one level deeper. Padding/
+  // margin/radius/border/shadow come from the SAME generic BoxModel/
+  // FourSideControl every other element already gets in Inspector.tsx
+  // (sel.length===4 branch) — only the flex-layout fields below are
+  // container-specific. Its `children` (El[]) live outside `props`/`defaults`
+  // entirely, same as Col.elements — see El.children in designer/types.ts.
+  container: {
+    labelKey: "designer-el-container",
+    icon: Frame,
+    defaults: { flexDirection: "row", justifyContent: "flex-start", alignItems: "stretch", flexWrap: "wrap", gap: "1rem" },
+    fields: [
+      { key: "flexDirection", labelKey: "designer-row-direction", kind: "select", options: ["row", "column", "row-reverse", "column-reverse"] },
+      { key: "justifyContent", labelKey: "designer-row-justify", kind: "select", options: ["flex-start", "center", "flex-end", "space-between", "space-around"] },
+      { key: "alignItems", labelKey: "designer-row-align", kind: "select", options: ["flex-start", "center", "flex-end", "stretch"] },
+      { key: "flexWrap", labelKey: "designer-row-wrap", kind: "select", options: ["nowrap", "wrap"] },
+      { key: "gap", labelKey: "designer-row-gap", kind: "length" },
+      { key: "bg", labelKey: "designer-s-bg", kind: "color" },
+      { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
+      { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
+      { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
+      { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
     ],
   },
 };

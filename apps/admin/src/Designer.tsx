@@ -202,6 +202,7 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   documentdownload: ["documents"],
   googlemap: ["embedUrl", "address"],
   announcementticker: ["tickerItems"],
+  container: [],
 };
 // i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
 // a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through

@@ -134,6 +134,10 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   bg: "background", bgImage: "background", bgColor: "background", textColor: "background",
   paddingY: "spacing", paddingX: "spacing", padding: "spacing", marginY: "spacing",
   width: "size", valign: "size", height: "size", ratio: "size", columns: "size", size: "size",
+  // Recursive container's own flex-layout fields (ELS.container) — no
+  // dedicated "layout" group exists, "size" is the closest semantic fit
+  // among the existing buckets.
+  flexDirection: "size", justifyContent: "size", alignItems: "size", flexWrap: "size", gap: "size",
   // Figma-style split: Appearance (opacity/shadow/radius — visual effects)
   // vs Stroke (the actual border color/width/style), each its own card.
   opacity: "appearance", shadow: "appearance", radius: "appearance",

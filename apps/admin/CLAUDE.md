@@ -318,8 +318,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   scripts) was extended to cover the new primitives directly, since Designer.tsx itself had no automated
   test coverage at the time. This was previously attempted and abandoned as too risky; scoping it as a
   behavior-preserving internal refactor (no data-model change, no new Container element, no UI change)
-  is what made it safe to actually ship. A recursive Container element is still real, separate, unplanned
-  future work — this just removes its main prerequisite blocker.
+  is what made it safe to actually ship. A recursive Container element built on top of this same day
+  (below) — this refactor removed its main prerequisite blocker.
   **First real Designer.tsx test coverage (2026-09-11):** `@playwright/test` (devDependency) +
   `apps/admin/playwright.config.ts` + `e2e/seed.ts`/`e2e/designer-smoke.spec.ts` — one E2E smoke test
   (`pnpm --filter @ucms/admin test:e2e`): seeds a disposable tenant+superadmin+draft page directly
@@ -332,6 +332,50 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   DB+browser can't run inside that step; run it manually or from a separate CI job. Not exhaustive — one
   path (add+save+reload), not full coverage — but it's the safety net the refactor-design doc's own
   "testing gap" section asked for before anyone attempts Layer 2 on top of this file.
+  **Recursive Container element (2026-09-11):** `ElType` gained `"container"` and `El` gained an optional
+  `children?: El[]` (`designer/types.ts`) — a flex box that can hold any other element, including another
+  container, nested arbitrarily deep. `designerTree.ts`'s `childrenOf()` was extended past its old
+  depth-3-throws limit: for a path of length 4+, it walks into the addressed El's own `children` (throwing
+  only if some ancestor along the path isn't actually a container), so every existing generic primitive
+  (`getNode`/`removeAt`/`insertAt`/`moveWithin`) already works at any depth for free — exactly the
+  extension point that refactor's own doc comment called out. **Deliberately scoped v1** (a much larger
+  effort was ruled out — see below): canvas (`ElPreview.tsx`'s new `"container"` case) and real site
+  render (`SectionBlock.astro`'s new `"container"` case + a `renderContainerChild` helper, mirroring
+  `renderSlideEl`'s own curated-subset shape) both recurse for real, and the validator
+  (`packages/element-schema`'s `validateElement`) recurses into `e.children` generically — but:
+  (1) container children are a **curated type subset** (`CONTAINER_CHILD_TYPES` in Inspector.tsx / the
+  matching switch cases in ElPreview.tsx and SectionBlock.astro: heading/text/image/button/badge/spacer/
+  divider/icon/container), not all ~30 element types — expand only after each additional type's
+  container-child behavior is actually checked; (2) nested children have **no drag-reorder/resize canvas
+  chrome** and are **not a palette drag-drop target** — a container's own Inspector panel
+  (`ContainerChildrenPanel`, shared by the top-level and nested-child branches) is the only way to
+  add/delete/duplicate/reorder a child, via plain buttons + a type picker, not canvas interaction; (3)
+  nested children get real bp-aware Content/Style editing (Inspector's new generic `sel.length > 4`
+  branch, resolving the node via `getNode(blocks, sel)` instead of a literal `[b,r,c,e]` tuple — works at
+  any depth without one branch per level) but **no per-language override** (the same "not attempted"
+  scope line this codebase already draws elsewhere for narrower nested-content features); (4) Live Edit
+  reaches nested children for **selection only** (their own `data-designer-path` resolves via the
+  existing generic `closest()`/`designer:select` handler, already depth-agnostic) — `designer:reorder`/
+  `designer:contextmenu` stay gated to their existing fixed depths and simply no-op past them, same
+  "selection only, ask before extending into real editing" scope line the slider's own Live Edit
+  bridge already drew. Fixed one real latent bug surfaced by this work: `ElPreview.tsx`'s canvas-direct
+  heading/text inline-edit `commit()` used to destructure `path` as a hardcoded `[b, r, c, e]` tuple —
+  harmless while every path was always exactly length 4, but would have silently corrupted a sibling/
+  ancestor element's text once container children (longer paths) could be edited inline; now resolves
+  generically via `getNode(bs, path)`. Container's own layout fields (`flexDirection`/`justifyContent`/
+  `alignItems`/`flexWrap`/`gap`) reuse the exact string values/i18n labels Row's own flex mode already
+  uses; its box style (`bg`/`borderWidth`/`borderColor`/`borderStyle`/`shadow`) is a new field set, while
+  padding/margin/radius come for free from the same generic `BoxModel`/`FourSideControl` every element
+  already gets in the Inspector. `designerTree.selfcheck.ts` gained a dedicated test block for the new
+  depth-4+ recursion (container children, and a container nested inside a container). **What this
+  deliberately does NOT do**, and why: a full `ElementDefinition`-style rewrite letting every one of
+  ~30 element types nest freely inside a container, with real drag/resize canvas chrome and drag-drop
+  from the palette, would mean rewriting Designer.tsx's ~300-line hand-tuned per-element canvas wrapper
+  (hardcoded `[b,r,c,e]` drag/margin/padding-handle math) to be path-generic — a much bigger, separate,
+  higher-risk effort than this pass's actual scope, not attempted here; the curated-subset + Inspector-
+  button v1 above is real, saves/renders/validates for real, and isn't a dead end (the same
+  `childrenOf`/generic-path foundation is what a future pass would build the richer canvas chrome on top
+  of), but it is intentionally not feature parity with a top-level element's full canvas experience yet.
   `startMove`'s smart guides gained sibling-to-sibling center alignment (a pink line, distinct from the
   red page-center/spacing-tick lines) — before this, `vCenter`/`hCenter` only snapped to the slide box's
   own 50% center; now, while dragging any item, its center is also compared against every OTHER item's

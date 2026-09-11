@@ -1,4 +1,4 @@
-import type { Block, SectionProps } from "./designer/types";
+import type { Block, El, SectionProps } from "./designer/types";
 
 // Generic, depth-agnostic path primitives for the Section->Row->Column->
 // Element tree — added so Designer.tsx's ~40 delete/move/duplicate/copy/
@@ -20,16 +20,26 @@ import type { Block, SectionProps } from "./designer/types";
 
 /** The list of children living AT `parentPath` — `[]` is the top-level
  * `blocks` array itself, `[b]` is that section's rows, `[b,r]` that row's
- * columns, `[b,r,c]` that column's elements. Elements have no children of
- * their own today (not a recursive container yet), so a 4-long parentPath
- * throws. */
+ * columns, `[b,r,c]` that column's elements, `[b,r,c,e]` a container
+ * element's own `children` (and each further index one more container level
+ * deep — a container's children can include another container). Throws only
+ * if some ancestor along the path isn't actually a container (no `children`
+ * to descend into), not on depth alone. */
 export function childrenOf(blocks: Block[], parentPath: number[]): unknown[] {
   if (parentPath.length === 0) return blocks;
   const [b, r, c] = parentPath;
   if (parentPath.length === 1) return (blocks[b].props as unknown as SectionProps).rows;
   if (parentPath.length === 2) return (blocks[b].props as unknown as SectionProps).rows[r].columns;
   if (parentPath.length === 3) return (blocks[b].props as unknown as SectionProps).rows[r].columns[c].elements;
-  throw new Error(`designerTree: no children below an element path (got ${JSON.stringify(parentPath)})`);
+  let el = (blocks[b].props as unknown as SectionProps).rows[r].columns[c].elements[parentPath[3]] as unknown as El;
+  for (let i = 4; i < parentPath.length; i++) {
+    if (el.type !== "container") throw new Error(`designerTree: ${JSON.stringify(parentPath.slice(0, i))} is not a container, has no children`);
+    el.children = el.children ?? [];
+    el = el.children[parentPath[i]];
+  }
+  if (el.type !== "container") throw new Error(`designerTree: ${JSON.stringify(parentPath)} is not a container, has no children`);
+  el.children = el.children ?? [];
+  return el.children;
 }
 
 /** `path`'s own containing list + index within it — the shared shape
