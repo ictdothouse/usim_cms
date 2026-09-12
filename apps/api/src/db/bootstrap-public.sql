@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS "public"."platform_settings" (
 -- Upgrade path: instance-wide MFA master switch (Settings "Login Methods").
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "mfa_enabled" boolean DEFAULT false NOT NULL;
 
+-- Off by default. While on, forces enrollment (not just the challenge) for
+-- any non-superadmin account without TOTP yet, at login itself — see
+-- schema.ts's platformSettings.mfaRequired comment and db/auth.ts's
+-- isMfaSetupRequired.
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "mfa_required" boolean DEFAULT false NOT NULL;
+
 -- Instance-wide default language-switcher placement/style (Settings
 -- "Language Switcher" card) — the seed a tenant with no override resolves to.
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "switcher_position" text DEFAULT 'header' NOT NULL;

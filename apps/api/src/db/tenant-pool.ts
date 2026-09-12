@@ -1023,6 +1023,37 @@ export async function setMfaEnabled(enabled: boolean): Promise<void> {
   }
 }
 
+// Same singleton-row pattern as getMfaEnabled/setMfaEnabled above — see
+// schema.ts's platformSettings.mfaRequired comment for what it means.
+export async function getMfaRequired(): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db.select().from(schema.platformSettings);
+    return row?.mfaRequired ?? false;
+  } finally {
+    client.release();
+  }
+}
+
+export async function setMfaRequired(required: boolean): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    await db
+      .insert(schema.platformSettings)
+      .values({ id: "singleton", mfaRequired: required })
+      .onConflictDoUpdate({
+        target: schema.platformSettings.id,
+        set: { mfaRequired: required, updatedAt: new Date() },
+      });
+  } finally {
+    client.release();
+  }
+}
+
 export interface EntraSettings {
   entraEnabled: boolean;
   entraOnly: boolean;

@@ -158,7 +158,14 @@ export interface LoginResult {
   // Present instead of `session` when the account has TOTP enabled —
   // exchange this for a real session via verifyTotp() below.
   mfaRequired?: boolean;
+  // Present instead of `session` when platformSettings.mfaRequired forced
+  // this account into enrollment (no TOTP yet) — exchange via
+  // totpSetupVerify() below instead of verifyTotp() (that one only checks an
+  // already-enrolled account's code, this one also flips enrollment on).
+  mfaSetupRequired?: boolean;
   pendingToken?: string;
+  secret?: string;
+  otpauthUri?: string;
 }
 
 export async function login(email: string, password: string): Promise<LoginResult> {
@@ -166,6 +173,14 @@ export async function login(email: string, password: string): Promise<LoginResul
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
+  if (body.mfaSetupRequired) {
+    return {
+      mfaSetupRequired: true,
+      pendingToken: body.pendingToken,
+      secret: body.secret,
+      otpauthUri: body.otpauthUri,
+    };
+  }
   if (body.mfaRequired) return { mfaRequired: true, pendingToken: body.pendingToken };
   return { session: { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] } };
 }
@@ -178,8 +193,20 @@ export async function verifyTotp(pendingToken: string, code: string): Promise<Se
   return { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
 }
 
+// Exchanges a forced-enrollment pendingToken (mfaSetupRequired above) for a
+// real session — same shape as verifyTotp, hits totp-setup-verify instead
+// since a correct code here also completes enrollment server-side.
+export async function totpSetupVerify(pendingToken: string, code: string): Promise<Session> {
+  const body = await request("/api/auth/totp-setup-verify", null, null, {
+    method: "POST",
+    body: JSON.stringify({ pendingToken, code }),
+  });
+  return { token: body.csrfToken, role: body.role, tenantHost: body.tenantHost, tenantHosts: body.tenantHosts ?? [] };
+}
+
 export interface LoginSettings {
   mfaEnabled: boolean;
+  mfaRequired: boolean;
   entraEnabled: boolean;
   entraOnly: boolean;
   entraTenantId: string | null;
@@ -189,6 +216,7 @@ export interface LoginSettings {
 function toLoginSettings(b: Record<string, unknown>): LoginSettings {
   return {
     mfaEnabled: b.mfaEnabled as boolean,
+    mfaRequired: b.mfaRequired as boolean,
     entraEnabled: b.entraEnabled as boolean,
     entraOnly: b.entraOnly as boolean,
     entraTenantId: (b.entraTenantId as string | null) ?? null,

@@ -325,6 +325,14 @@ export const platformSettings = pgTable("platform_settings", {
   // just see the "Set up MFA" prompt appear in their own Security tab. This
   // is the extension point for Entra ID/SSO later — see users table comment.
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
+  // Off by default. While on: any non-superadmin account without TOTP
+  // enrolled yet is forced through enrollment (QR/manual key + code) as an
+  // unskippable step of login itself, before a session is ever issued —
+  // unlike mfaEnabled above, which only ever *offers* the Security-tab
+  // enrollment passively. superadmin is exempt (break-glass, same reasoning
+  // as entraOnly below) so the person who flips this can't lock themselves
+  // out. See db/auth.ts's isMfaSetupRequired, the one place this is read.
+  mfaRequired: boolean("mfa_required").notNull().default(false),
   // Entra ID SSO — the extension point the comment above already flagged.
   // entraEnabled: Entra login available at all (login page shows the
   // button). entraOnly: password login disabled for every role EXCEPT

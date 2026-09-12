@@ -50,6 +50,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { QrCode } from "@/components/QrCode";
 // Designer (page-builder canvas), PostEditorPage (BlockNote rich-text editor)
 // and BlueprintGallery are the heaviest routed views — code-split so a
 // session that only ever opens Media/Menus/etc never downloads them.
@@ -232,6 +233,11 @@ function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; ent
   // switches the form to the code-entry step instead of a second page/route.
   const [pendingToken, setPendingToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  // Set instead of pendingToken when platformSettings.mfaRequired forced this
+  // account into enrollment (no TOTP yet) — same pre-session login page, but
+  // shows the QR/manual-key step first. Still just this one page: the
+  // dashboard genuinely never loads until totpSetupVerify succeeds below.
+  const [setupEnrollment, setSetupEnrollment] = useState<{ pendingToken: string; secret: string; otpauthUri: string } | null>(null);
   // Entra ID mode — fetched before anyone signs in (public route), so the
   // page knows which buttons/forms to show. entraOnly starts the password
   // form collapsed behind a disclosure link (superadmin break-glass path,
@@ -255,6 +261,10 @@ function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; ent
     setError(null);
     try {
       const result = await api.login(email, password);
+      if (result.mfaSetupRequired && result.pendingToken && result.secret && result.otpauthUri) {
+        setSetupEnrollment({ pendingToken: result.pendingToken, secret: result.secret, otpauthUri: result.otpauthUri });
+        return;
+      }
       if (result.mfaRequired && result.pendingToken) {
         setPendingToken(result.pendingToken);
         return;
@@ -283,7 +293,22 @@ function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; ent
     }
   }
 
-  const passwordFormVisible = !loginMethods?.entraOnly || pendingToken || showPasswordForm;
+  async function submitSetupCode(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const session = await api.totpSetupVerify(setupEnrollment!.pendingToken, code);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      onLogin(session);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const passwordFormVisible = !loginMethods?.entraOnly || pendingToken || setupEnrollment || showPasswordForm;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas font-sans text-ink antialiased">
@@ -293,12 +318,12 @@ function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; ent
             {entraError === "account_not_found" ? t("login-entra-error-account-not-found") : t("login-entra-error-generic")}
           </p>
         )}
-        {loginMethods?.entraEnabled && !pendingToken && (
+        {loginMethods?.entraEnabled && !pendingToken && !setupEnrollment && (
           <a href={api.entraLoginUrl()} className={`${btnPrimary} block w-full text-center`}>
             {t("login-entra-button")}
           </a>
         )}
-        {loginMethods?.entraOnly && !pendingToken && !showPasswordForm && (
+        {loginMethods?.entraOnly && !pendingToken && !setupEnrollment && !showPasswordForm && (
           <button
             type="button"
             className="w-full text-center text-xs text-sub underline"
@@ -309,7 +334,7 @@ function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; ent
         )}
         {passwordFormVisible && (
       <form
-        onSubmit={pendingToken ? submitCode : submit}
+        onSubmit={setupEnrollment ? submitSetupCode : pendingToken ? submitCode : submit}
         className="w-full max-w-sm space-y-4 rounded-2xl border border-line/30 bg-white p-8 shadow-sm"
       >
         <div className="flex items-center gap-3">
@@ -321,7 +346,36 @@ function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; ent
             <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
           </div>
         </div>
-        {pendingToken ? (
+        {setupEnrollment ? (
+          <>
+            <p className="text-xs text-sub">{t("login-mfa-setup-desc")}</p>
+            <div className="flex justify-center">
+              <QrCode value={setupEnrollment.otpauthUri} />
+            </div>
+            <p className="text-xs text-sub">{t("security-mfa-scan-hint")}</p>
+            <p className="rounded-lg border border-line/40 bg-canvas p-2 font-mono text-[11px] break-all">
+              {setupEnrollment.secret}
+            </p>
+            <label className="sr-only" htmlFor="login-mfa-setup-code">{t("login-mfa-code")}</label>
+            <input
+              id="login-mfa-setup-code"
+              className={inputCls}
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              autoComplete="one-time-code"
+              placeholder="000000"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              autoFocus
+              required
+            />
+            <FormError>{error}</FormError>
+            <button type="submit" disabled={busy || code.length !== 6} className={`${btnPrimary} w-full`}>
+              {busy ? t("login-busy") : t("login-mfa-setup-submit")}
+            </button>
+          </>
+        ) : pendingToken ? (
           <>
             <p className="text-xs text-sub">{t("login-mfa-desc")}</p>
             <label className="sr-only" htmlFor="login-mfa-code">{t("login-mfa-code")}</label>
@@ -4246,6 +4300,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
   const [proxyErr, setProxyErr] = useState<string | null>(null);
   const [proxyBusy, setProxyBusy] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaErr, setMfaErr] = useState<string | null>(null);
   const [mfaBusy, setMfaBusy] = useState(false);
   const [entraEnabled, setEntraEnabledState] = useState(false);
@@ -4336,6 +4391,7 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
       .getLoginSettings(token)
       .then((s) => {
         setMfaEnabled(s.mfaEnabled);
+        setMfaRequired(s.mfaRequired);
         setEntraEnabledState(s.entraEnabled);
         setEntraOnlyState(s.entraOnly);
         setEntraTenantIdState(s.entraTenantId ?? "");
@@ -4350,6 +4406,19 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
     setMfaBusy(true);
     try {
       await api.setLoginSettings(token, { mfaEnabled: enabled });
+      reloadLoginSettings();
+    } catch (e) {
+      setMfaErr((e as Error).message);
+    } finally {
+      setMfaBusy(false);
+    }
+  }
+
+  async function toggleMfaRequired(required: boolean) {
+    setMfaErr(null);
+    setMfaBusy(true);
+    try {
+      await api.setLoginSettings(token, { mfaRequired: required });
       reloadLoginSettings();
     } catch (e) {
       setMfaErr((e as Error).message);
@@ -4763,6 +4832,18 @@ function SettingsPanel({ token, tenants }: { token: string; tenants: Array<Recor
                   {t("settings-login-mfa")}
                 </label>
               </div>
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex items-center gap-2 font-medium text-ink">
+                  <input
+                    type="checkbox"
+                    checked={mfaRequired}
+                    disabled={mfaBusy || !mfaEnabled}
+                    onChange={(e) => void toggleMfaRequired(e.target.checked)}
+                  />
+                  {t("settings-login-mfa-required")}
+                </label>
+              </div>
+              {mfaRequired && <p className="text-xs text-sub">{t("settings-login-mfa-required-hint")}</p>}
             </div>
             {mfaEnabled && <p className="text-xs text-sub">{t("settings-login-mfa-hint")}</p>}
           </div>
@@ -5116,6 +5197,9 @@ function SecurityPanel({ token }: { token: string }) {
           )
         ) : enrolling ? (
           <form onSubmit={confirmEnroll} className="space-y-2">
+            <div className="flex justify-center">
+              <QrCode value={enrolling.otpauthUri} />
+            </div>
             <p className="text-xs text-sub">{t("security-mfa-scan-hint")}</p>
             <p className="rounded-lg border border-line/40 bg-canvas p-2 font-mono text-[11px] break-all">
               {enrolling.secret}

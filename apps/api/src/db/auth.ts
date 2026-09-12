@@ -57,6 +57,18 @@ export function totpAuthUri(secretBase32: string, email: string): string {
   return `otpauth://totp/${label}?secret=${secretBase32}&issuer=UCMS&algorithm=SHA1&digits=6&period=30`;
 }
 
+// The mandatory-MFA break-glass rule, pulled out as a pure function so it has
+// its own direct unit test — same convention as entra.ts's
+// isPasswordLoginAllowed. superadmin is exempt (the person who flips
+// platformSettings.mfaRequired on must still be able to get back in); every
+// other role without TOTP enrolled yet must finish enrollment at login once
+// mfaRequired is on. Already-enrolled accounts (totpEnabled) always go
+// through the normal challenge instead, regardless of this flag — see
+// index.ts's POST /api/auth/login, the one call site.
+export function isMfaSetupRequired(role: "superadmin" | "webmaster", totpEnabled: boolean, mfaRequired: boolean): boolean {
+  return mfaRequired && !totpEnabled && role !== "superadmin";
+}
+
 if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be set in production — refusing to boot with the insecure dev default.");
 }
