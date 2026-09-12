@@ -1,13 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { getEntraAuthorizeUrl, verifyEntraIdToken, isPasswordLoginAllowed } from "./entra.js";
+import { getEntraAuthorizeUrl, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "./entra.js";
 
 test("isPasswordLoginAllowed: superadmin break-glass exempt, webmaster blocked, only when entraOnly is on", () => {
   assert.equal(isPasswordLoginAllowed("webmaster", false), true);
   assert.equal(isPasswordLoginAllowed("superadmin", false), true);
   assert.equal(isPasswordLoginAllowed("webmaster", true), false);
   assert.equal(isPasswordLoginAllowed("superadmin", true), true);
+});
+
+test("isEntraStateValid: rejects missing/mismatched nonce, accepts a matching one (login-CSRF guard)", () => {
+  assert.equal(isEntraStateValid("nonce-abc", { entraState: true, entraNonce: "nonce-abc" }), true);
+  assert.equal(isEntraStateValid(undefined, { entraState: true, entraNonce: "nonce-abc" }), false, "no cookie at all");
+  assert.equal(isEntraStateValid("nonce-abc", { entraState: true, entraNonce: "different" }), false, "cookie doesn't match state's nonce");
+  assert.equal(isEntraStateValid("nonce-abc", { entraNonce: "nonce-abc" }), false, "state missing entraState flag");
+  assert.equal(isEntraStateValid("nonce-abc", null), false, "state didn't verify at all");
 });
 
 test("getEntraAuthorizeUrl builds the expected Microsoft authorize URL", () => {

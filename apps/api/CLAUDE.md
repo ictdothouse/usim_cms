@@ -354,6 +354,25 @@ callouts before assuming any of this is speculative hardening.
   the superadmin who flipped the toggle can't lock themselves out if Entra is ever misconfigured. The
   client secret and exact redirect URI are `ENTRA_CLIENT_SECRET`/`ENTRA_REDIRECT_URI` env vars only,
   never stored in the DB — same env-vs-DB split as `SESSION_SECRET`/`ADMIN_ORIGIN`.
+  **Login-CSRF fix (2026-09-12, from an automated security review).** A signed `entraState` token alone
+  only proves "our server minted this" — it doesn't prove the browser completing `/entra/callback` is
+  the same one that started the flow at `/entra/login`. Without that binding, an attacker could start
+  their own Entra login, capture the resulting valid `code`+`state` pair, and hand that callback URL to a
+  victim — logging the victim into the ATTACKER's Entra identity on the victim's own browser (classic
+  OAuth login-CSRF). Fixed by binding a random nonce into BOTH a short-lived (10min) HttpOnly
+  `ucms_entra_state` cookie (`lib/cookies.ts`'s `setEntraStateCookie`/`getEntraStateCookie`/
+  `clearEntraStateCookie`, set in `/entra/login`) and the signed state's own `entraNonce` claim
+  (`SessionPayload`, `db/auth.ts`) — `/entra/callback` requires the cookie's nonce to timing-safe-match
+  the state's (`entra.ts`'s `isEntraStateValid`, unit-tested directly) and clears the cookie either way
+  (one-time use). The same review also flagged the callback's redirect putting `csrfToken`/`role`/
+  `tenantHost` directly in the `/entra-callback?...` URL — a URL reaches server access logs and the next
+  request's `Referer` header far more readily than a response body does. Fixed by redirecting bare (only
+  `entraError` remains on the query string, since it isn't sensitive) and adding `GET /api/auth/session`
+  (cookie-authenticated via `verifyAnyUser`, same as `GET /api/auth/me`) for the SPA to read the session
+  data back out on landing — see apps/admin/CLAUDE.md's routing paragraph for the client half.
+  `lib/cookies.ts`'s cookie setters were also made composable (`appendSetCookie`, reading/appending to any
+  already-queued `set-cookie` header) since this callback now needs to clear one cookie and set another
+  in the same response — `reply.header("set-cookie", ...)` overwrites on a second call otherwise.
 - **Login rate limiting.** `login_attempts` (control-plane, one row per attempt, both success and
   failure) backs `isLoginRateLimited(email, ip)`/`recordLoginAttempt` (`tenant-pool.ts`) — a DB table,
   not an in-memory counter, because blue-green/multi-replica means separate processes don't share memory.

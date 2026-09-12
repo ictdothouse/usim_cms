@@ -124,6 +124,11 @@ export interface SessionPayload {
   // callback as CSRF/replay protection on the OAuth round trip (rejected
   // everywhere else, same treatment as previewOnly/pendingMfa above).
   entraState?: true;
+  // The random nonce bound into the entraState token above — matched against
+  // the entra_oauth_state cookie (lib/cookies.ts) in the callback, so a
+  // replayed state+code pair minted for one browser can't complete the login
+  // in a different one (login-CSRF). See entra.ts's isEntraStateValid.
+  entraNonce?: string;
   // Unix ms expiry. Optional only because a token predating this field
   // (signed before SESSION_TTL_MS existed) must still verify — every
   // signSession call today sets it, whether SESSION_TTL_MS (login/setup/

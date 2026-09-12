@@ -218,6 +218,23 @@ export const getLoginMethods = () =>
 // through request() (no JSON response to parse, no CSRF header to attach).
 export const entraLoginUrl = () => `${API_URL}/api/auth/entra/login`;
 
+// Called once by App.tsx right after landing on /entra-callback. The
+// callback route itself can only do a bare redirect (a real browser
+// navigation, no JSON body) — it deliberately does NOT put csrfToken/role/
+// tenantHost in that redirect's query string (a URL leaks into server access
+// logs and the next request's Referer header far more readily than a
+// response body does), so this is how the SPA reads them back out instead,
+// authenticated by the httpOnly session cookie entra/callback already set —
+// no CSRF header needed since GET is never a mutating method (see
+// apps/api/src/plugins/auth.ts's checkCsrf).
+export const fetchEntraSession = () =>
+  request("/api/auth/session", null, null).then((b) => ({
+    csrfToken: b.csrfToken as string,
+    role: b.role as "superadmin" | "webmaster",
+    tenantHost: (b.tenantHost as string | null) ?? null,
+    tenantHosts: (b.tenantHosts as string[] | null) ?? [],
+  }));
+
 export const totpSetup = (token: string) =>
   request("/api/auth/totp-setup", null, token, { method: "POST" }).then((b) => ({
     secret: b.secret as string,
