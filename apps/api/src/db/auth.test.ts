@@ -11,6 +11,7 @@ import {
   verifyTotpCode,
   totpAuthUri,
   base32Encode,
+  isMfaSetupRequired,
   type SessionPayload,
 } from "./auth.js";
 
@@ -21,6 +22,13 @@ const basePayload: SessionPayload = {
   tenantHost: "dept.usim.edu.my",
   permissions: [],
 };
+
+test("isMfaSetupRequired: forces enrollment for non-superadmin without TOTP when mfaRequired is on, exempts superadmin and already-enrolled accounts", () => {
+  assert.equal(isMfaSetupRequired("webmaster", false, true), true);
+  assert.equal(isMfaSetupRequired("superadmin", false, true), false, "superadmin break-glass exemption");
+  assert.equal(isMfaSetupRequired("webmaster", true, true), false, "already enrolled — normal challenge instead");
+  assert.equal(isMfaSetupRequired("webmaster", false, false), false, "mfaRequired off");
+});
 
 test("hashPassword/verifyPassword round-trip", () => {
   const stored = hashPassword("correct horse battery staple");

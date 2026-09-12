@@ -61,6 +61,8 @@ import {
   setTenantCertInfo,
   getMfaEnabled,
   setMfaEnabled,
+  getMfaRequired,
+  setMfaRequired,
   getEntraSettings,
   setEntraSettings,
   getLanguageSwitcherDefaults,
@@ -99,6 +101,7 @@ import {
   verifyTotpCode,
   totpAuthUri,
   generateCsrfToken,
+  isMfaSetupRequired,
 } from "./db/auth.js";
 import { setSessionCookie, clearSessionCookie, setEntraStateCookie, getEntraStateCookie, clearEntraStateCookie } from "./lib/cookies.js";
 import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "./entra.js";
@@ -432,6 +435,19 @@ app.post("/api/auth/login", async (req, reply) => {
       user.extraPermissions as string[] | null,
     ),
   };
+  // Mandatory-MFA mode (platformSettings.mfaRequired, superadmin exempt) and
+  // this account hasn't enrolled TOTP yet — force enrollment as part of
+  // login itself instead of letting them dismiss the Security-tab prompt
+  // indefinitely (which is exactly how an account can go a long time
+  // "protected" on paper but not actually enrolled). Re-uses the same
+  // pendingMfa flag/rejection as the challenge branch below — see
+  // POST /api/auth/totp-setup-verify, its one exchange point.
+  if (isMfaSetupRequired(user.role as "superadmin" | "webmaster", user.totpEnabled, await getMfaRequired())) {
+    const secret = generateTotpSecret();
+    await setUserTotpSecret(user.id, secret);
+    const pendingToken = signSession({ ...basePayload, pendingMfa: true, exp: Date.now() + 5 * 60 * 1000 });
+    return { mfaSetupRequired: true, pendingToken, secret, otpauthUri: totpAuthUri(secret, user.email) };
+  }
   // Second factor required — issue a short-lived pending token instead of a
   // real session; POST /api/auth/totp-verify exchanges it once the code
   // checks out. pendingMfa tokens are rejected by every other route (see
@@ -606,6 +622,54 @@ app.post("/api/auth/totp-verify", async (req, reply) => {
   return { csrfToken, role: pending.role, tenantHost: pending.tenantHost, tenantHosts };
 });
 
+// Exchanges the pendingToken from a forced-enrollment login (mfaSetupRequired
+// above) for a real session — same shape as totp-verify above, except a
+// correct code here also flips totpEnabled on (this call IS the enrollment,
+// not just a challenge against an already-enrolled account).
+app.post("/api/auth/totp-setup-verify", async (req, reply) => {
+  const { pendingToken, code } = req.body as { pendingToken?: string; code?: string };
+  if (!pendingToken || !code) {
+    reply.code(400);
+    return { error: "pendingToken and code required" };
+  }
+  const pending = verifySession(pendingToken);
+  if (!pending || !pending.pendingMfa) {
+    reply.code(401);
+    return { error: "invalid or expired pending token" };
+  }
+  if (await isLoginRateLimited(pending.email, req.ip)) {
+    reply.code(429);
+    return { error: "Too many failed attempts — try again later" };
+  }
+  const user = await findUserById(pending.userId);
+  const valid = !!user?.totpSecret && verifyTotpCode(user.totpSecret, code);
+  await recordLoginAttempt(pending.email, req.ip, valid);
+  if (!user?.totpSecret) {
+    reply.code(400);
+    return { error: "call /api/auth/login first" };
+  }
+  if (!valid) {
+    reply.code(401);
+    return { error: "invalid code" };
+  }
+  await setUserTotpEnabled(pending.userId, true);
+  await insertAuditLog({ actorUserId: pending.userId, actorEmail: pending.email, action: "mfa.enabled_self", ip: req.ip });
+  const tenantHosts = pending.tenantHosts ?? [];
+  const csrfToken = generateCsrfToken();
+  const token = signSession({
+    userId: pending.userId,
+    email: pending.email,
+    role: pending.role,
+    tenantHost: pending.tenantHost,
+    tenantHosts,
+    permissions: pending.permissions,
+    csrfToken,
+    exp: Date.now() + SESSION_TTL_MS,
+  });
+  setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  return { csrfToken, role: pending.role, tenantHost: pending.tenantHost, tenantHosts };
+});
+
 app.post("/api/auth/logout", async (_req, reply) => {
   clearSessionCookie(reply);
   return { loggedOut: true };
@@ -696,14 +760,15 @@ app.post("/api/auth/totp-disable", async (req, reply) => {
 app.get("/api/portal/login-settings", async (req, reply) => {
   if (!verifySuperadmin(req, reply)) return;
   const entra = await getEntraSettings();
-  return { mfaEnabled: await getMfaEnabled(), ...entra };
+  return { mfaEnabled: await getMfaEnabled(), mfaRequired: await getMfaRequired(), ...entra };
 });
 
 app.put("/api/portal/login-settings", async (req, reply) => {
   const session = verifySuperadmin(req, reply);
   if (!session) return;
-  const { mfaEnabled, entraEnabled, entraOnly, entraTenantId, entraClientId } = req.body as {
+  const { mfaEnabled, mfaRequired, entraEnabled, entraOnly, entraTenantId, entraClientId } = req.body as {
     mfaEnabled?: boolean;
+    mfaRequired?: boolean;
     entraEnabled?: boolean;
     entraOnly?: boolean;
     entraTenantId?: string | null;
@@ -723,6 +788,20 @@ app.put("/api/portal/login-settings", async (req, reply) => {
       ip: req.ip,
     });
   }
+  if (mfaRequired !== undefined) {
+    if (typeof mfaRequired !== "boolean") {
+      reply.code(400);
+      return { error: "mfaRequired must be a boolean" };
+    }
+    await setMfaRequired(mfaRequired);
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.mfa_toggle",
+      meta: { mfaRequired },
+      ip: req.ip,
+    });
+  }
   const entraPatch: { entraEnabled?: boolean; entraOnly?: boolean; entraTenantId?: string | null; entraClientId?: string | null } = {};
   if (entraEnabled !== undefined) entraPatch.entraEnabled = entraEnabled;
   if (entraOnly !== undefined) entraPatch.entraOnly = entraOnly;
@@ -738,7 +817,7 @@ app.put("/api/portal/login-settings", async (req, reply) => {
       ip: req.ip,
     });
   }
-  return { mfaEnabled: await getMfaEnabled(), ...(await getEntraSettings()) };
+  return { mfaEnabled: await getMfaEnabled(), mfaRequired: await getMfaRequired(), ...(await getEntraSettings()) };
 });
 
 // Cross-department aggregator (portal), reads public.shared_content directly

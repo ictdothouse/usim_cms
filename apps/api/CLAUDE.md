@@ -431,6 +431,28 @@ callouts before assuming any of this is speculative hardening.
   "Microsoft Entra ID / SSO — coming soon" (shown, not wired) — `signSession`/`SessionPayload` already
   don't care how a session was established, only that it ends up with the right shape, so a future SSO
   login route can issue the exact same token shape through a completely different first step.
+  **Mandatory MFA enrollment (2026-09-12).** Testing on the VPS surfaced a real gap: `mfaEnabled` above
+  only ever *offers* enrollment (Security tab); nothing ever forces an account to actually finish it, so
+  an account can go a long time "protected" on paper while `totpEnabled` stays false. A second,
+  independent instance-wide switch closes that: `platformSettings.mfaRequired` (off by default, same
+  Settings card, disabled/greyed out unless `mfaEnabled` is also on). While on, any non-superadmin
+  account without TOTP enrolled yet is forced through enrollment as an unskippable step of `POST
+  /api/auth/login` itself — `isMfaSetupRequired(role, totpEnabled, mfaRequired)` (`db/auth.ts`, unit-
+  tested, same pure-function convention as `isPasswordLoginAllowed`) gates a new branch that generates
+  a secret (`generateTotpSecret`/`setUserTotpSecret`, same as voluntary `totp-setup`) and returns
+  `{ mfaSetupRequired: true, pendingToken, secret, otpauthUri }` instead of a session. superadmin is
+  exempt (break-glass, same reasoning as `entraOnly` above) so whoever flips this switch on can't lock
+  themselves out. The `pendingToken` reuses the *existing* `pendingMfa: true` flag rather than a new
+  one — every route already rejects it (see above), so this needed zero extra plumbing. `POST
+  /api/auth/totp-setup-verify` (new) exchanges it for a real session: same rate-limited shape as
+  `totp-verify`, except a correct code here also calls `setUserTotpEnabled(id, true)` since this call
+  IS the enrollment, not just a challenge against an already-enrolled account. Already-enrolled accounts
+  are unaffected — they still hit the normal `totpEnabled` challenge branch regardless of `mfaRequired`.
+  **QR code**: enrollment (both this forced flow and the voluntary Security-tab one) now renders the
+  `otpauthUri` as a scannable QR (`apps/admin/src/components/QrCode.tsx`, wrapping the small zero-
+  dependency `qrcode-generator` package — no stdlib/CSS equivalent exists, and hand-rolling Reed-
+  Solomon error correction was out of scope) alongside the manual-entry key, which stays as the non-
+  camera fallback.
   **`pendingMfa` must be rejected by every route that accepts a session-shaped credential, not just the
   three auth guards.** `elevateIfAuthenticated` (`generic-crud.ts`, the public-route draft-visibility
   elevation — see its own paragraph above) was missed when `pendingMfa` was introduced: it checked

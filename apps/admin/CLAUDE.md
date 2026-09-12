@@ -32,7 +32,17 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   fetches `GET /api/auth/login-methods` (public, pre-auth) to decide its 3 render modes:
   password-only, both, or Entra-only (password form collapsed behind a disclosure link — never
   removed, since a superadmin's break-glass password login still needs a way to reach the form; the
-  real enforcement is server-side, this is UX only). The page builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit**
+  real enforcement is server-side, this is UX only). **Mandatory MFA enrollment (2026-09-12)**:
+  `LoginForm` has a third pre-session step alongside `pendingToken` (TOTP challenge) — `setupEnrollment`,
+  set when `POST /api/auth/login` returns `mfaSetupRequired` (platformSettings.mfaRequired forced this
+  non-superadmin account through enrollment since it had no TOTP yet). Same form, same page — the
+  dashboard genuinely never mounts until `submitSetupCode` exchanges the pendingToken via
+  `api.totpSetupVerify`, deliberately not a modal layered over an already-loaded dashboard (that's what
+  actually confused a user during VPS testing: reaching the Security tab's voluntary enrollment only
+  after the dashboard was already usable). Both this step and the existing Security-tab voluntary
+  enrollment (`SecurityPanel`) now render the `otpauthUri` as a QR (`components/QrCode.tsx`, wrapping
+  the zero-dependency `qrcode-generator` package) next to the manual-entry key, which stays as the non-
+  camera fallback. The page builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit**
   (opens by default — the real frontend page rendered in an iframe with click-to-select/inline editing via a postMessage
   bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
   actually activates), and a design template library. A page's slug is auto-derived from its title on
