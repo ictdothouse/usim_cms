@@ -5376,13 +5376,15 @@ const IMPERSONATOR_KEY = "usim_cms_impersonator";
 export default function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   // Entra login lands here as a real browser navigation (never a fetch —
-  // Microsoft's own login page needs a top-level redirect), so there's no
-  // JSON response to read: apps/api's entra/callback route redirects back
-  // to /entra-callback?csrfToken=...&role=...&tenantHost=...&tenantHosts=...
-  // (or ?entraError=... on failure) and this reads it straight off the URL,
-  // once, on mount — there's no client-side router mounted pre-login at all
-  // (see the BrowserRouter further down, only wrapping the post-session
-  // Shell), so this is a plain query-string check, not a routed page.
+  // Microsoft's own login page needs a top-level redirect). entra/callback
+  // deliberately does NOT put session data in this redirect's query string
+  // (a URL leaks into server access logs and Referer far more readily than a
+  // response body — see apps/api/CLAUDE.md's Auth hardening section), so on
+  // landing here this fetches it back via GET /api/auth/session, authenticated
+  // by the httpOnly cookie that route already set — there's no client-side
+  // router mounted pre-login at all (see the BrowserRouter further down, only
+  // wrapping the post-session Shell), so this is a plain pathname check, not
+  // a routed page.
   const [entraError, setEntraError] = useState<string | null>(null);
   useEffect(() => {
     if (window.location.pathname !== "/entra-callback") return;
@@ -5393,18 +5395,14 @@ export default function App() {
       setEntraError(err);
       return;
     }
-    const csrfToken = params.get("csrfToken");
-    const role = params.get("role");
-    if (csrfToken && (role === "superadmin" || role === "webmaster")) {
-      const newSession: Session = {
-        token: csrfToken,
-        role,
-        tenantHost: params.get("tenantHost") || null,
-        tenantHosts: (params.get("tenantHosts") ?? "").split(",").filter(Boolean),
-      };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
-      setSession(newSession);
-    }
+    api
+      .fetchEntraSession()
+      .then((s) => {
+        const newSession: Session = { token: s.csrfToken, role: s.role, tenantHost: s.tenantHost, tenantHosts: s.tenantHosts };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
+        setSession(newSession);
+      })
+      .catch(() => setEntraError("verification_failed"));
   }, []);
   // Set only while a superadmin is "viewing as" a webmaster — the stashed
   // superadmin session to restore on exit. Persisted so a page refresh

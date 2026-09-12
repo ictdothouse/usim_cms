@@ -20,10 +20,15 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (pre-session) render with no router mounted at all, so `/entra-callback` (Microsoft Entra ID SSO,
   2026-09-12 — see apps/api/CLAUDE.md's Auth hardening section for the backend half) is deliberately
   NOT a `<Route>`: `App()`'s own `useEffect` reads `window.location.pathname`/`search` directly on
-  mount (the one place in this app that does), turns a `csrfToken`/`role`/... query string into a
-  `Session` the same shape the password-login path already produces, or an `entraError` shown by
-  `LoginForm`, then `history.replaceState`s the URL back to `/` — a plain query-string check, not
-  client-side routing, because there's no `<Routes>` to land it in at that point. `LoginForm` itself
+  mount (the one place in this app that does), `history.replaceState`s the URL back to `/`, and — as
+  long as there's no `entraError` param — calls `api.fetchEntraSession()` (`GET /api/auth/session`,
+  cookie-authenticated, no CSRF header needed since it's a GET) to build the same `Session` shape the
+  password-login path already produces. **This is deliberately NOT read off the redirect's query string
+  anymore** (a 2026-09-12 follow-up security fix): the callback route used to put `csrfToken`/`role`/
+  `tenantHost` directly in the `/entra-callback?...` URL, which a background security review correctly
+  flagged — a URL leaks into server access logs and the next request's `Referer` header far more readily
+  than a JSON response body does. The redirect is now bare; `entraError` (shown by `LoginForm`) is the
+  only thing still carried on the query string, since it's not sensitive. `LoginForm` itself
   fetches `GET /api/auth/login-methods` (public, pre-auth) to decide its 3 render modes:
   password-only, both, or Entra-only (password form collapsed behind a disclosure link — never
   removed, since a superadmin's break-glass password login still needs a way to reach the form; the

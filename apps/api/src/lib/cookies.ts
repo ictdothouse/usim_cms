@@ -5,17 +5,37 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 // pnpm-lock.yaml, per this project's "avoid heavy dependencies" constraint.
 
 export const SESSION_COOKIE_NAME = "ucms_session";
+export const ENTRA_STATE_COOKIE_NAME = "ucms_entra_state";
 
-export function getSessionCookie(req: FastifyRequest): string | undefined {
+function getCookie(req: FastifyRequest, name: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
-    const name = part.slice(0, eq).trim();
-    if (name === SESSION_COOKIE_NAME) return decodeURIComponent(part.slice(eq + 1).trim());
+    const partName = part.slice(0, eq).trim();
+    if (partName === name) return decodeURIComponent(part.slice(eq + 1).trim());
   }
   return undefined;
+}
+
+export function getSessionCookie(req: FastifyRequest): string | undefined {
+  return getCookie(req, SESSION_COOKIE_NAME);
+}
+
+export function getEntraStateCookie(req: FastifyRequest): string | undefined {
+  return getCookie(req, ENTRA_STATE_COOKIE_NAME);
+}
+
+// A response can need to set/clear more than one cookie at once (the entra
+// callback clears the oauth-state cookie AND sets the session cookie in the
+// same redirect) — reply.header("set-cookie", ...) overwrites on a second
+// call, so every setter below appends onto whatever's already queued rather
+// than assuming it's the only cookie this response will ever send.
+function appendSetCookie(reply: FastifyReply, cookieString: string): void {
+  const existing = reply.getHeader("set-cookie");
+  const cookies = existing ? (Array.isArray(existing) ? existing.map(String) : [String(existing)]) : [];
+  reply.header("set-cookie", [...cookies, cookieString]);
 }
 
 // SameSite=Lax is enough here: the admin panel and API are always deployed
@@ -35,9 +55,21 @@ function baseAttrs(maxAgeSeconds: number): string[] {
 }
 
 export function setSessionCookie(reply: FastifyReply, token: string, maxAgeSeconds: number): void {
-  reply.header("set-cookie", [`${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`, ...baseAttrs(maxAgeSeconds)].join("; "));
+  appendSetCookie(reply, [`${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`, ...baseAttrs(maxAgeSeconds)].join("; "));
 }
 
 export function clearSessionCookie(reply: FastifyReply): void {
-  reply.header("set-cookie", [`${SESSION_COOKIE_NAME}=`, ...baseAttrs(0)].join("; "));
+  appendSetCookie(reply, [`${SESSION_COOKIE_NAME}=`, ...baseAttrs(0)].join("; "));
+}
+
+// Short-lived (10min, matching the entraState token's own TTL), HttpOnly —
+// binds the OAuth round trip to the browser that started it. Set in
+// entra/login, checked+cleared (one-time use, success or failure) in
+// entra/callback. See entra.ts's isEntraStateValid for why this exists.
+export function setEntraStateCookie(reply: FastifyReply, nonce: string): void {
+  appendSetCookie(reply, [`${ENTRA_STATE_COOKIE_NAME}=${encodeURIComponent(nonce)}`, ...baseAttrs(600)].join("; "));
+}
+
+export function clearEntraStateCookie(reply: FastifyReply): void {
+  appendSetCookie(reply, [`${ENTRA_STATE_COOKIE_NAME}=`, ...baseAttrs(0)].join("; "));
 }

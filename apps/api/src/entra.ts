@@ -4,7 +4,7 @@
 // node:crypto instead of otplib, see apps/api/CLAUDE.md's Auth hardening
 // section). index.ts's entra/login and entra/callback routes are the only
 // callers.
-import { createPublicKey, verify as cryptoVerify } from "node:crypto";
+import { createPublicKey, verify as cryptoVerify, timingSafeEqual } from "node:crypto";
 
 const AUTHORIZE_PATH = "oauth2/v2.0/authorize";
 const TOKEN_PATH = "oauth2/v2.0/token";
@@ -91,6 +91,28 @@ export interface EntraClaims {
 // Entra once entraOnly is on.
 export function isPasswordLoginAllowed(role: "superadmin" | "webmaster", entraOnly: boolean): boolean {
   return !entraOnly || role === "superadmin";
+}
+
+// Login-CSRF guard: the signed `state` param alone only proves "our server
+// minted this", not "the browser completing the callback is the same one
+// that started the flow" — without this, an attacker can start their own
+// Entra login, capture the resulting valid code+state pair, and hand that
+// callback URL to a victim, logging the victim into the ATTACKER's Entra
+// identity on the victim's own browser (classic OAuth login-CSRF). Binding a
+// random nonce into both a short-lived HttpOnly cookie (set in entra/login,
+// unreadable/unforgeable by a page on another origin) and the signed state
+// closes that: a replayed callback URL carries a state whose nonce won't
+// match whatever (if any) oauth-state cookie is sitting in the victim's own
+// browser. Pulled out as a pure function so it has its own direct unit test,
+// same convention as isPasswordLoginAllowed above.
+export function isEntraStateValid(
+  cookieNonce: string | undefined,
+  statePayload: { entraState?: true; entraNonce?: string } | null,
+): boolean {
+  if (!statePayload?.entraState || !cookieNonce || !statePayload.entraNonce) return false;
+  const a = Buffer.from(cookieNonce);
+  const b = Buffer.from(statePayload.entraNonce);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 // Verifies an id_token's RS256 signature against Microsoft's own published

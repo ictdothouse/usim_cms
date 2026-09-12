@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { rm } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -100,8 +100,8 @@ import {
   totpAuthUri,
   generateCsrfToken,
 } from "./db/auth.js";
-import { setSessionCookie, clearSessionCookie } from "./lib/cookies.js";
-import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed } from "./entra.js";
+import { setSessionCookie, clearSessionCookie, setEntraStateCookie, getEntraStateCookie, clearEntraStateCookie } from "./lib/cookies.js";
+import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "./entra.js";
 import {
   exportTenantBackup,
   importTenantBackup,
@@ -466,6 +466,11 @@ app.get("/api/auth/entra/login", async (req, reply) => {
     reply.code(404);
     return { error: "Entra ID login is not enabled" };
   }
+  // Bound into both a short-lived cookie (this browser only) and the signed
+  // state itself — see entra.ts's isEntraStateValid for why a bare signed
+  // state isn't enough on its own (login-CSRF).
+  const entraNonce = randomBytes(24).toString("base64url");
+  setEntraStateCookie(reply, entraNonce);
   const state = signSession({
     userId: "",
     email: "",
@@ -473,6 +478,7 @@ app.get("/api/auth/entra/login", async (req, reply) => {
     tenantHost: null,
     permissions: [],
     entraState: true,
+    entraNonce,
     exp: Date.now() + 10 * 60 * 1000,
   });
   reply.redirect(getEntraAuthorizeUrl(entraTenantId, entraClientId, redirectUri, state));
@@ -482,7 +488,9 @@ app.get("/api/auth/entra/callback", async (req, reply) => {
   const { code, state } = req.query as { code?: string; state?: string };
   const loginPageUrl = `${entraRedirectAdminOrigin}/login`;
   const statePayload = state ? verifySession(state) : null;
-  if (!code || !statePayload?.entraState) {
+  const cookieNonce = getEntraStateCookie(req);
+  clearEntraStateCookie(reply); // one-time use regardless of outcome
+  if (!code || !isEntraStateValid(cookieNonce, statePayload)) {
     return reply.redirect(`${loginPageUrl}?entraError=invalid_state`);
   }
   const { entraEnabled, entraTenantId, entraClientId } = await getEntraSettings();
@@ -527,9 +535,29 @@ app.get("/api/auth/entra/callback", async (req, reply) => {
     exp: Date.now() + SESSION_TTL_MS,
   });
   setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
-  const tenantHosts = (user.tenantHosts as string[] | null) ?? [];
-  const params = new URLSearchParams({ csrfToken, role: user.role, tenantHost: user.tenantHost ?? "", tenantHosts: tenantHosts.join(",") });
-  return reply.redirect(`${entraRedirectAdminOrigin}/entra-callback?${params.toString()}`);
+  // Deliberately no session data (csrfToken/role/tenantHost) in this
+  // redirect's query string — a URL is logged (server access logs) and
+  // leaked (Referer header on whatever the SPA fetches next) far more
+  // readily than a response body ever is. The httpOnly cookie just set
+  // above is the real credential; the SPA calls GET /api/auth/session
+  // (below) on landing to read the rest back out, authenticated by that
+  // same cookie.
+  return reply.redirect(`${entraRedirectAdminOrigin}/entra-callback`);
+});
+
+// Read-back for the Entra callback above: a real browser navigation can't
+// return a JSON body, so entra/callback sets the session cookie and redirects
+// bare — this is what the SPA calls on landing (cookie-authenticated) to get
+// the csrfToken/role/tenantHost it needs, without ever putting them in a URL.
+app.get("/api/auth/session", async (req, reply) => {
+  const session = verifyAnyUser(req, reply);
+  if (!session) return;
+  return {
+    csrfToken: session.csrfToken,
+    role: session.role,
+    tenantHost: session.tenantHost ?? null,
+    tenantHosts: session.tenantHosts ?? [],
+  };
 });
 
 app.post("/api/auth/totp-verify", async (req, reply) => {
