@@ -47,7 +47,13 @@ const { symbolId, tenantHost } = Astro.props;
 
 const symbol = symbolId ? await getSymbol(tenantHost, symbolId) : null;
 const node = symbol?.node as El | undefined;
+---
 
+{node && (() => {
+// Astro frontmatter (above the closing `---`) is plain script and can't
+// contain JSX — this whole function has to live inside a template `{}`
+// expression instead, same as SectionBlock.astro's own `const node = (() =>
+// {...})()` IIFE does for its per-element switch.
 const renderNode = (el: El): unknown => {
   const p = el.props ?? {};
   switch (el.type) {
@@ -165,6 +171,5 @@ const renderNode = (el: El): unknown => {
       return null;
   }
 };
----
-
-{node && renderNode(node)}
+return renderNode(node!);
+})()}
