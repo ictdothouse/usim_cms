@@ -438,6 +438,31 @@ export async function getMenu(tenantHost: string, id: string): Promise<Menu | nu
   }
 }
 
+// Live-linked reusable component — a Designer "symbol" element only stores
+// a symbolId, resolved here at render time (same reference pattern as
+// getMenu above). `node` is a bare Designer El, kept untyped here (no
+// Section/Row/Col/El types exist in this app) — SectionBlock.astro's
+// existing element-render switch handles it structurally the same way it
+// already handles any other El.
+export interface Symbol {
+  id: string;
+  name: string;
+  node: Record<string, unknown>;
+}
+
+export async function getSymbol(tenantHost: string, id: string): Promise<Symbol | null> {
+  if (!id) return null;
+  try {
+    const { item } = await apiGet<{ item: Symbol | null }>(`/api/symbols/${id}`, tenantHost);
+    return item;
+  } catch (err) {
+    // Same soft-fail as getMenu above — a deleted symbol renders nothing
+    // rather than a whole-page 500.
+    console.error(`getSymbol: ${id} failed, rendering no component`, err);
+    return null;
+  }
+}
+
 // Resolved, render-ready shape — href is always a plain string (already
 // slug-resolved for page/post/category links), label is already the
 // requested language's own translation (or the item's stored default).

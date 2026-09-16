@@ -538,7 +538,10 @@ function validateBp(bp: unknown, path: string): string | null {
   return null;
 }
 
-function validateElement(el: unknown, path: string): string | null {
+// Exported so a symbol's own `node` (a bare El, not part of a layout tree —
+// see apps/api's symbols table) can be validated the same way an El nested
+// inside a page's layout already is.
+export function validateElement(el: unknown, path: string): string | null {
   if (typeof el !== "object" || el === null) return `${path} must be an object`;
   const e = el as Record<string, unknown>;
   const err = validatePropsBag(e.props, path) ?? validateBp(e.bp, path);

@@ -878,6 +878,43 @@ function BlueprintDesignerRoute({ tenantHost, token, isSuper, backTo }: { tenant
   );
 }
 
+// Same shape as BlueprintDesignerRoute, for "Edit Master" on a live-linked
+// symbol (Designer.tsx's kind="symbol") — the bare El node is wrapped in a
+// throwaway section/row/column shell so every existing Designer mechanism
+// (Inspector, drag, undo, mutate) works completely unmodified; saveSymbol()
+// (Designer.tsx) unwraps back down to the bare node on save. Always opened
+// in a new tab (see Designer.tsx's "Edit Master" context-menu item), so
+// there's no `backTo` — onClose just closes that tab.
+function SymbolDesignerRoute({ tenantHost, token, isSuper }: { tenantHost: string; token: string; isSuper: boolean }) {
+  const { t } = useT();
+  const { id } = useParams();
+  const [sym, setSym] = useState<api.Symbol | null | undefined>(undefined);
+  useEffect(() => {
+    void api
+      .getSymbol(tenantHost, token, id as string)
+      .then(setSym)
+      .catch(() => setSym(null));
+  }, [tenantHost, id]);
+  if (sym === undefined) return null;
+  if (sym === null) return <p className="text-xs text-sub">{t("designer-symbols-missing")}</p>;
+  return (
+    <Designer
+      page={{
+        id: sym.id,
+        title: sym.name,
+        layout: [{ type: "section", props: { rows: [{ columns: [{ elements: [sym.node] }] }] } }],
+        settings: {},
+      }}
+      tenantHost={tenantHost}
+      token={token}
+      t={t}
+      onClose={() => window.close()}
+      isSuper={isSuper}
+      kind="symbol"
+    />
+  );
+}
+
 // Same shape as BlueprintDesignerRoute, for a header/footer's own layout —
 // see docs/superpowers/specs/2026-09-04-header-footer-designer-design.md.
 // `kind`/`isDefault`/`status` ride along on `page` since Designer's own
@@ -4414,6 +4451,9 @@ function ContentManager({
               <Route path="blueprints/:id" element={<BlueprintDesignerRoute tenantHost={siteHost} token={token} isSuper backTo="/content/blueprints" />} />
             )}
             {isSuper && (
+              <Route path="symbols/:id" element={<SymbolDesignerRoute tenantHost={siteHost} token={token} isSuper />} />
+            )}
+            {isSuper && (
               <Route path="events" element={<EventsPanel key={`events-${siteHost}`} tenantHost={siteHost} token={token} />} />
             )}
           </Routes>
@@ -5737,6 +5777,7 @@ function Shell({
                 />
                 <Route path="blueprints" element={!isSuper && session.tenantHost ? (<BlueprintGallery tenantHost={session.tenantHost} token={session.token} mode="manage" isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="blueprints/:id" element={!isSuper && session.tenantHost ? (<BlueprintDesignerRoute tenantHost={session.tenantHost} token={session.token} isSuper={false} backTo="/blueprints" />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="symbols/:id" element={!isSuper && session.tenantHost ? (<SymbolDesignerRoute tenantHost={session.tenantHost} token={session.token} isSuper={false} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="events" element={!isSuper && session.tenantHost ? (<EventsPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="global-theme" element={isSuper ? (<ThemeForm title={t("gtheme-title")} load={() => api.getGlobalTheme(session.token)} save={(s) => api.putGlobalTheme(session.token, s)} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />

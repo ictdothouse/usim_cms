@@ -459,7 +459,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
     sliderInnerSel, setSliderInnerSel, uploadImage, openMediaPicker,
-    availableMenus, availableCategories,
+    availableMenus, availableCategories, availableSymbols,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
@@ -830,6 +830,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           bpKey={bpKey}
           availableMenus={availableMenus}
           availableCategories={availableCategories}
+          availableSymbols={availableSymbols}
           ICONS={ICONS}
         />
       </div>
@@ -1178,6 +1179,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           bpKey={bpKey}
           availableMenus={availableMenus}
           availableCategories={availableCategories}
+          availableSymbols={availableSymbols}
           ICONS={ICONS}
         />
         <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
@@ -1307,6 +1309,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
           bpKey,
           availableMenus,
           availableCategories,
+          availableSymbols,
           ICONS,
         };
         const childIsFree = bpGetValue(childEl.props.position, childEl.bp, "position") === "custom";
@@ -1503,6 +1506,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
       bpKey,
       availableMenus,
       availableCategories,
+      availableSymbols,
       ICONS,
     };
     return (
@@ -1689,7 +1693,7 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
       collapsedGroups, toggleGroup, bp, t, iconSearch, setIconSearch, uploading, siteTheme,
       sel, blocks, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
       uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
-      availableMenus, availableCategories, ICONS,
+      availableMenus, availableCategories, availableSymbols, ICONS,
     };
     return (
       <div className="space-y-3">

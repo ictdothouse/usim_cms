@@ -17,7 +17,7 @@ import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
 import { getLivePreview, newLivePreviewId, setLivePreview } from "./live-preview-store.js";
 import { recordRequest, renderMetrics } from "./metrics.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
-import { validateLayout, validateOverrides, isSafeUrl } from "./collections/validate-layout.js";
+import { validateLayout, validateOverrides, validateElement, isSafeUrl } from "./collections/validate-layout.js";
 import { validateMenuItems } from "./collections/validate-menu.js";
 import * as schema from "./db/schema.js";
 import {
@@ -2466,6 +2466,41 @@ const templatesCollection: CollectionConfig = {
   },
 };
 
+// Live-linked reusable component. Unlike templates above, this DOES need
+// read+update: a page's "symbol" element resolves `node` at render time (both
+// admin canvas and the public site, hence the public registration below —
+// same reasoning as menus), and "Edit Master" PATCHes `node` in place rather
+// than delete-and-recreate. Reuses pages.* permissions, same precedent as
+// templates above (no new symbols.* permission category).
+const symbolsBeforeChange = (data: unknown) => {
+  const record = data as Record<string, unknown>;
+  const err = validateElement(record.node, "node");
+  if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  record.updatedAt = new Date();
+  return record;
+};
+
+const symbolsCollection: CollectionConfig = {
+  slug: "symbols",
+  table: schema.symbols,
+  createSchema: {
+    type: "object",
+    required: ["name", "node"],
+    additionalProperties: false,
+    properties: {
+      name: { type: "string", minLength: 1 },
+      node: { type: "object" },
+    },
+  },
+  access: {
+    read: () => true,
+    create: (a) => hasPermission(a, "pages.create"),
+    update: (a) => hasPermission(a, "pages.update"),
+    delete: (a) => hasPermission(a, "pages.delete"),
+  },
+  hooks: { beforeChange: symbolsBeforeChange },
+};
+
 // Public scope: tenant resolution only, no login required — this is what
 // anonymous website visitors (and the apps/frontend renderer) hit. Only GET
 // routes live here; never put a write route in this scope.
@@ -2475,6 +2510,7 @@ await app.register(async (publicScope) => {
   registerPublicCollectionRoutes(publicScope, postsCollection);
   registerPublicCollectionRoutes(publicScope, categoriesCollection);
   registerPublicCollectionRoutes(publicScope, menusCollection);
+  registerPublicCollectionRoutes(publicScope, symbolsCollection);
   registerPublicCollectionRoutes(publicScope, eventsCollection);
   registerPublicCollectionRoutes(publicScope, siteChromeCollection);
   // Theme lives in the control-plane DB, not the tenant DB — req.db's own
@@ -2613,6 +2649,7 @@ await app.register(async (protectedScope) => {
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
   registerProtectedCollectionRoutes(protectedScope, menusCollection);
+  registerProtectedCollectionRoutes(protectedScope, symbolsCollection);
   registerProtectedCollectionRoutes(protectedScope, eventsCollection);
   registerProtectedCollectionRoutes(protectedScope, siteChromeCollection);
 

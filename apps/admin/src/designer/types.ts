@@ -55,6 +55,7 @@ export type FieldKind =
   | "drag-number"
   | "menu-select"
   | "category-select"
+  | "symbol-select"
   | "repeater";
 
 // One sub-field of a "repeater" kind item — deliberately a small fixed set
@@ -138,6 +139,11 @@ export type ElType =
   | "ctabanner"
   | "announcementbar"
   | "postlist"
+  // Live-linked reusable component — a thin reference (props.symbolId only,
+  // same pattern as "menu"'s props.menuId), resolved against the symbols
+  // table at render time. See apps/api's symbols table comment and
+  // Designer.tsx's ELS.symbol/makeComponent/insertSymbol/detachSymbol.
+  | "symbol"
   // Batch of simple, no-backend Designer elements (audit report sections
   // 5.2/5.7) — each a repeater of small items (see FieldKind "repeater"
   // below) except googlemap/announcementticker, which are flat props.
