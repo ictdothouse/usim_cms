@@ -800,30 +800,31 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                               : {
                                   ...elMarginStyle(childEl.props ?? {}),
                                   ...elPaddingStyle(childEl.props ?? {}),
-                                  // A locked/flow button renders as a small
-                                  // inline-block pill, but this selection
-                                  // wrapper is a plain block div — full
-                                  // container width by default, so the
-                                  // selected/hover outline drew a box far
-                                  // wider than the visible pill. Shrinking
-                                  // just the button case to its own content
-                                  // width fixes that; text/heading stay
-                                  // full-width on purpose (their own
-                                  // left/center/right align needs the full
-                                  // row to align within). But a fit-content
-                                  // block still needs its OWN position set —
-                                  // the button's inner text-align:center div
-                                  // (below) has no spare width left to center
-                                  // into once this wrapper already hugs it —
-                                  // so mirror the button's own align here via
-                                  // margin instead (site's own render has no
-                                  // such wrapper, so it never needed this).
+                                  // Was previously shrunk to `width:
+                                  // "fit-content"` (plus a raw, non-bp-aware
+                                  // childEl.props.align read for margin
+                                  // centering) so the selection outline
+                                  // wouldn't look wider than the visible
+                                  // pill — but that made this wrapper's own
+                                  // box model diverge from the real site's
+                                  // (SectionBlock.astro's button case is a
+                                  // plain full-width div with `text-align`,
+                                  // no width override at all), which is
+                                  // exactly what caused Live Edit and
+                                  // Published to size/wrap the button
+                                  // differently (see docs/SliderProblem.pdf
+                                  // #2). Matching the site's own approach —
+                                  // full-width wrapper, alignment via
+                                  // text-align — fixes that mismatch AND
+                                  // makes a per-breakpoint align override
+                                  // actually apply here (bpGetValue, same as
+                                  // every other slide-child prop read in
+                                  // this function), at the minor cosmetic
+                                  // cost of a same-width-as-text-elements
+                                  // selection outline for a short button
+                                  // label.
                                   ...(childEl.type === "button"
-                                    ? {
-                                        width: "fit-content",
-                                        marginLeft: childEl.props.align === "right" ? "auto" : childEl.props.align === "center" ? "auto" : undefined,
-                                        marginRight: childEl.props.align === "left" ? "auto" : childEl.props.align === "center" ? "auto" : undefined,
-                                      }
+                                    ? { textAlign: (bpGetValue(childEl.props.align, childEl.bp, "align") as "left" | "center" | "right" | undefined) || undefined }
                                     : {}),
                                 }
                           }
