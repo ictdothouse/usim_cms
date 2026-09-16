@@ -3,7 +3,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
-import { getTheme, getBlueprintPreview } from "../lib/api";
+import { getTheme, getBlueprintPreview, getLivePreviewOverride } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Designer's blueprint "Live Edit" iframe — same designerEdit bridge as
@@ -22,9 +22,14 @@ const tenantHost =
 
 const id = Astro.url.searchParams.get("id") ?? "";
 const previewToken = Astro.url.searchParams.get("token") ?? "";
-const bp = id && previewToken ? await getBlueprintPreview(tenantHost, id, previewToken) : null;
+let bp = id && previewToken ? await getBlueprintPreview(tenantHost, id, previewToken) : null;
 if (!bp) {
   Astro.response.status = 404;
+} else {
+  // No prior Save required — see [...slug].astro's own comment on this
+  // same mechanism.
+  const draft = await getLivePreviewOverride(tenantHost, previewToken);
+  if (draft) bp = { ...bp, layout: draft.layout ?? bp.layout, settings: draft.settings ?? bp.settings };
 }
 const siteTheme = await getTheme(tenantHost);
 const theme = bp?.settings?.theme ? { ...siteTheme, ...bp.settings.theme } : siteTheme;
