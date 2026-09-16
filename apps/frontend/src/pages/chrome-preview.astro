@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
-import { getTheme, getSiteChromeById } from "../lib/api";
+import { getTheme, getSiteChromeById, getLivePreviewOverride } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Designer's Header/Footer device-preview modal — renders one siteChrome row
@@ -25,9 +25,15 @@ const kind = Astro.url.searchParams.get("kind") === "footer" ? "footer" : "heade
 // height back so the host can size the iframe to exactly the chrome, no
 // leftover gap.
 const embed = Astro.url.searchParams.get("embed") === "1";
-const chrome = id ? await getSiteChromeById(tenantHost, id) : null;
+const previewToken = Astro.url.searchParams.get("token") ?? "";
+let chrome = id ? await getSiteChromeById(tenantHost, id) : null;
 if (!chrome) {
   Astro.response.status = 404;
+} else if (previewToken) {
+  // No prior Save required — see [...slug].astro's own comment on this
+  // same mechanism.
+  const draft = await getLivePreviewOverride(tenantHost, previewToken);
+  if (draft?.layout) chrome = { ...chrome, layout: draft.layout };
 }
 const siteTheme = await getTheme(tenantHost);
 const fonts = collectFonts(chrome?.layout ?? []);

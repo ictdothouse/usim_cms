@@ -14,6 +14,7 @@ import { tenantPlugin } from "./plugins/tenant.js";
 import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
+import { getLivePreview, newLivePreviewId, setLivePreview } from "./live-preview-store.js";
 import { recordRequest, renderMetrics } from "./metrics.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
 import { validateLayout, validateOverrides, isSafeUrl } from "./collections/validate-layout.js";
@@ -1085,6 +1086,25 @@ app.post("/api/theme-preview-token", async (req, reply) => {
     themePreview: settings as Record<string, string>,
   });
   return { token };
+});
+
+// Reads back the not-yet-saved draft a page/blueprint/siteChrome
+// preview-token route stashed in the ephemeral live-preview-store (see
+// live-preview-store.ts) — the token itself only carries a livePreviewId
+// claim, never the draft content (too large for a token that ends up in a
+// URL query string). No tenant/DB lookup at all: the signed token's own
+// previewOnly+exp is the entire access check, same trust boundary as every
+// other preview token here. A missing/expired/foreign token, or a draft
+// that already aged out of the store, both resolve to `{ item: null }`
+// rather than an error — apps/frontend's callers all already fall back to
+// the real saved row when there's no override to apply.
+app.get("/api/live-preview", async (req) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return { item: null };
+  const session = verifySession(auth.slice("Bearer ".length));
+  if (!session?.previewOnly || !session.livePreviewId) return { item: null };
+  const item = (await getLivePreview(session.livePreviewId)) ?? null;
+  return { item };
 });
 
 // Fires the Caddy resync after any tenant-table change, but only when the
@@ -2548,7 +2568,21 @@ await app.register(async (protectedScope) => {
   // requireTenantAuth's rejection of it). Scoped to this tenant only, same
   // granularity as every other read check here (no per-row ACL exists).
   const PREVIEW_TOKEN_TTL_MS = 5 * 60 * 1000;
+  // Optional body: { layout?, settings?, translations? } — Designer's
+  // Preview/Live Edit now sends the canvas's current in-memory state
+  // directly, with no prior Save, mirroring Elementor/Avada's own "preview
+  // shows what's on screen, not what's persisted" behavior. Stored in the
+  // ephemeral live-preview-store (never pages.layout/settings/translations),
+  // referenced from the signed token by id only — see GET /api/live-preview.
+  // Omitting the body (or sending {}) keeps the old behavior: a plain
+  // draft-visibility token with nothing to override.
   protectedScope.post("/api/pages/:id/preview-token", async (req) => {
+    const draft = req.body as { layout?: unknown; settings?: unknown; translations?: unknown } | undefined;
+    let livePreviewId: string | undefined;
+    if (draft && (draft.layout !== undefined || draft.settings !== undefined || draft.translations !== undefined)) {
+      livePreviewId = newLivePreviewId();
+      await setLivePreview(livePreviewId, draft);
+    }
     const token = signSession({
       userId: req.user.userId,
       email: req.user.email,
@@ -2557,6 +2591,7 @@ await app.register(async (protectedScope) => {
       permissions: [],
       previewOnly: true,
       exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+      ...(livePreviewId ? { livePreviewId } : {}),
     });
     return { token };
   });
@@ -2580,6 +2615,32 @@ await app.register(async (protectedScope) => {
   registerProtectedCollectionRoutes(protectedScope, menusCollection);
   registerProtectedCollectionRoutes(protectedScope, eventsCollection);
   registerProtectedCollectionRoutes(protectedScope, siteChromeCollection);
+
+  // siteChrome's own GET is already publicly readable regardless of draft/
+  // published status (see chrome-preview.astro's own comment), so unlike the
+  // pages/blueprints preview-token routes above, this one exists purely to
+  // carry not-yet-saved canvas content for Designer's Header/Footer device
+  // preview — same ephemeral-store/livePreviewId mechanism, no draft-
+  // visibility elevation needed.
+  protectedScope.post("/api/siteChrome/:id/preview-token", async (req) => {
+    const draft = req.body as { layout?: unknown } | undefined;
+    let livePreviewId: string | undefined;
+    if (draft && draft.layout !== undefined) {
+      livePreviewId = newLivePreviewId();
+      await setLivePreview(livePreviewId, draft);
+    }
+    const token = signSession({
+      userId: req.user.userId,
+      email: req.user.email,
+      role: req.user.role,
+      tenantHost: req.tenantHost,
+      permissions: [],
+      previewOnly: true,
+      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+      ...(livePreviewId ? { livePreviewId } : {}),
+    });
+    return { token };
+  });
 
   // History/restore — a post-specific feature the generic CRUD mechanism
   // doesn't cover (same reasoning as the preview-token route above), so
@@ -3210,6 +3271,14 @@ await app.register(async (protectedScope) => {
       reply.code(404);
       return { error: "not found" };
     }
+    // Same not-yet-saved-content override as the pages preview-token route
+    // above — see its comment.
+    const draft = req.body as { layout?: unknown; settings?: unknown } | undefined;
+    let livePreviewId: string | undefined;
+    if (draft && (draft.layout !== undefined || draft.settings !== undefined)) {
+      livePreviewId = newLivePreviewId();
+      await setLivePreview(livePreviewId, draft);
+    }
     const token = signSession({
       userId: req.user.userId,
       email: req.user.email,
@@ -3218,6 +3287,7 @@ await app.register(async (protectedScope) => {
       permissions: [],
       previewOnly: true,
       exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+      ...(livePreviewId ? { livePreviewId } : {}),
     });
     return { token };
   });

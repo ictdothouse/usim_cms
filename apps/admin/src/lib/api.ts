@@ -313,8 +313,21 @@ export const createPage = (
   );
 
 // Mints a short-lived, read-only token for previewUrl() — see its comment.
-export const getPagePreviewToken = (tenantHost: string, token: string, id: string) =>
-  request(`/api/pages/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
+// `draft`, when passed, is the canvas's current in-memory (not-yet-saved)
+// content — the server stashes it in an ephemeral store and embeds a
+// reference in the token, so Preview/Live Edit never needs a prior Save
+// (Elementor/Avada-style "preview shows what's on screen"). Omit it for the
+// old draft-visibility-only behavior (e.g. the plain "View" link).
+export const getPagePreviewToken = (
+  tenantHost: string,
+  token: string,
+  id: string,
+  draft?: { layout?: unknown; settings?: unknown; translations?: unknown },
+) =>
+  request(`/api/pages/${id}/preview-token`, tenantHost, token, {
+    method: "POST",
+    ...(draft ? { body: JSON.stringify(draft) } : {}),
+  }).then((b) => b.token as string);
 
 export const getPostPreviewToken = (tenantHost: string, token: string, id: string) =>
   request(`/api/posts/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
@@ -539,12 +552,28 @@ export const deleteSiteChrome = (tenantHost: string, token: string, id: string) 
 // already publicly readable regardless of draft/published status (see
 // siteChromeCollection's access.read in apps/api/src/index.ts), so this just
 // points the frontend's chrome-preview.astro at the row by id.
-export const chromePreviewUrl = (tenantHost: string, id: string, kind: "header" | "footer", opts?: { embed?: boolean }) => {
+// Same not-yet-saved-content mechanism as getPagePreviewToken above —
+// siteChrome's own read is already public regardless of draft/published
+// status (see chrome-preview.astro), so this route exists purely to carry a
+// livePreviewId when `draft` is passed.
+export const getSiteChromePreviewToken = (tenantHost: string, token: string, id: string, draft?: { layout?: unknown }) =>
+  request(`/api/siteChrome/${id}/preview-token`, tenantHost, token, {
+    method: "POST",
+    ...(draft ? { body: JSON.stringify(draft) } : {}),
+  }).then((b) => b.token as string);
+
+export const chromePreviewUrl = (
+  tenantHost: string,
+  id: string,
+  kind: "header" | "footer",
+  opts?: { embed?: boolean; previewToken?: string },
+) => {
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
   const query = new URLSearchParams({
     id,
     kind,
     ...(opts?.embed ? { embed: "1" } : {}),
+    ...(opts?.previewToken ? { token: opts.previewToken } : {}),
     ...(isLocal ? { __tenant: tenantHost } : {}),
   }).toString();
   const scheme = window.location.protocol === "https:" ? "https" : "http";
@@ -608,8 +637,16 @@ export const deleteBlueprint = (tenantHost: string, token: string, id: string) =
 // Not underscore-prefixed: Astro's file-based router silently excludes any
 // src/pages file starting with "_" from routing at all, which is why this
 // was originally named "__blueprint-preview" and 404'd on every request.
-export const getBlueprintPreviewToken = (tenantHost: string, token: string, id: string) =>
-  request(`/api/blueprints/${id}/preview-token`, tenantHost, token, { method: "POST" }).then((b) => b.token as string);
+export const getBlueprintPreviewToken = (
+  tenantHost: string,
+  token: string,
+  id: string,
+  draft?: { layout?: unknown; settings?: unknown },
+) =>
+  request(`/api/blueprints/${id}/preview-token`, tenantHost, token, {
+    method: "POST",
+    ...(draft ? { body: JSON.stringify(draft) } : {}),
+  }).then((b) => b.token as string);
 
 export const blueprintPreviewUrl = (tenantHost: string, id: string, previewToken: string) => {
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);

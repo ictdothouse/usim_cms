@@ -849,6 +849,16 @@ export default function Designer({
   // navigate to) and for anyone who'd rather check breakpoints without
   // leaving the Designer.
   const [previewModal, setPreviewModal] = useState<{ src: string; device: "desktop" | "tablet" | "mobile" } | null>(null);
+  // preview()'s new-tab flow (kind === "page", draft-or-dirty branch) below —
+  // a real `<a target="_blank">` click the user makes themselves, never a
+  // script-driven window.open()+later-navigate. That combo is what a
+  // browser's popup/redirect heuristics can silently eat (a permanently
+  // blank about:blank tab, no error) once any await happens in between the
+  // open and the navigate — a real anchor click has no such window. Two
+  // steps: click "Preview" mints the token (previewMinting), then the same
+  // slot becomes a real link the user clicks to actually open the tab.
+  const [previewLink, setPreviewLink] = useState<string | null>(null);
+  const [previewMinting, setPreviewMinting] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
@@ -890,6 +900,13 @@ export default function Designer({
   // since it's not part of the undo stack, same convention as slugDraft above.
   // Persisted via save()'s `settings`.
   const [pageSettings, setPageSettings] = useState<PageSettings>(() => (page.settings as PageSettings) ?? {});
+  // A minted preview link is a snapshot of the canvas at mint time — any
+  // further edit before the user actually clicks it would make it stale
+  // (showing content older than what's now on screen), so drop it and
+  // require a fresh mint rather than silently open outdated content.
+  useEffect(() => {
+    setPreviewLink(null);
+  }, [rawBlocks, pageSettings]);
   // Header/Footer designer (kind === "siteChrome") — isDefault + mobileNav
   // style, edited via the standalone panel below the canvas, saved with an
   // immediate api.updateSiteChrome PATCH rather than folded into the
@@ -2297,59 +2314,95 @@ export default function Designer({
     }
   }
 
+  // `translations` payload shape save() itself PATCHes — reused here so
+  // Preview's draft override matches exactly what a real Save would send,
+  // minus the DB write.
+  function currentTranslationsPayload(): Record<string, { overrides: Record<string, Record<string, string>> }> {
+    const translations: Record<string, { overrides: Record<string, Record<string, string>> }> = {};
+    for (const [code, overrides] of Object.entries(langOverrides)) {
+      if (code !== BASE_LANG) translations[code] = { overrides };
+    }
+    return translations;
+  }
+
   // Only reached when there's unsaved content or the page is a draft — a
   // saved+published page renders a plain <a href target="_blank"> instead
   // (see the Preview button below), since a real anchor click is a genuine
-  // browser navigation and can't hit the "window.open then redirect"
-  // pattern's failure mode: some browsers let the blank tab open but then
-  // silently block the follow-up script navigation, leaving a permanently
-  // blank tab. This path unavoidably needs that pattern anyway — the save
-  // and/or the preview-token mint have to finish before the URL is known.
-  async function preview() {
-    const win = window.open("", "_blank", "noreferrer");
-    if (!win) {
-      // window.open silently returns null when the browser's popup blocker
-      // eats it — without this check, clicking Preview looks like nothing
-      // happened at all, with no error and no new tab.
-      setError(t("designer-preview-blocked"));
-      return;
-    }
+  // browser navigation and never hits the popup/redirect-blocking heuristic
+  // below.
+  //
+  // No Save first (Elementor/Avada-style: Preview shows whatever's on
+  // screen, not whatever's persisted) — the canvas's current in-memory state
+  // is sent straight to the preview-token mint, which stashes it in an
+  // ephemeral server-side store (see apps/api's live-preview-store.ts) and
+  // embeds a reference in the token; nothing is written to pages/blueprints.
+  //
+  // Two clicks, deliberately, not window.open()+later-navigate: opening a
+  // blank tab synchronously then setting its location after this mint's
+  // await used to leave a permanently blank about:blank tab in some
+  // browsers/settings — script-driven navigation of an already-open window,
+  // once any await separates the two, is exactly what a popup/redirect
+  // blocker can silently eat, with no error and no console trace. A real
+  // anchor click (the second step below) is a genuine user-gesture
+  // navigation and has no such window.
+  async function mintPreviewLink() {
+    setError(null);
+    setPreviewMinting(true);
     try {
-      if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
       const previewToken =
         kind === "blueprint"
-          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string)
-          : await api.getPagePreviewToken(tenantHost, token, page.id as string);
-      win.location.href =
+          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string, {
+              layout: clone(rawBlocks),
+              settings: pageSettings,
+            })
+          : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
+              layout: clone(rawBlocks),
+              settings: pageSettings,
+              translations: currentTranslationsPayload(),
+            });
+      setPreviewLink(
         kind === "blueprint"
           ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
-          : api.previewUrl(tenantHost, page.slug as string, previewToken);
+          : api.previewUrl(tenantHost, page.slug as string, previewToken),
+      );
     } catch (err) {
-      win.close();
       setError((err as Error).message);
+    } finally {
+      setPreviewMinting(false);
     }
   }
 
-  // Modal device preview — no popup blocker to fight since nothing is
-  // window.open()'d, so unlike preview() above this can mint the token
-  // and set the iframe src in one straight async function.
+  // Modal iframe, not a new tab — no popup blocker to fight, so unlike
+  // mintPreviewLink() above this can mint straight into the iframe's src in
+  // one call. No Save first either (same draft-override mechanism as
+  // mintPreviewLink — see its comment): the canvas's current in-memory state
+  // goes into the token mint, nothing is written to pages/blueprints/
+  // site_chrome.
   async function openDevicePreview() {
     setError(null);
     try {
       if (kind === "siteChrome") {
-        if (dirty) await saveSiteChrome();
+        const previewToken = await api.getSiteChromePreviewToken(tenantHost, token, page.id as string, {
+          layout: clone(rawBlocks),
+        });
         // Opens at whatever breakpoint the canvas itself is currently
         // previewing (bp) instead of always "desktop" — editing under
         // Mobile/Tablet and hitting Preview used to silently jump back to
         // desktop, a mismatch reported as "preview tak tepat".
-        setPreviewModal({ src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer"), device: bp });
+        setPreviewModal({
+          src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken }),
+          device: bp,
+        });
         return;
       }
-      if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
       const previewToken =
         kind === "blueprint"
-          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string)
-          : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string, { layout: clone(rawBlocks), settings: pageSettings })
+          : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
+              layout: clone(rawBlocks),
+              settings: pageSettings,
+              translations: currentTranslationsPayload(),
+            });
       const src =
         kind === "blueprint"
           ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
@@ -3023,12 +3076,23 @@ export default function Designer({
             >
               <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
             </a>
+          ) : previewLink ? (
+            <a
+              href={previewLink}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setPreviewLink(null)}
+              className="flex items-center gap-1 rounded-full bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview-ready")}
+            </a>
           ) : (
             <button
-              onClick={() => void preview()}
-              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+              onClick={() => void mintPreviewLink()}
+              disabled={previewMinting}
+              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas disabled:opacity-50"
             >
-              <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
+              <ExternalLink className="h-3.5 w-3.5" /> {previewMinting ? t("designer-saving") : t("designer-preview")}
             </button>
           ))}
         {kind !== "page" && (
@@ -3043,7 +3107,7 @@ export default function Designer({
         {kind === "page" && (
           <button
             onClick={() => void save("published")}
-            disabled={busy}
+            disabled={busy || (page.status === "published" && !dirty)}
             className="rounded-full bg-accent px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
             {busy ? t("designer-saving") : page.status === "published" ? t("designer-update") : t("designer-publish")}

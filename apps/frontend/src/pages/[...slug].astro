@@ -3,7 +3,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
-import { getPageBySlug, getTheme, getLanguages, resolvePageLayout, resolveHeaderFooter } from "../lib/api";
+import { getPageBySlug, getTheme, getLanguages, resolvePageLayout, resolveHeaderFooter, getLivePreviewOverride } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Single instance, ~50 real department domains: tenant identity is always
@@ -34,7 +34,24 @@ const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 // render not-yet-saved theme settings — independent of previewToken above.
 const themeToken = Astro.url.searchParams.get("themeToken") ?? undefined;
 
-const page = await getPageBySlug(tenantHost, slug, previewToken);
+let page = await getPageBySlug(tenantHost, slug, previewToken);
+// Designer's Preview/Live Edit — no prior Save required (Elementor/Avada-
+// style): the SAME previewToken above may also carry a livePreviewId
+// pointing at not-yet-saved layout/settings/translations, overlaid onto the
+// real saved row for this render only. A missing/expired draft (or a plain
+// draft-visibility-only token with nothing stashed) silently keeps the
+// saved row as-is.
+if (page && previewToken) {
+  const draft = await getLivePreviewOverride(tenantHost, previewToken);
+  if (draft) {
+    page = {
+      ...page,
+      layout: draft.layout ?? page.layout,
+      settings: draft.settings ?? page.settings,
+      translations: draft.translations ?? page.translations,
+    };
+  }
+}
 const siteTheme = await getTheme(tenantHost, themeToken);
 // Page Settings' theme picker is a snapshot copy (Theme panel's preset applied at
 // pick-time, see Designer.tsx) — overlaid last so it wins over the tenant's own

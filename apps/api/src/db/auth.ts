@@ -117,6 +117,14 @@ export interface SessionPayload {
   // them for this request only, without writing to site_theme. Same
   // previewOnly/exp gating as a page-preview token.
   themePreview?: Record<string, string>;
+  // Set only on a page/blueprint/siteChrome preview token that was minted
+  // alongside not-yet-saved canvas content (Designer's Preview/Live Edit,
+  // used with no prior Save — see live-preview-store.ts) — points at that
+  // draft's entry in the ephemeral store, never the content itself (a full
+  // layout tree is too large to embed in a token that ends up in a URL query
+  // string, unlike themePreview's small flat settings map above). GET
+  // /api/live-preview is the only route that reads this claim.
+  livePreviewId?: string;
   // Set only on a maintenance-bypass token (see POST
   // /api/portal/tenants/:host/maintenance-bypass-token) — lets Manage Site's
   // "View" link keep browsing a tenant's real site while maintenanceMode is

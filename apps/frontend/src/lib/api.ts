@@ -138,6 +138,27 @@ async function apiGet<T>(path: string, tenantHost: string, token?: string): Prom
   }
 }
 
+// Reads back the not-yet-saved draft a page/blueprint/siteChrome
+// preview-token route (apps/api) stashed in its ephemeral live-preview-store,
+// keyed off the SAME token already being forwarded for draft visibility — so
+// Designer's Preview/Live Edit never needs a prior Save (see that route's own
+// comment). No stale-cache fallback at all here (unlike apiGet's default):
+// a failed/expired lookup must fall back to the real saved row, not a
+// possibly-stale DIFFERENT draft.
+export interface LivePreviewOverride {
+  layout?: PageLayout;
+  settings?: Page["settings"];
+  translations?: Page["translations"];
+}
+export async function getLivePreviewOverride(tenantHost: string, token: string): Promise<LivePreviewOverride | null> {
+  try {
+    const { item } = await apiGet<{ item: LivePreviewOverride | null }>("/api/live-preview", tenantHost, token);
+    return item;
+  } catch {
+    return null;
+  }
+}
+
 export async function getPageBySlug(tenantHost: string, slug: string, token?: string): Promise<Page | null> {
   // Filters straight to Postgres via generic-crud's buildListFilters (any
   // column name is an exact-match query param) instead of fetching every
