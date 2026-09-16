@@ -932,6 +932,29 @@ export default function Designer({
     }
   }
 
+  // Autosave (2026-09-16): debounced silent save while dirty, restricted to
+  // draft-status content only — a page/siteChrome already published only
+  // saves on an explicit Update/Publish click, so autosave can never
+  // silently push an unreviewed edit onto the live site. Blueprints have no
+  // publish concept at all (every save just overwrites the same row, same
+  // as a draft page), so they're always autosave-eligible.
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const eligible =
+      kind === "blueprint" ||
+      (kind === "page" && page.status !== "published") ||
+      (kind === "siteChrome" && chromeStatus !== "published");
+    if (!dirty || !eligible || busy) return;
+    autosaveTimerRef.current = setTimeout(() => {
+      if (kind === "blueprint") void saveBlueprint();
+      else if (kind === "siteChrome") void saveSiteChrome();
+      else void save();
+    }, 2000);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [dirty, busy, kind, page.status, chromeStatus, rawBlocks, pageSettings]);
+
   // Page's own header/footer assignment (kind === "page") — same immediate-
   // PATCH pattern as chrome meta above, real pages columns not part of
   // `pageSettings`' jsonb bag. availableHeaders/Footers are fetched once,
@@ -2954,17 +2977,24 @@ export default function Designer({
             {slugError && <span className="text-[11px] font-semibold text-red-600">{slugError}</span>}
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                page.status === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+                busy ? "bg-accent/10 text-accent" : page.status === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
               }`}
             >
-              {dirty ? t("designer-dirty") : page.status === "published" ? t("pages-published") : t("pages-draft")}
+              {busy ? t("designer-saving") : dirty ? t("designer-dirty") : page.status === "published" ? t("pages-published") : t("pages-draft")}
             </span>
           </>
         )}
         {kind === "blueprint" && (
-          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
-            {t("blueprints-title")}
-          </span>
+          <>
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
+              {t("blueprints-title")}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${busy ? "bg-accent/10 text-accent" : dirty ? "bg-warn/10 text-warn" : "bg-ok/10 text-ok"}`}
+            >
+              {busy ? t("designer-saving") : dirty ? t("designer-dirty") : t("designer-saved")}
+            </span>
+          </>
         )}
         {kind === "siteChrome" && (
           <>
@@ -2973,10 +3003,10 @@ export default function Designer({
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                chromeStatus === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+                busy ? "bg-accent/10 text-accent" : chromeStatus === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
               }`}
             >
-              {dirty ? t("designer-dirty") : chromeStatus === "published" ? t("pages-published") : t("pages-draft")}
+              {busy ? t("designer-saving") : dirty ? t("designer-dirty") : chromeStatus === "published" ? t("pages-published") : t("pages-draft")}
             </span>
           </>
         )}
