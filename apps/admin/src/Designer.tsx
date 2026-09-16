@@ -3031,20 +3031,22 @@ export default function Designer({
               <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
             </button>
           ))}
-        <button
-          onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "siteChrome" ? saveSiteChrome() : save())}
-          disabled={busy}
-          className="rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-50"
-        >
-          {busy ? t("designer-saving") : t("designer-save")}
-        </button>
+        {kind !== "page" && (
+          <button
+            onClick={() => void (kind === "blueprint" ? saveBlueprint() : saveSiteChrome())}
+            disabled={busy}
+            className="rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-50"
+          >
+            {busy ? t("designer-saving") : t("designer-save")}
+          </button>
+        )}
         {kind === "page" && (
           <button
             onClick={() => void save("published")}
             disabled={busy}
             className="rounded-full bg-accent px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
-            {t("designer-publish")}
+            {busy ? t("designer-saving") : page.status === "published" ? t("designer-update") : t("designer-publish")}
           </button>
         )}
         {kind === "siteChrome" &&
