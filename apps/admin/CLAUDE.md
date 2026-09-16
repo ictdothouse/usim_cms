@@ -796,6 +796,53 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   page-draft `previewToken` (different purpose, both can be present at once); only the two tenant-scoped
   `ThemeForm` instances pass a `previewTenantHost` to enable this — Global Theme has no single site to
   open, so its Test still only updates the form's own local preview panel.
+  **ThemeForm UI/UX overhaul + design.md v2 (2026-09-16)**, from live feedback that the form read as one
+  long scrolling list and was missing a line-height control (large `postTitleFontSize` with no matching
+  line-height visually overlapped the element above it on the real site). Fixed the root cause first:
+  `postTitleLineHeight` (1–2.5, validated in `apps/api`'s `validateThemeSettings`) flows through the same
+  pipeline every other theme field already does — form state → save → `BaseLayout.astro`'s `themeVars` →
+  `posts/[slug].astro`'s `<h1>` inline style — and the admin's own live-preview panel got the same
+  `lineHeight` style. The form itself is now tabbed (`activeTab` state: Colors/Typography/Post
+  Display/Branding, a plain button row, not a routed sub-page) instead of one long column — the "UI
+  Themes" swatch picker/generator stays above the tabs since it's a quick-start action, not a settings
+  category. **Colors** grew from 4 to 9 keys — `tertiaryColor`/`successColor`/`warningColor`/
+  `errorColor`/`infoColor` (semantic palette, same hex validation as the original 4) — each swatch
+  (`colorField` helper) now also renders a fixed, non-editable role description underneath (e.g. "Main
+  buttons & links") per the user's own "palette + role label" scope call; none of these 5 have a real
+  frontend consumer yet beyond the CSS custom properties `BaseLayout.astro` emits, same "emit the var
+  now, wire a real consumer later" precedent `secondaryColor` itself already set. **Typography** grew a
+  real per-role scale: `headingFontSize`/`headingLineHeight`, `subHeadingFontSize`/
+  `subHeadingLineHeight`, `bodyFontSize`/`bodyLineHeight`, plus a brand new caption role
+  (`captionFont`/`captionFontSize`/`captionLineHeight` — the one role with no existing font-family field
+  to extend) — `sizeLineHeightFields` is the one shared size+line-height pair-of-inputs helper every role
+  (including post-title) now renders through, parameterized by min/max since post-title's own range
+  (12–96px) differs from the other roles' (8–120px, `apps/api`'s `TYPOGRAPHY_SIZE_MIN/MAX`). Real
+  consumers: `global.css`'s `h1`/`h2-h6`/`body` rules (already keyed to `--font-heading`/
+  `--font-subheading`/`--font-family`) now also apply the matching `-size`/`-line-height` CSS vars, and a
+  new opt-in `.ds-caption` class does the same for the caption role (no bare HTML tag for "caption text"
+  to hang a default rule on). A **component preview** card (visual-only mockup of buttons/a card/an input
+  with its error state, rendered in the current colors/fonts) sits next to the existing live text
+  preview — explicitly illustrative, never a second source of truth for real site styling, per the user's
+  own scope call. **design.md v2**: `downloadDesignMd`'s frontmatter is still the exact generic
+  key:value dump `importDesignMd` round-trips (now covers every new key for free, since both read/write
+  off `currentColors()`/its return shape rather than a hand-maintained key list) — the body below it is
+  now real documentation, a palette table (role + hex + description) and a typography-scale table, for a
+  human reading the file outside this app. Deliberately excludes the CorpScale reference export's
+  marketplace/social chrome (license, uploaded-by, downloads/likes, "Use with MCP") — out of scope for a
+  single-tenant CMS, per the user's own explicit call. **Generic import**: when an uploaded `design.md`
+  isn't this app's own format, `importDesignMd` falls back to a best-effort regex scan of the whole file
+  for `<role word> ... #hexcolor` on the same line (covers a foreign frontmatter's own key naming AND a
+  plain markdown palette table row like `| Primary | \`#0F62FE\` | ... |`) — colors only, deliberately;
+  font-family/size have too many free-form spellings to reliably regex-extract, not attempted. A
+  frontmatter value always wins over the heuristic; `importNotice` (shown as a small amber note next to
+  the upload button) flags when the fallback actually contributed a value, so the user knows the import
+  was best-effort rather than a full read of their file. **Save/Activate visibility**: the Save button
+  gained more padding + a shadow (its own className only, not `btnPrimary` globally); the "My collection"
+  row's Test/Activate went from `variant="link"` (plain text) to `variant="ghost"`/`variant="secondary"`
+  (`components/ui/button.tsx`) so they read as real actions. One real bug fixed as a side effect of
+  reusing `currentColors()` for `submit()`'s save payload (previously a hand-typed field list that
+  omitted `faviconUrl` entirely — a favicon upload never actually persisted on Save); `deactivate()`'s
+  reset object gained the matching `faviconUrl: ""` for the same reason.
   `PostsPanel` ("Post / Article" in the UI — the underlying `posts` slug/table/i18n-key names are
   unchanged) follows the same quick-create pattern as `PagesPanel`: title only, auto-derived +
   de-duplicated slug, then `navigate(item.id)` straight into `PostEditorPage` — a real routed page now

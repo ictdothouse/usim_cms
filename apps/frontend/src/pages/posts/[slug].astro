@@ -88,7 +88,7 @@ const { header: headerChrome, footer: footerChrome } = await resolveDefaultHeade
         {post.bannerImageUrl && (
           <img src={post.bannerImageUrl} alt="" style="width:100%;border-radius:0.75rem;margin-bottom:1.5rem;" />
         )}
-        <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));font-size:var(--font-post-title-size,2rem);">{content.title}</h1>
+        <h1 style="color:var(--color-primary,#1d1d1f);font-family:var(--font-post-title,var(--font-heading,inherit));font-size:var(--font-post-title-size,2rem);line-height:var(--font-post-title-line-height,1.2);">{content.title}</h1>
         <p style="color:#86868b;font-size:0.85rem;">
           {showDate && post.publishedAt &&
             new Date(post.publishedAt).toLocaleDateString(dateLocale, { day: "numeric", month: "long", year: "numeric" })}

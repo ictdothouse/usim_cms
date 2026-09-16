@@ -171,6 +171,12 @@ const SWITCHER_POSITIONS = ["header", "topbar", "float", "footer"] as const;
 const SWITCHER_STYLES = ["text", "flag", "shortform"] as const;
 
 const THEME_COLOR_KEYS = ["primaryColor", "secondaryColor", "backgroundColor", "textColor"] as const;
+// Semantic palette (design.md v2 / CorpScale-style role coverage) — same hex
+// validation as the 4 original colors, no rendered consumer yet on
+// apps/frontend beyond the CSS custom properties BaseLayout.astro emits
+// (same "emit the var, wire a real consumer later" precedent secondaryColor
+// itself already set).
+const THEME_SEMANTIC_COLOR_KEYS = ["tertiaryColor", "successColor", "warningColor", "errorColor", "infoColor"] as const;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 // Letters/digits/space only — this string ends up inside a Google Fonts URL
 // built by apps/frontend, so it must not carry `/`, `?`, `<`, etc.
@@ -188,7 +194,19 @@ const GAP_PATTERN = "^$|^[0-9]+(\\.[0-9]+)?(px|rem|em|%|vh|vw)?$";
 // fontFamily = body font; headingFont/postTitleFont are the other two roles
 // in the type system (Header/Title, Blog/Post Title) — all three end up in
 // the same Google Fonts URL, so all three validate the same way.
-const FONT_KEYS = ["fontFamily", "headingFont", "subHeadingFont", "postTitleFont"] as const;
+const FONT_KEYS = ["fontFamily", "headingFont", "subHeadingFont", "postTitleFont", "captionFont"] as const;
+
+// Typography scale (design.md v2) — size/line-height per role, same numeric
+// range/validation shape as postTitleFontSize/postTitleLineHeight below, just
+// generalized to 3 more roles (heading, sub-heading, body) plus a brand new
+// caption role. fontFamily itself is body's font (FONT_KEYS above already
+// covers it), so no separate "bodyFont" key is needed.
+const TYPOGRAPHY_SIZE_KEYS = ["headingFontSize", "subHeadingFontSize", "bodyFontSize", "captionFontSize"] as const;
+const TYPOGRAPHY_LINE_HEIGHT_KEYS = ["headingLineHeight", "subHeadingLineHeight", "bodyLineHeight", "captionLineHeight"] as const;
+const TYPOGRAPHY_SIZE_MIN = 8;
+const TYPOGRAPHY_SIZE_MAX = 120;
+const TYPOGRAPHY_LINE_HEIGHT_MIN = 1;
+const TYPOGRAPHY_LINE_HEIGHT_MAX = 2.5;
 
 // Site-wide default for whether a post shows its tags/category/author/date —
 // per-post can override this (posts.showTags etc., nullable booleans, null =
@@ -197,17 +215,33 @@ const FONT_KEYS = ["fontFamily", "headingFont", "subHeadingFont", "postTitleFont
 const POST_DISPLAY_KEYS = ["showPostTags", "showPostCategory", "showPostAuthor", "showPostDate"] as const;
 const POST_TITLE_FONT_SIZE_MIN = 12;
 const POST_TITLE_FONT_SIZE_MAX = 96;
+// A big custom postTitleFontSize with no matching line-height wraps its lines
+// tight enough to visually overlap the element above it — this is the actual
+// fix for that, not just a cosmetic add.
+const POST_TITLE_LINE_HEIGHT_MIN = 1;
+const POST_TITLE_LINE_HEIGHT_MAX = 2.5;
 
 // Shared by both theme write routes (per-tenant + global). site_theme.settings
 // is an open JSONB bag but only these keys are ever read by apps/frontend
 // (BaseLayout.astro, posts/[slug].astro) — reject anything else instead of
 // silently storing it.
 function validateThemeSettings(settings: Record<string, unknown>): string | null {
-  const allowed = new Set([...THEME_COLOR_KEYS, ...FONT_KEYS, ...POST_DISPLAY_KEYS, "logoUrl", "faviconUrl", "postTitleFontSize"]);
+  const allowed = new Set([
+    ...THEME_COLOR_KEYS,
+    ...THEME_SEMANTIC_COLOR_KEYS,
+    ...FONT_KEYS,
+    ...POST_DISPLAY_KEYS,
+    ...TYPOGRAPHY_SIZE_KEYS,
+    ...TYPOGRAPHY_LINE_HEIGHT_KEYS,
+    "logoUrl",
+    "faviconUrl",
+    "postTitleFontSize",
+    "postTitleLineHeight",
+  ]);
   for (const key of Object.keys(settings)) {
     if (!allowed.has(key)) return `unknown theme key: ${key}`;
   }
-  for (const key of THEME_COLOR_KEYS) {
+  for (const key of [...THEME_COLOR_KEYS, ...THEME_SEMANTIC_COLOR_KEYS]) {
     const value = settings[key];
     if (value !== undefined && value !== "" && !HEX_COLOR_RE.test(value as string)) {
       return `${key} must be a hex color like #003399`;
@@ -234,10 +268,33 @@ function validateThemeSettings(settings: Record<string, unknown>): string | null
       return `postTitleFontSize must be a number between ${POST_TITLE_FONT_SIZE_MIN} and ${POST_TITLE_FONT_SIZE_MAX}`;
     }
   }
+  const lineHeight = settings.postTitleLineHeight;
+  if (lineHeight !== undefined && lineHeight !== "") {
+    const n = Number(lineHeight);
+    if (!Number.isFinite(n) || n < POST_TITLE_LINE_HEIGHT_MIN || n > POST_TITLE_LINE_HEIGHT_MAX) {
+      return `postTitleLineHeight must be a number between ${POST_TITLE_LINE_HEIGHT_MIN} and ${POST_TITLE_LINE_HEIGHT_MAX}`;
+    }
+  }
   for (const key of POST_DISPLAY_KEYS) {
     const value = settings[key];
     if (value !== undefined && value !== "" && value !== "true" && value !== "false") {
       return `${key} must be "true" or "false"`;
+    }
+  }
+  for (const key of TYPOGRAPHY_SIZE_KEYS) {
+    const value = settings[key];
+    if (value === undefined || value === "") continue;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < TYPOGRAPHY_SIZE_MIN || n > TYPOGRAPHY_SIZE_MAX) {
+      return `${key} must be a number between ${TYPOGRAPHY_SIZE_MIN} and ${TYPOGRAPHY_SIZE_MAX}`;
+    }
+  }
+  for (const key of TYPOGRAPHY_LINE_HEIGHT_KEYS) {
+    const value = settings[key];
+    if (value === undefined || value === "") continue;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < TYPOGRAPHY_LINE_HEIGHT_MIN || n > TYPOGRAPHY_LINE_HEIGHT_MAX) {
+      return `${key} must be a number between ${TYPOGRAPHY_LINE_HEIGHT_MIN} and ${TYPOGRAPHY_LINE_HEIGHT_MAX}`;
     }
   }
   return null;

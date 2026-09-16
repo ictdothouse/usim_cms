@@ -23,9 +23,25 @@
 
 h1 {
   font-family: var(--font-heading, var(--font-family, inherit));
+  font-size: var(--font-heading-size, inherit);
+  line-height: var(--font-heading-line-height, inherit);
 }
 h2, h3, h4, h5, h6 {
   font-family: var(--font-subheading, var(--font-heading, var(--font-family, inherit)));
+  font-size: var(--font-subheading-size, inherit);
+  line-height: var(--font-subheading-line-height, inherit);
+}
+body {
+  font-size: var(--font-body-size, inherit);
+  line-height: var(--font-body-line-height, inherit);
+}
+/* Author opts an element into the caption role explicitly (e.g. an image
+   credit/small print) — no bare tag selector for this one, unlike h1-h6,
+   since HTML has no dedicated "caption text" element. */
+.ds-caption {
+  font-family: var(--font-caption, var(--font-family, inherit));
+  font-size: var(--font-caption-size, inherit);
+  line-height: var(--font-caption-line-height, inherit);
 }
 
 .ds-menu-list { display: flex; gap: 1.5rem; list-style: none; margin: 0; padding: 0; }
