@@ -106,6 +106,24 @@ const themeVars = [
   theme.subHeadingFont ? `--font-subheading:${theme.subHeadingFont}` : null,
   theme.postTitleFont ? `--font-post-title:${theme.postTitleFont}` : null,
   theme.postTitleFontSize ? `--font-post-title-size:${theme.postTitleFontSize}px` : null,
+  theme.postTitleLineHeight ? `--font-post-title-line-height:${theme.postTitleLineHeight}` : null,
+  // Semantic palette + typography scale (design.md v2) — same "emit the var
+  // now, a real per-component consumer can adopt it later" precedent this
+  // file's own comment above already sets for secondaryColor.
+  theme.tertiaryColor ? `--color-tertiary:${theme.tertiaryColor}` : null,
+  theme.successColor ? `--color-success:${theme.successColor}` : null,
+  theme.warningColor ? `--color-warning:${theme.warningColor}` : null,
+  theme.errorColor ? `--color-error:${theme.errorColor}` : null,
+  theme.infoColor ? `--color-info:${theme.infoColor}` : null,
+  theme.captionFont ? `--font-caption:${theme.captionFont}` : null,
+  theme.headingFontSize ? `--font-heading-size:${theme.headingFontSize}px` : null,
+  theme.headingLineHeight ? `--font-heading-line-height:${theme.headingLineHeight}` : null,
+  theme.subHeadingFontSize ? `--font-subheading-size:${theme.subHeadingFontSize}px` : null,
+  theme.subHeadingLineHeight ? `--font-subheading-line-height:${theme.subHeadingLineHeight}` : null,
+  theme.bodyFontSize ? `--font-body-size:${theme.bodyFontSize}px` : null,
+  theme.bodyLineHeight ? `--font-body-line-height:${theme.bodyLineHeight}` : null,
+  theme.captionFontSize ? `--font-caption-size:${theme.captionFontSize}px` : null,
+  theme.captionLineHeight ? `--font-caption-line-height:${theme.captionLineHeight}` : null,
 ]
   .filter(Boolean)
   .join(";");

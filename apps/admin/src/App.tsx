@@ -1820,6 +1820,25 @@ function ThemeForm({
   const [subHeadingFont, setSubHeadingFont] = useState("");
   const [postTitleFont, setPostTitleFont] = useState("");
   const [postTitleFontSize, setPostTitleFontSize] = useState("");
+  const [postTitleLineHeight, setPostTitleLineHeight] = useState("");
+  // Semantic palette + typography scale (design.md v2) — same open-bag/no-
+  // migration convention as every other theme key; see App.tsx's THEME_TABS.
+  const [tertiaryColor, setTertiaryColor] = useState("");
+  const [successColor, setSuccessColor] = useState("");
+  const [warningColor, setWarningColor] = useState("");
+  const [errorColor, setErrorColor] = useState("");
+  const [infoColor, setInfoColor] = useState("");
+  const [captionFont, setCaptionFont] = useState("");
+  const [headingFontSize, setHeadingFontSize] = useState("");
+  const [headingLineHeight, setHeadingLineHeight] = useState("");
+  const [subHeadingFontSize, setSubHeadingFontSize] = useState("");
+  const [subHeadingLineHeight, setSubHeadingLineHeight] = useState("");
+  const [bodyFontSize, setBodyFontSize] = useState("");
+  const [bodyLineHeight, setBodyLineHeight] = useState("");
+  const [captionFontSize, setCaptionFontSize] = useState("");
+  const [captionLineHeight, setCaptionLineHeight] = useState("");
+  const [activeTab, setActiveTab] = useState<"colors" | "typography" | "postdisplay" | "branding">("colors");
+  const [importNotice, setImportNotice] = useState(false);
   const [showPostTags, setShowPostTags] = useState("");
   const [showPostCategory, setShowPostCategory] = useState("");
   const [showPostAuthor, setShowPostAuthor] = useState("");
@@ -1867,11 +1886,26 @@ function ThemeForm({
     secondaryColor,
     backgroundColor,
     textColor,
+    tertiaryColor,
+    successColor,
+    warningColor,
+    errorColor,
+    infoColor,
     fontFamily,
     headingFont,
     subHeadingFont,
     postTitleFont,
+    captionFont,
     postTitleFontSize,
+    postTitleLineHeight,
+    headingFontSize,
+    headingLineHeight,
+    subHeadingFontSize,
+    subHeadingLineHeight,
+    bodyFontSize,
+    bodyLineHeight,
+    captionFontSize,
+    captionLineHeight,
     showPostTags,
     showPostCategory,
     showPostAuthor,
@@ -1899,6 +1933,21 @@ function ThemeForm({
       setSubHeadingFont(th.subHeadingFont ?? "");
       setPostTitleFont(th.postTitleFont ?? "");
       setPostTitleFontSize(th.postTitleFontSize ?? "");
+      setPostTitleLineHeight(th.postTitleLineHeight ?? "");
+      setTertiaryColor(th.tertiaryColor ?? "");
+      setSuccessColor(th.successColor ?? "");
+      setWarningColor(th.warningColor ?? "");
+      setErrorColor(th.errorColor ?? "");
+      setInfoColor(th.infoColor ?? "");
+      setCaptionFont(th.captionFont ?? "");
+      setHeadingFontSize(th.headingFontSize ?? "");
+      setHeadingLineHeight(th.headingLineHeight ?? "");
+      setSubHeadingFontSize(th.subHeadingFontSize ?? "");
+      setSubHeadingLineHeight(th.subHeadingLineHeight ?? "");
+      setBodyFontSize(th.bodyFontSize ?? "");
+      setBodyLineHeight(th.bodyLineHeight ?? "");
+      setCaptionFontSize(th.captionFontSize ?? "");
+      setCaptionLineHeight(th.captionLineHeight ?? "");
       setShowPostTags(th.showPostTags ?? "");
       setShowPostCategory(th.showPostCategory ?? "");
       setShowPostAuthor(th.showPostAuthor ?? "");
@@ -1942,6 +1991,21 @@ function ThemeForm({
     setSubHeadingFont(p.settings.subHeadingFont ?? "");
     setPostTitleFont(p.settings.postTitleFont ?? "");
     setPostTitleFontSize(p.settings.postTitleFontSize ?? "");
+    setPostTitleLineHeight(p.settings.postTitleLineHeight ?? "");
+    setTertiaryColor(p.settings.tertiaryColor ?? "");
+    setSuccessColor(p.settings.successColor ?? "");
+    setWarningColor(p.settings.warningColor ?? "");
+    setErrorColor(p.settings.errorColor ?? "");
+    setInfoColor(p.settings.infoColor ?? "");
+    setCaptionFont(p.settings.captionFont ?? "");
+    setHeadingFontSize(p.settings.headingFontSize ?? "");
+    setHeadingLineHeight(p.settings.headingLineHeight ?? "");
+    setSubHeadingFontSize(p.settings.subHeadingFontSize ?? "");
+    setSubHeadingLineHeight(p.settings.subHeadingLineHeight ?? "");
+    setBodyFontSize(p.settings.bodyFontSize ?? "");
+    setBodyLineHeight(p.settings.bodyLineHeight ?? "");
+    setCaptionFontSize(p.settings.captionFontSize ?? "");
+    setCaptionLineHeight(p.settings.captionLineHeight ?? "");
     setShowPostTags(p.settings.showPostTags ?? "");
     setShowPostCategory(p.settings.showPostCategory ?? "");
     setShowPostAuthor(p.settings.showPostAuthor ?? "");
@@ -2016,11 +2080,27 @@ function ThemeForm({
       subHeadingFont: "",
       postTitleFont: "",
       postTitleFontSize: "",
+      postTitleLineHeight: "",
+      tertiaryColor: "",
+      successColor: "",
+      warningColor: "",
+      errorColor: "",
+      infoColor: "",
+      captionFont: "",
+      headingFontSize: "",
+      headingLineHeight: "",
+      subHeadingFontSize: "",
+      subHeadingLineHeight: "",
+      bodyFontSize: "",
+      bodyLineHeight: "",
+      captionFontSize: "",
+      captionLineHeight: "",
       showPostTags: "",
       showPostCategory: "",
       showPostAuthor: "",
       showPostDate: "",
       logoUrl: "",
+      faviconUrl: "",
     };
     try {
       await save(empty);
@@ -2032,21 +2112,58 @@ function ThemeForm({
     }
   }
 
-  // design.md export/import — a small YAML-frontmatter-flavored text file,
-  // just the 6 known theme keys, human-readable and diffable, no library
-  // needed to read or write it.
+  // design.md export/import (v2) — a YAML-frontmatter-flavored text file:
+  // the frontmatter is still the exact round-trippable key:value dump this
+  // app's own importDesignMd reads back (every key currentColors() returns,
+  // generic — a new theme key added later needs no change here), the body
+  // below it is human-readable documentation of the same values (palette
+  // w/ fixed role labels, typography scale) for a person reading the file
+  // outside this app. Deliberately does NOT include marketplace/social
+  // metadata (license, uploaded-by, downloads/likes, "Use with MCP") — this
+  // is a single-tenant CMS, per the user's own explicit scope call.
   function downloadDesignMd() {
-    const colors = currentColors();
+    const c = currentColors();
+    const palette: Array<[string, string, string]> = [
+      [t("theme-primary"), c.primaryColor, t("theme-role-primary")],
+      [t("theme-secondary"), c.secondaryColor, t("theme-role-secondary")],
+      [t("theme-tertiary"), c.tertiaryColor, t("theme-role-tertiary")],
+      [t("theme-background"), c.backgroundColor, t("theme-role-background")],
+      [t("theme-text"), c.textColor, t("theme-role-text")],
+      [t("theme-success"), c.successColor, t("theme-role-success")],
+      [t("theme-warning"), c.warningColor, t("theme-role-warning")],
+      [t("theme-error"), c.errorColor, t("theme-role-error")],
+      [t("theme-info"), c.infoColor, t("theme-role-info")],
+    ].filter(([, hex]) => hex) as Array<[string, string, string]>;
+    const typography: Array<[string, string, string, string]> = [
+      [t("theme-font-heading"), c.headingFont, c.headingFontSize, c.headingLineHeight],
+      [t("theme-font-subheading"), c.subHeadingFont, c.subHeadingFontSize, c.subHeadingLineHeight],
+      [t("theme-font-posttitle"), c.postTitleFont, c.postTitleFontSize, c.postTitleLineHeight],
+      [t("theme-font-body"), c.fontFamily, c.bodyFontSize, c.bodyLineHeight],
+      [t("theme-font-caption"), c.captionFont, c.captionFontSize, c.captionLineHeight],
+    ].filter(([, font, size, lh]) => font || size || lh) as Array<[string, string, string, string]>;
     const lines = [
       "---",
       `name: ${presetName.trim() || title}`,
-      ...Object.entries(colors).map(([k, v]) => `${k}: ${v}`),
+      ...Object.entries(c).map(([k, v]) => `${k}: ${v}`),
       "---",
       "",
-      "# Design",
+      `# ${presetName.trim() || title}`,
       "",
       "Generated by USIM CMS's Theme panel. Upload this file back into any site's",
-      "Theme panel to preview or apply these settings.",
+      "Theme panel to preview or apply these settings — colors/fonts it recognizes",
+      "are filled in automatically, the rest of this file is documentation only.",
+      "",
+      "## Palette",
+      "",
+      "| Role | Color | Description |",
+      "| --- | --- | --- |",
+      ...palette.map(([role, hex, desc]) => `| ${role} | \`${hex}\` | ${desc} |`),
+      "",
+      "## Typography scale",
+      "",
+      "| Role | Font | Size (px) | Line height |",
+      "| --- | --- | --- | --- |",
+      ...typography.map(([role, font, size, lh]) => `| ${role} | ${font || "(inherit)"} | ${size || "(auto)"} | ${lh || "(auto)"} |`),
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -2056,6 +2173,25 @@ function ThemeForm({
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  // Generic import fallback — for a design.md NOT written by this app (e.g.
+  // CorpScale-style exports): no known frontmatter keys to read, so instead
+  // scan the whole file text for "<role word> ... #hexcolor" (covers both a
+  // foreign frontmatter's own naming and a plain markdown palette table row
+  // like "| Primary | `#0F62FE` | ..."). Best-effort only — fonts/sizes have
+  // too many free-form spellings to reliably regex-extract, so this covers
+  // colors only; a value the frontmatter pass already found always wins.
+  const GENERIC_COLOR_ROLES: Array<[RegExp, (v: string) => void]> = [
+    [/primary/i, setPrimaryColor],
+    [/secondary/i, setSecondaryColor],
+    [/tertiary/i, setTertiaryColor],
+    [/background/i, setBackgroundColor],
+    [/\btext\b/i, setTextColor],
+    [/success/i, setSuccessColor],
+    [/warning/i, setWarningColor],
+    [/error|danger/i, setErrorColor],
+    [/\binfo\b/i, setInfoColor],
+  ];
 
   async function importDesignMd(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -2069,21 +2205,55 @@ function ThemeForm({
         const m = line.match(/^([a-zA-Z]+):\s*(.*)$/);
         if (m) parsed[m[1]] = m[2].trim();
       }
-      setPrimaryColor(parsed.primaryColor ?? primaryColor);
-      setSecondaryColor(parsed.secondaryColor ?? secondaryColor);
-      setBackgroundColor(parsed.backgroundColor ?? backgroundColor);
-      setTextColor(parsed.textColor ?? textColor);
+      let usedGenericFallback = false;
+      const hex = (role: RegExp): string | undefined => {
+        for (const line of text.split("\n")) {
+          if (!role.test(line)) continue;
+          const m = line.match(/#[0-9a-f]{6}/i);
+          if (m) return m[0];
+        }
+        return undefined;
+      };
+      const resolveColor = (key: string, role: RegExp, current: string): string => {
+        if (parsed[key] !== undefined) return parsed[key];
+        const found = hex(role);
+        if (found) {
+          usedGenericFallback = true;
+          return found;
+        }
+        return current;
+      };
+      setPrimaryColor(resolveColor("primaryColor", GENERIC_COLOR_ROLES[0][0], primaryColor));
+      setSecondaryColor(resolveColor("secondaryColor", GENERIC_COLOR_ROLES[1][0], secondaryColor));
+      setTertiaryColor(resolveColor("tertiaryColor", GENERIC_COLOR_ROLES[2][0], tertiaryColor));
+      setBackgroundColor(resolveColor("backgroundColor", GENERIC_COLOR_ROLES[3][0], backgroundColor));
+      setTextColor(resolveColor("textColor", GENERIC_COLOR_ROLES[4][0], textColor));
+      setSuccessColor(resolveColor("successColor", GENERIC_COLOR_ROLES[5][0], successColor));
+      setWarningColor(resolveColor("warningColor", GENERIC_COLOR_ROLES[6][0], warningColor));
+      setErrorColor(resolveColor("errorColor", GENERIC_COLOR_ROLES[7][0], errorColor));
+      setInfoColor(resolveColor("infoColor", GENERIC_COLOR_ROLES[8][0], infoColor));
       setFontFamily(parsed.fontFamily ?? fontFamily);
       setHeadingFont(parsed.headingFont ?? headingFont);
       setSubHeadingFont(parsed.subHeadingFont ?? subHeadingFont);
       setPostTitleFont(parsed.postTitleFont ?? postTitleFont);
+      setCaptionFont(parsed.captionFont ?? captionFont);
       setPostTitleFontSize(parsed.postTitleFontSize ?? postTitleFontSize);
+      setPostTitleLineHeight(parsed.postTitleLineHeight ?? postTitleLineHeight);
+      setHeadingFontSize(parsed.headingFontSize ?? headingFontSize);
+      setHeadingLineHeight(parsed.headingLineHeight ?? headingLineHeight);
+      setSubHeadingFontSize(parsed.subHeadingFontSize ?? subHeadingFontSize);
+      setSubHeadingLineHeight(parsed.subHeadingLineHeight ?? subHeadingLineHeight);
+      setBodyFontSize(parsed.bodyFontSize ?? bodyFontSize);
+      setBodyLineHeight(parsed.bodyLineHeight ?? bodyLineHeight);
+      setCaptionFontSize(parsed.captionFontSize ?? captionFontSize);
+      setCaptionLineHeight(parsed.captionLineHeight ?? captionLineHeight);
       setShowPostTags(parsed.showPostTags ?? showPostTags);
       setShowPostCategory(parsed.showPostCategory ?? showPostCategory);
       setShowPostAuthor(parsed.showPostAuthor ?? showPostAuthor);
       setShowPostDate(parsed.showPostDate ?? showPostDate);
       setLogoUrl(parsed.logoUrl ?? logoUrl);
       if (parsed.name) setPresetName(parsed.name);
+      setImportNotice(usedGenericFallback);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -2106,22 +2276,7 @@ function ThemeForm({
     e.preventDefault();
     setError(null);
     try {
-      await save({
-        primaryColor,
-        secondaryColor,
-        backgroundColor,
-        textColor,
-        fontFamily,
-        headingFont,
-        subHeadingFont,
-        postTitleFont,
-        postTitleFontSize,
-        showPostTags,
-        showPostCategory,
-        showPostAuthor,
-        showPostDate,
-        logoUrl,
-      });
+      await save(currentColors());
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (err) {
@@ -2188,8 +2343,14 @@ function ThemeForm({
   const readabilityToneClass =
     readability.tone === "good" ? "text-ok" : readability.tone === "ok" ? "text-amber-600" : "text-red-600";
 
-  const colorField = (label: string, value: string, onChange: (v: string) => void) => (
-    <label className="flex flex-col items-center gap-1.5 rounded-xl border border-line/30 bg-white px-2 py-2.5 text-center transition-colors hover:border-line/60">
+  // role: a fixed, non-editable description shown under the swatch (e.g.
+  // "Main buttons & links") — the "palette + role label" shape the user
+  // picked for design.md v2's richer color coverage.
+  const colorField = (label: string, value: string, onChange: (v: string) => void, role?: string) => (
+    <label
+      className="flex flex-col items-center gap-1 rounded-xl border border-line/30 bg-white px-2 py-2.5 text-center transition-colors hover:border-line/60"
+      title={role}
+    >
       <span className="text-[11px] font-medium text-body">{label}</span>
       <span className="h-9 w-9 overflow-hidden rounded-lg border border-line/30 shadow-sm">
         <input
@@ -2200,7 +2361,50 @@ function ThemeForm({
         />
       </span>
       <span className="font-mono text-[10px] uppercase text-sub">{value || "#000000"}</span>
+      {role && <span className="text-[9px] leading-tight text-sub/70">{role}</span>}
     </label>
+  );
+
+  // Shared size+line-height pair — every typography-scale role (heading,
+  // sub-heading, body, caption, and post-title below) is the same two
+  // number fields, just a different key/range.
+  const sizeLineHeightFields = (
+    sizeLabel: string,
+    sizeValue: string,
+    setSize: (v: string) => void,
+    lhLabel: string,
+    lhValue: string,
+    setLh: (v: string) => void,
+    sizeMin = 8,
+    sizeMax = 120,
+  ) => (
+    <div className="grid grid-cols-2 gap-2">
+      <label className="block text-[11px] font-medium text-body">
+        {sizeLabel}
+        <input
+          type="number"
+          min={sizeMin}
+          max={sizeMax}
+          className={`${inputCls} mt-1`}
+          value={sizeValue}
+          onChange={(e) => setSize(e.target.value)}
+          placeholder="16"
+        />
+      </label>
+      <label className="block text-[11px] font-medium text-body">
+        {lhLabel}
+        <input
+          type="number"
+          min={1}
+          max={2.5}
+          step={0.1}
+          className={`${inputCls} mt-1`}
+          value={lhValue}
+          onChange={(e) => setLh(e.target.value)}
+          placeholder="1.4"
+        />
+      </label>
+    </div>
   );
 
   return (
@@ -2245,95 +2449,136 @@ function ThemeForm({
               </button>
             </div>
           </div>
-          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
-            <p className="text-xs font-medium text-body">{t("theme-colors")}</p>
-            <div className="grid grid-cols-4 gap-2">
-              {colorField(t("theme-primary"), primaryColor, setPrimaryColor)}
-              {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor)}
-              {colorField(t("theme-background"), backgroundColor, setBackgroundColor)}
-              {colorField(t("theme-text"), textColor, setTextColor)}
-            </div>
-          </div>
-          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-medium text-body">{t("theme-fonts")}</p>
+          <div className="flex gap-1 rounded-xl border border-line/20 bg-canvas/40 p-1">
+            {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
               <button
+                key={tabId}
                 type="button"
-                onClick={applyFontPairing}
-                className="flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+                onClick={() => setActiveTab(tabId)}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                  activeTab === tabId ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
+                }`}
               >
-                <Sparkles className="h-3 w-3" /> {t("theme-font-pairing")}
+                {t(`theme-tab-${tabId}`)}
               </button>
-            </div>
-            <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} placeholder="Poppins" />
-            <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} placeholder="Poppins" />
-            {sameFontNote(subHeadingFont, headingFont)}
-            <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} placeholder="Poppins" />
-            {sameFontNote(postTitleFont, headingFont)}
-            <label className="block text-xs font-medium text-body">
-              {t("theme-post-title-size")}
-              <input
-                type="number"
-                min={12}
-                max={96}
-                className={`${inputCls} mt-1`}
-                value={postTitleFontSize}
-                onChange={(e) => setPostTitleFontSize(e.target.value)}
-                placeholder="32"
-              />
-            </label>
-            <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
-          </div>
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
-            <label className="flex items-center gap-2 text-xs font-medium text-body">
-              <input type="checkbox" checked={showPostTags !== "false"} onChange={(e) => setShowPostTags(e.target.checked ? "" : "false")} />
-              {t("theme-show-tags")}
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-body">
-              <input type="checkbox" checked={showPostCategory !== "false"} onChange={(e) => setShowPostCategory(e.target.checked ? "" : "false")} />
-              {t("theme-show-category")}
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-body">
-              <input type="checkbox" checked={showPostAuthor !== "false"} onChange={(e) => setShowPostAuthor(e.target.checked ? "" : "false")} />
-              {t("theme-show-author")}
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-body">
-              <input type="checkbox" checked={showPostDate !== "false"} onChange={(e) => setShowPostDate(e.target.checked ? "" : "false")} />
-              {t("theme-show-date")}
-            </label>
-          </div>
-          <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/40 p-3">
-            <p className="text-xs font-semibold text-body">{t("theme-branding")}</p>
-            {!previewTenantHost && <p className="text-[11px] text-muted-foreground">{t("theme-branding-global-hint")}</p>}
-            {(
-              [
-                ["logo", t("theme-logo"), logoUrl, setLogoUrl, "h-10"],
-                ["favicon", t("theme-favicon"), faviconUrl, setFaviconUrl, "h-8 w-8"],
-              ] as const
-            ).map(([kind, label, value, setValue, previewCls]) => (
-              <label key={kind} className="block text-xs font-medium text-body">
-                {label}
-                <div className="mt-1 flex items-center gap-2">
-                  <input className={inputCls} value={value} placeholder="https://" onChange={(e) => setValue(e.target.value)} />
-                  <label className="inline-block shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-canvas px-3 py-1.5 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
-                    {brandUploading === kind ? t("designer-uploading") : t("designer-upload")}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) void uploadBrandAsset(f, kind);
-                      }}
-                    />
-                  </label>
-                </div>
-                {value && <img src={value.startsWith("http") ? value : api.API_URL + value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
-              </label>
             ))}
           </div>
+
+          {activeTab === "colors" && (
+            <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <p className="text-xs font-medium text-body">{t("theme-colors")}</p>
+              <div className="grid grid-cols-3 gap-2">
+                {colorField(t("theme-primary"), primaryColor, setPrimaryColor, t("theme-role-primary"))}
+                {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor, t("theme-role-secondary"))}
+                {colorField(t("theme-tertiary"), tertiaryColor, setTertiaryColor, t("theme-role-tertiary"))}
+                {colorField(t("theme-background"), backgroundColor, setBackgroundColor, t("theme-role-background"))}
+                {colorField(t("theme-text"), textColor, setTextColor, t("theme-role-text"))}
+                {colorField(t("theme-success"), successColor, setSuccessColor, t("theme-role-success"))}
+                {colorField(t("theme-warning"), warningColor, setWarningColor, t("theme-role-warning"))}
+                {colorField(t("theme-error"), errorColor, setErrorColor, t("theme-role-error"))}
+                {colorField(t("theme-info"), infoColor, setInfoColor, t("theme-role-info"))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "typography" && (
+            <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-body">{t("theme-fonts")}</p>
+                <button
+                  type="button"
+                  onClick={applyFontPairing}
+                  className="flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+                >
+                  <Sparkles className="h-3 w-3" /> {t("theme-font-pairing")}
+                </button>
+              </div>
+              <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} placeholder="Poppins" />
+              {sizeLineHeightFields(
+                t("theme-heading-size"), headingFontSize, setHeadingFontSize,
+                t("theme-heading-line-height"), headingLineHeight, setHeadingLineHeight,
+              )}
+              <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} placeholder="Poppins" />
+              {sameFontNote(subHeadingFont, headingFont)}
+              {sizeLineHeightFields(
+                t("theme-subheading-size"), subHeadingFontSize, setSubHeadingFontSize,
+                t("theme-subheading-line-height"), subHeadingLineHeight, setSubHeadingLineHeight,
+              )}
+              <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} placeholder="Poppins" />
+              {sameFontNote(postTitleFont, headingFont)}
+              {sizeLineHeightFields(
+                t("theme-post-title-size"), postTitleFontSize, setPostTitleFontSize,
+                t("theme-post-title-line-height"), postTitleLineHeight, setPostTitleLineHeight,
+                12, 96,
+              )}
+              <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
+              {sizeLineHeightFields(
+                t("theme-body-size"), bodyFontSize, setBodyFontSize,
+                t("theme-body-line-height"), bodyLineHeight, setBodyLineHeight,
+              )}
+              <FontField label={t("theme-font-caption")} value={captionFont} onChange={setCaptionFont} placeholder="Inter" />
+              {sizeLineHeightFields(
+                t("theme-caption-size"), captionFontSize, setCaptionFontSize,
+                t("theme-caption-line-height"), captionLineHeight, setCaptionLineHeight,
+              )}
+            </div>
+          )}
+
+          {activeTab === "postdisplay" && (
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostTags !== "false"} onChange={(e) => setShowPostTags(e.target.checked ? "" : "false")} />
+                {t("theme-show-tags")}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostCategory !== "false"} onChange={(e) => setShowPostCategory(e.target.checked ? "" : "false")} />
+                {t("theme-show-category")}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostAuthor !== "false"} onChange={(e) => setShowPostAuthor(e.target.checked ? "" : "false")} />
+                {t("theme-show-author")}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostDate !== "false"} onChange={(e) => setShowPostDate(e.target.checked ? "" : "false")} />
+                {t("theme-show-date")}
+              </label>
+            </div>
+          )}
+
+          {activeTab === "branding" && (
+            <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <p className="text-xs font-semibold text-body">{t("theme-branding")}</p>
+              {!previewTenantHost && <p className="text-[11px] text-muted-foreground">{t("theme-branding-global-hint")}</p>}
+              {(
+                [
+                  ["logo", t("theme-logo"), logoUrl, setLogoUrl, "h-10"],
+                  ["favicon", t("theme-favicon"), faviconUrl, setFaviconUrl, "h-8 w-8"],
+                ] as const
+              ).map(([kind, label, value, setValue, previewCls]) => (
+                <label key={kind} className="block text-xs font-medium text-body">
+                  {label}
+                  <div className="mt-1 flex items-center gap-2">
+                    <input className={inputCls} value={value} placeholder="https://" onChange={(e) => setValue(e.target.value)} />
+                    <label className="inline-block shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-canvas px-3 py-1.5 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+                      {brandUploading === kind ? t("designer-uploading") : t("designer-upload")}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void uploadBrandAsset(f, kind);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {value && <img src={value.startsWith("http") ? value : api.API_URL + value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
+                </label>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2 pt-1">
-            <button type="submit" className={`${btnPrimary} w-full`}>
+            <button type="submit" className={`${btnPrimary} w-full py-3 text-sm shadow-md`}>
               {t("theme-save")}
             </button>
             {saved && <span className="shrink-0 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
@@ -2363,7 +2608,14 @@ function ThemeForm({
             <p className="text-base font-semibold opacity-90" style={{ fontFamily: subHeadingFont || undefined }}>
               {t("theme-preview-subheading")}
             </p>
-            <p className="text-sm font-semibold opacity-80" style={{ fontFamily: postTitleFont || undefined, fontSize: postTitleFontSize ? `${postTitleFontSize}px` : undefined }}>
+            <p
+              className="text-sm font-semibold opacity-80"
+              style={{
+                fontFamily: postTitleFont || undefined,
+                fontSize: postTitleFontSize ? `${postTitleFontSize}px` : undefined,
+                lineHeight: postTitleLineHeight || undefined,
+              }}
+            >
               {t("theme-preview-posttitle")}
             </p>
             <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
@@ -2408,6 +2660,52 @@ function ThemeForm({
               </p>
             )}
           </div>
+
+          {/* Visual-only mockup of common components in the current
+              colors/fonts — never changes real site styling, just an
+              at-a-glance preview of the palette+typography in context. */}
+          <div className={`${card} space-y-2 p-3`}>
+            <p className="text-xs font-semibold text-ink">{t("theme-component-preview")}</p>
+            <p className="text-[10px] text-sub">{t("theme-component-preview-note")}</p>
+            <div
+              className="space-y-2 rounded-lg border border-line/20 p-3"
+              style={{ background: backgroundColor || "#ffffff", color: textColor || "#111111", fontFamily: fontFamily || undefined }}
+            >
+              <div className="flex flex-wrap gap-1.5">
+                <span
+                  className="rounded-md px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: primaryColor || "#0f62fe", color: bestTextColor(primaryColor || "#0f62fe") }}
+                >
+                  {t("theme-preview-primary")}
+                </span>
+                <span
+                  className="rounded-md px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: secondaryColor || "#666666", color: bestTextColor(secondaryColor || "#666666") }}
+                >
+                  {t("theme-preview-secondary")}
+                </span>
+                <span
+                  className="rounded-md border px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ borderColor: errorColor || "#dc2626", color: errorColor || "#dc2626" }}
+                >
+                  {t("theme-error")}
+                </span>
+              </div>
+              <div className="rounded-lg border border-current/15 p-2.5">
+                <p className="text-xs font-bold" style={{ fontFamily: headingFont || undefined }}>
+                  {t("theme-preview-card-title")}
+                </p>
+                <p className="text-[11px] opacity-80">{t("theme-preview-card-body")}</p>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[10px] font-medium opacity-70">{t("theme-preview-input-label")}</label>
+                <input disabled className="w-full rounded-md border border-current/20 bg-white/50 px-2 py-1 text-[11px]" />
+                <p className="text-[10px]" style={{ color: errorColor || "#dc2626" }}>
+                  {t("theme-preview-input-error")}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Export/import a whole theme as a small human-readable file —
@@ -2427,6 +2725,7 @@ function ThemeForm({
             {t("theme-file-upload")}
           </button>
           <input ref={importInputRef} type="file" accept=".md,text/markdown" onChange={importDesignMd} className="hidden" />
+          {importNotice && <p className="text-[11px] text-amber-600">{t("theme-import-generic-note")}</p>}
         </div>
       </div>
 
@@ -2445,10 +2744,10 @@ function ThemeForm({
                   style={{ background: `linear-gradient(135deg, ${p.settings.primaryColor || "#ccc"} 50%, ${p.settings.secondaryColor || "#999"} 50%)` }}
                 />
                 <span className="min-w-0 flex-1 truncate font-semibold text-ink">{p.name}</span>
-                <Button variant="link" size="sm" onClick={() => testPreset(p)}>
+                <Button variant="ghost" size="sm" onClick={() => testPreset(p)}>
                   {t("theme-preset-test")}
                 </Button>
-                <Button variant="link" size="sm" onClick={() => void activatePreset(p)}>
+                <Button variant="secondary" size="sm" onClick={() => void activatePreset(p)}>
                   {t("theme-preset-activate")}
                 </Button>
                 <Button
