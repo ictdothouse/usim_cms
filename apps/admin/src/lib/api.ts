@@ -496,6 +496,32 @@ export const updateMenu = (tenantHost: string, token: string, id: string, patch:
 export const deleteMenu = (tenantHost: string, token: string, id: string) =>
   request(`/api/menus/${id}`, tenantHost, token, { method: "DELETE" });
 
+// Live-linked reusable component — see apps/api's symbols table comment.
+// `node` is a bare Designer `El` (designer/types.ts), not typed any more
+// strictly here to avoid an import cycle between lib/api.ts and Designer.tsx.
+export interface Symbol {
+  id: string;
+  name: string;
+  node: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listSymbols = (tenantHost: string, token: string) =>
+  request("/api/symbols", tenantHost, token).then((b) => b.items as Symbol[]);
+
+export const getSymbol = (tenantHost: string, token: string, id: string) =>
+  request(`/api/symbols/${id}`, tenantHost, token).then((b) => b.item as Symbol);
+
+export const createSymbol = (tenantHost: string, token: string, name: string, node: Record<string, unknown>) =>
+  request("/api/symbols", tenantHost, token, { method: "POST", body: JSON.stringify({ name, node }) }).then((b) => b.item as Symbol);
+
+export const updateSymbol = (tenantHost: string, token: string, id: string, patch: Partial<Pick<Symbol, "name" | "node">>) =>
+  request(`/api/symbols/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(patch) }).then((b) => b.item as Symbol);
+
+export const deleteSymbol = (tenantHost: string, token: string, id: string) =>
+  request(`/api/symbols/${id}`, tenantHost, token, { method: "DELETE" });
+
 export interface EventItem {
   id: string;
   title: string;

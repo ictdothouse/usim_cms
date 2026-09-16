@@ -1,0 +1,170 @@
+---
+// Live-linked reusable component (Designer.tsx's "symbol" element) — same
+// async-fetch-then-render shape as MenuBlock.astro: getSymbol resolves the
+// tenant's symbols table at render time (no propagation/sync step, editing
+// the master instantly changes every page that references it).
+//
+// Renders the resolved node through the SAME curated element set
+// SectionBlock.astro's own "container" case (renderContainerChild) already
+// uses for nested content — not the full top-level switch (menu/slider/
+// postlist/etc. don't make sense embedded inside a component, mirroring why
+// container's own children are curated too). Duplicated here rather than
+// shared, same "redefined per instance" convention renderContainerChild's
+// own comment already establishes for this codebase. No data-designer-path/
+// Live-Edit wiring — a resolved symbol's content isn't individually
+// selectable on the canvas either (see ElPreview.tsx's "symbol" case,
+// path: undefined), editing only happens via "Edit Master".
+import { getSymbol } from "../lib/api";
+import {
+  cls,
+  safeUrl,
+  headingTag,
+  ICON_PATHS,
+  marginStyle,
+  paddingStyle,
+  elBorderShadowStyle,
+  typoStyle,
+  elRadius,
+  fluidTextSize,
+  lengthValue,
+  TEXT_SIZE,
+  SPACE,
+  elHoverClass,
+  elEntranceClass,
+  renderInline,
+} from "./SectionBlock.astro";
+
+interface El {
+  type: string;
+  props?: Record<string, string>;
+  children?: El[];
+}
+interface Props {
+  symbolId: string;
+  tenantHost: string;
+}
+const { symbolId, tenantHost } = Astro.props;
+
+const symbol = symbolId ? await getSymbol(tenantHost, symbolId) : null;
+const node = symbol?.node as El | undefined;
+
+const renderNode = (el: El): unknown => {
+  const p = el.props ?? {};
+  switch (el.type) {
+    case "heading": {
+      const Tag = headingTag(p.level) as "h1";
+      return (
+        <Tag
+          class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
+            .filter(Boolean)
+            .join(";")}
+          set:html={p.text ? renderInline(p.text) : ""}
+        />
+      );
+    }
+    case "text":
+      return (
+        <p
+          class={cls("ds-text", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          style={[
+            `font-size:${fluidTextSize(lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+            p.align ? `text-align:${p.align}` : null,
+            marginStyle(p),
+            paddingStyle(p),
+            typoStyle(p),
+            elBorderShadowStyle(p),
+          ]
+            .filter(Boolean)
+            .join(";")}
+          set:html={renderInline(p.text ?? "")}
+        />
+      );
+    case "image": {
+      const src = safeUrl(p.src);
+      return src ? (
+        <img
+          class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          src={src}
+          alt={p.alt ?? ""}
+          loading="lazy"
+          style={[`border-radius:${elRadius(p)}`, p.imgWidth ? `width:${p.imgWidth}` : null, marginStyle(p), paddingStyle(p), elBorderShadowStyle(p)]
+            .filter(Boolean)
+            .join(";")}
+        />
+      ) : null;
+    }
+    case "button":
+      return p.label ? (
+        <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+          <a
+            class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+            href={safeUrl(p.href) ?? "#"}
+            style={[p.color ? `color:${p.color}` : null, elBorderShadowStyle(p)].filter(Boolean).join(";") || undefined}
+          >
+            {p.label}
+          </a>
+        </div>
+      ) : null;
+    case "badge": {
+      const iconPath = p.name ? ICON_PATHS[p.name] : undefined;
+      const iconSize = { sm: "14", md: "16", lg: "20" }[p.scale ?? "md"] ?? "16";
+      return (
+        <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+          <span class={cls(`ds-badge ds-badge-${p.variant || "soft"} ds-badge-${p.scale || "md"}`, p.cssClass)} style={p.color ? `color:${p.color}` : undefined}>
+            {iconPath && (
+              <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d={iconPath} />
+              </svg>
+            )}
+            {p.label}
+          </span>
+        </div>
+      );
+    }
+    case "spacer":
+      return <div style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} />;
+    case "divider":
+      return <hr class="ds-divider" style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")} />;
+    case "icon": {
+      const iconPath = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
+      const iconSize = lengthValue(p.size, { sm: "1rem", md: "1.5rem", lg: "2rem" }, "1.5rem");
+      return (
+        <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+          <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={p.color || "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d={iconPath} />
+          </svg>
+        </div>
+      );
+    }
+    case "container": {
+      const children = el.children ?? [];
+      return (
+        <div
+          style={[
+            "display:flex",
+            `flex-direction:${p.flexDirection || "row"}`,
+            `justify-content:${p.justifyContent || "flex-start"}`,
+            `align-items:${p.alignItems || "stretch"}`,
+            `flex-wrap:${p.flexWrap || "wrap"}`,
+            `gap:${p.gap || "1rem"}`,
+            p.bg ? `background:${p.bg}` : null,
+            `border-radius:${elRadius(p)}`,
+            marginStyle(p),
+            paddingStyle(p),
+            elBorderShadowStyle(p),
+          ]
+            .filter(Boolean)
+            .join(";")}
+        >
+          {children.map((child) => renderNode(child))}
+        </div>
+      );
+    }
+    default:
+      return null;
+  }
+};
+---
+
+{node && renderNode(node)}

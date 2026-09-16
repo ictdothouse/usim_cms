@@ -283,6 +283,24 @@ export const designTemplates = pgTable("design_templates", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Live-linked reusable component ("symbol"): unlike design_templates above
+// (a one-shot copy, edited independently after insertion), a page's "symbol"
+// element only stores a symbolId and resolves `node` at render time — same
+// reference pattern as the "menu" Designer element storing a menuId instead
+// of a copy of the menu tree. Editing `node` here instantly changes every
+// page that references it, with no propagation/sync step. Per-tenant (own
+// database), same as design_templates, but needs a public read route too
+// (apps/frontend must resolve it at render time, same as menus).
+export const symbols = pgTable("symbols", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  // A single `El` node (apps/admin/src/designer/types.ts) — may be a
+  // "container" type with nested `children` for a multi-part component.
+  node: jsonb("node").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Control-plane registry of known tenant hosts, always in the "public"
 // schema. Resolved via search_path (tenant schema first, "public" fallback
 // after) rather than an explicit qualifier, since Drizzle disallows

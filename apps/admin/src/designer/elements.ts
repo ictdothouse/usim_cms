@@ -20,6 +20,7 @@ import {
   CalendarDays,
   ChevronsUpDown,
   Code2,
+  Component,
   FileText,
   Frame,
   GalleryHorizontal,
@@ -395,6 +396,18 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "dropdownTrigger", labelKey: "designer-f-menu-trigger", kind: "select", options: ["hover", "click"] },
       { key: "megaMenuWidth", labelKey: "designer-f-menu-width", kind: "select", options: ["contained", "full-width"] },
     ],
+  },
+  // Live-linked reusable component — a thin reference (props.symbolId only,
+  // same pattern as menu's menuId above), resolved against the tenant's
+  // symbols table at render time (ElPreview.tsx / SectionBlock.astro). No
+  // other configurable fields: the actual content lives on the symbol row,
+  // edited only via "Edit Master" (Designer.tsx), never through this
+  // Inspector panel directly.
+  symbol: {
+    labelKey: "designer-el-symbol",
+    icon: Component,
+    defaults: { symbolId: "" },
+    fields: [{ key: "symbolId", labelKey: "designer-f-symbol", kind: "symbol-select" }],
   },
   // Sprint 5 (docs/laporan-audit-ui-ux.md section 5.6) — most versatile
   // content block per the audit's own ranking: news, quick links, services,

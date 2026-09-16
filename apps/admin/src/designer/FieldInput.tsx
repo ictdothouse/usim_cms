@@ -8,7 +8,7 @@
 // from inside a .map() the same way it always was inside Designer.tsx.
 
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Minus, Plus, Trash2 } from "lucide-react";
-import type { Menu, Category } from "@/lib/api";
+import type { Menu, Category, Symbol } from "@/lib/api";
 import type { Key } from "@/i18n";
 import type { Field, Bp, SlideItem, Block, SectionProps } from "./types";
 import { SHADOW_DEFAULT_PARTS } from "./fields";
@@ -91,6 +91,9 @@ export interface FieldInputProps {
   // "postlist" element's categoryId picker (Sprint 5) — same live-fetched-
   // once-per-tenant shape as availableMenus above, not a static enum.
   availableCategories: Category[];
+  // "symbol" element's symbolId picker — same live-fetched-once-per-tenant
+  // shape as availableMenus/availableCategories above.
+  availableSymbols: Symbol[];
   ICONS: Record<string, typeof Check>;
 }
 
@@ -118,6 +121,7 @@ export function FieldInput({
   bpKey,
   availableMenus,
   availableCategories,
+  availableSymbols,
   ICONS,
 }: FieldInputProps) {
   // FieldInput calls itself recursively at 3 spots below (inside
@@ -149,6 +153,7 @@ export function FieldInput({
     bpKey,
     availableMenus,
     availableCategories,
+    availableSymbols,
     ICONS,
   };
   const base =
@@ -162,6 +167,18 @@ export function FieldInput({
         {availableMenus.map((m) => (
           <option key={m.id} value={m.id}>
             {m.name}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (field.kind === "symbol-select") {
+    return (
+      <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{t("designer-f-symbol-none")}</option>
+        {availableSymbols.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
           </option>
         ))}
       </select>

@@ -16,6 +16,7 @@ import {
   Check,
   ChevronsUpDown,
   Code2,
+  Component,
   FileText,
   Image as ImageIcon,
   Images,
@@ -172,7 +173,7 @@ function mergeElBp(
 
 export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: number[] }) {
   const {
-    mode, kind, t, mutate, bp, availableMenus, availableCategories,
+    mode, kind, t, mutate, bp, availableMenus, availableCategories, availableSymbols,
     sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     sliderInnerEditing, setSliderInnerEditing,
     editingText, bpGetValue, sel,
@@ -963,6 +964,23 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
           ))}
         </nav>
       );
+    }
+    case "symbol": {
+      const linked = availableSymbols.find((s) => s.id === el.props.symbolId);
+      if (!linked) {
+        return (
+          <div className="flex items-center gap-3 rounded border border-dashed border-line/40 bg-canvas/40 px-3 py-2 text-xs text-sub">
+            <Component className="h-3.5 w-3.5" />
+            {t("designer-symbols-missing")}
+          </div>
+        );
+      }
+      // Resolved read-only, no path — same "not this canvas's job" boundary
+      // the "menu" case above already draws for its own linked.items:
+      // editing the resolved subtree happens via "Edit Master" (Designer.tsx),
+      // never by selecting into it here (path: undefined disables click-to-
+      // select on any of its own nested children too, see "container" case).
+      return ElPreview({ ctx, el: linked.node as unknown as El, path: undefined });
     }
     case "cardgrid": {
       const cards = parseCards(p.cards);

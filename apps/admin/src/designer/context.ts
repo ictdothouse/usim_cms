@@ -29,7 +29,7 @@ export interface DesignerCtx {
   t: (k: Key) => string;
   bp: Bp;
   mode: "blocks" | "live";
-  kind: "page" | "blueprint" | "siteChrome";
+  kind: "page" | "blueprint" | "siteChrome" | "symbol";
   sel: Sel;
   setSel: (path: Sel) => void;
   blocks: Block[];
@@ -105,6 +105,7 @@ export interface DesignerCtx {
   openMediaPicker: (onSelect: (url: string) => void) => void;
   availableMenus: api.Menu[];
   availableCategories: api.Category[];
+  availableSymbols: api.Symbol[];
 
   // Page settings ("nothing selected" panel)
   pageSettings: PageSettings;

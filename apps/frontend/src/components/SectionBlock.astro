@@ -5,6 +5,7 @@
 // the <script> at the bottom) — accordion stays zero-JS via native
 // <details>/<summary>.
 import MenuBlock from "./MenuBlock.astro";
+import SymbolBlock from "./SymbolBlock.astro";
 import PostListBlock from "./PostListBlock.astro";
 import EventListBlock from "./EventListBlock.astro";
 import { escapeHtml, sanitizeUrl } from "@ucms/element-style";
@@ -154,9 +155,9 @@ const {
 } = Astro.props;
 
 const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
-const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
+export const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
 const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
-const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
+export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
 const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
 // Real per-breakpoint visibility (Designer.tsx's VisibilityToggle) AND, for
@@ -468,7 +469,7 @@ function fluidClamp(px: number, ceiling: string): string {
 // keeps the author's original unit untouched. `%` (or anything unrecognized)
 // passes through as-is: already relative to its container, not a fixed size
 // that can render "too big" on a narrow screen the way px/rem/em can.
-function fluidTextSize(v: string): string {
+export function fluidTextSize(v: string): string {
   const m = /^(-?[0-9]+(?:\.[0-9]+)?)(px|rem|em)$/.exec(v);
   if (!m) return v;
   const num = parseFloat(m[1]);
@@ -514,7 +515,7 @@ const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25r
 // Matches apps/admin/src/Designer.tsx's ICONS map by name — hand-simplified
 // stroke path data (24x24, lucide-style) so this zero-JS renderer doesn't
 // need lucide-react as a dependency. Add a name to both places together.
-const ICON_PATHS: Record<string, string> = {
+export const ICON_PATHS: Record<string, string> = {
   check: "M20 6 9 17l-5-5",
   "arrow-right": "M5 12h14M12 5l7 7-7 7",
   "arrow-left": "M19 12H5M12 19l-7-7 7-7",
@@ -634,7 +635,7 @@ const ICON_PATHS: Record<string, string> = {
 // skip rendering entirely) — the actual scheme/control-char validation now
 // lives once in @ucms/element-style's sanitizeUrl, shared with apps/admin's
 // own safeHref (which instead falls back to "#" for an anchor).
-const safeUrl = (u?: string) => (u ? (sanitizeUrl(u) ?? undefined) : undefined);
+export const safeUrl = (u?: string) => (u ? (sanitizeUrl(u) ?? undefined) : undefined);
 // bgImage/slider slide images are concatenated into a raw url(...) CSS
 // function, not bound through a safe attribute — safeUrl()'s scheme check
 // alone isn't enough here, a stray quote/semicolon/paren/brace could still
@@ -700,7 +701,7 @@ function bgVariantUrl(url: string): string {
 // ponytail: link regex stops at the first ")" in the URL, so a raw
 // unescaped "(" / ")" inside the URL itself truncates it — fine for normal
 // links/anchors, encode the parens if it ever matters.
-function renderInline(text: string): string {
+export function renderInline(text: string): string {
   return escapeHtml(text)
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, url) => `<a href="${safeUrl(url) ?? "#"}">${label}</a>`)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
@@ -711,7 +712,7 @@ function renderInline(text: string): string {
 // ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
 // ("42px", "2.5rem") — existing pages keep their preset look, new edits get
 // free-form units. Duplicated in Designer.tsx like every other shared table.
-function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
+export function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
   if (!v) return fallback;
   if (v in table) return table[v];
   // Mirrors Designer.tsx's own lengthValue fix: FourSideControl's per-side
@@ -721,7 +722,7 @@ function lengthValue(v: string | undefined, table: Record<string, string>, fallb
 }
 // Every element accepts marginY/marginX, or independent per-side overrides
 // (see Designer.tsx's Inspector) — same fallback convention as paddingStyle.
-function marginStyle(p: Record<string, string>) {
+export function marginStyle(p: Record<string, string>) {
   if (!p.marginY && !p.marginX && !p.marginTop && !p.marginRight && !p.marginBottom && !p.marginLeft) return null;
   const top = lengthValue(p.marginTop || p.marginY, SPACE, "0");
   const right = lengthValue(p.marginRight || p.marginX, SPACE, "0");
@@ -731,7 +732,7 @@ function marginStyle(p: Record<string, string>) {
 }
 // Universal per-element padding (all 4 sides) — unlike radius, which only
 // makes visual sense on image/embed/gallery, every element type gets this.
-function paddingStyle(p: Record<string, string>) {
+export function paddingStyle(p: Record<string, string>) {
   if (!p.padding && !p.paddingTop && !p.paddingRight && !p.paddingBottom && !p.paddingLeft) return null;
   const side = (per: string) => lengthValue(p[per] || p.padding, PAD, "0");
   return `padding:${side("paddingTop")} ${side("paddingRight")} ${side("paddingBottom")} ${side("paddingLeft")}`;
@@ -740,7 +741,7 @@ function paddingStyle(p: Record<string, string>) {
 // apps/admin's elBorderShadowStyle(); returns null (not a stray "border:;")
 // when neither is set, so an existing default (e.g. button's outline
 // variant CSS class) isn't overridden by an empty declaration.
-function elBorderShadowStyle(p: Record<string, string>): string | null {
+export function elBorderShadowStyle(p: Record<string, string>): string | null {
   const border = p.borderWidth
     ? `border:${p.borderWidth}px ${p.borderStyle || "solid"} ${p.borderColor || "currentColor"}`
     : p.border
@@ -750,7 +751,7 @@ function elBorderShadowStyle(p: Record<string, string>): string | null {
   return [border, shadow].filter(Boolean).join(";") || null;
 }
 // Full typography escape hatch for heading/text/list.
-function typoStyle(p: Record<string, string>) {
+export function typoStyle(p: Record<string, string>) {
   return [
     p.fontFamily ? `font-family:'${p.fontFamily}'` : null,
     p.color ? `color:${p.color}` : null,
@@ -823,17 +824,17 @@ function posStyle(mp: Record<string, string>): string | null {
 // Hover/entrance effect classes — mirrors apps/admin's elHoverClass; the
 // classes themselves are defined once in global.css (ds-hover-*/ds-entrance-*).
 // entrance has no admin-canvas equivalent, see that file's own comment.
-function elHoverClass(p: Record<string, string>): string | undefined {
+export function elHoverClass(p: Record<string, string>): string | undefined {
   return p.hoverEffect && p.hoverEffect !== "none" ? `ds-hover-${p.hoverEffect}` : undefined;
 }
-function elEntranceClass(p: Record<string, string>): string | undefined {
+export function elEntranceClass(p: Record<string, string>): string | undefined {
   return p.entrance && p.entrance !== "none" ? `ds-entrance-${p.entrance}` : undefined;
 }
-function elRadius(p: Record<string, string>): string {
+export function elRadius(p: Record<string, string>): string {
   const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.none);
   return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
 }
-const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
+export const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
 
 // Extracted to a plain function of `p` (rather than reading the
 // destructured Props consts directly) so bp-override rendering (below) can
@@ -928,7 +929,7 @@ const rowStyle = (row: Row, isFirst: boolean) => {
       : `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")}`;
   return `${layout};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
 };
-const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
+export const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");
 // Column width (Col.span) is edited per-breakpoint in the Inspector (col.bp's
 // "tablet:span"/"mobile:span"), same bag every other Col/El style override
 // uses — but the value actually drives the PARENT row's own
@@ -1635,6 +1636,8 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                       lang={requestedLang}
                     />
                   );
+                case "symbol":
+                  return <SymbolBlock symbolId={p.symbolId ?? ""} tenantHost={tenantHost} />;
                 case "cardgrid": {
                   const cards = parseCards(p.cards);
                   if (cards.length === 0) return null;

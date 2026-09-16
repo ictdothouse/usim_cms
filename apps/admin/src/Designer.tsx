@@ -30,6 +30,7 @@ import {
   ChevronsUpDown,
   Clipboard,
   ClipboardPaste,
+  Component,
   Clock,
   Cloud,
   Code2,
@@ -131,6 +132,7 @@ import {
   Type,
   Umbrella,
   Undo2,
+  Unlink,
   Unlock,
   User,
   Users,
@@ -189,6 +191,7 @@ const CONTENT_KEYS: Record<ElType, string[]> = {
   tabs: ["items"],
   slider: ["slides"],
   menu: ["menuId"],
+  symbol: ["symbolId"],
   cardgrid: ["cards"],
   ctabanner: ["heading", "description", "button1Label", "button2Label"],
   announcementbar: ["text", "linkLabel"],
@@ -430,7 +433,11 @@ export default function Designer({
   // device-preview button too — a header/footer has no preview-token route
   // of its own yet (a real, scoped-out-for-now follow-up), Blocks-mode
   // canvas editing is enough for v1.
-  kind?: "page" | "blueprint" | "siteChrome";
+  // "symbol" (a live-linked component's own master, see SymbolDesignerRoute
+  // in App.tsx) gets the same no-slug/no-publish treatment as "blueprint" —
+  // Save just PATCHes the symbol's node, no Preview/Live-Edit (a bare
+  // component has no route of its own to preview).
+  kind?: "page" | "blueprint" | "siteChrome" | "symbol";
 }) {
   // True base tree — always the shared, single source of truth for structure
   // AND style, regardless of which language pill is active (see `blocks`
@@ -869,6 +876,11 @@ export default function Designer({
   // made a real save look like a dead button.
   const [pendingTemplate, setPendingTemplate] = useState<{ kind: string; value: unknown } | null>(null);
   const [templateName, setTemplateName] = useState("");
+  // "Make component" — same in-app naming pattern as "Save as template"
+  // above, reusing the same showTemplates modal (see makeComponent below).
+  const [pendingSymbolEl, setPendingSymbolEl] = useState<{ path: [number, number, number, number]; el: El } | null>(null);
+  const [symbolName, setSymbolName] = useState("");
+  const [symbolsBusy, setSymbolsBusy] = useState(false);
   // "Save as blueprint" — same in-app-modal naming pattern as templates above.
   const [showSaveBlueprint, setShowSaveBlueprint] = useState(false);
   const [blueprintName, setBlueprintName] = useState("");
@@ -935,18 +947,20 @@ export default function Designer({
   // Autosave (2026-09-16): debounced silent save while dirty, restricted to
   // draft-status content only — a page/siteChrome already published only
   // saves on an explicit Update/Publish click, so autosave can never
-  // silently push an unreviewed edit onto the live site. Blueprints have no
-  // publish concept at all (every save just overwrites the same row, same
-  // as a draft page), so they're always autosave-eligible.
+  // silently push an unreviewed edit onto the live site. Blueprints/symbols
+  // have no publish concept at all (every save just overwrites the same
+  // row, same as a draft page), so they're always autosave-eligible.
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const eligible =
       kind === "blueprint" ||
+      kind === "symbol" ||
       (kind === "page" && page.status !== "published") ||
       (kind === "siteChrome" && chromeStatus !== "published");
     if (!dirty || !eligible || busy) return;
     autosaveTimerRef.current = setTimeout(() => {
       if (kind === "blueprint") void saveBlueprint();
+      else if (kind === "symbol") void saveSymbol();
       else if (kind === "siteChrome") void saveSiteChrome();
       else void save();
     }, 2000);
@@ -1056,6 +1070,15 @@ export default function Designer({
   const [availableCategories, setAvailableCategories] = useState<api.Category[]>([]);
   useEffect(() => {
     void api.listCategories(tenantHost, token).then(setAvailableCategories);
+  }, [tenantHost]);
+  // "symbol" element's symbolId picker — same live-fetched-once-per-tenant
+  // shape as availableMenus above. ponytail: fetched once per Designer
+  // mount, so an "Edit Master" save in another tab won't refresh this list
+  // until reload — fine at this scale, upgrade to refetch-on-focus if it
+  // becomes annoying.
+  const [availableSymbols, setAvailableSymbols] = useState<api.Symbol[]>([]);
+  useEffect(() => {
+    void api.listSymbols(tenantHost, token).then(setAvailableSymbols);
   }, [tenantHost]);
   // i18n Phase 5 — site-wide master switch, plus this page's own opt-in;
   // the Translations block below is only offered when both are true.
@@ -1761,6 +1784,78 @@ export default function Designer({
     }
   }
 
+  // Stages "Make component" the same way saveAsTemplate stages a save —
+  // element-level only (sel.length === 4): a symbol is always a single El,
+  // same granularity as insertTemplate's "element" branch.
+  function makeComponent(path: Sel = sel) {
+    if (!path || path.length !== 4) return;
+    const [b, r, c, e] = path;
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
+    const el = section(blocks, b).rows[r].columns[c].elements[e];
+    setShowTemplates(true);
+    setSymbolName("");
+    setPendingSymbolEl({ path: [b, r, c, e], el });
+  }
+
+  async function confirmMakeComponent() {
+    if (!pendingSymbolEl) return;
+    const name = symbolName.trim();
+    if (!name) return;
+    setSymbolsBusy(true);
+    try {
+      const sym = await api.createSymbol(tenantHost, token, name, clone(pendingSymbolEl.el) as unknown as Record<string, unknown>);
+      const [b, r, c, e] = pendingSymbolEl.path;
+      mutate((bs) => {
+        section(bs, b).rows[r].columns[c].elements[e] = { id: uid(), type: "symbol", props: { symbolId: sym.id } };
+      });
+      setAvailableSymbols(await api.listSymbols(tenantHost, token));
+      setPendingSymbolEl(null);
+      setSymbolName("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSymbolsBusy(false);
+    }
+  }
+
+  // Mirrors insertTemplate's "element" branch, but no node cloning at all —
+  // just a thin reference (see the symbols table's own comment for why).
+  function insertSymbol(sym: api.Symbol) {
+    if (!sel || sel.length < 3) {
+      alert(t("designer-templates-need-column"));
+      return;
+    }
+    const [b, r, c] = sel;
+    if (isSectionLocked(b)) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
+    const index = sel.length === 4 ? sel[3] + 1 : section(blocks, b).rows[r].columns[c].elements.length;
+    mutate((bs) => insertAt(bs, [b, r, c], { id: uid(), type: "symbol", props: { symbolId: sym.id } } as El, index));
+    bumpStructural();
+  }
+
+  async function deleteSymbolHandler(id: string) {
+    if (!confirm(t("designer-symbols-delete-confirm"))) return;
+    await api.deleteSymbol(tenantHost, token, id);
+    setAvailableSymbols(await api.listSymbols(tenantHost, token));
+  }
+
+  // Breaks the live link: materializes the resolved symbol's current
+  // content as a plain, independently-editable element — same one-shot-copy
+  // convention as blueprint apply/insertTemplate elsewhere in this file.
+  function detachSymbolInstance(b: number, r: number, c: number, e: number) {
+    const el = section(blocks, b).rows[r].columns[c].elements[e];
+    const sym = availableSymbols.find((s) => s.id === el.props.symbolId);
+    if (!sym) return;
+    mutate((bs) => {
+      section(bs, b).rows[r].columns[c].elements[e] = { ...(clone(sym.node) as unknown as El), id: uid() };
+    });
+  }
+
   async function confirmSaveAsBlueprint() {
     const name = blueprintName.trim();
     if (!name) return;
@@ -2301,6 +2396,30 @@ export default function Designer({
     setError(null);
     try {
       await api.updateBlueprint(tenantHost, token, page.id as string, { layout: clone(rawBlocks), settings: pageSettings });
+      setDirty(false);
+      setSavedAny(true);
+      setMsg(t("designer-saved"));
+      setTimeout(() => setMsg(null), 2500);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Symbol master's own save path (kind === "symbol", see SymbolDesignerRoute
+  // in App.tsx) — same shape as saveBlueprint, but unwraps rawBlocks' one
+  // throwaway section/row/column shell back down to the bare El node before
+  // PATCHing, since that's all `symbols.node` actually stores. Live (no
+  // sync/propagate step needed): every page instance resolves this same row
+  // at render time, see ElPreview.tsx/SectionBlock.astro's "symbol" case.
+  async function saveSymbol() {
+    setBusy(true);
+    setError(null);
+    try {
+      const wrapped = rawBlocks[0] as unknown as { props: SectionProps };
+      const node = wrapped.props.rows[0].columns[0].elements[0];
+      await api.updateSymbol(tenantHost, token, page.id as string, { node: node as unknown as Record<string, unknown> });
       setDirty(false);
       setSavedAny(true);
       setMsg(t("designer-saved"));
@@ -2906,7 +3025,7 @@ export default function Designer({
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
     sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing, uploadImage, openMediaPicker,
-    availableMenus, availableCategories,
+    availableMenus, availableCategories, availableSymbols,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
@@ -2996,6 +3115,18 @@ export default function Designer({
             </span>
           </>
         )}
+        {kind === "symbol" && (
+          <>
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
+              {t("designer-symbols-title")}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${busy ? "bg-accent/10 text-accent" : dirty ? "bg-warn/10 text-warn" : "bg-ok/10 text-ok"}`}
+            >
+              {busy ? t("designer-saving") : dirty ? t("designer-dirty") : t("designer-saved")}
+            </span>
+          </>
+        )}
         {kind === "siteChrome" && (
           <>
             <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold uppercase text-accent">
@@ -3059,7 +3190,7 @@ export default function Designer({
             <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
           </button>
         )}
-        {kind !== "siteChrome" && (
+        {(kind === "page" || kind === "blueprint") && (
           <button
             onClick={() => void toggleLive()}
             className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-canvas ${
@@ -3127,7 +3258,7 @@ export default function Designer({
           ))}
         {kind !== "page" && (
           <button
-            onClick={() => void (kind === "blueprint" ? saveBlueprint() : saveSiteChrome())}
+            onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "symbol" ? saveSymbol() : saveSiteChrome())}
             disabled={busy}
             className="rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-50"
           >
@@ -4244,6 +4375,7 @@ export default function Designer({
               onClick={() => {
                 setShowTemplates(false);
                 setPendingTemplate(null);
+                setPendingSymbolEl(null);
               }}
             >
               <div
@@ -4264,7 +4396,39 @@ export default function Designer({
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                {pendingTemplate ? (
+                {pendingSymbolEl ? (
+                  <form
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      void confirmMakeComponent();
+                    }}
+                    className="mb-3 flex items-center gap-1.5"
+                  >
+                    <input
+                      autoFocus
+                      value={symbolName}
+                      onChange={(ev) => setSymbolName(ev.target.value)}
+                      placeholder={t("designer-symbols-make-prompt")}
+                      className="min-w-0 flex-1 rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!symbolName.trim() || symbolsBusy}
+                      className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                    >
+                      {t("designer-symbols-make")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingSymbolEl(null)}
+                      className="text-body hover:text-ink"
+                      aria-label={t("designer-cancel")}
+                      title={t("designer-cancel")}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </form>
+                ) : pendingTemplate ? (
                   <form
                     onSubmit={(ev) => {
                       ev.preventDefault();
@@ -4368,6 +4532,35 @@ export default function Designer({
                     </div>
                   </>
                 )}
+                <div className="mt-4 border-t border-line/20 pt-3">
+                  <p className="mb-2 text-xs font-bold text-ink">{t("designer-symbols-title")}</p>
+                  {availableSymbols.length === 0 ? (
+                    <p className="text-xs text-sub">{t("designer-symbols-empty")}</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {availableSymbols.map((sym) => (
+                        <div key={sym.id} className="flex flex-col gap-1.5 rounded-lg border border-line/30 p-2">
+                          <span className="truncate text-[11px] font-medium text-ink" title={sym.name}>
+                            {sym.name}
+                          </span>
+                          <div className="flex items-center justify-end gap-2">
+                            <button onClick={() => insertSymbol(sym)} className="text-[11px] font-semibold text-accent">
+                              {t("designer-templates-insert")}
+                            </button>
+                            <button
+                              onClick={() => void deleteSymbolHandler(sym.id)}
+                              className="text-red-500"
+                              aria-label={t("designer-symbols-delete")}
+                              title={t("designer-symbols-delete")}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -4561,7 +4754,19 @@ export default function Designer({
                   </>
                 )}
                 {divider}
-                {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b, r, c, e]))}
+                {el.type === "symbol" ? (
+                  <>
+                    {item(<ExternalLink className="h-3.5 w-3.5" />, t("designer-symbols-edit-master"), () =>
+                      window.open(`${isSuper ? "/content/symbols" : "/symbols"}/${el.props.symbolId}`, "_blank"),
+                    )}
+                    {item(<Unlink className="h-3.5 w-3.5" />, t("designer-symbols-detach"), () => detachSymbolInstance(b, r, c, e))}
+                  </>
+                ) : (
+                  <>
+                    {item(<LayoutTemplate className="h-3.5 w-3.5" />, t("designer-templates-save"), () => saveAsTemplate([b, r, c, e]))}
+                    {item(<Component className="h-3.5 w-3.5" />, t("designer-symbols-make"), () => makeComponent([b, r, c, e]))}
+                  </>
+                )}
                 {divider}
                 {deleteItem(t("designer-delete"), () => deleteElement(b, r, c, e))}
               </>
