@@ -169,6 +169,7 @@ import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import { useBpStyle } from "./designer/hooks/useBpStyle";
 import { useLiveEditBridge } from "./designer/hooks/useLiveEditBridge";
 import { useBlockOps } from "./designer/hooks/useBlockOps";
+import { useTemplateLibrary } from "./designer/hooks/useTemplateLibrary";
 import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -790,30 +791,6 @@ export default function Designer({
   // slot becomes a real link the user clicks to actually open the tab.
   const [previewLink, setPreviewLink] = useState<string | null>(null);
   const [previewMinting, setPreviewMinting] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
-  const [templatesBusy, setTemplatesBusy] = useState(false);
-  // Naming step for "Save as template" — an in-app field, not window.prompt():
-  // Chrome/Firefox silently suppress repeated JS dialogs in one tab ("prevent
-  // this page from creating additional dialogs"), after which prompt() just
-  // returns null instantly with no visible sign anything happened, which
-  // made a real save look like a dead button.
-  const [pendingTemplate, setPendingTemplate] = useState<{ kind: string; value: unknown } | null>(null);
-  const [templateName, setTemplateName] = useState("");
-  // "Make component" — same in-app naming pattern as "Save as template"
-  // above, reusing the same showTemplates modal (see makeComponent below).
-  const [pendingSymbolEl, setPendingSymbolEl] = useState<{ path: [number, number, number, number]; el: El } | null>(null);
-  const [symbolName, setSymbolName] = useState("");
-  const [symbolsBusy, setSymbolsBusy] = useState(false);
-  // "Save as blueprint" — same in-app-modal naming pattern as templates above.
-  const [showSaveBlueprint, setShowSaveBlueprint] = useState(false);
-  const [blueprintName, setBlueprintName] = useState("");
-  const [blueprintDescription, setBlueprintDescription] = useState("");
-  const [blueprintCategory, setBlueprintCategory] = useState("");
-  const [blueprintScope, setBlueprintScope] = useState<"system" | "tenant">("tenant");
-  const [blueprintBusy, setBlueprintBusy] = useState(false);
-  const [templateSearch, setTemplateSearch] = useState("");
-  const [templateFilter, setTemplateFilter] = useState<"all" | "section" | "row" | "column" | "element">("all");
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
   const [editingSlug, setEditingSlug] = useState(false);
@@ -1283,6 +1260,32 @@ export default function Designer({
   });
 
   const {
+    showTemplates, setShowTemplates, templates, templatesBusy,
+    openTemplates, templateKind, saveAsTemplate, confirmSaveTemplate, insertTemplate, deleteTemplateHandler,
+    templateFilter, setTemplateFilter, templateSearch, setTemplateSearch, templateKindLabel, templateRows,
+    pendingTemplate, setPendingTemplate, templateName, setTemplateName,
+    pendingSymbolEl, setPendingSymbolEl, symbolName, setSymbolName, symbolsBusy,
+    makeComponent, confirmMakeComponent, insertSymbol, deleteSymbolHandler, detachSymbolInstance,
+    showSaveBlueprint, setShowSaveBlueprint,
+    blueprintName, setBlueprintName, blueprintDescription, setBlueprintDescription,
+    blueprintCategory, setBlueprintCategory, blueprintScope, setBlueprintScope, blueprintBusy,
+    confirmSaveAsBlueprint,
+  } = useTemplateLibrary({
+    blocks,
+    mutate,
+    sel,
+    bumpStructural,
+    isSectionLocked,
+    t,
+    tenantHost,
+    token,
+    pageSettings,
+    availableSymbols,
+    setAvailableSymbols,
+    setError,
+  });
+
+  const {
     mode,
     liveSrc,
     frameARef,
@@ -1331,223 +1334,6 @@ export default function Designer({
       window.removeEventListener("keydown", onKey);
     };
   }, [ctxMenu]);
-
-  async function openTemplates() {
-    setShowTemplates(true);
-    setTemplatesBusy(true);
-    try {
-      setTemplates(await api.listTemplates(tenantHost, token));
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTemplatesBusy(false);
-    }
-  }
-
-  // Saveable at any selection depth — path[0] is always the containing
-  // section's index regardless of depth, so this derives which level
-  // (section/row/column/element) a given path actually points at. Defaults
-  // to the left-click `sel` state, but the right-click context menu passes
-  // its own `ctxMenu.path` explicitly — right-clicking an element never
-  // updates `sel`, so relying on `sel` there silently no-ops on whatever was
-  // previously (or never) left-click selected. Row is included because
-  // clicking a section's background/grid area selects its Row, not the
-  // section itself (see the Row Inspector note above) — without this, a
-  // user trying to save "the whole section" via a background click always
-  // hit a silently-disabled Save button.
-  function templateKind(path: Sel = sel): "section" | "row" | "column" | "element" | null {
-    if (!path || blocks[path[0]]?.type !== "section") return null;
-    return path.length === 1
-      ? "section"
-      : path.length === 2
-        ? "row"
-        : path.length === 3
-          ? "column"
-          : path.length === 4
-            ? "element"
-            : null;
-  }
-
-  // Stages the save (opens the modal's inline name field) — the actual API
-  // call happens in confirmSaveTemplate() once a name is entered.
-  function saveAsTemplate(path: Sel = sel) {
-    const kind = templateKind(path);
-    if (!kind || !path) return;
-    const value: unknown =
-      kind === "section"
-        ? blocks[path[0]]
-        : kind === "row"
-          ? section(blocks, path[0]).rows[path[1]]
-          : kind === "column"
-            ? section(blocks, path[0]).rows[path[1]].columns[path[2]]
-            : section(blocks, path[0]).rows[path[1]].columns[path[2]].elements[path[3]];
-    setShowTemplates(true);
-    setTemplateName("");
-    setPendingTemplate({ kind, value });
-  }
-
-  async function confirmSaveTemplate() {
-    if (!pendingTemplate) return;
-    const name = templateName.trim();
-    if (!name) return;
-    setTemplatesBusy(true);
-    try {
-      await api.createTemplate(tenantHost, token, name, pendingTemplate as unknown as Record<string, unknown>);
-      setTemplates(await api.listTemplates(tenantHost, token));
-      setPendingTemplate(null);
-      setTemplateName("");
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setTemplatesBusy(false);
-    }
-  }
-
-  // Stages "Make component" the same way saveAsTemplate stages a save —
-  // element-level only (sel.length === 4): a symbol is always a single El,
-  // same granularity as insertTemplate's "element" branch.
-  function makeComponent(path: Sel = sel) {
-    if (!path || path.length !== 4) return;
-    const [b, r, c, e] = path;
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const el = section(blocks, b).rows[r].columns[c].elements[e];
-    setShowTemplates(true);
-    setSymbolName("");
-    setPendingSymbolEl({ path: [b, r, c, e], el });
-  }
-
-  async function confirmMakeComponent() {
-    if (!pendingSymbolEl) return;
-    const name = symbolName.trim();
-    if (!name) return;
-    setSymbolsBusy(true);
-    try {
-      const sym = await api.createSymbol(tenantHost, token, name, clone(pendingSymbolEl.el) as unknown as Record<string, unknown>);
-      const [b, r, c, e] = pendingSymbolEl.path;
-      mutate((bs) => {
-        section(bs, b).rows[r].columns[c].elements[e] = { id: uid(), type: "symbol", props: { symbolId: sym.id } };
-      });
-      setAvailableSymbols(await api.listSymbols(tenantHost, token));
-      setPendingSymbolEl(null);
-      setSymbolName("");
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSymbolsBusy(false);
-    }
-  }
-
-  // Mirrors insertTemplate's "element" branch, but no node cloning at all —
-  // just a thin reference (see the symbols table's own comment for why).
-  function insertSymbol(sym: api.Symbol) {
-    if (!sel || sel.length < 3) {
-      alert(t("designer-templates-need-column"));
-      return;
-    }
-    const [b, r, c] = sel;
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const index = sel.length === 4 ? sel[3] + 1 : section(blocks, b).rows[r].columns[c].elements.length;
-    mutate((bs) => insertAt(bs, [b, r, c], { id: uid(), type: "symbol", props: { symbolId: sym.id } } as El, index));
-    bumpStructural();
-  }
-
-  async function deleteSymbolHandler(id: string) {
-    if (!confirm(t("designer-symbols-delete-confirm"))) return;
-    await api.deleteSymbol(tenantHost, token, id);
-    setAvailableSymbols(await api.listSymbols(tenantHost, token));
-  }
-
-  // Breaks the live link: materializes the resolved symbol's current
-  // content as a plain, independently-editable element — same one-shot-copy
-  // convention as blueprint apply/insertTemplate elsewhere in this file.
-  function detachSymbolInstance(b: number, r: number, c: number, e: number) {
-    const el = section(blocks, b).rows[r].columns[c].elements[e];
-    const sym = availableSymbols.find((s) => s.id === el.props.symbolId);
-    if (!sym) return;
-    mutate((bs) => {
-      section(bs, b).rows[r].columns[c].elements[e] = { ...(clone(sym.node) as unknown as El), id: uid() };
-    });
-  }
-
-  async function confirmSaveAsBlueprint() {
-    const name = blueprintName.trim();
-    if (!name) return;
-    setBlueprintBusy(true);
-    try {
-      await api.createBlueprint(tenantHost, token, {
-        name,
-        description: blueprintDescription.trim() || undefined,
-        category: blueprintCategory.trim() || undefined,
-        layout: blocks,
-        settings: pageSettings,
-        scope: blueprintScope,
-      });
-      setShowSaveBlueprint(false);
-      setBlueprintName("");
-      setBlueprintDescription("");
-      setBlueprintCategory("");
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBlueprintBusy(false);
-    }
-  }
-
-  // Pre-migration rows have no `kind`/`value` wrapper — `data` itself was
-  // the raw section block, so a missing `kind` falls back to that shape.
-  function insertTemplate(tpl: api.DesignTemplate) {
-    const kind = tpl.data?.kind as "section" | "row" | "column" | "element" | undefined;
-    const value = kind ? tpl.data.value : tpl.data;
-    if (kind === "row") {
-      if (!sel || sel.length < 1) {
-        alert(t("designer-templates-need-column"));
-        return;
-      }
-      const b = sel[0];
-      if (isSectionLocked(b)) {
-        toast.error(t("designer-section-locked-toast"));
-        return;
-      }
-      const index = sel.length >= 2 ? sel[1] + 1 : section(blocks, b).rows.length;
-      mutate((bs) => section(bs, b).rows.splice(index, 0, clone(value) as Row));
-    } else if (kind === "column" || kind === "element") {
-      if (!sel || sel.length < 3) {
-        alert(t("designer-templates-need-column"));
-        return;
-      }
-      const [b, r, c, e] = sel;
-      if (isSectionLocked(b)) {
-        toast.error(t("designer-section-locked-toast"));
-        return;
-      }
-      if (kind === "column") {
-        mutate((bs) => section(bs, b).rows[r].columns.splice(c + 1, 0, clone(value) as Col));
-      } else {
-        const index = sel.length === 4 ? e + 1 : section(blocks, b).rows[r].columns[c].elements.length;
-        mutate((bs) => insertAt(bs, [b, r, c], { ...(clone(value) as El), id: uid() }, index));
-      }
-    } else {
-      mutate((bs) => bs.push(clone(value) as unknown as Block));
-    }
-    bumpStructural();
-    setShowTemplates(false);
-  }
-
-  async function deleteTemplateHandler(id: string) {
-    if (!confirm(t("designer-templates-delete-confirm"))) return;
-    try {
-      await api.deleteTemplate(tenantHost, token, id);
-      setTemplates((ts) => ts.filter((x) => x.id !== id));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -2089,32 +1875,6 @@ export default function Designer({
     } finally {
       setUploading(false);
     }
-  }
-
-  function templateKindLabel(kind: string): string {
-    return kind === "row"
-      ? t("designer-row")
-      : kind === "column"
-        ? t("designer-column")
-        : kind === "element"
-          ? t("designer-elements")
-          : t("designer-section");
-  }
-
-  // Normalizes a DesignTemplate's kind/value into TemplatePreview's rows[]
-  // shape — same normalization the old inline TemplatePreview used to do
-  // internally, now a plain call-site helper so the preview component itself
-  // stays templates-vs-blueprints agnostic.
-  function templateRows(tpl: api.DesignTemplate): Row[] {
-    const kind = (tpl.data?.kind as string | undefined) ?? "section";
-    const value = tpl.data?.kind ? tpl.data.value : tpl.data;
-    return kind === "section"
-      ? ((value as SectionProps).rows ?? [])
-      : kind === "row"
-        ? [value as Row]
-        : kind === "column"
-          ? [{ columns: [value as Col] } as Row]
-          : [{ columns: [{ elements: [value as El] }] } as Row];
   }
 
   // section/legacy-block level controls: move up/down, duplicate, delete
