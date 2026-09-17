@@ -768,3 +768,48 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     ],
   },
 };
+
+// Which of each ElType's props are actual content (vs. style) — copy-style/
+// paste-style (designer/hooks/useClipboard.ts's styleCopy) strips these
+// before storing, so pasting a copied element's style onto a different
+// element never carries its source text/image/etc along. Moved here from
+// Designer.tsx alongside ELS since it's the same per-ElType data-table shape
+// and designer/hooks/useClipboard.ts (a designer/ file) needs it directly —
+// designer/ files may never import back from Designer.tsx (designer/
+// types.ts's own rule).
+export const CONTENT_KEYS: Record<ElType, string[]> = {
+  heading: ["text"],
+  text: ["text"],
+  image: ["src", "alt"],
+  video: ["src"],
+  button: ["label", "href"],
+  badge: ["label"],
+  icon: ["name"],
+  list: ["items"],
+  html: ["html"],
+  gallery: ["images"],
+  embed: ["url"],
+  spacer: [],
+  divider: [],
+  accordion: ["items"],
+  infobox: ["name", "heading", "text"],
+  tabs: ["items"],
+  slider: ["slides"],
+  menu: ["menuId"],
+  symbol: ["symbolId"],
+  cardgrid: ["cards"],
+  ctabanner: ["heading", "description", "button1Label", "button2Label"],
+  announcementbar: ["text", "linkLabel"],
+  postlist: [],
+  eventlist: [],
+  testimonial: ["testimonials"],
+  statscounter: ["stats"],
+  peoplegrid: ["people"],
+  socialicons: ["socials"],
+  logocloud: ["logos"],
+  timeline: ["timelineItems"],
+  documentdownload: ["documents"],
+  googlemap: ["embedUrl", "address"],
+  announcementticker: ["tickerItems"],
+  container: [],
+};
