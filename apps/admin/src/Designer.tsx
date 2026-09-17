@@ -175,7 +175,6 @@ import { useSiteChrome } from "./designer/hooks/useSiteChrome";
 import { usePersist } from "./designer/hooks/usePersist";
 import MediaPickerModal from "./MediaPickerModal";
 
-const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
@@ -197,13 +196,6 @@ const newSection = (): Block => ({
   type: "section",
   props: { paddingY: "md", width: "contained", rows: [{ columns: [{ span: 1, elements: [] }] }] },
 });
-const newEl = (type: ElType): El => ({ id: uid(), type, props: { ...ELS[type].defaults } });
-
-// drag payload: a new palette element, or a move of an existing one
-type Drag =
-  | { kind: "new"; type: ElType }
-  | { kind: "move"; path: number[] }
-  | { kind: "tree-reorder"; treeKind: "section" | "column"; path: number[] };
 
 // Hatched spacing-overlay band: shown while a padding/margin drag handle is
 // selected so the actual area being resized is visible, not just its number.
