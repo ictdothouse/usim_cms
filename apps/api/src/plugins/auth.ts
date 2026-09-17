@@ -54,7 +54,12 @@ export async function requireTenantAuth(app: FastifyInstance) {
     }
     if (!checkCsrf(req, reply, session)) return;
     const allowedHosts = session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []);
-    if (session.role === "webmaster" && !allowedHosts.includes(req.tenantHost)) {
+    // Deny-list, not an allow-list naming "webmaster" specifically: only
+    // superadmin is exempt from the host check. Adding a third role string
+    // in the future (e.g. "editor") would otherwise silently bypass tenant
+    // binding entirely — a forged x-tenant-host would grant it cross-tenant
+    // access with no code change anywhere else.
+    if (session.role !== "superadmin" && !allowedHosts.includes(req.tenantHost)) {
       return reply.code(403).send({ error: "Not authorized for this tenant" });
     }
     req.user = session;

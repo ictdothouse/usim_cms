@@ -2846,8 +2846,22 @@ await app.register(async (protectedScope) => {
   // Stores uploaded images (banners, etc.) on local disk under a per-tenant
   // folder. Served back publicly at the returned URL — that's expected for
   // site assets, not a tenant-isolation break (no read of any DB data here).
-  // No svg in the allowlist on purpose: svg can carry scripts.
-  const ALLOWED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "video/mp4", "video/webm"]);
+  // No svg in the allowlist on purpose: svg can carry scripts. Extension is
+  // derived from THIS map (server-controlled), never the client's own
+  // filename — same fix as the branding-upload route above (~line 923)
+  // already applies: without it, a part declaring e.g. `Content-Type:
+  // video/mp4` with `filename: x.html` got stored and served back with a
+  // `.html` extension, executing as a page on this API's own origin (a
+  // stored-XSS → session-hijack chain, since GET /api/auth/session — same
+  // origin — returns the caller's csrfToken).
+  const MEDIA_EXT_BY_MIME: Record<string, string> = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+  };
   const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   protectedScope.post("/api/media", async (req, reply) => {
@@ -2873,12 +2887,12 @@ await app.register(async (protectedScope) => {
     if (folderField && !Array.isArray(folderField) && folderField.type === "field") {
       folderId = (folderField.value as string) || null;
     }
-    if (!ALLOWED_MEDIA_TYPES.has(file.mimetype)) {
+    const ext = MEDIA_EXT_BY_MIME[file.mimetype];
+    if (!ext) {
       reply.code(415);
       return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp/mp4/webm only)` };
     }
     const safeTenant = tenantFolder(req.tenantHost);
-    const ext = path.extname(file.filename);
     const stem = randomUUID();
     const filename = `${stem}${ext}`;
     // Buffered (not streamed straight to storage) so the same bytes can also

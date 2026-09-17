@@ -69,10 +69,39 @@ function ensurePublicSchema(client: PoolClient): Promise<unknown> {
   return publicSchemaReady;
 }
 
-// One small pool per tenant database, created lazily and cached for the
-// process lifetime. Small max per pool: 50 tenants must share the server's
-// connection budget (PgBouncer in front caps the global total in deploys).
+// One small pool per tenant database, created lazily and cached — but NOT
+// for the process lifetime unconditionally, see the idle-eviction sweep
+// below. Small max per pool: 50 tenants must share the server's connection
+// budget (PgBouncer in front caps the global total in deploys).
 const tenantPools = new Map<string, Pool>();
+
+// Architecture audit finding: without this, a tenant pool (up to 5 held
+// connections each) lived for the whole process lifetime once provisioned,
+// even for a host that's gone quiet for weeks — at ~100 tenants that's up to
+// 500 idle-but-open connections through PgBouncer that never get reclaimed.
+// Sweeps periodically and closes any pool that's BOTH past the idle
+// threshold AND has nothing currently checked out (ending a pool with an
+// in-flight client would otherwise just block until it's released, which is
+// fine, but skipping it here means the sweep never stalls on a busy tenant).
+// Removed from the map before end() is even awaited — a request arriving
+// mid-drain finds nothing there and simply creates a fresh Pool via
+// getTenantPool below, rather than racing a connect() against a pool that's
+// closing.
+const poolLastUsed = new Map<string, number>();
+const IDLE_POOL_EVICT_MS = 30 * 60 * 1000;
+const IDLE_POOL_SWEEP_MS = 5 * 60 * 1000;
+const idleSweepTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [connectionString, tp] of tenantPools) {
+    const lastUsed = poolLastUsed.get(connectionString) ?? 0;
+    if (now - lastUsed < IDLE_POOL_EVICT_MS) continue;
+    if (tp.waitingCount > 0 || tp.idleCount !== tp.totalCount) continue;
+    tenantPools.delete(connectionString);
+    poolLastUsed.delete(connectionString);
+    tp.end().catch((err) => console.error("tenant pool: idle eviction close failed", err));
+  }
+}, IDLE_POOL_SWEEP_MS);
+idleSweepTimer.unref();
 
 // Raw pg Pool counters for GET /metrics — pool.totalCount/idleCount/
 // waitingCount are pg's own live gauges, no extra bookkeeping needed.
@@ -95,6 +124,7 @@ export function getPoolStats(): {
 }
 
 function getTenantPool(connectionString: string): Pool {
+  poolLastUsed.set(connectionString, Date.now());
   let tp = tenantPools.get(connectionString);
   if (!tp) {
     tp = new Pool({
@@ -191,8 +221,10 @@ async function provisionTenantDatabase(tenantHost: string, dbUrl: string | null,
 }
 
 export async function closePool(): Promise<void> {
+  clearInterval(idleSweepTimer);
   await Promise.all([pool.end(), ...[...tenantPools.values()].map((p) => p.end())]);
   tenantPools.clear();
+  poolLastUsed.clear();
 }
 
 export interface SharedContentEntry {
@@ -528,6 +560,7 @@ export async function deleteTenant(host: string): Promise<void> {
     await tp.end();
     tenantPools.delete(connectionString);
   }
+  poolLastUsed.delete(connectionString);
   provisionedDbs.delete(connectionString);
 
   if (!dbUrl) {

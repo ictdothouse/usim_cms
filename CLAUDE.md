@@ -38,7 +38,7 @@ See apps/api/CLAUDE.md for multi-tenancy (database-per-tenant, i18n phases 1-5) 
 
 ## Architecture
 
-pnpm workspace monorepo with two apps:
+pnpm workspace monorepo with three apps:
 
 - **`apps/api`** — Fastify + TypeScript + Drizzle ORM. See apps/api/CLAUDE.md for collection routes, pages/posts/menus schema, and the multi-tenant plugin. Local API/SDK for same-process frontend access is not implemented yet.
 
