@@ -165,6 +165,7 @@ import { ELS } from "./designer/elements";
 import { ICONS } from "./designer/icons";
 import { BASE_LANG, type DesignerCtx, type ClipLevel } from "./designer/context";
 import { useClipboard } from "./designer/hooks/useClipboard";
+import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -391,14 +392,8 @@ export default function Designer({
   // component has no route of its own to preview).
   kind?: "page" | "blueprint" | "siteChrome" | "symbol";
 }) {
-  // True base tree — always the shared, single source of truth for structure
-  // AND style, regardless of which language pill is active (see `blocks`
-  // below, and the `langOverrides` state further down, for how a
-  // non-base-language view is derived from this without ever mutating it
-  // directly). Only `mutate`/`startSpacingDrag`/`undo`/`redo` — and save() —
-  // touch this state directly; everything else in this file reads/renders
-  // the memoized `blocks` view instead.
-  const [rawBlocks, setRawBlocks] = useState<Block[]>(() => clone((page.layout as Block[] | undefined) ?? []));
+  // Declared ahead of the useUndoRedo() call below, which needs it.
+  const [dirty, setDirty] = useState(false);
   // The Blocks/Live-Edit canvas used to be an iframe of the real frontend, so
   // it always showed the tenant's actual theme colors/fonts. Once that became
   // an in-app canvas (see mode === "live" below), it lost that for-free theme
@@ -411,6 +406,29 @@ export default function Designer({
     api.getTheme(tenantHost, token).then(setSiteTheme).catch(() => {});
   }, [tenantHost, token]);
   const [sel, setSel] = useState<Sel>(null);
+  // True base tree — always the shared, single source of truth for structure
+  // AND style, regardless of which language pill is active (see `blocks`
+  // below, and the `langOverrides` state further down, for how a
+  // non-base-language view is derived from this without ever mutating it
+  // directly). Only `mutate`/`startSpacingDrag`/`undo`/`redo` — and save() —
+  // touch this state directly; everything else in this file reads/renders
+  // the memoized `blocks` view instead.
+  // Figma-style spacing overlay: the hatched fill band only shows while the
+  // matching handle is hovered or actively dragged, not for the whole
+  // selected box's perimeter at once — a persistent 4-sided hatch on every
+  // selection was too visually noisy (user feedback). The small "Npx" badge
+  // itself still always shows once selected; only the colored band is gated.
+  // Declared ahead of the useUndoRedo() call below, which needs its setter.
+  const [hoverBand, setHoverBand] = useState<string | null>(null);
+  const {
+    rawBlocks,
+    mutate,
+    setRawBlocksDirectly,
+    startSpacingDrag,
+    undo,
+    redo,
+    draggingBand,
+  } = useUndoRedo(clone((page.layout as Block[] | undefined) ?? []), setDirty, setSel, bumpStructural, setHoverBand);
   const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
   // Sprint 2: below `lg` the palette/inspector asides become off-canvas
   // drawers (same pattern as Shell's mobile nav) instead of the fixed
@@ -787,7 +805,6 @@ export default function Designer({
   // its onLoad fires — covers the skeleton overlay below so a reload never
   // shows the browser's own blank-frame flash, however brief.
   const [reloading, setReloading] = useState(true);
-  const [dirty, setDirty] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1244,19 +1261,6 @@ export default function Designer({
       setTranslating(false);
     }
   }
-  // Figma-style spacing overlay: the hatched fill band only shows while the
-  // matching handle is hovered or actively dragged, not for the whole
-  // selected box's perimeter at once — a persistent 4-sided hatch on every
-  // selection was too visually noisy (user feedback). The small "Npx" badge
-  // itself still always shows once selected; only the colored band is gated.
-  const [hoverBand, setHoverBand] = useState<string | null>(null);
-  // A drag in progress must keep its band shown even once the mouse leaves
-  // the small handle it started on — dragging moves the cursor away from
-  // that ~20px hit target almost immediately, which used to fire
-  // onMouseLeave and clear hoverBand right as the drag began (the band
-  // would then only reappear if the cursor happened to re-enter a handle).
-  // startSpacingDrag sets this before the first onMouseLeave can fire.
-  const draggingBand = useRef(false);
   // When the four/two sides are linked (dragging one moves them all), a
   // single shared key for the whole group means hovering/dragging any one
   // handle shows every linked side's band together, not just the one edge
@@ -1269,8 +1273,6 @@ export default function Designer({
       if (!draggingBand.current) setHoverBand((k) => (k === key ? null : k));
     },
   });
-  const history = useRef<Block[][]>([]);
-  const future = useRef<Block[][]>([]);
   const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
   // Which slide each slider element is previewing on the Blocks canvas, keyed
@@ -1295,87 +1297,6 @@ export default function Designer({
   const frameARef = useRef<HTMLIFrameElement>(null);
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
-
-  // Uses the functional setState form so multiple mutate() calls fired
-  // synchronously in the same tick each build on the PREVIOUS call's result
-  // instead of all cloning the same pre-edit `blocks` closure value and
-  // racing to overwrite each other. This came up for real: a "linked"
-  // FourSideControl commit calls setSide once per side (sides.forEach) — 4
-  // separate mutate() calls back to back — and with a plain `const next =
-  // clone(blocks)` here, all 4 cloned the same stale snapshot and only the
-  // LAST call's single-side change actually stuck (every other side's
-  // change was silently discarded), even though the linked value looked
-  // right in the input itself.
-  function mutate(fn: (next: Block[]) => void) {
-    history.current.push(clone(rawBlocks));
-    if (history.current.length > 50) history.current.shift();
-    future.current = [];
-    setRawBlocks((prev) => {
-      const next = clone(prev);
-      fn(next);
-      return next;
-    });
-    setDirty(true);
-  }
-
-  // Figma-style drag-to-resize for the spacing-overlay badges: one history
-  // entry for the whole drag (pushed once, up front) instead of one per
-  // mousemove — every subsequent move re-derives the full next value from
-  // the drag's start snapshot and overwrites, rather than accumulating.
-  function startSpacingDrag(
-    e: React.MouseEvent,
-    startPx: number,
-    axis: "x" | "y",
-    sign: 1 | -1,
-    apply: (next: Block[], px: number) => void,
-    bandKey?: string,
-  ) {
-    e.stopPropagation();
-    e.preventDefault();
-    const startPos = axis === "x" ? e.clientX : e.clientY;
-    const base = clone(rawBlocks);
-    history.current.push(clone(rawBlocks));
-    if (history.current.length > 50) history.current.shift();
-    future.current = [];
-    draggingBand.current = true;
-    if (bandKey) setHoverBand(bandKey);
-    function onMove(ev: MouseEvent) {
-      const pos = axis === "x" ? ev.clientX : ev.clientY;
-      const px = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
-      const next = clone(base);
-      apply(next, px);
-      setRawBlocks(next);
-      setDirty(true);
-    }
-    function onUp() {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      draggingBand.current = false;
-      if (bandKey) setHoverBand((k) => (k === bandKey ? null : k));
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
-
-  function undo() {
-    const prev = history.current.pop();
-    if (!prev) return;
-    future.current.push(clone(rawBlocks));
-    setRawBlocks(prev);
-    setSel(null);
-    setDirty(true);
-    bumpStructural();
-  }
-
-  function redo() {
-    const next = future.current.pop();
-    if (!next) return;
-    history.current.push(clone(rawBlocks));
-    setRawBlocks(next);
-    setSel(null);
-    setDirty(true);
-    bumpStructural();
-  }
 
   useEffect(() => {
     setSelectedRect(null);
@@ -2287,7 +2208,7 @@ export default function Designer({
     setError(null);
     try {
       const restored = await api.restorePageRevision(tenantHost, token, page.id as string, revisionId);
-      setRawBlocks(clone((restored.layout as Block[] | undefined) ?? []));
+      setRawBlocksDirectly(clone((restored.layout as Block[] | undefined) ?? []));
       setPageSettings((restored.settings as PageSettings) ?? {});
       page.status = restored.status as string;
       page.layout = restored.layout;
