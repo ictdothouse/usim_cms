@@ -166,6 +166,7 @@ import { ICONS } from "./designer/icons";
 import { BASE_LANG, type DesignerCtx, type ClipLevel } from "./designer/context";
 import { useClipboard } from "./designer/hooks/useClipboard";
 import { useUndoRedo } from "./designer/hooks/useUndoRedo";
+import { useBpStyle } from "./designer/hooks/useBpStyle";
 import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -444,13 +445,6 @@ export default function Designer({
   // like Heading doesn't force scrolling past Padding/Margin/Typography just
   // to reach the Text field, or vice versa.
   const [inspectorTab, setInspectorTab] = useState<"content" | "style">("content");
-  // Four-side padding/radius controls (section Inspector): linked = one input
-  // sets all 4 sides/corners equal; unlinked = Top/Right/Bottom/Left edited
-  // independently. UI-only toggle, not persisted — doesn't change what's
-  // already stored, only which input(s) are shown.
-  const [linkedPadding, setLinkedPadding] = useState(true);
-  const [linkedRadius, setLinkedRadius] = useState(true);
-  const [linkedMargin, setLinkedMargin] = useState(true);
   function toggleGroup(g: FieldGroupKey) {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -460,35 +454,21 @@ export default function Designer({
     });
   }
 
-  // Breakpoint edit mode — admin-preview only (Framer-style Desktop/Tablet/
-  // Mobile toggle). Narrows the canvas width and routes Inspector field
-  // edits into each node's `bp` override bag instead of its base props.
-  // apps/frontend never reads `bp` — the real site is unaffected, this is
-  // purely how the page looks/edits inside this Designer session.
-  const [bp, setBp] = useState<"desktop" | "tablet" | "mobile">("desktop");
-  function bpKey(key: string) {
-    return `${bp}:${key}`;
-  }
-  // Whether ANY of `keys` has an override at the CURRENT bp — a FourSideControl
-  // covers several side keys (paddingTop/Right/Bottom/Left) at once, so its own
-  // toggle icon represents the group, not one key.
-  function bpKeysOverridden(bag: Record<string, string> | undefined, keys: string[]): boolean {
-    return !!bag && keys.some((k) => bag[bpKey(k)] !== undefined);
-  }
-  // Enabling an override seeds it at "" (falls through lengthValue's own
-  // default-preset resolution until the author actually types a value) rather
-  // than copying the resolved desktop value — simpler, and "no override yet
-  // but the icon is now active" is itself a real, distinct state worth
-  // showing. Disabling removes every one of `keys`' override entries.
-  function toggleBpKeys(bag: Record<string, string> | undefined, keys: string[]): Record<string, string> {
-    const has = bpKeysOverridden(bag, keys);
-    const next = { ...(bag ?? {}) };
-    for (const k of keys) {
-      if (has) delete next[bpKey(k)];
-      else next[bpKey(k)] = "";
-    }
-    return next;
-  }
+  const {
+    bp,
+    setBp,
+    bpKey,
+    bpGetValue,
+    bpKeysOverridden,
+    toggleBpKeys,
+    sideValue,
+    linkedPadding,
+    setLinkedPadding,
+    linkedRadius,
+    setLinkedRadius,
+    linkedMargin,
+    setLinkedMargin,
+  } = useBpStyle();
   // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
   // — this is real (SectionBlock.astro renders the matching @media rule on
   // the published site), so the Blocks canvas ghosting it here isn't just
@@ -511,25 +491,6 @@ export default function Designer({
         <Icon className="h-2.5 w-2.5" /> {t("designer-hidden-at-bp")}
       </span>
     );
-  }
-  function bpGetValue(base: string | undefined, overrides: Record<string, string> | undefined, key: string) {
-    if (bp !== "desktop") {
-      const ov = overrides?.[bpKey(key)];
-      if (ov !== undefined) return ov;
-    }
-    return base ?? "";
-  }
-  // Canvas-preview equivalents of bpGetValue — resolve the active
-  // breakpoint's overrides into the same style objects colStyle()/the
-  // section wrapper/element margin already compute from desktop props.
-  // Resolves one side/corner of a four-side control: its own override (bp-
-  // aware) if set, else the shared axis/preset field's value (also bp-aware).
-  // Generic version of fourSideValue()/setFourSideValue() below — same
-  // fallback-chain resolution, but for any props/bp bag (Section, Column, or
-  // Element), not just SectionProps.
-  function sideValue(props: Record<string, string> | undefined, bpBag: Record<string, string> | undefined, perSideKey: string, fallbackKey: string): string {
-    const raw = bpGetValue(props?.[perSideKey], bpBag, perSideKey);
-    return raw || bpGetValue(props?.[fallbackKey], bpBag, fallbackKey);
   }
   function fourSideValue(sp: SectionProps, perSideKey: string, fallbackKey: string): string {
     return sideValue(sp as unknown as Record<string, string>, sp.bp, perSideKey, fallbackKey);
