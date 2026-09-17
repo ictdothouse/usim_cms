@@ -148,6 +148,7 @@ import * as api from "@/lib/api";
 import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn, childrenOf, getNode, removeAt, insertAt, moveWithin } from "./designerTree";
+import { section } from "./designer/blockPath";
 import type { Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem, Sel, PageSettings } from "./designer/types";
 import { parsePairs, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
 import { TemplatePreview } from "./designer/TemplatePreview";
@@ -1993,8 +1994,6 @@ export default function Designer({
       document.head.appendChild(link);
     });
   }, [blocks]);
-
-  const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionProps;
 
   // Extracted from BlockControls/Inspector's inline closures so both those
   // and LiveEditToolbar (Live Edit mode) call one shared implementation per
