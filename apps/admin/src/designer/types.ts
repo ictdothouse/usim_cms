@@ -314,6 +314,14 @@ export interface Block {
 // can never import it back from Designer.tsx.
 export type Sel = number[] | null;
 
+// Canvas drag-in-progress descriptor (Designer()'s own `drag` ref) — moved
+// here (Layer 2, useBlockOps) since dropIntoColumn needs it and designer/
+// files can't import a type back from Designer.tsx.
+export type Drag =
+  | { kind: "new"; type: ElType }
+  | { kind: "move"; path: number[] }
+  | { kind: "tree-reorder"; treeKind: "section" | "column"; path: number[] };
+
 // Page-wide Designer defaults (pages.settings JSONB), read by Inspector's
 // "nothing selected" panel. Moved here alongside Sel for the same reason.
 export interface PageSettings {

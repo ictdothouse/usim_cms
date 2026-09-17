@@ -168,6 +168,7 @@ import { useClipboard } from "./designer/hooks/useClipboard";
 import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import { useBpStyle } from "./designer/hooks/useBpStyle";
 import { useLiveEditBridge } from "./designer/hooks/useLiveEditBridge";
+import { useBlockOps } from "./designer/hooks/useBlockOps";
 import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -1216,7 +1217,6 @@ export default function Designer({
       if (!draggingBand.current) setHoverBand((k) => (k === key ? null : k));
     },
   });
-  const drag = useRef<Drag | null>(null);
   const editingText = useRef<Record<string, string>>({});
   // Which slide each slider element is previewing on the Blocks canvas, keyed
   // by element id (a page can hold several sliders). The canvas used to
@@ -1262,6 +1262,25 @@ export default function Designer({
   }, []);
 
   const { clipCopy, clipRead, clipHas, styleCopy, styleRead, styleHas } = useClipboard();
+
+  const {
+    drag,
+    isSectionLocked,
+    duplicateSection, copySection, pasteSection, copyStyleSection, pasteStyleSection, deleteSection,
+    duplicateColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, nudgeColumn,
+    deleteRow, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, setRowGap,
+    duplicateElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, deleteElement, moveElement,
+    dropIntoColumn,
+  } = useBlockOps({
+    blocks,
+    mutate,
+    setSel,
+    bumpStructural,
+    isSuper,
+    t,
+    clipboard: { clipCopy, clipRead, styleCopy, styleRead },
+    setDropHint,
+  });
 
   const {
     mode,
@@ -1594,189 +1613,6 @@ export default function Designer({
     });
   }, [blocks]);
 
-  // Extracted from BlockControls/Inspector's inline closures so both those
-  // and LiveEditToolbar (Live Edit mode) call one shared implementation per
-  // action+level instead of re-deriving the same splice/clip logic.
-  // Section lock (Page Blueprint deferred item) — a superadmin can mark a
-  // section `locked` (props.locked === "true", toggled in the Inspector) so
-  // a non-superadmin can view it but never mutate it. Only delete and
-  // paste-style actually overwrite the locked section's own content (every
-  // other section action — duplicate, copy, paste-after, move, save-as-
-  // template — leaves it untouched, so those stay enabled). This is UX
-  // only: the real gate is apps/api's pagesBeforeChange, which rejects any
-  // save that changes or removes a locked section regardless of what the
-  // client sends.
-  function isSectionLocked(b: number): boolean {
-    return !isSuper && (blocks[b]?.props as unknown as SectionProps | undefined)?.locked === "true";
-  }
-  function duplicateSection(b: number) {
-    mutate((bs) => insertAt(bs, [], clone(getNode(bs, [b])), b + 1));
-    bumpStructural();
-  }
-  function copySection(b: number) {
-    clipCopy("section", blocks[b]);
-  }
-  function pasteSection(b: number) {
-    const data = clipRead<Block>("section");
-    if (data) {
-      mutate((bs) => insertAt(bs, [], clone(data), b + 1));
-      bumpStructural();
-    }
-  }
-  function copyStyleSection(b: number) {
-    // rows is the section's content (children), never its "style" —
-    // stripped so pasting style elsewhere can't overwrite content.
-    const { rows: _rows, ...styleProps } = blocks[b].props as unknown as SectionProps;
-    styleCopy("section", styleProps as unknown as Record<string, string>);
-  }
-  function pasteStyleSection(b: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const style = styleRead("section");
-    if (style) mutate((bs) => Object.assign(bs[b].props, style));
-  }
-  function deleteSection(b: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => {
-      removeAt(bs, [b]);
-    });
-    setSel(null);
-    bumpStructural();
-  }
-
-  function duplicateColumn(b: number, r: number, c: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => insertAt(bs, [b, r], clone(getNode(bs, [b, r, c]) as Col), c + 1));
-    bumpStructural();
-  }
-  function copyColumn(b: number, r: number, c: number) {
-    clipCopy("column", getNode(blocks, [b, r, c]) as Col);
-  }
-  function pasteColumn(b: number, r: number, c: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const data = clipRead<Col>("column");
-    if (data) {
-      mutate((bs) => insertAt(bs, [b, r], clone(data), c + 1));
-      bumpStructural();
-    }
-  }
-  function copyStyleColumn(b: number, r: number, c: number) {
-    styleCopy("column", (getNode(blocks, [b, r, c]) as Col).props ?? {});
-  }
-  function pasteStyleColumn(b: number, r: number, c: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const style = styleRead("column");
-    if (style)
-      mutate((bs) => {
-        const target = getNode(bs, [b, r, c]) as Col;
-        target.props = { ...(target.props ?? {}), ...style };
-      });
-  }
-  function deleteColumn(b: number, r: number, c: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => {
-      removeAt(bs, [b, r, c]);
-      if ((childrenOf(bs, [b, r]) as Col[]).length === 0) removeAt(bs, [b, r]);
-    });
-    setSel(null);
-    bumpStructural();
-  }
-  // Named distinctly from designerTree.ts's imported `moveColumn` (a bulk
-  // from/to array-mutation helper) — this one is the arrow-button single-step
-  // nudge. They used to share a name, which let this local function
-  // declaration (hoisted) shadow the import for the whole component body,
-  // breaking the imported moveColumn's real call sites below.
-  function nudgeColumn(b: number, r: number, c: number, dir: -1 | 1) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const target = c + dir;
-    if (target < 0 || target >= (childrenOf(blocks, [b, r]) as Col[]).length) return;
-    mutate((bs) => moveWithin(bs, [b, r], c, target));
-    setSel([b, r, target]);
-    bumpStructural();
-  }
-  // A freshly added-row preset has columns but no elements in them yet — the
-  // only way to remove it was previously to delete each of its columns one
-  // at a time (deleteColumn only cascades to the row once its last column is
-  // gone). This is the direct one-click equivalent.
-  function deleteRow(b: number, r: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => removeAt(bs, [b, r]));
-    setSel(null);
-    bumpStructural();
-  }
-  function moveRow(b: number, r: number, dir: -1 | 1) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const target = r + dir;
-    if (target < 0 || target >= (childrenOf(blocks, [b]) as Row[]).length) return;
-    mutate((bs) => moveWithin(bs, [b], r, target));
-    setSel([b, target]);
-    bumpStructural();
-  }
-  function duplicateRow(b: number, r: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => insertAt(bs, [b], clone(getNode(bs, [b, r]) as Row), r + 1));
-    bumpStructural();
-  }
-  function copyRow(b: number, r: number) {
-    clipCopy("row", getNode(blocks, [b, r]) as Row);
-  }
-  function pasteRow(b: number, r: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const data = clipRead<Row>("row");
-    if (data) {
-      mutate((bs) => insertAt(bs, [b], clone(data), r + 1));
-      bumpStructural();
-    }
-  }
-  function copyStyleRow(b: number, r: number) {
-    const { columns: _columns, ...styleProps } = getNode(blocks, [b, r]) as Row;
-    styleCopy("row", styleProps as unknown as Record<string, string>);
-  }
-  function pasteStyleRow(b: number, r: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const style = styleRead("row");
-    if (style) mutate((bs) => Object.assign(getNode(bs, [b, r]) as Row, style));
-  }
-  function setRowGap(b: number, r: number, gap: string | undefined) {
-    mutate((bs) => {
-      (getNode(bs, [b, r]) as Row).gap = gap;
-    });
-  }
   function setPageGap(gap: string | undefined) {
     setPageSettings((s) => ({ ...s, gap }));
     setDirty(true);
@@ -1797,99 +1633,6 @@ export default function Designer({
     setPageSettings((s) => (preset ? { ...s, theme: preset.settings, themePresetName: preset.name } : { ...s, theme: undefined, themePresetName: undefined }));
     setDirty(true);
   }
-
-  function duplicateElement(b: number, r: number, c: number, e: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => {
-      const src = getNode(bs, [b, r, c, e]) as El;
-      insertAt(bs, [b, r, c], { ...clone(src), id: uid() }, e + 1);
-    });
-    bumpStructural();
-  }
-  function copyElement(b: number, r: number, c: number, e: number) {
-    clipCopy("element", getNode(blocks, [b, r, c, e]) as El);
-  }
-  function pasteElement(b: number, r: number, c: number, e: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const data = clipRead<El>("element");
-    if (data) {
-      mutate((bs) => insertAt(bs, [b, r, c], { ...clone(data), id: uid() }, e + 1));
-      bumpStructural();
-    }
-  }
-  function copyStyleElement(b: number, r: number, c: number, e: number) {
-    const el = getNode(blocks, [b, r, c, e]) as El;
-    styleCopy("element", el.props, el.type);
-  }
-  function pasteStyleElement(b: number, r: number, c: number, e: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const style = styleRead("element");
-    if (style)
-      mutate((bs) => {
-        const target = getNode(bs, [b, r, c, e]) as El;
-        target.props = { ...target.props, ...style };
-      });
-  }
-  function deleteElement(b: number, r: number, c: number, e: number) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => {
-      removeAt(bs, [b, r, c, e]);
-    });
-    setSel(null);
-    bumpStructural();
-  }
-  function moveElement(b: number, r: number, c: number, e: number, dir: -1 | 1) {
-    if (isSectionLocked(b)) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    const target = e + dir;
-    if (target < 0 || target >= (childrenOf(blocks, [b, r, c]) as El[]).length) return;
-    mutate((bs) => moveWithin(bs, [b, r, c], e, target));
-    setSel([b, r, c, target]);
-    bumpStructural();
-  }
-
-  function dropIntoColumn(colPath: number[], index?: number) {
-    const d = drag.current;
-    drag.current = null;
-    setDropHint(null);
-    // Layers-tree section/column reorders are handled entirely by rowDragProps'
-    // own onDrop — a stray drop onto a canvas column must not fall through to
-    // the "move" (element) branch below, which would destructure this payload's
-    // section/column path as if it were an element's [b, r, c, e] path.
-    if (!d || d.kind === "tree-reorder") return;
-    if (isSectionLocked(colPath[0]) || (d.kind !== "new" && isSectionLocked(d.path[0]))) {
-      toast.error(t("designer-section-locked-toast"));
-      return;
-    }
-    mutate((bs) => {
-      if (d.kind === "new") {
-        insertAt(bs, colPath, newEl(d.type), index);
-        return;
-      }
-      const [sb, sr, sc, se] = d.path;
-      let idx = index;
-      // same-column move: removing the source first shifts later indexes down
-      if (idx !== undefined && sb === colPath[0] && sr === colPath[1] && sc === colPath[2] && se < idx) idx--;
-      const el = removeAt(bs, d.path);
-      insertAt(bs, colPath, el, idx);
-    });
-    setSel(null);
-  }
-
   // Quick-create (App.tsx's PagesPanel) only auto-derives the slug up
   // front — this is the "then boleh edit" half, exposed as a click-to-edit
   // field in the header instead of a whole page-settings screen.
