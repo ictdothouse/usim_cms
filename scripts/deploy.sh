@@ -12,7 +12,8 @@
 #
 # Reads .env (repo root) for: DEPLOY_SECRET (required — must match the api
 # container's own, see docker-compose.release.yml), and optionally
-# API_REPLICAS/FRONTEND_REPLICAS/ADMIN_REPLICAS (default 1 each) to scale.
+# API_REPLICAS/FRONTEND_REPLICAS/ADMIN_REPLICAS (default 1 each) to scale, and
+# SMOKE_TEST_HOST (a real tenant domain — see smoke_test()'s own comment).
 #
 # Test gate: each app's own Dockerfile runs its typecheck/test step as part
 # of the image build (see apps/api/Dockerfile's comment) — a failing test
@@ -41,6 +42,8 @@ DEPLOY_SECRET="${DEPLOY_SECRET:?set DEPLOY_SECRET in .env}"
 API_REPLICAS="${API_REPLICAS:-1}"
 FRONTEND_REPLICAS="${FRONTEND_REPLICAS:-1}"
 ADMIN_REPLICAS="${ADMIN_REPLICAS:-1}"
+SMOKE_TEST_HOST="${SMOKE_TEST_HOST:-}"
+SMOKE_TEST_PATH="${SMOKE_TEST_PATH:-/}"
 STATE_FILE="$REPO_DIR/.deploy-color"
 RELEASE_FILE="docker-compose.release.yml"
 HEALTH_TRIES=45 # 45 * 2s = 90s budget
@@ -79,6 +82,40 @@ wait_for_healthy() {
     sleep "$HEALTH_INTERVAL"
   done
   return 1
+}
+
+# Docker's own healthcheck (container_healthy above) hits /health, which
+# deliberately never renders a real page (server.mjs's own comment: "must
+# never depend on a tenant or the api being reachable") — so a build that
+# crashes only mid-render (2026-09-17's "RADIUS is not defined" SSR outage:
+# typechecked clean, passed /health, then threw on every real page once
+# promoted) sails straight through wait_for_healthy. This fetches one real
+# tenant page through the NEW color's own frontend container, the way a
+# browser actually would, before promote ever flips traffic to it.
+# Opt-in via SMOKE_TEST_HOST (a real tenant domain in .env) — skipped with a
+# warning when unset, so a fresh install/trial with no tenant configured yet
+# doesn't fail deploys on this.
+smoke_test() {
+  local project="$1" name="$2" body
+  if [ -z "$SMOKE_TEST_HOST" ]; then
+    echo "SMOKE_TEST_HOST not set in .env — skipping real-page smoke test (health check only)." >&2
+    return 0
+  fi
+  echo "-- smoke-testing $SMOKE_TEST_HOST$SMOKE_TEST_PATH via $name --"
+  if ! body=$(docker compose -p "$project" -f "$RELEASE_FILE" exec -T "$name" \
+    wget -qO- --header="Host: $SMOKE_TEST_HOST" "http://127.0.0.1:4321$SMOKE_TEST_PATH" 2>&1); then
+    echo "smoke test request failed:" >&2
+    echo "$body" >&2
+    return 1
+  fi
+  # A stream that broke mid-render (this outage's exact failure mode) never
+  # reaches its closing tag — cheap enough to catch without parsing HTML.
+  if ! echo "$body" | grep -qi "</html>"; then
+    echo "smoke test response looks truncated/broken (no closing </html>):" >&2
+    echo "$body" | tail -20 >&2
+    return 1
+  fi
+  return 0
 }
 
 # Dial list for one service, e.g. ["ucms-green-api-1:3000","ucms-green-api-2:3000"]
@@ -168,6 +205,15 @@ do_deploy() {
     exit 1
   fi
   echo "$next is healthy."
+
+  if ! smoke_test "$project" frontend; then
+    echo "" >&2
+    echo "$next failed the real-page smoke test — leaving ${CURRENT:-<none>} live untouched." >&2
+    docker compose -p "$project" -f "$RELEASE_FILE" logs --tail 50 frontend >&2 || true
+    docker compose -p "$project" -f "$RELEASE_FILE" down
+    exit 1
+  fi
+  echo "$next passed the smoke test."
 
   local body
   body=$(printf '{"admin":%s,"api":%s,"frontend":%s}' \

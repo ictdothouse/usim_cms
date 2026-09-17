@@ -320,12 +320,28 @@ cycle: reads `.deploy-color` (repo root) for the currently-live color, builds+st
 OTHER one (`--scale api=$API_REPLICAS` etc, default 1 each — see `.env.example`), polls
 each new container's real Docker healthcheck (`docker inspect`'s `.State.Health.Status`;
 a service with no HEALTHCHECK, like `admin`, just needs `.State.Running`) up to 90s, and
-only once every container is healthy does it POST to `POST /internal/deploy/promote` —
-which flips Caddy's live routes to the new color, atomically, via the exact same
-`syncCaddy`/`buildCaddyConfig` (`apps/api/src/proxy-sync.ts`) the tenant-domain-automation
-feature already used. Only then is `.deploy-color` updated and the OLD color torn down.
-Any failure before promote succeeds leaves the previously-live color completely untouched
-(zero impact) and tears down just the failed new color — safe to re-run.
+only once every container is healthy does it run `smoke_test` (see below), and only once
+that passes does it POST to `POST /internal/deploy/promote` — which flips Caddy's live
+routes to the new color, atomically, via the exact same `syncCaddy`/`buildCaddyConfig`
+(`apps/api/src/proxy-sync.ts`) the tenant-domain-automation feature already used. Only then
+is `.deploy-color` updated and the OLD color torn down. Any failure before promote succeeds
+leaves the previously-live color completely untouched (zero impact) and tears down just
+the failed new color — safe to re-run.
+- **`smoke_test` (added 2026-09-17, after a real outage)**: Docker's own healthcheck hits
+  `/health`, which deliberately never renders a real page (see the `/health` bullet below) —
+  so a build that typechecks clean, passes `/health`, and only throws mid-render (the
+  `"RADIUS is not defined"` SSR crash that shipped this day: a helper `export`ed straight off
+  an `.astro` file's frontmatter, which broke Astro's SSR chunk-splitting) sailed straight
+  through `wait_for_healthy` and got promoted to every tenant's live traffic. `smoke_test`
+  fetches one real tenant page (`SMOKE_TEST_HOST`/`SMOKE_TEST_PATH`, `.env`) through the NEW
+  color's own frontend container — the same way a browser actually would — and fails the
+  deploy (leaving the previous color untouched, same as a failed health check) if the
+  request errors or the response looks truncated (no closing `</html>`, this outage's exact
+  failure mode: Astro's stream broke mid-render). Opt-in: unset `SMOKE_TEST_HOST` skips it
+  with a warning, so a fresh install/trial with no tenant configured yet doesn't fail
+  deploys on this — set it once a real tenant exists. Not run on `rollback` (going back to
+  code that was already live before is lower-risk, and rollback is the emergency path —
+  slowing it down for a symmetry check wasn't worth it).
 - `buildCaddyConfig(tenants, upstreams?)` gained an optional `CaddyUpstreams` param
   (`{admin?, api?, frontend?}`, each an array of `host:port` dial strings) — omitted, it
   falls back to the single-container dial targets (`ADMIN_UPSTREAM`/`API_UPSTREAM`/
@@ -403,7 +419,9 @@ Any failure before promote succeeds leaves the previously-live color completely 
 - `apps/frontend/server.mjs` gained a plain `GET /health` (before `serveStatic`/`handler`)
   — Docker's own healthcheck in `docker-compose.release.yml` and `deploy.sh`'s promotion
   gate both need a liveness probe that never depends on a tenant or the api being
-  reachable, unlike every real page route.
+  reachable, unlike every real page route. That's also its blind spot: it can't catch a bug
+  that only throws while actually rendering a page — see `smoke_test` above, added after
+  exactly that happened.
 - **`install.sh`'s existing docker-mode trial flow is deliberately untouched** — it still
   publishes `api`/`frontend`/`admin` straight to host ports and never starts `proxy`,
   exactly as before. That flow is proven across real incidents (multi-distro, iptables,
