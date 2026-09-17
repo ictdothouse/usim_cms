@@ -170,149 +170,12 @@ import { useBpStyle } from "./designer/hooks/useBpStyle";
 import { useLiveEditBridge } from "./designer/hooks/useLiveEditBridge";
 import { useBlockOps } from "./designer/hooks/useBlockOps";
 import { useTemplateLibrary } from "./designer/hooks/useTemplateLibrary";
+import { usePageAndLanguage } from "./designer/hooks/usePageAndLanguage";
 import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-// "Paste style" strips these before merging onto a target, so copying a
-// heading's style and pasting it onto a button can't leak the heading's
-// actual text — only the type's own content field(s) need stripping;
-// section/column props are already style-only.
-// i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
-// a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through
-// /api/translate as a plain string. Everything else (accordion/tabs' `items`,
-// slider's `slides` JSON, `html`) is intentionally NOT auto-translated here —
-// translating delimited/structured data risks corrupting it — a switch to an
-// empty language slot just verbatim-copies those fields, same as before this
-// feature, and an author can hand-translate them.
-const TRANSLATABLE_TEXT_KEYS: Partial<Record<ElType, string[]>> = {
-  heading: ["text"],
-  text: ["text"],
-  button: ["label"],
-  image: ["alt"],
-  infobox: ["heading", "text"],
-  ctabanner: ["heading", "description", "button1Label", "button2Label"],
-  announcementbar: ["text", "linkLabel"],
-};
-// Which of an element type's own props are free-prose TEXT — these are
-// ALWAYS per-language (no shared-by-default/opt-in toggle the way a style
-// field gets one, see the Inspector's LangToggle): switching to a language
-// tab always shows/edits that language's OWN value for these keys, falling
-// back to the shared base value only until a translation is seeded.
-// Section/Column have no text-bucket fields at all, so `elType` undefined
-// (or any type with no TRANSLATABLE_TEXT_KEYS entry) is never a text key.
-function isTextKey(elType: string | undefined, key: string): boolean {
-  if (!elType) return false;
-  return (TRANSLATABLE_TEXT_KEYS[elType as ElType] ?? []).includes(key);
-}
-// Position-addressed key for a Section/Column/Element node's own per-language
-// override bag — `langOverrides[code][pathKey(...)]`. Sections have no id of
-// their own (only rows/columns/elements do), so this is positional, not
-// id-based: reordering sections/rows/columns/elements while a language
-// override exists on one of them can misassign it to whatever now sits at
-// that position — a known, visible-and-fixable (just re-toggle the override)
-// ceiling, not a silent corruption; an id-based scheme would be the upgrade
-// path if that ever becomes a real complaint.
-function pathKey(b: number, r?: number, c?: number, e?: number): string {
-  return [b, r, c, e].filter((n) => n !== undefined).join(".");
-}
-// Overlays a language's own override bag onto a clone of the shared base
-// tree — this is what the canvas/Inspector actually render/read while a
-// non-base language pill is active (see the `blocks` memo below). A flat key
-// (e.g. "paddingTop") becomes that node's own value for this language,
-// across every breakpoint (falls straight through the existing
-// bpGetValue/sideValue resolution chain exactly like an ordinary base value
-// would); a "tablet:"/"mobile:"-prefixed key instead merges into the node's
-// OWN `bp` bag, so it rides the exact same per-breakpoint resolution (and,
-// for Section/Column, the same real-published-site rendering) an ordinary bp
-// override already gets — this is the "also stack by breakpoint" opt-in a
-// language override can additionally turn on. Structure (which/how many
-// sections/rows/columns/elements exist) is never touched here — only style/
-// text VALUES change per language, per this whole feature's premise.
-function applyLangOverrides(base: Block[], bag: Record<string, Record<string, string>>): Block[] {
-  const out = clone(base);
-  out.forEach((block, b) => {
-    if (block.type !== "section") return;
-    const sp = block.props as unknown as SectionProps;
-    const spBag = bag[pathKey(b)];
-    if (spBag) {
-      for (const [key, value] of Object.entries(spBag)) {
-        if (key.startsWith("tablet:") || key.startsWith("mobile:")) sp.bp = { ...(sp.bp ?? {}), [key]: value };
-        else (sp as unknown as Record<string, string>)[key] = value;
-      }
-    }
-    (sp.rows ?? []).forEach((row, r) => {
-      (row.columns ?? []).forEach((col, c) => {
-        const colBag = bag[pathKey(b, r, c)];
-        if (colBag) {
-          for (const [key, value] of Object.entries(colBag)) {
-            if (key.startsWith("tablet:") || key.startsWith("mobile:")) col.bp = { ...(col.bp ?? {}), [key]: value };
-            else col.props = { ...(col.props ?? {}), [key]: value };
-          }
-        }
-        (col.elements ?? []).forEach((el, e) => {
-          const elBag = bag[pathKey(b, r, c, e)];
-          if (elBag) {
-            for (const [key, value] of Object.entries(elBag)) {
-              if (key.startsWith("tablet:") || key.startsWith("mobile:")) el.bp = { ...(el.bp ?? {}), [key]: value };
-              else el.props[key] = value;
-            }
-          }
-        });
-      });
-    });
-  });
-  return out;
-}
-// One-time, transparent upgrade of the OLD per-language shape
-// (`translations[code] = { layout: Block[] }` — a full, independently
-// forkable clone of the entire tree) into the new sparse-override shape.
-// The old shape is exactly what caused the reported bug: the first time a
-// language was opened it forked the WHOLE tree (style included), and once
-// forked, a later style edit on either side never propagated to the other —
-// it read as "editing English changed the style specifically for English"
-// even though the intent was always a shared style. Walks the old
-// translated tree alongside the CURRENT base tree at the same positions and
-// keeps ONLY each translatable text value — style is deliberately dropped
-// (kept from the base instead, per the confirmed migration choice), and a
-// structural mismatch (a block added/removed independently in one
-// language's old fork) just stops the walk for that one path rather than
-// attempting a full reconciliation. Never a hard DB migration — this runs
-// each time an old-shape page loads, same "upgrade silently on read, save in
-// the new shape on next write" convention every other schema evolution in
-// this codebase already uses.
-function migrateOldTranslation(base: Block[], oldLayout: Block[]): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
-  base.forEach((block, b) => {
-    if (block.type !== "section") return;
-    const oldBlock = oldLayout[b];
-    if (!oldBlock || oldBlock.type !== "section") return;
-    const sp = block.props as unknown as SectionProps;
-    const oldSp = oldBlock.props as unknown as SectionProps;
-    (sp.rows ?? []).forEach((row, r) => {
-      const oldRow = oldSp.rows?.[r];
-      if (!oldRow) return;
-      (row.columns ?? []).forEach((col, c) => {
-        const oldCol = oldRow.columns?.[c];
-        if (!oldCol) return;
-        (col.elements ?? []).forEach((el, e) => {
-          const oldEl = oldCol.elements?.[e];
-          if (!oldEl || oldEl.type !== el.type) return;
-          const keys = TRANSLATABLE_TEXT_KEYS[el.type as ElType];
-          if (!keys) return;
-          for (const key of keys) {
-            const val = oldEl.props[key];
-            if (typeof val === "string" && val.trim()) {
-              (out[pathKey(b, r, c, e)] ??= {})[key] = val;
-            }
-          }
-        });
-      });
-    });
-  });
-  return out;
-}
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
 // "0") into the rounded px number shown on the badge. rem assumed at the
 // browser default 16px root — this editor doesn't let authors change that.
@@ -485,6 +348,15 @@ export default function Designer({
     linkedMargin,
     setLinkedMargin,
   } = useBpStyle();
+
+  const {
+    blocks,
+    pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
+    siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
+    siteLanguages, pageLanguage, setPageLanguage,
+    activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,
+    langOverrides, isTextKey, pathKey, langKeysOverridden, toggleLangKeys, langStackKeysOverridden, toggleLangStackKeys, setLangValue,
+  } = usePageAndLanguage({ rawBlocks, page, tenantHost, token, bp, bpKey, setDirty, setSel });
   // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
   // — this is real (SectionBlock.astro renders the matching @media rule on
   // the published site), so the Blocks canvas ghosting it here isn't just
@@ -510,79 +382,6 @@ export default function Designer({
   }
   function fourSideValue(sp: SectionProps, perSideKey: string, fallbackKey: string): string {
     return sideValue(sp as unknown as Record<string, string>, sp.bp, perSideKey, fallbackKey);
-  }
-  // Per-language STYLE override — "different for this language" (Inspector's
-  // LangToggle), and, nested inside that, "also stack by breakpoint" (the
-  // existing BpToggle, reused). `langKeysOverridden`/`toggleLangKeys` are the
-  // outer opt-in: OFF means the field stays on the shared base value
-  // (edits made under a non-base language pill still land on `rawBlocks` via
-  // the plain `mutate()` path below, exactly as if the base pill were
-  // active) — this is the actual bug fix, style is shared by default.
-  // `langStackKeysOverridden`/`toggleLangStackKeys` are the inner opt-in,
-  // only meaningful once the outer one is on and only while previewing a
-  // non-desktop breakpoint: it further splits that language's own override
-  // per-breakpoint, the same "tablet:"/"mobile:"-prefixed-key convention the
-  // ordinary `bp` bag already uses (see applyLangOverrides/bpKey).
-  function langKeysOverridden(path: string, keys: string[]): boolean {
-    if (activeLang === BASE_LANG) return false;
-    const bag = langOverrides[activeLang]?.[path];
-    return !!bag && keys.some((k) => bag[k] !== undefined);
-  }
-  function toggleLangKeys(path: string, keys: string[]) {
-    const has = langKeysOverridden(path, keys);
-    setLangOverrides((prev) => {
-      const next = { ...prev, [activeLang]: { ...(prev[activeLang] ?? {}) } };
-      const bag = { ...(next[activeLang][path] ?? {}) };
-      for (const k of keys) {
-        if (has) {
-          delete bag[k];
-          delete bag[`tablet:${k}`];
-          delete bag[`mobile:${k}`];
-        } else {
-          bag[k] = "";
-        }
-      }
-      if (Object.keys(bag).length) next[activeLang][path] = bag;
-      else delete next[activeLang][path];
-      return next;
-    });
-    setDirty(true);
-  }
-  function langStackKeysOverridden(path: string, keys: string[]): boolean {
-    if (activeLang === BASE_LANG || bp === "desktop") return false;
-    const bag = langOverrides[activeLang]?.[path];
-    return !!bag && keys.some((k) => bag[bpKey(k)] !== undefined);
-  }
-  function toggleLangStackKeys(path: string, keys: string[]) {
-    if (bp === "desktop") return;
-    const has = langStackKeysOverridden(path, keys);
-    setLangOverrides((prev) => {
-      const next = { ...prev, [activeLang]: { ...(prev[activeLang] ?? {}) } };
-      const bag = { ...(next[activeLang][path] ?? {}) };
-      for (const k of keys) {
-        if (has) delete bag[bpKey(k)];
-        else bag[bpKey(k)] = "";
-      }
-      next[activeLang][path] = bag;
-      return next;
-    });
-    setDirty(true);
-  }
-  // Single-field write once a language style override is ON for that field
-  // (see langKeysOverridden above) — writes into the CURRENT breakpoint
-  // tier's slot within that language's own bag: flat (desktop-tier-and-
-  // beyond) unless the nested "stack by breakpoint" opt-in is also on for
-  // this key, in which case it lands in that tier's own "tablet:"/"mobile:"
-  // sub-key instead (see langStackKeysOverridden/toggleLangStackKeys).
-  function setLangValue(path: string, key: string, value: string) {
-    const stacked = bp !== "desktop" && langStackKeysOverridden(path, [key]);
-    const finalKey = stacked ? bpKey(key) : key;
-    setLangOverrides((prev) => {
-      const next = { ...prev, [activeLang]: { ...(prev[activeLang] ?? {}) } };
-      next[activeLang][path] = { ...(next[activeLang][path] ?? {}), [finalKey]: value };
-      return next;
-    });
-    setDirty(true);
   }
   function setFourSideValue(b: number, perSideKey: string, value: string) {
     const path = pathKey(b);
@@ -796,11 +595,6 @@ export default function Designer({
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
-  // Page-wide Designer defaults (default column gap, content width, left/right
-  // padding, and an optional theme snapshot) — separate from `blocks`/history
-  // since it's not part of the undo stack, same convention as slugDraft above.
-  // Persisted via save()'s `settings`.
-  const [pageSettings, setPageSettings] = useState<PageSettings>(() => (page.settings as PageSettings) ?? {});
   // A minted preview link is a snapshot of the canvas at mint time — any
   // further edit before the user actually clicks it would make it stale
   // (showing content older than what's now on screen), so drop it and
@@ -936,16 +730,6 @@ export default function Designer({
     return () => window.removeEventListener("message", onChromeHeight);
   }, []);
 
-  // "Theme" picker in Page Settings — this user's saved presets, same list
-  // ThemeForm's own collection reads (api.listThemePresets).
-  const [themePresets, setThemePresets] = useState<api.ThemePreset[]>([]);
-  useEffect(() => {
-    api.listThemePresets(token).then(setThemePresets).catch(() => {});
-  }, [token]);
-  // i18n Phase 4 — same page-level, not-part-of-the-undo-stack treatment as
-  // pageSettings above; persisted via save()'s `language` field.
-  const [pageLanguage, setPageLanguage] = useState<string>((page.language as string | null) ?? "");
-  const [siteLanguages, setSiteLanguages] = useState<api.SiteLanguage[]>([]);
   // "menu" element's Inspector needs a live list to populate its menuId
   // picker — dynamic per-tenant data, unlike every other field here which
   // is a static enum, so it's fetched once (like siteLanguages above) rather
@@ -969,219 +753,6 @@ export default function Designer({
   useEffect(() => {
     void api.listSymbols(tenantHost, token).then(setAvailableSymbols);
   }, [tenantHost]);
-  // i18n Phase 5 — site-wide master switch, plus this page's own opt-in;
-  // the Translations block below is only offered when both are true.
-  const [siteMultilangEnabled, setSiteMultilangEnabled] = useState(false);
-  const [pageMultilangEnabled, setPageMultilangEnabled] = useState<boolean>(Boolean(page.multilangEnabled));
-  // Per-language override bag — `langOverrides[code][pathKey][fieldKey]`.
-  // TEXT fields (isTextKey) are always stored per-language here, auto-seeded
-  // by machine translation the first time a language is opened (see
-  // seedMissingTextOverrides). STYLE fields only ever land here when the
-  // author explicitly turns on "different for this language" for that field
-  // (Inspector's LangToggle) — otherwise a style edit always writes straight
-  // into the shared `rawBlocks` tree (see setFourSideValue/setColSideValue/
-  // setElSideValue and the Section/Column/Element FieldGroups setValue
-  // further down), regardless of which language pill happens to be active.
-  // This REPLACES the old `content: Record<string, Block[]>` full-tree-per-
-  // language fork, which is exactly what caused the reported bug — style
-  // forked whole-tree the first time a language was opened and then
-  // diverged from the base forever (see migrateOldTranslation above for how
-  // an existing page's old-shape data is folded into this new shape).
-  const [langOverrides, setLangOverrides] = useState<Record<string, Record<string, Record<string, string>>>>(() => {
-    const base = clone((page.layout as Block[] | undefined) ?? []);
-    const raw =
-      (page.translations as Record<string, { layout?: Block[]; overrides?: Record<string, Record<string, string>> }> | null) ?? {};
-    const out: Record<string, Record<string, Record<string, string>>> = {};
-    for (const [code, v] of Object.entries(raw)) {
-      if (!v) continue;
-      if (v.overrides) out[code] = v.overrides;
-      else if (v.layout) out[code] = migrateOldTranslation(base, v.layout);
-    }
-    return out;
-  });
-  const [activeLang, setActiveLang] = useState(BASE_LANG);
-  const [translating, setTranslating] = useState(false);
-  // The canvas/Inspector's actual driving view: the shared base tree
-  // (`rawBlocks`) as-is while editing the default language, or that same
-  // tree with the active language's own overrides layered on top otherwise.
-  // Every read in this file (canvas render, Inspector's current-value
-  // display, ElPreview) goes through this — only `mutate`/`startSpacingDrag`/
-  // `undo`/`redo`/save() ever touch `rawBlocks` directly.
-  const blocks = useMemo(
-    () => (activeLang === BASE_LANG ? rawBlocks : applyLangOverrides(rawBlocks, langOverrides[activeLang] ?? {})),
-    [rawBlocks, activeLang, langOverrides],
-  );
-  useEffect(() => {
-    void api.getTenantLanguages(tenantHost, token).then((d) => {
-      setSiteLanguages(d.allEnabled);
-      setSiteMultilangEnabled(d.multilangEnabled);
-      // Only for a page that has never had its own language explicitly
-      // chosen — same "never override an explicit pick" rule as posts'.
-      if (!(page.language as string | null) && d.defaultLanguage) {
-        setPageLanguage(d.defaultLanguage);
-      }
-    });
-  }, [tenantHost, token, page.id]);
-  // Same "Language field doubles as the translation switcher, always the
-  // SAME row" behavior as PostEditorPage's switchLanguage/clickLanguagePill
-  // — see those for the full rule. Undo history no longer needs resetting on
-  // switch: `rawBlocks` (what undo/redo actually operate on) never changes
-  // just from switching which language pill is active.
-  // Real auto-translate (i18n follow-up — see CLAUDE.md): walks the
-  // CURRENTLY-DISPLAYED tree (`blocks`, i.e. whatever's on screen right now
-  // — same "translate from what you're looking at" behavior as before this
-  // rework) translating only TRANSLATABLE_TEXT_KEYS' plain-prose fields that
-  // `target` doesn't already have an override for, one /api/translate call
-  // at a time (sequential await, never Promise.all — see CLAUDE.md's
-  // deadlock note). A field that fails to translate is simply skipped —
-  // falls back to the shared base value — rather than blocking the switch.
-  async function seedMissingTextOverrides(target: string, source: string | undefined) {
-    const additions: Record<string, Record<string, string>> = {};
-    const existing = langOverrides[target] ?? {};
-    for (let b = 0; b < blocks.length; b++) {
-      const block = blocks[b];
-      if (block.type !== "section") continue;
-      const sp = block.props as unknown as SectionProps;
-      for (let r = 0; r < (sp.rows ?? []).length; r++) {
-        const row = sp.rows[r];
-        for (let c = 0; c < (row.columns ?? []).length; c++) {
-          const col = row.columns[c];
-          for (let e = 0; e < (col.elements ?? []).length; e++) {
-            const el = col.elements[e];
-            const keys = TRANSLATABLE_TEXT_KEYS[el.type as ElType];
-            if (!keys) continue;
-            const path = pathKey(b, r, c, e);
-            for (const key of keys) {
-              if (existing[path]?.[key] !== undefined) continue;
-              const val = el.props[key];
-              if (typeof val === "string" && val.trim()) {
-                try {
-                  const translated = await api.translateText(tenantHost, token, val, target, { source });
-                  (additions[path] ??= {})[key] = translated;
-                } catch {
-                  // keep untranslated (falls back to the shared base value) — don't block the switch
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    if (Object.keys(additions).length === 0) return;
-    setLangOverrides((prev) => {
-      const next = { ...prev, [target]: { ...(prev[target] ?? {}) } };
-      for (const [path, kv] of Object.entries(additions)) {
-        next[target][path] = { ...(next[target][path] ?? {}), ...kv };
-      }
-      return next;
-    });
-  }
-  async function switchPageLanguage(target: string) {
-    if (target === activeLang) return;
-    if (target !== BASE_LANG) {
-      const sourceCode = activeLang === BASE_LANG ? (pageLanguage || undefined) : activeLang;
-      setTranslating(true);
-      try {
-        await seedMissingTextOverrides(target, sourceCode);
-      } finally {
-        setTranslating(false);
-      }
-    }
-    setSel(null);
-    setActiveLang(target);
-  }
-  function clickPageLanguagePill(code: string) {
-    if (!pageLanguage) {
-      setPageLanguage(code);
-      setDirty(true);
-      return;
-    }
-    void switchPageLanguage(code === pageLanguage ? BASE_LANG : code);
-  }
-  // Which language slots currently have ANY content of their own — drives
-  // the "+"/pill-fill state in the Page Settings panel below (previously a
-  // `Boolean(content[slotKey])` check against the old full-tree-per-language
-  // map).
-  function hasLangSlot(code: string): boolean {
-    return code === BASE_LANG || Boolean(langOverrides[code] && Object.keys(langOverrides[code]).length);
-  }
-  // Force-regenerate a language's TEXT — switchPageLanguage above only fills
-  // in a still-missing value, so a page whose translations were saved
-  // before this real-translate fix existed (verbatim stub copies from the
-  // old behavior) would otherwise stay stale forever, since opening that
-  // pill just shows the existing (untranslated) content. Clears that
-  // language's existing TEXT overrides first (any of its own per-language
-  // STYLE overrides are left completely untouched — retranslating text was
-  // never meant to also discard a deliberate style choice), then re-seeds
-  // from the current base.
-  function elTypeAtPath(path: string): string | undefined {
-    const [b, r, c, e] = path.split(".").map(Number);
-    if (e === undefined) return undefined;
-    const sp = rawBlocks[b]?.props as unknown as SectionProps | undefined;
-    return sp?.rows?.[r]?.columns?.[c]?.elements?.[e]?.type;
-  }
-  async function retranslatePageLanguage(code: string) {
-    setTranslating(true);
-    try {
-      // Keep only this language's own STYLE overrides (never touched by a
-      // retranslate) — every TEXT entry is dropped here and freshly
-      // retranslated below. Computed synchronously (not inside the eventual
-      // setLangOverrides call) since the translate loop below needs to know
-      // which keys to fetch fresh values for regardless of what was there.
-      const prevBag = langOverrides[code] ?? {};
-      const styleOnly: Record<string, Record<string, string>> = {};
-      for (const [path, kv] of Object.entries(prevBag)) {
-        const elType = elTypeAtPath(path);
-        const kept: Record<string, string> = {};
-        for (const [key, value] of Object.entries(kv)) {
-          const bare = key.startsWith("tablet:") || key.startsWith("mobile:") ? key.slice(key.indexOf(":") + 1) : key;
-          if (!isTextKey(elType, bare)) kept[key] = value;
-        }
-        if (Object.keys(kept).length) styleOnly[path] = kept;
-      }
-      // Always translate FROM the shared base (`rawBlocks`), not whatever
-      // language happens to be on screen right now — same "retranslate
-      // always re-derives from the source of truth" rule the old
-      // full-tree-fork version of this function already followed.
-      const textAdditions: Record<string, Record<string, string>> = {};
-      for (let b = 0; b < rawBlocks.length; b++) {
-        const block = rawBlocks[b];
-        if (block.type !== "section") continue;
-        const sp = block.props as unknown as SectionProps;
-        for (let r = 0; r < (sp.rows ?? []).length; r++) {
-          const row = sp.rows[r];
-          for (let c = 0; c < (row.columns ?? []).length; c++) {
-            const col = row.columns[c];
-            for (let e = 0; e < (col.elements ?? []).length; e++) {
-              const el = col.elements[e];
-              const keys = TRANSLATABLE_TEXT_KEYS[el.type as ElType];
-              if (!keys) continue;
-              const path = pathKey(b, r, c, e);
-              for (const key of keys) {
-                const val = el.props[key];
-                if (typeof val === "string" && val.trim()) {
-                  try {
-                    const translated = await api.translateText(tenantHost, token, val, code, { source: pageLanguage || undefined });
-                    (textAdditions[path] ??= {})[key] = translated;
-                  } catch {
-                    // keep this one key untranslated — don't block the rest
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-      const merged: Record<string, Record<string, string>> = { ...styleOnly };
-      for (const [path, kv] of Object.entries(textAdditions)) {
-        merged[path] = { ...(merged[path] ?? {}), ...kv };
-      }
-      setLangOverrides((prev) => ({ ...prev, [code]: merged }));
-      setDirty(true);
-    } finally {
-      setTranslating(false);
-    }
-  }
   // When the four/two sides are linked (dragging one moves them all), a
   // single shared key for the whole group means hovering/dragging any one
   // handle shows every linked side's band together, not just the one edge
@@ -1399,26 +970,6 @@ export default function Designer({
     });
   }, [blocks]);
 
-  function setPageGap(gap: string | undefined) {
-    setPageSettings((s) => ({ ...s, gap }));
-    setDirty(true);
-  }
-  function setPageContentWidth(contentWidth: "contained" | "full" | undefined) {
-    setPageSettings((s) => ({ ...s, contentWidth }));
-    setDirty(true);
-  }
-  function setPagePaddingX(paddingX: string | undefined) {
-    setPageSettings((s) => ({ ...s, paddingX }));
-    setDirty(true);
-  }
-  // Selecting a preset copies its settings in as a one-time snapshot (same
-  // convention as every other "apply once, edit independently after" copy in
-  // this codebase — see CLAUDE.md's i18n bookmark-card note) — editing the
-  // preset later never retroactively changes this page.
-  function setPageThemePreset(preset: api.ThemePreset | null) {
-    setPageSettings((s) => (preset ? { ...s, theme: preset.settings, themePresetName: preset.name } : { ...s, theme: undefined, themePresetName: undefined }));
-    setDirty(true);
-  }
   // Quick-create (App.tsx's PagesPanel) only auto-derives the slug up
   // front — this is the "then boleh edit" half, exposed as a click-to-edit
   // field in the header instead of a whole page-settings screen.
