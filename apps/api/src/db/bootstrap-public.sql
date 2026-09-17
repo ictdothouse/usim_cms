@@ -129,6 +129,22 @@ CREATE TABLE IF NOT EXISTS "public"."roles" (
 -- replay into tenant databases where these tables don't belong).
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "role_id" uuid REFERENCES "public"."roles"("id") ON DELETE SET NULL;
 
+-- Architecture audit finding: "superadmin" | "webmaster" was only ever a
+-- comment on schema.ts's role column, never enforced by Postgres itself —
+-- and plugins/auth.ts's tenant-host check keys off the literal string
+-- "webmaster" (now fixed to a deny-list on "superadmin" instead, see that
+-- file), so a typo'd or future third role value would have silently meant
+-- "unrestricted, no host check applies". CHECK closes the DB half of that.
+DO $$ BEGIN
+  ALTER TABLE "public"."users" ADD CONSTRAINT "users_role_check" CHECK ("role" IN ('superadmin', 'webmaster'));
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+-- FK columns with no supporting index (control-plane tables only — see
+-- migrations/0027_fk_indexes.sql for the tenant-DB equivalents).
+CREATE INDEX IF NOT EXISTS "users_role_id_idx" ON "public"."users" ("role_id");
+CREATE INDEX IF NOT EXISTS "theme_presets_owner_user_id_idx" ON "public"."theme_presets" ("owner_user_id");
+
 -- Upgrade path for control-plane DBs bootstrapped before tenant_hosts/
 -- extra_permissions existed (multi-site users + per-user extra grants).
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "tenant_hosts" text[] DEFAULT '{}' NOT NULL;

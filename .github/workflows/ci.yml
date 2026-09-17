@@ -19,3 +19,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm --filter @ucms/api test
+      - run: pnpm --filter @ucms/admin test

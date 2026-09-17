@@ -462,6 +462,34 @@ callouts before assuming any of this is speculative hardening.
   security-audit finding, and the reason a future new credential-accepting path should centralize this
   check (an `assertUsableSession(session)` helper covering `previewOnly`/`pendingMfa`/`exp`) rather than
   repeat it inline each time.
+- **Media upload extension fix (2026-09-17, security audit finding).** `POST /api/media` used to derive
+  the stored file extension from the client-supplied `filename` (`path.extname`) — a part declaring
+  `Content-Type: video/mp4` with `filename: x.html` was stored and served back AS `.html` from
+  `/uploads/...` (same Fastify `app`, same origin as `GET /api/auth/session`), a stored-XSS → session-
+  hijack chain. Fixed the same way the branding-upload route (`POST /api/portal/branding-upload`)
+  already did it: extension comes from a server-controlled `MEDIA_EXT_BY_MIME` map keyed on the
+  ALLOWED-listed mimetypes, never the client's own filename — `ALLOWED_MEDIA_TYPES` (the old separate
+  allowlist) was folded into this same map so there's one source of truth instead of two.
+- **Tenant-host check is now a deny-list, not an allow-list (2026-09-17, security audit finding).**
+  `requireTenantAuth` (`plugins/auth.ts`) used to check `session.role === "webmaster"` before enforcing
+  `allowedHosts.includes(req.tenantHost)` — a third role value (never existed yet, but nothing in the DB
+  stopped one) would have silently skipped the host check entirely. Now `session.role !== "superadmin"`.
+  Paired with a new `CHECK (role IN ('superadmin','webmaster'))` constraint on `public.users.role`
+  (`bootstrap-public.sql`) — previously only a `schema.ts` comment, never enforced by Postgres itself.
+- **Tenant pool idle eviction (2026-09-17, architecture audit finding).** `tenantPools` (`tenant-pool.ts`)
+  used to live for the whole process lifetime once a tenant was first provisioned — at ~100 tenants
+  that's up to 500 idle-but-open connections through PgBouncer that never get reclaimed even for a
+  dormant host. A `setInterval` sweep (`IDLE_POOL_EVICT_MS` = 30min, checked every `IDLE_POOL_SWEEP_MS` =
+  5min) now closes and evicts any tenant pool that's both past the idle threshold and has nothing
+  currently checked out; the next request to that host just re-provisions a fresh `Pool` (the tenant's
+  database and migrations are untouched — only the in-process connection pool is closed).
+- **Missing FK indexes (2026-09-17, database audit finding).** `posts.categoryId`, `pages.headerId`/
+  `footerId`, `postRevisions.postId`, `pageRevisions.pageId`, `media.folderId` (tenant DBs,
+  `migrations/0027_fk_indexes.sql`) and `users.roleId`/`themePresets.ownerUserId` (control-plane,
+  `bootstrap-public.sql`) had no supporting index — a category-delete restrict check or revision-history
+  lookup sequential-scanned the table once row counts grew. All added as plain `CREATE INDEX IF NOT
+  EXISTS`, no data migration needed.
+
 - **Security tab** (`SecurityPanel`, a new top-level `Tab` reachable by both superadmin and webmaster —
   unlike Settings, which only a superadmin can reach) is where a user manages their OWN MFA
   enrollment, independent of the instance-wide switch's location.
@@ -538,7 +566,8 @@ callouts before assuming any of this is speculative hardening.
     `req.method` and reach `req.db`/`req.user`) is handed to
     `registerPublicCollectionRoutes`/`registerProtectedCollectionRoutes`, which mount generic CRUD routes
     at `/api/:collectionSlug` — collections are not meant to get hand-written route handlers. `pages`,
-    `posts`, and `templates` (`src/index.ts`) are wired up this way, each with real
+    `posts`, `categories`, `menus`, `events`, `siteChrome`, `symbols`, and `templates` (`src/index.ts`)
+    are all wired up this way, each with real
     `access.create/update/delete` checks (`hasPermission`) and a `beforeChange` hook enforced in the
     handlers — `501` only fires for a config with no `table` at all, not as a general stub state. The
     public list `GET` also applies generic query-string filters (`generic-crud.ts`'s
