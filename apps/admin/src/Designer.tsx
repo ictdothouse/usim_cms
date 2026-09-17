@@ -163,7 +163,8 @@ import { Inspector } from "./designer/Inspector";
 import { ElPreview } from "./designer/ElPreview";
 import { ELS } from "./designer/elements";
 import { ICONS } from "./designer/icons";
-import { BASE_LANG, type DesignerCtx } from "./designer/context";
+import { BASE_LANG, type DesignerCtx, type ClipLevel } from "./designer/context";
+import { useClipboard } from "./designer/hooks/useClipboard";
 import MediaPickerModal from "./MediaPickerModal";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -173,42 +174,6 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 // heading's style and pasting it onto a button can't leak the heading's
 // actual text — only the type's own content field(s) need stripping;
 // section/column props are already style-only.
-const CONTENT_KEYS: Record<ElType, string[]> = {
-  heading: ["text"],
-  text: ["text"],
-  image: ["src", "alt"],
-  video: ["src"],
-  button: ["label", "href"],
-  badge: ["label"],
-  icon: ["name"],
-  list: ["items"],
-  html: ["html"],
-  gallery: ["images"],
-  embed: ["url"],
-  spacer: [],
-  divider: [],
-  accordion: ["items"],
-  infobox: ["name", "heading", "text"],
-  tabs: ["items"],
-  slider: ["slides"],
-  menu: ["menuId"],
-  symbol: ["symbolId"],
-  cardgrid: ["cards"],
-  ctabanner: ["heading", "description", "button1Label", "button2Label"],
-  announcementbar: ["text", "linkLabel"],
-  postlist: [],
-  eventlist: [],
-  testimonial: ["testimonials"],
-  statscounter: ["stats"],
-  peoplegrid: ["people"],
-  socialicons: ["socials"],
-  logocloud: ["logos"],
-  timeline: ["timelineItems"],
-  documentdownload: ["documents"],
-  googlemap: ["embedUrl", "address"],
-  announcementticker: ["tickerItems"],
-  container: [],
-};
 // i18n follow-up — subset of CONTENT_KEYS that's actual freeform prose (not
 // a URL/icon-name/enum/delimited-pairs blob/raw HTML), safe to run through
 // /api/translate as a plain string. Everything else (accordion/tabs' `items`,
@@ -343,20 +308,6 @@ function migrateOldTranslation(base: Block[], oldLayout: Block[]): Record<string
   });
   return out;
 }
-type ClipLevel = "section" | "row" | "column" | "element";
-const CLIP_KEYS: Record<ClipLevel, string> = {
-  section: "designer:clip:section",
-  row: "designer:clip:row",
-  column: "designer:clip:column",
-  element: "designer:clip:element",
-};
-const CLIPSTYLE_KEYS: Record<ClipLevel, string> = {
-  section: "designer:clipstyle:section",
-  row: "designer:clipstyle:row",
-  column: "designer:clipstyle:column",
-  element: "designer:clipstyle:element",
-};
-
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
 // "0") into the rounded px number shown on the badge. rem assumed at the
 // browser default 16px root — this editor doesn't let authors change that.
@@ -850,7 +801,6 @@ export default function Designer({
   const [revisions, setRevisions] = useState<api.PageRevision[]>([]);
   const [revisionsLoaded, setRevisionsLoaded] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [clipTick, setClipTick] = useState(0); // bumped on every clipboard write, to re-render Paste button enabled-state
   // Modal device preview (Desktop/Tablet/Mobile) — separate from preview()'s
   // new-tab flow below: that one is a real browser navigation for a page's
   // published-and-clean case, this one is for blueprints (no public URL to
@@ -1470,40 +1420,7 @@ export default function Designer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structuralTick]);
 
-  // localStorage-backed clipboard (survives reload/switching pages), namespaced
-  // per level so copying a section doesn't clobber a copied element.
-  function clipCopy(level: ClipLevel, data: unknown) {
-    localStorage.setItem(CLIP_KEYS[level], JSON.stringify(data));
-    setClipTick((x) => x + 1);
-  }
-  function clipRead<T = unknown>(level: ClipLevel): T | null {
-    const raw = localStorage.getItem(CLIP_KEYS[level]);
-    return raw ? (JSON.parse(raw) as T) : null;
-  }
-  function clipHas(level: ClipLevel) {
-    void clipTick;
-    return localStorage.getItem(CLIP_KEYS[level]) !== null;
-  }
-  function styleCopy(level: ClipLevel, props: Record<string, string>, elType?: ElType) {
-    const clean = { ...props };
-    (elType ? CONTENT_KEYS[elType] : []).forEach((k) => delete clean[k]);
-    localStorage.setItem(CLIPSTYLE_KEYS[level], JSON.stringify(clean));
-    setClipTick((x) => x + 1);
-  }
-  function styleRead(level: ClipLevel): Record<string, string> | null {
-    const raw = localStorage.getItem(CLIPSTYLE_KEYS[level]);
-    return raw ? (JSON.parse(raw) as Record<string, string>) : null;
-  }
-  function styleHas(level: ClipLevel) {
-    void clipTick;
-    return localStorage.getItem(CLIPSTYLE_KEYS[level]) !== null;
-  }
-
-  useEffect(() => {
-    const onStorage = () => setClipTick((x) => x + 1);
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  const { clipCopy, clipRead, clipHas, styleCopy, styleRead, styleHas } = useClipboard();
 
   useEffect(() => {
     if (!ctxMenu) return;
