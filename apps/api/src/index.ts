@@ -121,50 +121,7 @@ import {
 import { uploadFile, deleteFile, localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
 import { translatePlainText, translateHtmlBody } from "./translate.js";
 import { generateImageVariants, deleteImageVariants } from "./image-variants.js";
-
-// Fixed permission matrix (resource.action) a superadmin composes into named
-// roles (schema.ts's roles.permissions) and assigns per webmaster user — see
-// docs/superpowers/specs/2026-07-13-admin-branding-features-design.md §12,
-// superseded 2026-07-14 from a per-user capability toggle to this full role
-// system per user request. "users.manage" stays a stored-but-unenforced
-// placeholder: no tenant-scoped multi-user endpoint exists yet to gate.
-const PERMISSIONS = new Set([
-  "pages.create",
-  "pages.update",
-  "pages.delete",
-  "posts.create",
-  "posts.update",
-  "posts.delete",
-  "media.upload",
-  "media.delete",
-  "theme.write",
-  "users.manage",
-  "sites.multi",
-  "languages.write",
-  "menus.write",
-  "blueprints.write",
-  "events.write",
-  "headerFooter.write",
-]);
-
-// Superadmin bypasses every permission check — a role's permissions are only
-// ever consulted for webmaster sessions.
-function hasPermission(args: AccessArgs, permission: string): boolean {
-  return args.role === "superadmin" || (args.permissions ?? []).includes(permission);
-}
-
-function mergePermissions(rolePermissions: string[], extraPermissions: string[] | null): string[] {
-  return Array.from(new Set([...rolePermissions, ...(extraPermissions ?? [])]));
-}
-
-function validatePermissions(permissions: unknown): string | null {
-  if (permissions === undefined) return null;
-  if (!Array.isArray(permissions) || !permissions.every((p) => typeof p === "string")) {
-    return "permissions must be a string array";
-  }
-  const unknown = permissions.find((p) => !PERMISSIONS.has(p));
-  return unknown ? `unknown permission: ${unknown}` : null;
-}
+import { PERMISSIONS, hasPermission, mergePermissions, validatePermissions } from "./routes/permissions.js";
 
 // Language-switcher placement/style — shared enum for both the global
 // (platform_settings) and per-site (tenant_languages) settings.
