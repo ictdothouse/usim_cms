@@ -14,7 +14,8 @@ import {
 import * as api from "@/lib/api";
 import type { Key } from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useT, ListLoading, BlueprintGallery, ThemeForm, NAV_GROUP_ORDER, NAV_GROUP_LABEL, type NavGroup } from "./App";
+import { useT, ListLoading, BlueprintGallery, NAV_GROUP_ORDER, NAV_GROUP_LABEL, type NavGroup } from "./App";
+import { ThemeForm } from "./ThemeForm";
 import { PageDesignerRoute, BlueprintDesignerRoute, SymbolDesignerRoute, HeaderFooterDesignerRoute } from "./DesignerRoutes";
 import CategoriesPanel from "./CategoriesPanel";
 import PagesPanel from "./PagesPanel";
