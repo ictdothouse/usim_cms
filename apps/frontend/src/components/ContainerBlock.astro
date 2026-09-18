@@ -62,7 +62,7 @@ interface Props {
   e: number;
   designerEdit?: boolean;
 }
-const { el, blockIndex, r, c, e, designerEdit = false } = Astro.props;
+const { el, blockIndex, r, c, e, designerEdit = false } = Astro.props as Props;
 const p = el.props ?? {};
 ---
 
