@@ -1,0 +1,1188 @@
+import { useEffect, useRef, useState } from "react";
+import { Palette, Sparkles, Trash2 } from "lucide-react";
+import * as api from "@/lib/api";
+import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
+import { useConfirm } from "@/hooks/useConfirm";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { useT, inputCls, btnPrimary, card, FormError } from "./App";
+
+// ---------- Theme (shared form for per-site and global) ----------
+// A curated slice of daisyUI's own built-in themes (real oklch() triples
+// copied from node_modules/daisyui/themes.css's [data-theme=X] rules, not
+// guessed) — picking one fills the 4 pickers below, which stay fully
+// editable afterwards, same as typing a color by hand.
+const THEME_PRESETS: Array<{ name: string; primary: [number, number, number]; secondary: [number, number, number]; base: [number, number, number]; text: [number, number, number] }> = [
+  { name: "light", primary: [0.45, 0.24, 277.023], secondary: [0.65, 0.241, 354.308], base: [1, 0, 0], text: [0.21, 0.006, 285.885] },
+  { name: "dark", primary: [0.58, 0.233, 277.117], secondary: [0.65, 0.241, 354.308], base: [0.2533, 0.016, 252.42], text: [0.97807, 0.029, 256.847] },
+  { name: "cupcake", primary: [0.85, 0.138, 181.071], secondary: [0.89, 0.061, 343.231], base: [0.97788, 0.004, 56.375], text: [0.23574, 0.066, 313.189] },
+  { name: "corporate", primary: [0.58, 0.158, 241.966], secondary: [0.55, 0.046, 257.417], base: [1, 0, 0], text: [0.22389, 0.031, 278.072] },
+  { name: "synthwave", primary: [0.71, 0.202, 349.761], secondary: [0.82, 0.111, 230.318], base: [0.15, 0.09, 281.288], text: [0.78, 0.115, 274.713] },
+  { name: "forest", primary: [0.68628, 0.185, 148.958], secondary: [0.69776, 0.135, 168.327], base: [0.2084, 0.008, 17.911], text: [0.83768, 0.001, 17.911] },
+  { name: "luxury", primary: [1, 0, 0], secondary: [0.27581, 0.064, 261.069], base: [0.14076, 0.004, 285.822], text: [0.75687, 0.123, 76.89] },
+  { name: "dracula", primary: [0.75461, 0.183, 346.812], secondary: [0.74202, 0.148, 301.883], base: [0.28822, 0.022, 277.508], text: [0.97747, 0.007, 106.545] },
+  { name: "winter", primary: [0.5686, 0.255, 257.57], secondary: [0.42551, 0.161, 282.339], base: [1, 0, 0], text: [0.41886, 0.053, 255.824] },
+  { name: "business", primary: [0.41703, 0.099, 251.473], secondary: [0.64092, 0.027, 229.389], base: [0.24353, 0, 0], text: [0.8487, 0, 0] },
+  { name: "coffee", primary: [0.71996, 0.123, 62.756], secondary: [0.34465, 0.029, 199.194], base: [0.24, 0.023, 329.708], text: [0.72354, 0.092, 79.129] },
+  { name: "night", primary: [0.75351, 0.138, 232.661], secondary: [0.68011, 0.158, 276.934], base: [0.20768, 0.039, 265.754], text: [0.84153, 0.007, 265.754] },
+];
+
+function presetToColors(p: (typeof THEME_PRESETS)[number]) {
+  return {
+    primaryColor: oklchToHex(...p.primary),
+    secondaryColor: oklchToHex(...p.secondary),
+    backgroundColor: oklchToHex(...p.base),
+    textColor: oklchToHex(...p.text),
+  };
+}
+
+// Random palette on the same oklch model as the presets above, not a
+// separate ad-hoc random-hex generator — a random hue for primary, an
+// analogous hue for secondary, and light/dark base+text picked together so
+// text stays readable against the background.
+function randomTheme() {
+  const hue = Math.random() * 360;
+  const dark = Math.random() < 0.5;
+  return {
+    primaryColor: oklchToHex(0.6, 0.19, hue),
+    secondaryColor: oklchToHex(0.62, 0.16, (hue + 130) % 360),
+    backgroundColor: dark ? oklchToHex(0.22, 0.02, hue) : oklchToHex(0.98, 0.01, hue),
+    textColor: dark ? oklchToHex(0.92, 0.02, hue) : oklchToHex(0.2, 0.02, hue),
+  };
+}
+
+// Color contrast can be perfect and a font can still be hard to read —
+// script/handwriting faces are illegible in any role, especially at small
+// size or paragraph length; condensed/display faces (Bebas Neue, Anton,
+// Righteous) are fine for a short heading but unreadable as extended body
+// copy, so those are only flagged when used for the body font.
+const SCRIPT_FONTS = new Set([
+  "Pacifico",
+  "Caveat",
+  "Dancing Script",
+  "Lobster",
+  "Permanent Marker",
+  "Shadows Into Light",
+  "Amatic SC",
+  "Indie Flower",
+]);
+const DISPLAY_ONLY_FONTS = new Set(["Bebas Neue", "Anton", "Righteous", "Abril Fatface"]);
+
+function isLegibleFont(name: string, role: "body" | "heading"): boolean {
+  if (!name) return true;
+  if (SCRIPT_FONTS.has(name)) return false;
+  return !(role === "body" && DISPLAY_ONLY_FONTS.has(name));
+}
+
+// Typeable/scrollable font picker shared by the heading/post-title/body
+// fields below — each field owns its own open/filter state, so 3 of these
+// can sit in one form without stepping on each other.
+function FontField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const matches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(value.toLowerCase()));
+  return (
+    <div className="relative">
+      <label className="block text-xs font-medium text-body">
+        {label}
+        <input
+          className={`${inputCls} mt-1`}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder={placeholder}
+        />
+      </label>
+      {open && matches.length > 0 && (
+        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
+          {matches.map((f) => (
+            <li key={f}>
+              <button
+                type="button"
+                onMouseDown={() => {
+                  onChange(f);
+                  setOpen(false);
+                }}
+                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
+                style={{ fontFamily: f }}
+              >
+                {f}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Curated heading/body pairings (not derived from the freeform GOOGLE_FONTS
+// list above) so "Generate pairing" always lands on a combination that's
+// actually designed to look intentional together, not two random fonts —
+// every pair here is a well-documented typography pairing (the kind of combo
+// fontpair.co-style galleries recommend), every font name is also in
+// GOOGLE_FONTS so the picker/preview can actually render it.
+const FONT_PAIRINGS: Array<{ heading: string; body: string }> = [
+  { heading: "Poppins", body: "Inter" },
+  { heading: "Playfair Display", body: "Source Sans Pro" },
+  { heading: "Playfair Display", body: "Raleway" },
+  { heading: "Space Grotesk", body: "Inter" },
+  { heading: "Merriweather", body: "Open Sans" },
+  { heading: "Merriweather", body: "Montserrat" },
+  { heading: "Montserrat", body: "Nunito" },
+  { heading: "Oswald", body: "Roboto" },
+  { heading: "Oswald", body: "Lato" },
+  { heading: "Libre Baskerville", body: "Lato" },
+  { heading: "Archivo", body: "Work Sans" },
+  { heading: "Bitter", body: "Karla" },
+  { heading: "Bitter", body: "Raleway" },
+  { heading: "Abril Fatface", body: "Mulish" },
+  { heading: "Abril Fatface", body: "Poppins" },
+  { heading: "DM Sans", body: "IBM Plex Sans" },
+  { heading: "Rubik", body: "Noto Sans" },
+  { heading: "Raleway", body: "Roboto" },
+  { heading: "Lora", body: "Montserrat" },
+  { heading: "Crimson Text", body: "Karla" },
+  { heading: "Cormorant Garamond", body: "Montserrat" },
+  { heading: "Josefin Sans", body: "Nunito" },
+  { heading: "Zilla Slab", body: "Work Sans" },
+  { heading: "Domine", body: "Mulish" },
+  { heading: "Barlow", body: "Fira Sans" },
+  { heading: "Manrope", body: "Inter" },
+  { heading: "Outfit", body: "Inter" },
+  { heading: "Plus Jakarta Sans", body: "Inter" },
+  { heading: "Quicksand", body: "Nunito" },
+  { heading: "Titillium Web", body: "Open Sans" },
+];
+function randomFontPairing() {
+  return FONT_PAIRINGS[Math.floor(Math.random() * FONT_PAIRINGS.length)];
+}
+
+// WCAG contrast ratio maxes out its useful range at 7:1 (the AAA threshold
+// for normal text) — scaling the percent to that instead of the ratio's true
+// max (21:1, pure black on white) keeps "100%" meaning "as readable as it
+// needs to be", not "the single most extreme pair possible".
+function readabilityScore(ratio: number): { percent: number; tone: "good" | "ok" | "poor" } {
+  const percent = Math.min(100, Math.round((ratio / 7) * 100));
+  const tone = ratio >= 4.5 ? "good" : ratio >= 3 ? "ok" : "poor";
+  return { percent, tone };
+}
+
+export function ThemeForm({
+  title,
+  desc,
+  load,
+  save,
+  token,
+  allowDeactivate,
+  previewTenantHost,
+}: {
+  title: string;
+  desc?: string;
+  load: () => Promise<Record<string, string>>;
+  save: (settings: Record<string, string>) => Promise<unknown>;
+  token: string;
+  // Only the per-site override has a "default" above it to fall back to —
+  // the global theme itself has nothing to deactivate into.
+  allowDeactivate?: boolean;
+  // Which site's real homepage "Test" opens with these not-yet-saved
+  // settings applied. Omitted for the Global Theme form (no single site to
+  // preview against) — Test there still fills the form/local preview panel.
+  previewTenantHost?: string;
+}) {
+  const { t } = useT();
+  const confirm = useConfirm();
+  const [primaryColor, setPrimaryColor] = useState("");
+  const [secondaryColor, setSecondaryColor] = useState("");
+  const [backgroundColor, setBackgroundColor] = useState("");
+  const [textColor, setTextColor] = useState("");
+  const [fontFamily, setFontFamily] = useState("");
+  const [headingFont, setHeadingFont] = useState("");
+  const [subHeadingFont, setSubHeadingFont] = useState("");
+  const [postTitleFont, setPostTitleFont] = useState("");
+  const [postTitleFontSize, setPostTitleFontSize] = useState("");
+  const [postTitleLineHeight, setPostTitleLineHeight] = useState("");
+  // Semantic palette + typography scale (design.md v2) — same open-bag/no-
+  // migration convention as every other theme key; see App.tsx's THEME_TABS.
+  const [tertiaryColor, setTertiaryColor] = useState("");
+  const [successColor, setSuccessColor] = useState("");
+  const [warningColor, setWarningColor] = useState("");
+  const [errorColor, setErrorColor] = useState("");
+  const [infoColor, setInfoColor] = useState("");
+  const [captionFont, setCaptionFont] = useState("");
+  const [headingFontSize, setHeadingFontSize] = useState("");
+  const [headingLineHeight, setHeadingLineHeight] = useState("");
+  const [subHeadingFontSize, setSubHeadingFontSize] = useState("");
+  const [subHeadingLineHeight, setSubHeadingLineHeight] = useState("");
+  const [bodyFontSize, setBodyFontSize] = useState("");
+  const [bodyLineHeight, setBodyLineHeight] = useState("");
+  const [captionFontSize, setCaptionFontSize] = useState("");
+  const [captionLineHeight, setCaptionLineHeight] = useState("");
+  const [activeTab, setActiveTab] = useState<"colors" | "typography" | "postdisplay" | "branding">("colors");
+  const [importNotice, setImportNotice] = useState(false);
+  const [showPostTags, setShowPostTags] = useState("");
+  const [showPostCategory, setShowPostCategory] = useState("");
+  const [showPostAuthor, setShowPostAuthor] = useState("");
+  const [showPostDate, setShowPostDate] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [faviconUrl, setFaviconUrl] = useState("");
+  const [brandUploading, setBrandUploading] = useState<"logo" | "favicon" | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [presets, setPresets] = useState<api.ThemePreset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Per-site ThemeForm uploads into that tenant's own media library; the
+  // Global Theme form (no previewTenantHost) has no tenant media library to
+  // use, so it uploads into a fixed control-plane "_global" folder instead
+  // (POST /api/portal/branding-upload) — this becomes every site's default
+  // logo/favicon unless a site's own Branding overrides it.
+  async function uploadBrandAsset(file: File, kind: "logo" | "favicon") {
+    setBrandUploading(kind);
+    try {
+      const url = previewTenantHost ? await api.uploadMedia(previewTenantHost, token, file) : await api.uploadGlobalBranding(token, file);
+      // previewTenantHost is only set for a per-site ThemeForm (see the
+      // comment above this function) — the instance-wide Global Theme default
+      // has no single tenant domain to bake in, so it's stored bare/relative
+      // instead (no host at all): every tenant's own domain now proxies
+      // /uploads/* to the api container (see proxy-sync.ts), so a relative
+      // path resolves correctly against WHICHEVER tenant is rendering the
+      // page — the one case where storing no host beats baking in any one.
+      // The <img> preview a few lines below resolves it back to an absolute
+      // URL for the admin's own on-screen display only (a different origin
+      // than any tenant, so it needs one).
+      const full = url.startsWith("http") ? url : previewTenantHost ? api.publicMediaBase(previewTenantHost) + url : url;
+      if (kind === "logo") setLogoUrl(full);
+      else setFaviconUrl(full);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBrandUploading(null);
+    }
+  }
+
+  const currentColors = () => ({
+    primaryColor,
+    secondaryColor,
+    backgroundColor,
+    textColor,
+    tertiaryColor,
+    successColor,
+    warningColor,
+    errorColor,
+    infoColor,
+    fontFamily,
+    headingFont,
+    subHeadingFont,
+    postTitleFont,
+    captionFont,
+    postTitleFontSize,
+    postTitleLineHeight,
+    headingFontSize,
+    headingLineHeight,
+    subHeadingFontSize,
+    subHeadingLineHeight,
+    bodyFontSize,
+    bodyLineHeight,
+    captionFontSize,
+    captionLineHeight,
+    showPostTags,
+    showPostCategory,
+    showPostAuthor,
+    showPostDate,
+    logoUrl,
+    faviconUrl,
+  });
+
+  async function refreshPresets() {
+    try {
+      setPresets(await api.listThemePresets(token));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    void load().then((th) => {
+      setPrimaryColor(th.primaryColor ?? "");
+      setSecondaryColor(th.secondaryColor ?? "");
+      setBackgroundColor(th.backgroundColor ?? "");
+      setTextColor(th.textColor ?? "");
+      setFontFamily(th.fontFamily ?? "");
+      setHeadingFont(th.headingFont ?? "");
+      setSubHeadingFont(th.subHeadingFont ?? "");
+      setPostTitleFont(th.postTitleFont ?? "");
+      setPostTitleFontSize(th.postTitleFontSize ?? "");
+      setPostTitleLineHeight(th.postTitleLineHeight ?? "");
+      setTertiaryColor(th.tertiaryColor ?? "");
+      setSuccessColor(th.successColor ?? "");
+      setWarningColor(th.warningColor ?? "");
+      setErrorColor(th.errorColor ?? "");
+      setInfoColor(th.infoColor ?? "");
+      setCaptionFont(th.captionFont ?? "");
+      setHeadingFontSize(th.headingFontSize ?? "");
+      setHeadingLineHeight(th.headingLineHeight ?? "");
+      setSubHeadingFontSize(th.subHeadingFontSize ?? "");
+      setSubHeadingLineHeight(th.subHeadingLineHeight ?? "");
+      setBodyFontSize(th.bodyFontSize ?? "");
+      setBodyLineHeight(th.bodyLineHeight ?? "");
+      setCaptionFontSize(th.captionFontSize ?? "");
+      setCaptionLineHeight(th.captionLineHeight ?? "");
+      setShowPostTags(th.showPostTags ?? "");
+      setShowPostCategory(th.showPostCategory ?? "");
+      setShowPostAuthor(th.showPostAuthor ?? "");
+      setShowPostDate(th.showPostDate ?? "");
+      setLogoUrl(th.logoUrl ?? "");
+      setFaviconUrl(th.faviconUrl ?? "");
+    });
+    void refreshPresets();
+  }, []);
+
+  // "Add to my favourites" — saves whatever's currently in the form
+  // (unsaved edits included) as a new named preset, not what's on disk.
+  async function saveToCollection() {
+    const name = presetName.trim();
+    if (!name) return;
+    try {
+      await api.createThemePreset(token, name, currentColors());
+      setPresetName("");
+      await refreshPresets();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function deletePreset(id: string) {
+    try {
+      await api.deleteThemePreset(token, id);
+      await refreshPresets();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function loadPreset(p: api.ThemePreset) {
+    setPrimaryColor(p.settings.primaryColor ?? "");
+    setSecondaryColor(p.settings.secondaryColor ?? "");
+    setBackgroundColor(p.settings.backgroundColor ?? "");
+    setTextColor(p.settings.textColor ?? "");
+    setFontFamily(p.settings.fontFamily ?? "");
+    setHeadingFont(p.settings.headingFont ?? "");
+    setSubHeadingFont(p.settings.subHeadingFont ?? "");
+    setPostTitleFont(p.settings.postTitleFont ?? "");
+    setPostTitleFontSize(p.settings.postTitleFontSize ?? "");
+    setPostTitleLineHeight(p.settings.postTitleLineHeight ?? "");
+    setTertiaryColor(p.settings.tertiaryColor ?? "");
+    setSuccessColor(p.settings.successColor ?? "");
+    setWarningColor(p.settings.warningColor ?? "");
+    setErrorColor(p.settings.errorColor ?? "");
+    setInfoColor(p.settings.infoColor ?? "");
+    setCaptionFont(p.settings.captionFont ?? "");
+    setHeadingFontSize(p.settings.headingFontSize ?? "");
+    setHeadingLineHeight(p.settings.headingLineHeight ?? "");
+    setSubHeadingFontSize(p.settings.subHeadingFontSize ?? "");
+    setSubHeadingLineHeight(p.settings.subHeadingLineHeight ?? "");
+    setBodyFontSize(p.settings.bodyFontSize ?? "");
+    setBodyLineHeight(p.settings.bodyLineHeight ?? "");
+    setCaptionFontSize(p.settings.captionFontSize ?? "");
+    setCaptionLineHeight(p.settings.captionLineHeight ?? "");
+    setShowPostTags(p.settings.showPostTags ?? "");
+    setShowPostCategory(p.settings.showPostCategory ?? "");
+    setShowPostAuthor(p.settings.showPostAuthor ?? "");
+    setShowPostDate(p.settings.showPostDate ?? "");
+    setLogoUrl(p.settings.logoUrl ?? "");
+    setFaviconUrl(p.settings.faviconUrl ?? "");
+  }
+
+  // Fills all 4 font roles from one curated pairing — heading, sub-heading,
+  // and post-title share the display face (all "big text", same family at
+  // different weights, matching how the source pairings are actually used
+  // in the wild), body gets the paired reading face. Same pattern as
+  // applyPalette below for colors.
+  function applyFontPairing() {
+    const pairing = randomFontPairing();
+    setHeadingFont(pairing.heading);
+    setSubHeadingFont(pairing.heading);
+    setPostTitleFont(pairing.heading);
+    setFontFamily(pairing.body);
+  }
+
+  // "Test only" — loads the preset into the form/local preview (same as
+  // clicking a preset swatch) AND, when there's a real site to preview
+  // against, opens its actual homepage with these not-yet-saved settings
+  // applied (via a short-lived theme-preview token — see
+  // getThemePreviewToken), so "Test" shows the real rendered page, not just
+  // this panel's own preview box. Nothing is saved until Save is pressed.
+  // Opens the tab before the await (not after) so the async token mint
+  // can't trip the "window.open then redirect" popup-blocker failure mode.
+  async function testPreset(p: api.ThemePreset) {
+    loadPreset(p);
+    if (!previewTenantHost) return;
+    const win = window.open("", "_blank", "noreferrer");
+    if (!win) {
+      setError(t("designer-preview-blocked"));
+      return;
+    }
+    try {
+      const themeToken = await api.getThemePreviewToken(token, p.settings);
+      win.location.href = api.previewUrl(previewTenantHost, "home", undefined, themeToken);
+    } catch (err) {
+      win.close();
+      setError((err as Error).message);
+    }
+  }
+
+  // Activate: load then immediately persist — same effect as loading a
+  // preset by hand and clicking Save, bundled into one click.
+  async function activatePreset(p: api.ThemePreset) {
+    loadPreset(p);
+    try {
+      await save(p.settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // Revert this site to inheriting the global theme untouched — clearing
+  // every key (not deleting the row) is exactly what the existing PUT
+  // /api/theme already treats as "no override" (validateThemeSettings
+  // allows "" for every field; getMergedTheme spreads an empty object).
+  async function deactivate() {
+    const empty = {
+      primaryColor: "",
+      secondaryColor: "",
+      backgroundColor: "",
+      textColor: "",
+      fontFamily: "",
+      headingFont: "",
+      subHeadingFont: "",
+      postTitleFont: "",
+      postTitleFontSize: "",
+      postTitleLineHeight: "",
+      tertiaryColor: "",
+      successColor: "",
+      warningColor: "",
+      errorColor: "",
+      infoColor: "",
+      captionFont: "",
+      headingFontSize: "",
+      headingLineHeight: "",
+      subHeadingFontSize: "",
+      subHeadingLineHeight: "",
+      bodyFontSize: "",
+      bodyLineHeight: "",
+      captionFontSize: "",
+      captionLineHeight: "",
+      showPostTags: "",
+      showPostCategory: "",
+      showPostAuthor: "",
+      showPostDate: "",
+      logoUrl: "",
+      faviconUrl: "",
+    };
+    try {
+      await save(empty);
+      loadPreset({ id: "", name: "", createdAt: "", settings: empty });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // design.md export/import (v2) — a YAML-frontmatter-flavored text file:
+  // the frontmatter is still the exact round-trippable key:value dump this
+  // app's own importDesignMd reads back (every key currentColors() returns,
+  // generic — a new theme key added later needs no change here), the body
+  // below it is human-readable documentation of the same values (palette
+  // w/ fixed role labels, typography scale) for a person reading the file
+  // outside this app. Deliberately does NOT include marketplace/social
+  // metadata (license, uploaded-by, downloads/likes, "Use with MCP") — this
+  // is a single-tenant CMS, per the user's own explicit scope call.
+  function downloadDesignMd() {
+    const c = currentColors();
+    const palette: Array<[string, string, string]> = [
+      [t("theme-primary"), c.primaryColor, t("theme-role-primary")],
+      [t("theme-secondary"), c.secondaryColor, t("theme-role-secondary")],
+      [t("theme-tertiary"), c.tertiaryColor, t("theme-role-tertiary")],
+      [t("theme-background"), c.backgroundColor, t("theme-role-background")],
+      [t("theme-text"), c.textColor, t("theme-role-text")],
+      [t("theme-success"), c.successColor, t("theme-role-success")],
+      [t("theme-warning"), c.warningColor, t("theme-role-warning")],
+      [t("theme-error"), c.errorColor, t("theme-role-error")],
+      [t("theme-info"), c.infoColor, t("theme-role-info")],
+    ].filter(([, hex]) => hex) as Array<[string, string, string]>;
+    const typography: Array<[string, string, string, string]> = [
+      [t("theme-font-heading"), c.headingFont, c.headingFontSize, c.headingLineHeight],
+      [t("theme-font-subheading"), c.subHeadingFont, c.subHeadingFontSize, c.subHeadingLineHeight],
+      [t("theme-font-posttitle"), c.postTitleFont, c.postTitleFontSize, c.postTitleLineHeight],
+      [t("theme-font-body"), c.fontFamily, c.bodyFontSize, c.bodyLineHeight],
+      [t("theme-font-caption"), c.captionFont, c.captionFontSize, c.captionLineHeight],
+    ].filter(([, font, size, lh]) => font || size || lh) as Array<[string, string, string, string]>;
+    const lines = [
+      "---",
+      `name: ${presetName.trim() || title}`,
+      ...Object.entries(c).map(([k, v]) => `${k}: ${v}`),
+      "---",
+      "",
+      `# ${presetName.trim() || title}`,
+      "",
+      "Generated by USIM CMS's Theme panel. Upload this file back into any site's",
+      "Theme panel to preview or apply these settings — colors/fonts it recognizes",
+      "are filled in automatically, the rest of this file is documentation only.",
+      "",
+      "## Palette",
+      "",
+      "| Role | Color | Description |",
+      "| --- | --- | --- |",
+      ...palette.map(([role, hex, desc]) => `| ${role} | \`${hex}\` | ${desc} |`),
+      "",
+      "## Typography scale",
+      "",
+      "| Role | Font | Size (px) | Line height |",
+      "| --- | --- | --- | --- |",
+      ...typography.map(([role, font, size, lh]) => `| ${role} | ${font || "(inherit)"} | ${size || "(auto)"} | ${lh || "(auto)"} |`),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slugify(presetName.trim() || title)}.design.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Generic import fallback — for a design.md NOT written by this app (e.g.
+  // CorpScale-style exports): no known frontmatter keys to read, so instead
+  // scan the whole file text for "<role word> ... #hexcolor" (covers both a
+  // foreign frontmatter's own naming and a plain markdown palette table row
+  // like "| Primary | `#0F62FE` | ..."). Best-effort only — fonts/sizes have
+  // too many free-form spellings to reliably regex-extract, so this covers
+  // colors only; a value the frontmatter pass already found always wins.
+  const GENERIC_COLOR_ROLES: Array<[RegExp, (v: string) => void]> = [
+    [/primary/i, setPrimaryColor],
+    [/secondary/i, setSecondaryColor],
+    [/tertiary/i, setTertiaryColor],
+    [/background/i, setBackgroundColor],
+    [/\btext\b/i, setTextColor],
+    [/success/i, setSuccessColor],
+    [/warning/i, setWarningColor],
+    [/error|danger/i, setErrorColor],
+    [/\binfo\b/i, setInfoColor],
+  ];
+
+  async function importDesignMd(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const frontmatter = text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+      const parsed: Record<string, string> = {};
+      for (const line of frontmatter.split("\n")) {
+        const m = line.match(/^([a-zA-Z]+):\s*(.*)$/);
+        if (m) parsed[m[1]] = m[2].trim();
+      }
+      let usedGenericFallback = false;
+      const hex = (role: RegExp): string | undefined => {
+        for (const line of text.split("\n")) {
+          if (!role.test(line)) continue;
+          const m = line.match(/#[0-9a-f]{6}/i);
+          if (m) return m[0];
+        }
+        return undefined;
+      };
+      const resolveColor = (key: string, role: RegExp, current: string): string => {
+        if (parsed[key] !== undefined) return parsed[key];
+        const found = hex(role);
+        if (found) {
+          usedGenericFallback = true;
+          return found;
+        }
+        return current;
+      };
+      setPrimaryColor(resolveColor("primaryColor", GENERIC_COLOR_ROLES[0][0], primaryColor));
+      setSecondaryColor(resolveColor("secondaryColor", GENERIC_COLOR_ROLES[1][0], secondaryColor));
+      setTertiaryColor(resolveColor("tertiaryColor", GENERIC_COLOR_ROLES[2][0], tertiaryColor));
+      setBackgroundColor(resolveColor("backgroundColor", GENERIC_COLOR_ROLES[3][0], backgroundColor));
+      setTextColor(resolveColor("textColor", GENERIC_COLOR_ROLES[4][0], textColor));
+      setSuccessColor(resolveColor("successColor", GENERIC_COLOR_ROLES[5][0], successColor));
+      setWarningColor(resolveColor("warningColor", GENERIC_COLOR_ROLES[6][0], warningColor));
+      setErrorColor(resolveColor("errorColor", GENERIC_COLOR_ROLES[7][0], errorColor));
+      setInfoColor(resolveColor("infoColor", GENERIC_COLOR_ROLES[8][0], infoColor));
+      setFontFamily(parsed.fontFamily ?? fontFamily);
+      setHeadingFont(parsed.headingFont ?? headingFont);
+      setSubHeadingFont(parsed.subHeadingFont ?? subHeadingFont);
+      setPostTitleFont(parsed.postTitleFont ?? postTitleFont);
+      setCaptionFont(parsed.captionFont ?? captionFont);
+      setPostTitleFontSize(parsed.postTitleFontSize ?? postTitleFontSize);
+      setPostTitleLineHeight(parsed.postTitleLineHeight ?? postTitleLineHeight);
+      setHeadingFontSize(parsed.headingFontSize ?? headingFontSize);
+      setHeadingLineHeight(parsed.headingLineHeight ?? headingLineHeight);
+      setSubHeadingFontSize(parsed.subHeadingFontSize ?? subHeadingFontSize);
+      setSubHeadingLineHeight(parsed.subHeadingLineHeight ?? subHeadingLineHeight);
+      setBodyFontSize(parsed.bodyFontSize ?? bodyFontSize);
+      setBodyLineHeight(parsed.bodyLineHeight ?? bodyLineHeight);
+      setCaptionFontSize(parsed.captionFontSize ?? captionFontSize);
+      setCaptionLineHeight(parsed.captionLineHeight ?? captionLineHeight);
+      setShowPostTags(parsed.showPostTags ?? showPostTags);
+      setShowPostCategory(parsed.showPostCategory ?? showPostCategory);
+      setShowPostAuthor(parsed.showPostAuthor ?? showPostAuthor);
+      setShowPostDate(parsed.showPostDate ?? showPostDate);
+      setLogoUrl(parsed.logoUrl ?? logoUrl);
+      if (parsed.name) setPresetName(parsed.name);
+      setImportNotice(usedGenericFallback);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  // One combined stylesheet request for every curated font so the dropdown
+  // rows and the live preview panel below can render each one for real,
+  // instead of just naming it — shared across both ThemeForm instances
+  // (Global Theme + per-site Theme), so guard against injecting it twice.
+  useEffect(() => {
+    if (document.getElementById("admin-font-picker-preview")) return;
+    const link = document.createElement("link");
+    link.id = "admin-font-picker-preview";
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`;
+    document.head.appendChild(link);
+  }, []);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await save(currentColors());
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function applyPalette(colors: Record<string, string>) {
+    setPrimaryColor(colors.primaryColor);
+    setSecondaryColor(colors.secondaryColor);
+    setBackgroundColor(colors.backgroundColor);
+    setTextColor(colors.textColor);
+  }
+
+  // Heading/sub-heading/post-title are 3 independent fields but commonly
+  // land on the same font (a pairing applies one display face to all of
+  // them) — flag that instead of hiding it, so the user knows the fields
+  // aren't broken/duplicated and can tell at a glance whether to leave them
+  // shared or give this one its own face.
+  const sameFontNote = (value: string, comparedTo: string) =>
+    value && comparedTo && value === comparedTo ? (
+      <p className="-mt-1 text-[11px] text-sub">{t("theme-font-same-note")}</p>
+    ) : null;
+
+  // Auto readability check — worst-case contrast across the things actually
+  // rendered on the real site: body text vs background, and the primary
+  // button's label vs its background (SectionBlock.astro's .ds-btn-primary).
+  // The button check uses bestTextColor, not a hardcoded white, matching
+  // what the real frontend now does too — otherwise a light primary color
+  // (several daisyUI presets included) would falsely score "poor" here while
+  // actually rendering fine with auto-picked black text on the live site.
+  // secondaryColor isn't checked: it has no real rendered consumer yet
+  // (BaseLayout.astro defines --color-secondary but nothing reads it), so
+  // testing it here would just be flagging an admin-preview-only decoration.
+  const colorReadability = readabilityScore(
+    Math.min(
+      contrastRatio(textColor || "#111111", backgroundColor || "#ffffff"),
+      contrastRatio(bestTextColor(primaryColor || "#0f62fe"), primaryColor || "#0f62fe"),
+      // Secondary/accent is checked the same way as primary: as a filled
+      // swatch with an auto-picked (black-or-white) label, matching how
+      // daisyUI actually pairs every color with its own "-content" text —
+      // not as raw secondaryColor used directly as text on the page
+      // background, which isn't how any real color system uses an accent
+      // hue and made several legitimately-fine presets score "poor" for a
+      // combination nothing actually renders. Accent color still moves this
+      // score (a genuinely low-contrast fill, e.g. white text picked for a
+      // near-white accent, is still caught).
+      contrastRatio(bestTextColor(secondaryColor || "#666666"), secondaryColor || "#666666"),
+    ),
+  );
+  // Font legibility is checked separately from color contrast (a script body
+  // font is unreadable even with perfect contrast) — if any field fails,
+  // that caps the overall score/tone, since "readable" has to mean both.
+  const illegibleFontFields = [
+    !isLegibleFont(fontFamily, "body") && t("theme-font-body"),
+    !isLegibleFont(headingFont, "heading") && t("theme-font-heading"),
+    !isLegibleFont(subHeadingFont, "heading") && t("theme-font-subheading"),
+    !isLegibleFont(postTitleFont, "heading") && t("theme-font-posttitle"),
+  ].filter((v): v is string => Boolean(v));
+  const readability =
+    illegibleFontFields.length > 0
+      ? { percent: Math.min(colorReadability.percent, 40), tone: "poor" as const }
+      : colorReadability;
+  const readabilityToneClass =
+    readability.tone === "good" ? "text-ok" : readability.tone === "ok" ? "text-amber-600" : "text-red-600";
+
+  // role: a fixed, non-editable description shown under the swatch (e.g.
+  // "Main buttons & links") — the "palette + role label" shape the user
+  // picked for design.md v2's richer color coverage.
+  const colorField = (label: string, value: string, onChange: (v: string) => void, role?: string) => (
+    <label
+      className="flex flex-col items-center gap-1 rounded-xl border border-line/30 bg-white px-2 py-2.5 text-center transition-colors hover:border-line/60"
+      title={role}
+    >
+      <span className="text-[11px] font-medium text-body">{label}</span>
+      <span className="h-9 w-9 overflow-hidden rounded-lg border border-line/30 shadow-sm">
+        <input
+          type="color"
+          className="h-full w-full cursor-pointer border-0 p-0"
+          value={value || "#000000"}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </span>
+      <span className="font-mono text-[10px] uppercase text-sub">{value || "#000000"}</span>
+      {role && <span className="text-[9px] leading-tight text-sub/70">{role}</span>}
+    </label>
+  );
+
+  // Shared size+line-height pair — every typography-scale role (heading,
+  // sub-heading, body, caption, and post-title below) is the same two
+  // number fields, just a different key/range.
+  const sizeLineHeightFields = (
+    sizeLabel: string,
+    sizeValue: string,
+    setSize: (v: string) => void,
+    lhLabel: string,
+    lhValue: string,
+    setLh: (v: string) => void,
+    sizeMin = 8,
+    sizeMax = 120,
+  ) => (
+    <div className="grid grid-cols-2 gap-2">
+      <label className="block text-[11px] font-medium text-body">
+        {sizeLabel}
+        <input
+          type="number"
+          min={sizeMin}
+          max={sizeMax}
+          className={`${inputCls} mt-1`}
+          value={sizeValue}
+          onChange={(e) => setSize(e.target.value)}
+          placeholder="16"
+        />
+      </label>
+      <label className="block text-[11px] font-medium text-body">
+        {lhLabel}
+        <input
+          type="number"
+          min={1}
+          max={2.5}
+          step={0.1}
+          className={`${inputCls} mt-1`}
+          value={lhValue}
+          onChange={(e) => setLh(e.target.value)}
+          placeholder="1.4"
+        />
+      </label>
+    </div>
+  );
+
+  return (
+    <section className="space-y-3">
+      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+        <Palette className="h-4 w-4 text-accent" /> {title}
+      </h2>
+      {desc && <p className="text-xs text-sub">{desc}</p>}
+      <div className="flex flex-wrap items-start gap-4">
+        <form onSubmit={submit} className={`${card} max-w-sm space-y-4 p-5`}>
+          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+            <p className="text-xs font-medium text-body">{t("theme-presets")}</p>
+            <div className="flex flex-wrap gap-2">
+              {THEME_PRESETS.map((p, i) => {
+                const colors = presetToColors(p);
+                const active =
+                  primaryColor === colors.primaryColor &&
+                  secondaryColor === colors.secondaryColor &&
+                  backgroundColor === colors.backgroundColor &&
+                  textColor === colors.textColor;
+                return (
+                  <button
+                    key={p.name}
+                    type="button"
+                    title={`${t("theme-presets")} ${i + 1}`}
+                    onClick={() => applyPalette(colors)}
+                    className={`h-9 w-9 shrink-0 overflow-hidden rounded-lg border shadow-sm transition-all hover:scale-110 hover:shadow-md ${
+                      active ? "border-accent ring-2 ring-accent ring-offset-2 ring-offset-canvas" : "border-line/30"
+                    }`}
+                    style={{ background: `linear-gradient(135deg, ${colors.primaryColor} 50%, ${colors.secondaryColor} 50%)` }}
+                  />
+                );
+              })}
+              <button
+                type="button"
+                title={t("theme-generate")}
+                aria-label={t("theme-generate")}
+                onClick={() => applyPalette(randomTheme())}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-line/50 text-sub transition-all hover:scale-110 hover:border-accent hover:text-accent"
+              >
+                <Sparkles className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-1 rounded-xl border border-line/20 bg-canvas/40 p-1">
+            {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
+              <button
+                key={tabId}
+                type="button"
+                onClick={() => setActiveTab(tabId)}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                  activeTab === tabId ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
+                }`}
+              >
+                {t(`theme-tab-${tabId}`)}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === "colors" && (
+            <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <p className="text-xs font-medium text-body">{t("theme-colors")}</p>
+              <div className="grid grid-cols-3 gap-2">
+                {colorField(t("theme-primary"), primaryColor, setPrimaryColor, t("theme-role-primary"))}
+                {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor, t("theme-role-secondary"))}
+                {colorField(t("theme-tertiary"), tertiaryColor, setTertiaryColor, t("theme-role-tertiary"))}
+                {colorField(t("theme-background"), backgroundColor, setBackgroundColor, t("theme-role-background"))}
+                {colorField(t("theme-text"), textColor, setTextColor, t("theme-role-text"))}
+                {colorField(t("theme-success"), successColor, setSuccessColor, t("theme-role-success"))}
+                {colorField(t("theme-warning"), warningColor, setWarningColor, t("theme-role-warning"))}
+                {colorField(t("theme-error"), errorColor, setErrorColor, t("theme-role-error"))}
+                {colorField(t("theme-info"), infoColor, setInfoColor, t("theme-role-info"))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "typography" && (
+            <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-body">{t("theme-fonts")}</p>
+                <button
+                  type="button"
+                  onClick={applyFontPairing}
+                  className="flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+                >
+                  <Sparkles className="h-3 w-3" /> {t("theme-font-pairing")}
+                </button>
+              </div>
+              <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} placeholder="Poppins" />
+              {sizeLineHeightFields(
+                t("theme-heading-size"), headingFontSize, setHeadingFontSize,
+                t("theme-heading-line-height"), headingLineHeight, setHeadingLineHeight,
+              )}
+              <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} placeholder="Poppins" />
+              {sameFontNote(subHeadingFont, headingFont)}
+              {sizeLineHeightFields(
+                t("theme-subheading-size"), subHeadingFontSize, setSubHeadingFontSize,
+                t("theme-subheading-line-height"), subHeadingLineHeight, setSubHeadingLineHeight,
+              )}
+              <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} placeholder="Poppins" />
+              {sameFontNote(postTitleFont, headingFont)}
+              {sizeLineHeightFields(
+                t("theme-post-title-size"), postTitleFontSize, setPostTitleFontSize,
+                t("theme-post-title-line-height"), postTitleLineHeight, setPostTitleLineHeight,
+                12, 96,
+              )}
+              <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
+              {sizeLineHeightFields(
+                t("theme-body-size"), bodyFontSize, setBodyFontSize,
+                t("theme-body-line-height"), bodyLineHeight, setBodyLineHeight,
+              )}
+              <FontField label={t("theme-font-caption")} value={captionFont} onChange={setCaptionFont} placeholder="Inter" />
+              {sizeLineHeightFields(
+                t("theme-caption-size"), captionFontSize, setCaptionFontSize,
+                t("theme-caption-line-height"), captionLineHeight, setCaptionLineHeight,
+              )}
+            </div>
+          )}
+
+          {activeTab === "postdisplay" && (
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostTags !== "false"} onChange={(e) => setShowPostTags(e.target.checked ? "" : "false")} />
+                {t("theme-show-tags")}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostCategory !== "false"} onChange={(e) => setShowPostCategory(e.target.checked ? "" : "false")} />
+                {t("theme-show-category")}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostAuthor !== "false"} onChange={(e) => setShowPostAuthor(e.target.checked ? "" : "false")} />
+                {t("theme-show-author")}
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-body">
+                <input type="checkbox" checked={showPostDate !== "false"} onChange={(e) => setShowPostDate(e.target.checked ? "" : "false")} />
+                {t("theme-show-date")}
+              </label>
+            </div>
+          )}
+
+          {activeTab === "branding" && (
+            <div className="space-y-3 rounded-xl border border-line/20 bg-canvas/40 p-3">
+              <p className="text-xs font-semibold text-body">{t("theme-branding")}</p>
+              {!previewTenantHost && <p className="text-[11px] text-muted-foreground">{t("theme-branding-global-hint")}</p>}
+              {(
+                [
+                  ["logo", t("theme-logo"), logoUrl, setLogoUrl, "h-10"],
+                  ["favicon", t("theme-favicon"), faviconUrl, setFaviconUrl, "h-8 w-8"],
+                ] as const
+              ).map(([kind, label, value, setValue, previewCls]) => (
+                <label key={kind} className="block text-xs font-medium text-body">
+                  {label}
+                  <div className="mt-1 flex items-center gap-2">
+                    <input className={inputCls} value={value} placeholder="https://" onChange={(e) => setValue(e.target.value)} />
+                    <label className="inline-block shrink-0 cursor-pointer whitespace-nowrap rounded-full bg-canvas px-3 py-1.5 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+                      {brandUploading === kind ? t("designer-uploading") : t("designer-upload")}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void uploadBrandAsset(f, kind);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {value && <img src={value.startsWith("http") ? value : api.API_URL + value} alt="" className={`mt-2 rounded object-contain ${previewCls}`} />}
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <button type="submit" className={`${btnPrimary} w-full py-3 text-sm shadow-md`}>
+              {t("theme-save")}
+            </button>
+            {saved && <span className="shrink-0 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
+          </div>
+          <FormError>{error}</FormError>
+        </form>
+
+        {/* Live preview — reflects the form's current (unsaved) state, not
+            what's actually saved, so tweaking a color/font shows its effect
+            immediately without a round trip to Save. The readability check
+            sits in its own box below (not inside the preview) and always
+            uses fixed neutral styling, not the theme's own colors — it has
+            to stay legible even when the theme it's judging isn't. */}
+        <div className="w-72 shrink-0 space-y-2">
+          <div
+            className="space-y-3 rounded-xl border border-line/30 p-5"
+            style={{
+              background: backgroundColor || "#ffffff",
+              color: textColor || "#111111",
+              fontFamily: fontFamily || undefined,
+            }}
+          >
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{t("theme-preview-label")}</p>
+            <p className="text-lg font-bold" style={{ fontFamily: headingFont || undefined }}>
+              {t("theme-preview-heading")}
+            </p>
+            <p className="text-base font-semibold opacity-90" style={{ fontFamily: subHeadingFont || undefined }}>
+              {t("theme-preview-subheading")}
+            </p>
+            <p
+              className="text-sm font-semibold opacity-80"
+              style={{
+                fontFamily: postTitleFont || undefined,
+                fontSize: postTitleFontSize ? `${postTitleFontSize}px` : undefined,
+                lineHeight: postTitleLineHeight || undefined,
+              }}
+            >
+              {t("theme-preview-posttitle")}
+            </p>
+            <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
+            <div className="flex gap-2">
+              <span
+                className="rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ background: primaryColor || "#0f62fe", color: bestTextColor(primaryColor || "#0f62fe") }}
+              >
+                {t("theme-preview-primary")}
+              </span>
+              <span
+                className="rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ background: secondaryColor || "#666666", color: bestTextColor(secondaryColor || "#666666") }}
+              >
+                {t("theme-preview-secondary")}
+              </span>
+            </div>
+            <div className="flex gap-1.5 border-t border-current/10 pt-3">
+              <input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                placeholder={t("theme-preset-name")}
+                className="min-w-0 flex-1 rounded-lg border border-current/20 bg-white/40 px-2 py-1 text-xs text-ink placeholder:text-current/50"
+              />
+              <button
+                type="button"
+                onClick={() => void saveToCollection()}
+                disabled={!presetName.trim()}
+                className="shrink-0 rounded-lg bg-black/10 px-2 py-1 text-xs font-semibold disabled:opacity-40"
+              >
+                {t("theme-add-favourite")}
+              </button>
+            </div>
+          </div>
+          <div className={`${card} space-y-1 p-3`}>
+            <p className={`text-xs font-semibold ${readabilityToneClass}`}>
+              {t("theme-readability")}: {readability.percent}% — {t(`theme-readability-${readability.tone}`)}
+            </p>
+            {illegibleFontFields.length > 0 && (
+              <p className="text-[11px] text-sub">
+                {t("theme-readability-font-note")} {illegibleFontFields.join(", ")}
+              </p>
+            )}
+          </div>
+
+          {/* Visual-only mockup of common components in the current
+              colors/fonts — never changes real site styling, just an
+              at-a-glance preview of the palette+typography in context. */}
+          <div className={`${card} space-y-2 p-3`}>
+            <p className="text-xs font-semibold text-ink">{t("theme-component-preview")}</p>
+            <p className="text-[10px] text-sub">{t("theme-component-preview-note")}</p>
+            <div
+              className="space-y-2 rounded-lg border border-line/20 p-3"
+              style={{ background: backgroundColor || "#ffffff", color: textColor || "#111111", fontFamily: fontFamily || undefined }}
+            >
+              <div className="flex flex-wrap gap-1.5">
+                <span
+                  className="rounded-md px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: primaryColor || "#0f62fe", color: bestTextColor(primaryColor || "#0f62fe") }}
+                >
+                  {t("theme-preview-primary")}
+                </span>
+                <span
+                  className="rounded-md px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ background: secondaryColor || "#666666", color: bestTextColor(secondaryColor || "#666666") }}
+                >
+                  {t("theme-preview-secondary")}
+                </span>
+                <span
+                  className="rounded-md border px-2.5 py-1 text-[11px] font-semibold"
+                  style={{ borderColor: errorColor || "#dc2626", color: errorColor || "#dc2626" }}
+                >
+                  {t("theme-error")}
+                </span>
+              </div>
+              <div className="rounded-lg border border-current/15 p-2.5">
+                <p className="text-xs font-bold" style={{ fontFamily: headingFont || undefined }}>
+                  {t("theme-preview-card-title")}
+                </p>
+                <p className="text-[11px] opacity-80">{t("theme-preview-card-body")}</p>
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[10px] font-medium opacity-70">{t("theme-preview-input-label")}</label>
+                <input disabled className="w-full rounded-md border border-current/20 bg-white/50 px-2 py-1 text-[11px]" />
+                <p className="text-[10px]" style={{ color: errorColor || "#dc2626" }}>
+                  {t("theme-preview-input-error")}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Export/import a whole theme as a small human-readable file —
+            works across sites: download here, upload on any other site's
+            Theme panel to load the same settings into its form/preview. */}
+        <div className={`${card} w-64 shrink-0 space-y-2 p-4`}>
+          <p className="text-xs font-semibold text-ink">{t("theme-file-title")}</p>
+          <p className="text-[11px] text-sub">{t("theme-file-desc")}</p>
+          <button type="button" onClick={downloadDesignMd} className="w-full rounded-lg bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]">
+            {t("theme-file-download")}
+          </button>
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            className="w-full rounded-lg border border-line/30 px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+          >
+            {t("theme-file-upload")}
+          </button>
+          <input ref={importInputRef} type="file" accept=".md,text/markdown" onChange={importDesignMd} className="hidden" />
+          {importNotice && <p className="text-[11px] text-amber-600">{t("theme-import-generic-note")}</p>}
+        </div>
+      </div>
+
+      {/* "My collection" — personal favourites, not tied to any one site;
+          Test loads a preset into the form/preview without saving, Activate
+          loads it and saves immediately. */}
+      <Card className="max-w-3xl">
+        <CardContent className="space-y-2 p-4">
+          <p className="text-xs font-semibold text-ink">{t("theme-collection-title")}</p>
+          {presets.length === 0 && <p className="text-[11px] text-sub">{t("theme-collection-empty")}</p>}
+          <ul className="divide-y divide-line/20">
+            {presets.map((p) => (
+              <li key={p.id} className="flex items-center gap-3 py-2 text-xs">
+                <span
+                  className="h-5 w-5 shrink-0 rounded-full border border-line/30"
+                  style={{ background: `linear-gradient(135deg, ${p.settings.primaryColor || "#ccc"} 50%, ${p.settings.secondaryColor || "#999"} 50%)` }}
+                />
+                <span className="min-w-0 flex-1 truncate font-semibold text-ink">{p.name}</span>
+                <Button variant="ghost" size="sm" onClick={() => testPreset(p)}>
+                  {t("theme-preset-test")}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => void activatePreset(p)}>
+                  {t("theme-preset-activate")}
+                </Button>
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => {
+                    setPresetName(p.name);
+                    loadPreset(p);
+                    downloadDesignMd();
+                  }}
+                >
+                  {t("theme-file-download")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-500 hover:text-red-700"
+                  title={t("theme-preset-delete")}
+                  aria-label={t("theme-preset-delete")}
+                  onClick={async () => {
+                    if (!(await confirm(t("theme-preset-delete-confirm")))) return;
+                    void deletePreset(p.id);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      {allowDeactivate && (
+        <button
+          type="button"
+          onClick={() => void deactivate()}
+          className="text-xs font-semibold text-sub hover:text-red-600 hover:underline"
+        >
+          {t("theme-deactivate")}
+        </button>
+      )}
+    </section>
+  );
+}
