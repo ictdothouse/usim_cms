@@ -14,12 +14,8 @@ import { getNode, childrenOf, insertAt, removeAt, moveWithin } from "../../desig
 import { ELS } from "../elements";
 import type { Block, Col, Row, El, ElType, Sel, SectionProps, Drag } from "../types";
 import type { ClipLevel } from "../context";
+import { clone } from "@/lib/utils";
 
-// Designer.tsx keeps its own copy of this same one-liner — not shared via
-// an import, since a `designer/` file may never import back from
-// Designer.tsx and every other extracted hook that's needed it (useUndoRedo)
-// keeps its own copy too, same precedent.
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const uid = () => Math.random().toString(36).slice(2, 10);
 const newEl = (type: ElType): El => ({ id: uid(), type, props: { ...ELS[type].defaults } });
 

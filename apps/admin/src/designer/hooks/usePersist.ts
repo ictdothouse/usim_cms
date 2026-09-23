@@ -7,12 +7,10 @@
 // paths), page revision history, and the two preview-token mint flows.
 import { useState } from "react";
 import * as api from "@/lib/api";
-import { slugify } from "@/lib/utils";
+import { slugify, clone } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { BASE_LANG } from "../context";
 import type { Block, PageSettings, SectionProps } from "../types";
-
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 export interface PersistDeps {
   tenantHost: string;

@@ -10,15 +10,9 @@
 import { useRef, useState } from "react";
 import type React from "react";
 import type { Block, Sel } from "../types";
+import { clone } from "@/lib/utils";
 
 type SetHoverBand = React.Dispatch<React.SetStateAction<string | null>>;
-
-// Designer.tsx keeps its own copy of this same one-liner for its remaining
-// (non-extracted) mutate-adjacent call sites — not shared via an import,
-// since a `designer/` file may never import back from Designer.tsx
-// (`designer/types.ts`'s own rule) and no other `designer/` module needs a
-// clone helper yet besides this one and Designer.tsx itself.
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 // Pulled out of useUndoRedo() so mutate/undo/redo's actual behavior — the
 // history-cap, the functional-setState fix for the multi-mutate-per-tick

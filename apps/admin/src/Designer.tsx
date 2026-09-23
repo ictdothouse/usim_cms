@@ -29,7 +29,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "@/lib/api";
-import { bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
+import { bestTextColor, GOOGLE_FONTS, clone } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn } from "./designerTree";
 import { section } from "./designer/blockPath";
@@ -54,8 +54,6 @@ import { usePageAndLanguage } from "./designer/hooks/usePageAndLanguage";
 import { useSiteChrome } from "./designer/hooks/useSiteChrome";
 import { usePersist } from "./designer/hooks/usePersist";
 import MediaPickerModal from "./MediaPickerModal";
-
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
 // "0") into the rounded px number shown on the badge. rem assumed at the

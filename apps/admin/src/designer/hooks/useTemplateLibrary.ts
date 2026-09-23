@@ -14,8 +14,8 @@ import type { Key } from "@/i18n";
 import { insertAt } from "../../designerTree";
 import { section } from "../blockPath";
 import type { Block, Row, Col, El, Sel, SectionProps, PageSettings } from "../types";
+import { clone } from "@/lib/utils";
 
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 export interface TemplateLibraryDeps {

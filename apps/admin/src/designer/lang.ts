@@ -2,8 +2,7 @@
 // usePageAndLanguage) since designer/hooks/usePageAndLanguage.ts needs them
 // and designer/ files can't import back from Designer.tsx.
 import type { Block, ElType, SectionProps } from "./types";
-
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+import { clone } from "@/lib/utils";
 
 // Which of an element type's own props are free-prose TEXT — these are
 // ALWAYS per-language (no shared-by-default/opt-in toggle the way a style
