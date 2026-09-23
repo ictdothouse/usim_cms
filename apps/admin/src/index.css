@@ -8,17 +8,19 @@
 
 /* Was tailwind.config.js's theme.extend (colors/fontFamily/borderRadius/
    keyframes/animation) under v3 — v4 is CSS-first, so the same tokens live
-   here as --color-*/--font-*/--radius-*/--animate-* theme variables instead
-   of a JS config object. Values that were already `var(--foo)` referencing
-   the :root/.dark custom properties below are unchanged, just re-homed
-   under the --color-* namespace v4 requires for a token to generate
-   utilities like bg-card/text-card-foreground. */
-/* inline: these tokens reference OTHER custom properties (the :root/.dark
-   block below) that differ between light/dark — inline keeps them as live
-   var() references in the generated utility CSS instead of Tailwind baking
-   in whatever they statically resolve to at build time, which is also what
-   was making @apply border-border/bg-background below fail to resolve. */
-@theme inline {
+   here as --color-, --font-, --radius- and --animate- theme variables
+   instead of a JS config object. Values that were already `var(--foo)`
+   referencing the :root/.dark custom properties below are unchanged, just
+   re-homed under the --color- namespace v4 requires for a token to
+   generate utilities like bg-card/text-card-foreground. */
+/* Plain @theme: these are literal hex values (this app's own "prototype
+   look" palette — ink/sub/body/line/canvas/accent/ok/warn — not shadcn's
+   var()-referencing tokens below), so they don't need `inline`. Putting
+   them under `inline` (an earlier mistake) silently dropped them from the
+   compiled CSS entirely — bg-accent/text-accent/bg-canvas etc, used by
+   App.tsx's btnPrimary/btnGhost/inputCls/card across every panel, produced
+   no utility classes at all. */
+@theme {
   --font-sans: Inter, system-ui, sans-serif;
   --font-display: Space Grotesk, sans-serif;
 
@@ -31,7 +33,14 @@
   --color-accent-foreground: #ffffff;
   --color-ok: #34c759;
   --color-warn: #ff9500;
+}
 
+/* inline: these tokens reference OTHER custom properties (the :root/.dark
+   block below) that differ between light/dark — inline keeps them as live
+   var() references in the generated utility CSS instead of Tailwind baking
+   in whatever they statically resolve to at build time, which is also what
+   was making @apply border-border/bg-background below fail to resolve. */
+@theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
