@@ -1,0 +1,618 @@
+---
+// Slider element render branch, extracted verbatim out of SectionBlock.astro's
+// "slider" case (god-file breakup, part 2/2 — see ContainerBlock.astro's own
+// top-of-file comment on why shared *logic* goes through lib/element-render.ts,
+// never another .astro file's frontmatter, and why several small helpers
+// (SLIDER_HEIGHT, SRCSET_WIDTHS/buildSrcset, safeCssUrl/bgVariantUrl,
+// bpMerge/bpStyleRules) are re-declared here rather than imported from
+// SectionBlock.astro — SectionBlock.astro's own copies, still used by other
+// element cases there, are untouched). HEX_RE/bestTextColor/contrastRatio/
+// relativeLuminance/posStyle/parseSlides and its Slide/legacySlideRows
+// machinery had no other caller in SectionBlock.astro, so those moved here
+// wholesale instead of staying duplicated in both places.
+//
+// `elId` (this element's `data-vis` id, e.g. `e${blockIndex}-${r}-${c}-${e}`,
+// computed by the caller) and `responsiveRules` (the page's shared @media-
+// rule collector, flushed into one <style> by SectionBlock.astro at the very
+// end of its render) are passed in as props — `responsiveRules` is the SAME
+// array instance the caller declared (arrays pass by reference in Astro SSR,
+// no serialization boundary since this isn't a client island), so a bp rule
+// pushed from here still lands in the final page's stylesheet.
+//
+// hasSlideChildBp simplification: SectionBlock.astro used to track, via a
+// closure variable this case wrote to, whether any nested slide element had
+// a real bp override, so the slider wrapper's own `data-vis` id could be
+// skipped when it wasn't needed. That signal can't cross an Astro component
+// boundary synchronously, so SectionBlock.astro now just always gives the
+// slider wrapper a `data-vis` id — a harmless always-present attribute
+// (`display:contents` wrapper), not a visible behavior change.
+import {
+  TEXT_SIZE,
+  fluidTextSize,
+  hexToRgba,
+  safeUrl,
+  renderInline,
+  lengthValue,
+  marginStyle,
+  paddingStyle,
+  elBorderShadowStyle,
+  typoStyle,
+  elHoverClass,
+  elEntranceClass,
+  elRadius,
+  cls,
+  headingTag,
+} from "../lib/element-render";
+
+// Local, not imported from SectionBlock.astro's frontmatter — see this
+// file's own comment above and SectionBlock.astro's top comment on the
+// outage caused by sharing frontmatter bindings across .astro files.
+const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
+const SRCSET_WIDTHS = [400, 800, 1200, 1600];
+function buildSrcset(url: string): { srcset: string; sizes: string } | null {
+  const m = /[?&]w=(\d+)/.exec(url);
+  if (!m) return null;
+  const width = Number(m[1]);
+  const base = url.split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
+  if (candidates.length === 0) return null;
+  const entries = [...candidates.map((w) => `${stem}-${w}w.webp ${w}w`), `${base} ${width}w`];
+  return { srcset: entries.join(", "), sizes: "(min-width: 1024px) 800px, 100vw" };
+}
+// Render-time defense-in-depth for slide bgImage — mirrors SectionBlock.astro's
+// own safeCssUrl (still used there by other cases, e.g. "ctabanner").
+const safeCssUrl = (u?: string) => {
+  const v = safeUrl(u);
+  return v && !/['";(){}\s]/.test(v) ? v : undefined;
+};
+// CSS background-image has no srcset equivalent, so a slide image picks ONE
+// pre-generated variant instead — mirrors SectionBlock.astro's own
+// bgVariantUrl (still used there by "ctabanner").
+function bgVariantUrl(url: string): string {
+  const m = /[?&]w=(\d+)/.exec(url);
+  if (!m) return url;
+  const width = Number(m[1]);
+  const base = url.split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
+  if (candidates.length === 0) return url;
+  return `${stem}-${candidates[candidates.length - 1]}w.webp`;
+}
+// bp overrides are keyed "tablet:<fieldKey>"/"mobile:<fieldKey>" — mirrors
+// SectionBlock.astro's own bpMerge/bpStyleRules (still used there by
+// respId/row/image/height bp handling); duplicated here purely so
+// renderSlideEl below can scope a nested slide element's own real
+// per-breakpoint margin/padding/position override, same as every other
+// bp-driven style on the page.
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
+// Render-time defense-in-depth for slide bgColor/overlayColor overrides —
+// sole owner is this slider case (moved wholesale out of SectionBlock.astro,
+// not duplicated).
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+// Mirrors apps/admin/src/lib/utils.ts's bestTextColor/contrastRatio — can't
+// share code across the two apps (no shared package for this), so this is a
+// deliberate byte-for-byte-equivalent port, not a rewrite.
+function relativeLuminance(hex: string): number {
+  const clean = hex.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(clean.slice(i, i + 2), 16) / 255);
+  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+function contrastRatio(hexA: string, hexB: string): number {
+  const lA = relativeLuminance(hexA);
+  const lB = relativeLuminance(hexB);
+  const [lighter, darker] = lA > lB ? [lA, lB] : [lB, lA];
+  return (lighter + 0.05) / (darker + 0.05);
+}
+function bestTextColor(hex: string): string {
+  return contrastRatio("#ffffff", hex) >= contrastRatio("#000000", hex) ? "#ffffff" : "#000000";
+}
+// Slide-nested element free positioning (props.position === "custom") — opts
+// an element out of the row/column stack and into position:absolute inside
+// `.ds-slide-content` (already `position:relative` for its own z-index — see
+// that rule's own comment), the same containing block apps/admin's ElPreview
+// drags against (`.ds-slide-canvas` there), so an x/y saved in the admin
+// lands in the same spot here. Defined in frontmatter (not inside
+// renderSlideEl, which lives in the template for JSX) — Astro's template
+// expression parser rejects a function declaration's TS type annotations.
+function posStyle(mp: Record<string, string>): string | null {
+  return mp.position === "custom"
+    ? [
+        "position:absolute",
+        `top:${mp.y || "10"}%`,
+        `left:${mp.x || "10"}%`,
+        mp.posWidth ? `width:${mp.posWidth}` : null,
+        mp.posHeight ? `height:${mp.posHeight}` : null,
+      ]
+        .filter(Boolean)
+        .join(";")
+    : null;
+}
+
+interface El {
+  id?: string;
+  type: string;
+  props?: Record<string, string>;
+  bp?: Record<string, string>;
+  children?: El[];
+}
+interface Col {
+  span?: number;
+  elements?: El[];
+  props?: Record<string, string>;
+  bp?: Record<string, string>;
+}
+interface Row {
+  columns?: Col[];
+  gap?: string;
+  marginTop?: string;
+  marginBottom?: string;
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
+  hideDesktop?: string;
+  hideTablet?: string;
+  hideMobile?: string;
+  layoutMode?: "grid" | "flex";
+  flexDirection?: "row" | "column" | "row-reverse" | "column-reverse";
+  justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around";
+  alignItems?: "flex-start" | "center" | "flex-end" | "stretch";
+  flexWrap?: "nowrap" | "wrap";
+  bp?: Record<string, string>;
+}
+// Slider slide data. Storage is a JSON array (see Designer.tsx's
+// parseSlides/stringifySlides, added alongside the Embla Carousel rewrite) —
+// parseSlides() here mirrors that same dual-format parser: JSON.parse first,
+// falling back to the OLD imageUrl|heading|subtitle|buttonLabel|buttonHref
+// pipe-line format for any page saved before this rewrite (never re-written
+// until the author next edits that slider in Designer.tsx).
+// A slide is its own small section body — the same rows: Row[] tree a
+// Section itself has (El/Col/Row above), reusing renderSlideEl() below
+// (heading/text/button/image only — the only types the admin's slides
+// editor can ever add) instead of a bespoke heading/subtitle/button schema.
+// Mirrors apps/admin/src/designer/types.ts's SlideItem exactly.
+interface Slide {
+  imageUrl: string;
+  bgSize: string; // "" | cover | contain | repeat | no-repeat | auto — "" resolves to cover
+  bgColor: string; // hex fallback fill behind the image (or the whole slide when there's no image) — "" = transparent
+  overlayColor: string;
+  overlayOpacity: string;
+  textPosition: "left" | "center" | "right";
+  rows: Row[];
+}
+const SLIDE_BG_SIZES = ["cover", "contain", "repeat", "no-repeat", "auto"];
+// Converts a legacy slide (saved before slides gained a real rows: Row[]
+// tree — still carrying heading/subtitle as a string or {text,color,
+// fontSize,align,...} object, buttons as {label,href,variant,...}[]) into
+// the equivalent real elements. Mirrors apps/admin/src/designer/parsers.ts's
+// legacySlideElements/legacySlideRows exactly (button color/textColor/
+// radius/fontSize/custom-position have no equivalent on the standalone
+// button element and are dropped, same accepted scope reduction as there).
+function legacySlideRows(s: Record<string, unknown>): Row[] {
+  const els: El[] = [];
+  const asTextObj = (raw: unknown): Record<string, unknown> | null =>
+    typeof raw === "string" ? { text: raw } : raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  const str = (o: Record<string, unknown>, key: string) => (typeof o[key] === "string" ? (o[key] as string) : "");
+  const align = (o: Record<string, unknown>) => (o.align === "center" || o.align === "right" ? (o.align as string) : "left");
+
+  const heading = asTextObj(s.heading);
+  if (heading && str(heading, "text")) {
+    els.push({
+      type: "heading",
+      props: {
+        text: str(heading, "text"),
+        level: "2",
+        align: align(heading),
+        fontFamily: str(heading, "fontFamily"),
+        color: str(heading, "color"),
+        lineHeight: str(heading, "lineHeight"),
+        letterSpacing: str(heading, "letterSpacing"),
+        fontWeight: str(heading, "fontWeight"),
+        textTransform: str(heading, "textTransform"),
+        fontStyle: str(heading, "fontStyle"),
+        textDecoration: str(heading, "textDecoration"),
+      },
+    });
+  }
+  const subtitle = asTextObj(s.subtitle);
+  if (subtitle && str(subtitle, "text")) {
+    const fontSize = str(subtitle, "fontSize");
+    els.push({
+      type: "text",
+      props: {
+        text: str(subtitle, "text"),
+        size: fontSize ? `${fontSize}px` : "",
+        align: align(subtitle),
+        fontFamily: str(subtitle, "fontFamily"),
+        color: str(subtitle, "color"),
+        lineHeight: str(subtitle, "lineHeight"),
+        letterSpacing: str(subtitle, "letterSpacing"),
+        fontWeight: str(subtitle, "fontWeight"),
+        textTransform: str(subtitle, "textTransform"),
+        fontStyle: str(subtitle, "fontStyle"),
+        textDecoration: str(subtitle, "textDecoration"),
+      },
+    });
+  }
+  const buttons = Array.isArray(s.buttons) ? s.buttons : [];
+  for (const b of buttons) {
+    const btn = (b ?? {}) as Record<string, unknown>;
+    const label = str(btn, "label");
+    if (!label) continue;
+    els.push({ type: "button", props: { label, href: str(btn, "href"), variant: btn.variant === "outline" ? "outline" : "primary", align: "left" } });
+  }
+  return els.length === 0 ? [] : [{ columns: [{ span: 12, elements: els }] }];
+}
+// Slider slide repeater. Storage is a JSON array (see apps/admin/src/
+// designer/parsers.ts's parseSlides/stringifySlides) — accepts three shapes
+// on read, oldest-first fallback: the original pipe-delimited line format,
+// a legacy JSON object (heading/subtitle/buttons, no `rows`), and the
+// current shape (`rows: Row[]`). A page saved under either older shape
+// keeps rendering correctly forever — it silently upgrades to the current
+// shape the next time its slider is edited in the Designer, never a hard
+// migration.
+function parseSlides(raw: string | undefined): Slide[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        const s = (item ?? {}) as Record<string, unknown>;
+        const rows = Array.isArray(s.rows) ? (s.rows as Row[]) : legacySlideRows(s);
+        return {
+          imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+          bgSize: typeof s.bgSize === "string" && SLIDE_BG_SIZES.includes(s.bgSize) ? s.bgSize : "",
+          bgColor: typeof s.bgColor === "string" ? s.bgColor : "",
+          overlayColor: typeof s.overlayColor === "string" ? s.overlayColor : "#000000",
+          overlayOpacity: typeof s.overlayOpacity === "string" ? s.overlayOpacity : "0",
+          textPosition: s.textPosition === "left" || s.textPosition === "right" ? s.textPosition : "center",
+          rows,
+        };
+      });
+    }
+  } catch {
+    // Not JSON — fall through to the legacy pipe-line format below.
+  }
+  return raw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [imageUrl = "", heading = "", subtitle = "", buttonLabel = "", buttonHref = ""] = line.split("|");
+      return {
+        imageUrl,
+        bgSize: "",
+        bgColor: "",
+        overlayColor: "#000000",
+        overlayOpacity: "0",
+        textPosition: "center" as const,
+        rows: legacySlideRows({ heading, subtitle, buttons: buttonLabel ? [{ label: buttonLabel, href: buttonHref }] : [] }),
+      };
+    });
+}
+
+interface Props {
+  el: El;
+  designerEdit?: boolean;
+  elId: string;
+  responsiveRules: string[];
+}
+const { el, designerEdit = false, elId, responsiveRules } = Astro.props as Props;
+const p = el.props ?? {};
+---
+
+{(() => {
+  const slides = parseSlides(p.slides);
+  if (slides.length === 0) return null;
+  const autoplayMs = Math.round(Number(p.autoplay || "0") * 1000);
+  const navStyle = p.navStyle || "arrows";
+  const dotsStyle = p.dotsStyle || "dots";
+  const transition = p.transition || "slide";
+  // Nav/pagination module customization — CSS custom
+  // properties + a data attribute per knob, all optional
+  // (empty = keep the existing hand-rolled default below).
+  const navColor = p.navColor && HEX_RE.test(p.navColor) ? p.navColor : null;
+  const navPlacement = p.navPlacement === "outside" ? "outside" : "inside";
+  const navIcon = p.navIcon === "arrow" ? "arrow" : "chevron";
+  const paginationColor = p.paginationColor && HEX_RE.test(p.paginationColor) ? p.paginationColor : null;
+  const paginationPlacement = p.paginationPlacement === "outside" ? "outside" : "inside";
+  const paginationPosition = ["start", "end"].includes(p.paginationPosition as string) ? p.paginationPosition : "center";
+  // Renders one nested element inside a slide's own mini
+  // canvas — heading/text/button/image only (the only types
+  // the admin's slides editor can ever add via its Add Text/
+  // Button/Image buttons; "Add Row" only nests more of the
+  // same three). Mirrors the main element switch's own
+  // heading/text/image/button cases above. Margin/padding/
+  // shadow/border/color/typography are real per-element
+  // props (same fields as any top-level element). Real
+  // per-breakpoint override is wired for margin/padding/
+  // free-position (the fields the Inspector's own FourSideControl/
+  // Position block let an author toggle a BpToggle on) —
+  // shadow/border/color/typography/hoverEffect/entrance stay
+  // admin-canvas-preview-only for now (a bp override toggle
+  // still shows for them in the Inspector, since FieldGroups
+  // renders every ELS field the same generic way, but it's
+  // inert here — only the base value ever reaches this
+  // render), the one remaining scope reduction (same
+  // "not every field, just the common layout ones" tradeoff
+  // imgWidth/slider-height made before this).
+  // slideIdx/r/c/e address this element within the slider's
+  // OWN slides[]/rows[]/columns[]/elements[] tree — separate
+  // from the page's own [b,r,c,e] block-index path (which
+  // only ever reaches the slider element itself, see
+  // data-designer-path below). Live Edit's click bridge reads
+  // data-slide-sel plus the nearest ancestor's
+  // data-designer-path to route a click into Designer.tsx's
+  // existing sliderInnerSel/sliderSlideIdx state (the same
+  // state apps/admin's own Blocks-mode canvas already
+  // selects through) — see BaseLayout.astro's designerEdit
+  // bridge script.
+  const renderSlideEl = (el: El, slideIdx: number, r: number, c: number, e: number) => {
+    const slideSel = designerEdit ? `${slideIdx}.${r}.${c}.${e}` : undefined;
+    const ep = el.props ?? {};
+    if (el.bp && Object.keys(el.bp).length > 0) {
+      responsiveRules.push(
+        ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"]`, el.bp, ep, (mp) =>
+          [marginStyle(mp), paddingStyle(mp), posStyle(mp)].filter(Boolean).join(";"),
+        ),
+      );
+    }
+    switch (el.type) {
+      case "heading": {
+        const Tag = headingTag(ep.level) as "h1";
+        return (
+          <Tag
+            class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+            data-slide-el={el.id}
+            data-slide-sel={slideSel}
+            style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), typoStyle(ep), elBorderShadowStyle(ep), posStyle(ep)]
+              .filter(Boolean)
+              .join(";")}
+            set:html={ep.text ? renderInline(ep.text) : ""}
+          />
+        );
+      }
+      case "text":
+        return (
+          <p
+            class={cls("ds-text", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+            data-slide-el={el.id}
+            data-slide-sel={slideSel}
+            style={[
+              `font-size:${fluidTextSize(lengthValue(ep.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+              ep.align ? `text-align:${ep.align}` : null,
+              marginStyle(ep),
+              paddingStyle(ep),
+              typoStyle(ep),
+              elBorderShadowStyle(ep),
+              posStyle(ep),
+            ]
+              .filter(Boolean)
+              .join(";")}
+            set:html={renderInline(ep.text ?? "")}
+          />
+        );
+      case "image": {
+        // posStyle(ep) sizes the WRAPPER div (posWidth/
+        // posHeight from the admin canvas's free-position
+        // resize handle) — the <img> itself must also be
+        // told to fill it, or a resized box visibly does
+        // nothing to the actual picture.
+        const freePos = ep.position === "custom";
+        const epSrc = safeUrl(ep.src);
+        const epSrcset = epSrc ? buildSrcset(epSrc) : null;
+        return epSrc ? (
+          <div data-slide-el={el.id} data-slide-sel={slideSel} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
+            <img
+              class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+              src={epSrc}
+              srcset={epSrcset?.srcset}
+              sizes={epSrcset ? epSrcset.sizes : undefined}
+              alt={ep.alt ?? ""}
+              loading="lazy"
+              style={[
+                `border-radius:${elRadius(ep)}`,
+                freePos && ep.posWidth ? "width:100%" : ep.imgWidth ? `width:${ep.imgWidth}` : null,
+                freePos && ep.posHeight ? "height:100%;object-fit:cover" : null,
+                marginStyle(ep),
+                paddingStyle(ep),
+                elBorderShadowStyle(ep),
+              ]
+                .filter(Boolean)
+                .join(";")}
+            />
+          </div>
+        ) : null;
+      }
+      case "button": {
+        // Same free-position box-fill need as "image" above.
+        const freePos = ep.position === "custom";
+        return ep.label ? (
+          <div
+            data-slide-el={el.id}
+            data-slide-sel={slideSel}
+            style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), posStyle(ep)].filter(Boolean).join(";")}
+          >
+            <a
+              class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+              href={safeUrl(ep.href) ?? "#"}
+              style={[
+                ep.color ? `color:${ep.color}` : null,
+                freePos && ep.posWidth ? "width:100%" : null,
+                freePos && ep.posHeight ? "height:100%;display:flex;align-items:center;justify-content:center" : null,
+                elBorderShadowStyle(ep),
+              ]
+                .filter(Boolean)
+                .join(";") || undefined}
+            >
+              {ep.label}
+            </a>
+          </div>
+        ) : null;
+      }
+      default:
+        return null;
+    }
+  };
+  // Pagination dots — built once, then placed either inside
+  // the fixed-height box (absolute, over the image, today's
+  // only behavior) or as a normal-flow sibling below it
+  // (paginationPlacement "outside"), so the box's own height
+  // never has to change shape for outside-mode nav buttons'
+  // sake (they stay put, centered on the box either way).
+  const dotsEl = dotsStyle !== "none" && (
+    <div
+      class={cls("ds-slider-dots", paginationPlacement === "outside" ? "ds-slider-dots-outside" : undefined)}
+      data-style={dotsStyle}
+      data-position={paginationPosition}
+    >
+      {slides.map((_, i) => (
+        <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i}>
+          {dotsStyle === "numbers" ? i + 1 : ""}
+        </span>
+      ))}
+    </div>
+  );
+  return (
+    <div
+      class={cls("ds-slider", p.cssClass)}
+      style={[
+        marginStyle(p),
+        paddingStyle(p),
+        navColor ? `--ds-nav-color:${navColor}` : null,
+        p.navSize ? `--ds-nav-size:${p.navSize}` : null,
+        p.navOffset ? `--ds-nav-offset:${p.navOffset}` : null,
+        paginationColor ? `--ds-dot-color:${paginationColor}` : null,
+        p.paginationOffset ? `--ds-dot-offset:${p.paginationOffset}` : null,
+        p.paginationBulletSize ? `--ds-dot-size:${p.paginationBulletSize}` : null,
+        p.paginationBulletGap ? `--ds-dot-gap:${p.paginationBulletGap}` : null,
+      ]
+        .filter(Boolean)
+        .join(";")}
+      data-nav-placement={navPlacement}
+    >
+      <div
+        class="ds-slider-box"
+        style={`height:${lengthValue(p.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`}
+        data-autoplay={autoplayMs > 0 ? autoplayMs : undefined}
+        data-nav={navStyle}
+        data-transition={transition}
+        data-slides-per-view={p.slidesPerView || "1"}
+        data-direction={p.direction === "vertical" ? "vertical" : "horizontal"}
+        data-slides-per-group={p.slidesPerGroup || "1"}
+        data-slides-rows={p.slidesRows || "1"}
+        data-centered-slides={p.centeredSlides === "true" ? "true" : undefined}
+        data-space-between={p.spaceBetween || undefined}
+        data-initial-slide={p.initialSlide || undefined}
+        data-auto-height={p.autoHeight === "true" ? "true" : undefined}
+        data-grab-cursor={p.grabCursor === "false" ? "false" : undefined}
+        data-slide-to-clicked={p.slideToClickedSlide === "true" ? "true" : undefined}
+      >
+      <div class="ds-slider-viewport">
+        <div class="ds-slider-track">
+          {slides.map((s, slideIdx) => {
+            const bgUrl = s.imageUrl ? safeCssUrl(bgVariantUrl(s.imageUrl)) : undefined;
+            const overlayOpacity = Math.min(100, Math.max(0, Number(s.overlayOpacity) || 0)) / 100;
+            const bgSize = s.bgSize || "cover";
+            // bgColor is a flat fill BEHIND the image (visible
+            // in any transparent margin, or as the whole
+            // background when there's no image at all) — the
+            // only previous way to get a solid-color slide was
+            // an accidental side effect of the overlay sitting
+            // over the page's own backdrop, not a real choice.
+            // Default text color for this slide's nested
+            // content (an element's own Typography color
+            // still wins) — same "pick the readable side of
+            // whatever we can actually see" logic as
+            // apps/admin's canvas preview; a bare light
+            // photo with no bgColor/overlay keeps the
+            // classic white-on-dark-hero default from
+            // .ds-slide's own CSS rule below.
+            const slideTextColor =
+              s.bgColor && HEX_RE.test(s.bgColor)
+                ? bestTextColor(s.bgColor)
+                : overlayOpacity > 0.3 && HEX_RE.test(s.overlayColor || "")
+                  ? bestTextColor(s.overlayColor)
+                  // No image either — there's no dark photo backdrop to
+                  // justify the white default, and the page behind it is
+                  // typically light. Force dark instead of falling through
+                  // to .ds-slide's white default.
+                  : !bgUrl ? "#000000" : null;
+            const slideStyle = [
+              bgUrl ? `background-image:url('${bgUrl}')` : null,
+              s.bgColor && HEX_RE.test(s.bgColor) ? `background-color:${s.bgColor}` : null,
+              `background-size:${bgSize === "repeat" || bgSize === "no-repeat" ? "auto" : bgSize}`,
+              `background-repeat:${bgSize === "repeat" ? "repeat" : "no-repeat"}`,
+              slideTextColor ? `color:${slideTextColor}` : null,
+            ]
+              .filter(Boolean)
+              .join(";");
+            return (
+              <div class="ds-slide" style={slideStyle || undefined}>
+                {overlayOpacity > 0 && (
+                  <div class="ds-slide-overlay" style={`background:${hexToRgba(s.overlayColor, overlayOpacity)}`} />
+                )}
+                {s.rows.length > 0 && (
+                  <div class={cls("ds-slide-content", `ds-slide-${s.textPosition}`)}>
+                    {s.rows.map((row, r) => (
+                      <div
+                        class="ds-slide-cols"
+                        style={`grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")}`}
+                      >
+                        {(row.columns ?? []).map((col, c) => (
+                          <div class="ds-slide-row">
+                            {(col.elements ?? []).map((el, e) => renderSlideEl(el, slideIdx, r, c, e))}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {slides.length > 1 && (
+        <>
+          {navStyle !== "none" && (
+            <>
+              <button type="button" class="ds-slider-prev" aria-label="Previous slide">{navIcon === "arrow" ? "←" : "‹"}</button>
+              <button type="button" class="ds-slider-next" aria-label="Next slide">{navIcon === "arrow" ? "→" : "›"}</button>
+            </>
+          )}
+          {paginationPlacement === "inside" && dotsEl}
+        </>
+      )}
+      </div>
+      {slides.length > 1 && paginationPlacement === "outside" && dotsEl}
+    </div>
+  );
+})()}
