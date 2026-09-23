@@ -616,3 +616,221 @@ const p = el.props ?? {};
     </div>
   );
 })()}
+
+<style>
+  /* Byte-for-byte copies of the matching rules in SectionBlock.astro's own
+     <style> — Astro's scoped-CSS attribute only covers markup written in
+     THIS file's own template, so a class defined only in SectionBlock's
+     style never applies to markup rendered by this component (confirmed
+     against the compiled build: this component's output never carries the
+     scoping attribute SectionBlock's CSS selectors require). SectionBlock
+     keeps its own copies too, for the elements it still renders directly. */
+  .ds-h {
+    margin: 0;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+  .ds-h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  .ds-h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); }
+  .ds-h3 { font-size: clamp(1.3rem, 3.2vw, 1.5rem); }
+  .ds-h4 { font-size: clamp(1.1rem, 2.6vw, 1.2rem); }
+  .ds-text {
+    margin: 0;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .ds-img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .ds-btn {
+    display: inline-block;
+    padding: 0.65em 1.6em;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    transition: opacity 0.15s ease;
+  }
+  .ds-btn:hover {
+    opacity: 0.85;
+  }
+  .ds-btn-primary {
+    background: var(--color-primary, #0f62fe);
+    color: var(--color-primary-content, #fff);
+  }
+  .ds-btn-outline {
+    border: 2px solid currentColor;
+    color: inherit;
+  }
+  .ds-slider {
+    position: relative;
+  }
+  .ds-slider-box {
+    position: relative;
+    height: 100%;
+  }
+  .ds-slider-viewport {
+    overflow: hidden;
+    border-radius: 0.5rem;
+    height: 100%;
+  }
+  .ds-slider-track {
+    display: flex;
+    height: 100%;
+  }
+  .ds-slide {
+    position: relative;
+    flex-shrink: 0;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    color: #fff;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ds-slide-overlay {
+    position: absolute;
+    inset: 0;
+  }
+  .ds-slide-content {
+    z-index: 1;
+    width: 100%;
+    max-width: 36rem;
+    padding: 1.5rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .ds-slide-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .ds-slide-cols {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .ds-slide-content.ds-slide-left {
+    text-align: left;
+    margin-right: auto;
+    align-items: flex-start;
+  }
+  .ds-slide-content.ds-slide-right {
+    text-align: right;
+    margin-left: auto;
+    align-items: flex-end;
+  }
+  .ds-slider-prev,
+  .ds-slider-next {
+    position: absolute;
+    top: 50%;
+    z-index: 2;
+    width: var(--ds-nav-size, 2.25rem);
+    height: var(--ds-nav-size, 2.25rem);
+    transform: translateY(-50%);
+    border: none;
+    border-radius: 9999px;
+    background: var(--ds-nav-color, rgba(255, 255, 255, 0.85));
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .ds-slider-prev {
+    left: var(--ds-nav-offset, 1rem);
+  }
+  .ds-slider-next {
+    right: var(--ds-nav-offset, 1rem);
+  }
+  .ds-slider[data-nav-placement="outside"] .ds-slider-prev {
+    left: calc(-1 * (var(--ds-nav-size, 2.25rem) + var(--ds-nav-offset, 1rem)));
+  }
+  .ds-slider[data-nav-placement="outside"] .ds-slider-next {
+    right: calc(-1 * (var(--ds-nav-size, 2.25rem) + var(--ds-nav-offset, 1rem)));
+  }
+  .ds-slider-dots {
+    position: absolute;
+    bottom: var(--ds-dot-offset, 1rem);
+    left: 50%;
+    z-index: 2;
+    display: flex;
+    justify-content: center;
+    gap: var(--ds-dot-gap, 0.4rem);
+    transform: translateX(-50%);
+  }
+  .ds-slider-dots.ds-slider-dots-outside {
+    position: static;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    margin-top: var(--ds-dot-offset, 0.75rem);
+  }
+  .ds-slider-dots[data-position="start"] {
+    left: 1rem;
+    justify-content: flex-start;
+    transform: none;
+  }
+  .ds-slider-dots[data-position="end"] {
+    left: auto;
+    right: 1rem;
+    justify-content: flex-end;
+    transform: none;
+  }
+  .ds-slider-dot {
+    width: var(--ds-dot-size, 0.5rem);
+    height: var(--ds-dot-size, 0.5rem);
+    border: none;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+  }
+  .ds-slider-dot.is-active {
+    background: var(--ds-dot-color, #fff);
+  }
+  .ds-slider-box[data-nav="minimal"] .ds-slider-prev,
+  .ds-slider-box[data-nav="minimal"] .ds-slider-next {
+    background: transparent;
+    color: var(--ds-nav-color, #fff);
+    font-size: 2rem;
+  }
+  .ds-slider-dots[data-style="lines"] .ds-slider-dot {
+    width: 1.5rem;
+    height: 0.25rem;
+    border-radius: 0.125rem;
+  }
+  .ds-slider-dots[data-style="numbers"] .ds-slider-dot {
+    width: auto;
+    height: auto;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    color: #111827;
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+  .ds-slider-box[data-transition="fade"] .ds-slider-track {
+    display: block;
+    position: relative;
+    height: 100%;
+  }
+  .ds-slider-box[data-transition="fade"] .ds-slide {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+  }
+  .ds-slider-box[data-transition="fade"] .ds-slide.is-active-fade {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  @media (max-width: 768px) {
+    .ds-slide-cols {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>
