@@ -103,6 +103,124 @@ function spacingBand(edge: "top" | "bottom" | "left" | "right", px: number, outw
   );
 }
 
+// Hoisted to module scope so these keep a stable component identity across
+// Designer renders — declared as nested functions inside Designer() before,
+// React saw a new `type` at their JSX call site on every render (every
+// keystroke/drag), forcing a full unmount+remount instead of a normal diff.
+function HiddenAtBpBadge({ hidden, bp, t }: { hidden: boolean; bp: Bp; t: (k: Key) => string }) {
+  if (!hidden) return null;
+  const Icon = bp === "tablet" ? Tablet : Smartphone;
+  return (
+    <span className="absolute -top-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-red-300 bg-red-50 px-1.5 py-0.5 text-[9px] font-semibold text-red-500 shadow-sm">
+      <Icon className="h-2.5 w-2.5" /> {t("designer-hidden-at-bp")}
+    </span>
+  );
+}
+
+function LayersTreeView({
+  blocks, treeDropHint, rowDragProps, expanded, selEq, pick, toggleExpand, t,
+}: {
+  blocks: Block[];
+  treeDropHint: { key: string; pos: "before" | "after" } | null;
+  rowDragProps: (kind: "section" | "column" | "element", path: number[], key: string) => Record<string, unknown>;
+  expanded: Set<string>;
+  selEq: (p: number[]) => boolean;
+  pick: (e: React.MouseEvent, p: number[]) => void;
+  toggleExpand: (key: string) => void;
+  t: (k: Key) => string;
+}) {
+  return (
+    <div className="space-y-0.5 text-xs">
+      {blocks.map((block, b) => {
+        if (block.type !== "section") {
+          const key = `${b}`;
+          return (
+            <div
+              key={b}
+              className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sub ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
+              {...rowDragProps("section", [b], key)}
+            >
+              <Lock className="h-3 w-3" /> {t("designer-layers-locked")} ({block.type})
+            </div>
+          );
+        }
+        const sp = block.props as unknown as SectionProps;
+        const key = `${b}`;
+        const isOpen = expanded.has(key);
+        const label = sp.anchorId || sp.cssClass || `${t("designer-layers-section")} ${b + 1}`;
+        return (
+          <div key={b}>
+            <div
+              className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
+              onClick={(e) => pick(e, [b])}
+              {...rowDragProps("section", [b], key)}
+            >
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}
+                aria-label={t(isOpen ? "designer-collapse" : "designer-expand")}
+              >
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+              <span className="truncate">{label}</span>
+            </div>
+            {isOpen &&
+              sp.rows.map((row, r) => (
+                <div key={r} className="ml-3">
+                  {sp.rows.length > 1 && (
+                    <div
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer ${selEq([b, r]) ? "bg-accent/10 text-accent" : "text-sub hover:bg-canvas"}`}
+                      onClick={(e) => pick(e, [b, r])}
+                    >
+                      {t("designer-layers-row")} {r + 1}
+                    </div>
+                  )}
+                  {row.columns.map((col, c) => {
+                    const colKey = `${b}.${r}.${c}`;
+                    const colOpen = expanded.has(colKey);
+                    return (
+                      <div key={c} className="ml-1.5">
+                        <div
+                          className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === colKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === colKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
+                          onClick={(e) => pick(e, [b, r, c])}
+                          {...rowDragProps("column", [b, r, c], colKey)}
+                        >
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleExpand(colKey); }}
+                            aria-label={t(colOpen ? "designer-collapse" : "designer-expand")}
+                          >
+                            {colOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          </button>
+                          <span className="truncate">
+                            {t("designer-layers-column")} {c + 1} ({col.span})
+                          </span>
+                        </div>
+                        {colOpen &&
+                          col.elements.map((el, e) => {
+                            const Icon = ELS[el.type].icon;
+                            const elKey = `${b}.${r}.${c}.${e}`;
+                            return (
+                              <div
+                                key={el.id}
+                                className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === elKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === elKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
+                                onClick={(ev) => pick(ev, [b, r, c, e])}
+                                {...rowDragProps("element", [b, r, c, e], elKey)}
+                              >
+                                <Icon className="h-3 w-3" /> {t(ELS[el.type].labelKey)}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Designer({
   page,
   tenantHost,
@@ -244,15 +362,6 @@ export default function Designer({
     if (!props) return false;
     const key = bp === "desktop" ? "hideDesktop" : bp === "tablet" ? "hideTablet" : "hideMobile";
     return props[key] === "true";
-  }
-  function HiddenAtBpBadge({ hidden }: { hidden: boolean }) {
-    if (!hidden) return null;
-    const Icon = bp === "tablet" ? Tablet : Smartphone;
-    return (
-      <span className="absolute -top-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-red-300 bg-red-50 px-1.5 py-0.5 text-[9px] font-semibold text-red-500 shadow-sm">
-        <Icon className="h-2.5 w-2.5" /> {t("designer-hidden-at-bp")}
-      </span>
-    );
   }
   function fourSideValue(sp: SectionProps, perSideKey: string, fallbackKey: string): string {
     return sideValue(sp as unknown as Record<string, string>, sp.bp, perSideKey, fallbackKey);
@@ -826,99 +935,6 @@ export default function Designer({
     };
   }
 
-  function LayersTree() {
-    return (
-      <div className="space-y-0.5 text-xs">
-        {blocks.map((block, b) => {
-          if (block.type !== "section") {
-            const key = `${b}`;
-            return (
-              <div
-                key={b}
-                className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sub ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
-                {...rowDragProps("section", [b], key)}
-              >
-                <Lock className="h-3 w-3" /> {t("designer-layers-locked")} ({block.type})
-              </div>
-            );
-          }
-          const sp = block.props as unknown as SectionProps;
-          const key = `${b}`;
-          const isOpen = expanded.has(key);
-          const label = sp.anchorId || sp.cssClass || `${t("designer-layers-section")} ${b + 1}`;
-          return (
-            <div key={b}>
-              <div
-                className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
-                onClick={(e) => pick(e, [b])}
-                {...rowDragProps("section", [b], key)}
-              >
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}
-                  aria-label={t(isOpen ? "designer-collapse" : "designer-expand")}
-                >
-                  {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                </button>
-                <span className="truncate">{label}</span>
-              </div>
-              {isOpen &&
-                sp.rows.map((row, r) => (
-                  <div key={r} className="ml-3">
-                    {sp.rows.length > 1 && (
-                      <div
-                        className={`rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer ${selEq([b, r]) ? "bg-accent/10 text-accent" : "text-sub hover:bg-canvas"}`}
-                        onClick={(e) => pick(e, [b, r])}
-                      >
-                        {t("designer-layers-row")} {r + 1}
-                      </div>
-                    )}
-                    {row.columns.map((col, c) => {
-                      const colKey = `${b}.${r}.${c}`;
-                      const colOpen = expanded.has(colKey);
-                      return (
-                        <div key={c} className="ml-1.5">
-                          <div
-                            className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === colKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === colKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
-                            onClick={(e) => pick(e, [b, r, c])}
-                            {...rowDragProps("column", [b, r, c], colKey)}
-                          >
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleExpand(colKey); }}
-                              aria-label={t(colOpen ? "designer-collapse" : "designer-expand")}
-                            >
-                              {colOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                            </button>
-                            <span className="truncate">
-                              {t("designer-layers-column")} {c + 1} ({col.span})
-                            </span>
-                          </div>
-                          {colOpen &&
-                            col.elements.map((el, e) => {
-                              const Icon = ELS[el.type].icon;
-                              const elKey = `${b}.${r}.${c}.${e}`;
-                              return (
-                                <div
-                                  key={el.id}
-                                  className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === elKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === elKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
-                                  onClick={(ev) => pick(ev, [b, r, c, e])}
-                                  {...rowDragProps("element", [b, r, c, e], elKey)}
-                                >
-                                  <Icon className="h-3 w-3" /> {t(ELS[el.type].labelKey)}
-                                </div>
-                              );
-                            })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
   // ---------- inspector ----------
   // Media library picker (docs/SliderProblem.pdf #3 — an image field should
   // let an author pick an already-uploaded file, not just paste a URL or
@@ -1338,7 +1354,16 @@ export default function Designer({
               <p className="pt-2 text-[10px] leading-relaxed text-sub">{t("designer-drop-hint")}</p>
             </div>
           ) : (
-            <LayersTree />
+            <LayersTreeView
+              blocks={blocks}
+              treeDropHint={treeDropHint}
+              rowDragProps={rowDragProps}
+              expanded={expanded}
+              selEq={selEq}
+              pick={pick}
+              toggleExpand={toggleExpand}
+              t={t}
+            />
           )}
         </aside>
 
@@ -1418,7 +1443,7 @@ export default function Designer({
                     setCtxMenu({ path: [b], x: ev.clientX, y: ev.clientY });
                   }}
                 >
-                  <HiddenAtBpBadge hidden={sectionHiddenAtBp} />
+                  <HiddenAtBpBadge hidden={sectionHiddenAtBp} bp={bp} t={t} />
                   <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
                     {t("designer-section")} {BlockControls({ b })}
                   </div>
@@ -1631,7 +1656,7 @@ export default function Designer({
                           className="group/row relative"
                           style={{ ...rowMarginStyle(row, r === 0), opacity: rowHiddenAtBp ? 0.35 : undefined }}
                         >
-                          <HiddenAtBpBadge hidden={rowHiddenAtBp} />
+                          <HiddenAtBpBadge hidden={rowHiddenAtBp} bp={bp} t={t} />
                           {mode !== "live" && (
                             <>
                               <button
@@ -1729,7 +1754,7 @@ export default function Designer({
                                 dropIntoColumn([b, r, c]);
                               }}
                             >
-                              <HiddenAtBpBadge hidden={colHiddenAtBp} />
+                              <HiddenAtBpBadge hidden={colHiddenAtBp} bp={bp} t={t} />
                               {selEq([b, r, c]) && mode !== "live" && (
                                 <button
                                   onClick={(ev) => {
@@ -1934,7 +1959,7 @@ export default function Designer({
                                   className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
                                   style={{ ...bpMarginStyle(el), ...bpPaddingStyle(el), opacity: hiddenAtBp(el.props) ? 0.35 : undefined }}
                                 >
-                                  <HiddenAtBpBadge hidden={hiddenAtBp(el.props)} />
+                                  <HiddenAtBpBadge hidden={hiddenAtBp(el.props)} bp={bp} t={t} />
                                   {selEq([b, r, c, e]) && (
                                     <div className="absolute -left-2 -top-2 z-30 rounded-full bg-white p-1 text-accent shadow-sm ring-1 ring-line/30">
                                       <GripVertical className="h-3 w-3" />
