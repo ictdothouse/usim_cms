@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Deep clone via JSON round-trip — fine for plain block/page JSON (no Date,
+// Map, undefined, or circular refs in that data), duplicated identically
+// across Designer's hooks before this was pulled out.
+export const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
 // Shared by App.tsx's page-create flow and Designer.tsx's slug-rename field
 // — both need the exact same sanitizing rules so a slug typed in either
 // place ends up looking the same.

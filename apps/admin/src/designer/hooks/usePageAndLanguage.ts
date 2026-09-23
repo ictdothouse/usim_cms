@@ -11,8 +11,7 @@ import * as api from "@/lib/api";
 import { BASE_LANG } from "../context";
 import { TRANSLATABLE_TEXT_KEYS, isTextKey, pathKey, applyLangOverrides, migrateOldTranslation } from "../lang";
 import type { Block, ElType, PageSettings, SectionProps } from "../types";
-
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+import { clone } from "@/lib/utils";
 
 export interface PageAndLanguageDeps {
   rawBlocks: Block[];
