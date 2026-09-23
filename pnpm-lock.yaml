@@ -43,7 +43,7 @@ importers:
         version: 0.51.4(@floating-ui/dom@1.8.0)(@types/hast@3.0.5)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@hookform/resolvers':
         specifier: ^5.7.1
-        version: 5.7.1(ajv@8.20.0)(react-hook-form@7.84.0(react@18.3.1))(zod@4.4.3)
+        version: 5.7.1(ajv@8.20.0)(react-hook-form@7.88.0(react@18.3.1))(zod@4.4.3)
       '@mantine/core':
         specifier: ^8.3.18
         version: 8.3.18(@mantine/hooks@8.3.18(react@18.3.1))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -135,8 +135,8 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       react-hook-form:
-        specifier: ^7.84.0
-        version: 7.84.0(react@18.3.1)
+        specifier: ^7.88.0
+        version: 7.88.0(react@18.3.1)
       react-router-dom:
         specifier: ^6.28.0
         version: 6.30.4(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1811,12 +1811,6 @@ packages:
     resolution: {integrity: sha512-QoWr9+S8gg5050TQ06aTSxtlpGjYOpIllRbjYYXlRvZeTsUqiTbVfvQROLexu4rEaK+yy9Wwriwl9PMRgbLqPw==}
     peerDependencies:
       react: ^18.x || ^19.x
-
-  '@napi-rs/wasm-runtime@1.1.6':
-    resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
-    peerDependencies:
-      '@emnapi/core': ^1.7.1
-      '@emnapi/runtime': ^1.7.1
 
   '@napi-rs/wasm-runtime@1.2.4':
     resolution: {integrity: sha512-AJxoUD2/15ESHbvpcyjU274nsAPLuOtPHCk0vKJM5pj//Fg/B1FXNWjPnXTT9PymCYYiHo4zPj0ZomXBKhoy7g==}
@@ -4549,8 +4543,8 @@ packages:
     peerDependencies:
       react: ^18.3.1
 
-  react-hook-form@7.84.0:
-    resolution: {integrity: sha512-+hWvQP6GLco56mDwrbU4XnHix8t1z90ltZsDIrREl+jnQFQxYLX8oAzqe/Xn8nHpmoXTY5M6oEXrAhbP1qevNQ==}
+  react-hook-form@7.88.0:
+    resolution: {integrity: sha512-QRaLOWhX93YCnMiRfnOFRSwWXZNt8qhm2JTZwypoDvKpSffTJHmpzMXt8U6PV5UThvL3IiiLDUWe2nHMtz6Mmw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       react: ^16.8.0 || ^17 || ^18 || ^19
@@ -6514,10 +6508,10 @@ snapshots:
       prosemirror-transform: 1.12.0
       prosemirror-view: 1.42.1
 
-  '@hookform/resolvers@5.7.1(ajv@8.20.0)(react-hook-form@7.84.0(react@18.3.1))(zod@4.4.3)':
+  '@hookform/resolvers@5.7.1(ajv@8.20.0)(react-hook-form@7.88.0(react@18.3.1))(zod@4.4.3)':
     dependencies:
       '@standard-schema/utils': 0.3.0
-      react-hook-form: 7.84.0(react@18.3.1)
+      react-hook-form: 7.88.0(react@18.3.1)
     optionalDependencies:
       ajv: 8.20.0
       zod: 4.4.3
@@ -6762,13 +6756,6 @@ snapshots:
   '@mantine/hooks@8.3.18(react@18.3.1)':
     dependencies:
       react: 18.3.1
-
-  '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
-    dependencies:
-      '@emnapi/core': 1.11.1
-      '@emnapi/runtime': 1.11.1
-      '@tybys/wasm-util': 0.10.3
-    optional: true
 
   '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
@@ -7370,7 +7357,7 @@ snapshots:
     dependencies:
       '@emnapi/core': 1.11.1
       '@emnapi/runtime': 1.11.1
-      '@napi-rs/wasm-runtime': 1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
+      '@napi-rs/wasm-runtime': 1.2.4(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
     optional: true
 
   '@rolldown/binding-win32-arm64-msvc@1.1.5':
@@ -9453,7 +9440,7 @@ snapshots:
       react: 18.3.1
       scheduler: 0.23.2
 
-  react-hook-form@7.84.0(react@18.3.1):
+  react-hook-form@7.88.0(react@18.3.1):
     dependencies:
       react: 18.3.1
 
