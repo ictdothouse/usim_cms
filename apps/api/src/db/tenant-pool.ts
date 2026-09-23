@@ -208,12 +208,24 @@ async function provisionTenantDatabase(tenantHost: string, dbUrl: string | null,
 
   // Replay every migration into the tenant DB's own public schema. Idempotent
   // (IF NOT EXISTS / DROP POLICY IF EXISTS throughout), same replay the old
-  // schema-per-tenant provisioning did.
+  // schema-per-tenant provisioning did. Wrapped in one transaction (audit
+  // finding, 2026-09-23) — a crash mid-replay used to leave whichever
+  // migration file was in flight only partially applied; none of the files
+  // use CREATE INDEX CONCURRENTLY (checked — Postgres refuses that inside a
+  // transaction), so BEGIN/COMMIT around the whole loop is safe and makes a
+  // retry always start from either "nothing applied yet" or "fully applied".
   const tp = getTenantPool(connectionString);
   const client = await tp.connect();
   try {
-    for (const file of migrationFiles) {
-      await client.query(readFileSync(path.join(dbDir, "migrations", file), "utf8"));
+    await client.query("BEGIN");
+    try {
+      for (const file of migrationFiles) {
+        await client.query(readFileSync(path.join(dbDir, "migrations", file), "utf8"));
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
     }
   } finally {
     client.release();
@@ -475,6 +487,7 @@ export async function createTenant(
   } finally {
     client.release();
   }
+  tenantRegistryCache.delete(host);
   // Provision eagerly so the tenant works on its first request (and so a
   // missing CREATEDB grant fails loudly here, not on a visitor request).
   const connectionString = await ensureTenantDatabase(host, dbUrl);
@@ -552,6 +565,7 @@ export async function deleteTenant(host: string): Promise<void> {
   } finally {
     client.release();
   }
+  tenantRegistryCache.delete(host);
 
   const dbUrl = tenant.dbUrl as string | null;
   const connectionString = dbUrl ?? deriveTenantDbUrl(host);
@@ -1396,10 +1410,25 @@ export interface TenantConnection {
   release: () => void;
 }
 
-export async function getTenantConnection(tenantHost: string): Promise<TenantConnection> {
-  // Registry lookup on the control-plane — the x-tenant-host trust boundary.
+// Audit finding (2026-09-23): this registry lookup ran on the SAME 10-backend
+// PgBouncer pool on literally every request, ahead of the tenant's own DB
+// connection — the shared control-plane pool saturates before any individual
+// tenant's own pool does, well under the ~8-tenant ceiling documented in
+// deployment/SKILL.md. A tenant row (active/dbUrl) only ever changes via an
+// explicit admin action (createTenant/deleteTenant below, both invalidate
+// their own host's entry on write), so a short TTL is enough to absorb the
+// common case — repeated requests to the same host inside the window skip
+// the control-plane pool entirely — without a stale row surviving much past
+// an actual registry change.
+const TENANT_REGISTRY_CACHE_TTL_MS = 30_000;
+type TenantRow = typeof schema.tenants.$inferSelect;
+const tenantRegistryCache = new Map<string, { tenant: TenantRow | null; expiresAt: number }>();
+
+async function lookupTenantCached(tenantHost: string): Promise<TenantRow | null> {
+  const cached = tenantRegistryCache.get(tenantHost);
+  if (cached && cached.expiresAt > Date.now()) return cached.tenant;
   const registryClient = await pool.connect();
-  let tenant;
+  let tenant: TenantRow | undefined;
   try {
     await ensurePublicSchema(registryClient);
     const db = drizzle(registryClient, { schema });
@@ -1407,6 +1436,13 @@ export async function getTenantConnection(tenantHost: string): Promise<TenantCon
   } finally {
     registryClient.release();
   }
+  tenantRegistryCache.set(tenantHost, { tenant: tenant ?? null, expiresAt: Date.now() + TENANT_REGISTRY_CACHE_TTL_MS });
+  return tenant ?? null;
+}
+
+export async function getTenantConnection(tenantHost: string): Promise<TenantConnection> {
+  // Registry lookup on the control-plane — the x-tenant-host trust boundary.
+  const tenant = await lookupTenantCached(tenantHost);
   if (!tenant || !tenant.active) {
     throw new UnknownTenantError(tenantHost);
   }

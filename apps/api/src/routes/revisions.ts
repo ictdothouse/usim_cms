@@ -22,7 +22,11 @@ export function registerRevisionsRoutes(protectedScope: FastifyInstance) {
   // referenced from the signed token by id only — see GET /api/live-preview.
   // Omitting the body (or sending {}) keeps the old behavior: a plain
   // draft-visibility token with nothing to override.
-  protectedScope.post("/api/pages/:id/preview-token", async (req) => {
+  protectedScope.post("/api/pages/:id/preview-token", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
     const draft = req.body as { layout?: unknown; settings?: unknown; translations?: unknown } | undefined;
     let livePreviewId: string | undefined;
     if (draft && (draft.layout !== undefined || draft.settings !== undefined || draft.translations !== undefined)) {
@@ -44,7 +48,11 @@ export function registerRevisionsRoutes(protectedScope: FastifyInstance) {
 
   // Same shape as the pages preview-token route above — posts had none,
   // which made a Preview button dead for Draft/Private posts.
-  protectedScope.post("/api/posts/:id/preview-token", async (req) => {
+  protectedScope.post("/api/posts/:id/preview-token", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "posts.update")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
     const token = signSession({
       userId: req.user.userId,
       email: req.user.email,
@@ -63,7 +71,11 @@ export function registerRevisionsRoutes(protectedScope: FastifyInstance) {
   // carry not-yet-saved canvas content for Designer's Header/Footer device
   // preview — same ephemeral-store/livePreviewId mechanism, no draft-
   // visibility elevation needed.
-  protectedScope.post("/api/siteChrome/:id/preview-token", async (req) => {
+  protectedScope.post("/api/siteChrome/:id/preview-token", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "headerFooter.write")) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
     const draft = req.body as { layout?: unknown } | undefined;
     let livePreviewId: string | undefined;
     if (draft && draft.layout !== undefined) {
@@ -96,7 +108,12 @@ export function registerRevisionsRoutes(protectedScope: FastifyInstance) {
       .select()
       .from(schema.postRevisions)
       .where(eq(schema.postRevisions.postId, id))
-      .orderBy(desc(schema.postRevisions.createdAt));
+      .orderBy(desc(schema.postRevisions.createdAt))
+      // Audit finding: unbounded — a frequently-republished post accumulates
+      // one snapshot per publish forever. History UI only ever shows a
+      // scrollable list to restore from, not a full archive, so the most
+      // recent 50 is plenty; older snapshots stay in the DB, just unlisted.
+      .limit(50);
     return { items };
   });
 
@@ -158,7 +175,9 @@ export function registerRevisionsRoutes(protectedScope: FastifyInstance) {
       .select()
       .from(schema.pageRevisions)
       .where(eq(schema.pageRevisions.pageId, id))
-      .orderBy(desc(schema.pageRevisions.createdAt));
+      .orderBy(desc(schema.pageRevisions.createdAt))
+      // Same unbounded-history cap as the posts revisions route above.
+      .limit(50);
     return { items };
   });
 

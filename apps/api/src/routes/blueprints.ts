@@ -158,6 +158,10 @@ export function registerBlueprintRoutes(protectedScope: FastifyInstance) {
       reply.code(404);
       return { error: "not found" };
     }
+    if (!canWriteBlueprint(req, existing.tenantHost)) {
+      reply.code(403);
+      return { error: "missing blueprints.write permission" };
+    }
     // Same not-yet-saved-content override as the pages preview-token route —
     // see its comment.
     const draft = req.body as { layout?: unknown; settings?: unknown } | undefined;
