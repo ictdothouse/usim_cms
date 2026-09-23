@@ -21,3 +21,4 @@ jobs:
       - run: pnpm build
       - run: pnpm --filter @ucms/api test
       - run: pnpm --filter @ucms/admin test
+      - run: pnpm --filter @ucms/frontend test
