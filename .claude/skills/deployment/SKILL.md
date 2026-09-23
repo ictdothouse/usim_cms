@@ -180,9 +180,15 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   restore, which is how the admin's site-clone feature works). `exportStaticSite` renders
   every page/post through the real running frontend and bundles the HTML + assets for a
   static-host handover.
-- `apps/api/scripts/backup.sh` is the instance-level counterpart: `pg_dump` (whole
-  control-plane + tenant DBs, or a specific tenant's schema by host), meant to run on a
-  cron job (`RETENTION_DAYS` prunes old dumps, defaults 14).
+- `apps/api/scripts/backup.sh` is the instance-level `pg_dump` counterpart: with no args,
+  dumps the control-plane database plus every active tenant's OWN database (queries
+  `public.tenants` for host/db_url, derives `tenant_<host>`'s connection the same way
+  `tenant-pool.ts`'s `deriveTenantDbUrl` does when `db_url` is unset); with host args,
+  dumps just those tenants. Meant to run on a cron job (`RETENTION_DAYS` prunes old dumps,
+  defaults 14). Fixed 2026-09-23 — it used to `pg_dump -n tenant_<host>` (a schema) against
+  the control-plane connection, where that schema never existed, so a tenant-scoped backup
+  silently produced an empty dump; tenant content has always lived in a separate database,
+  never a schema (see "Multi-tenancy: database-per-tenant" in `apps/api/CLAUDE.md`).
 - **`apps/api/scripts/backup-media.sh`** — the filesystem-level counterpart, for the
   uploads themselves (large-media tenants where `backup.ts`'s in-memory zip export isn't
   practical — see `MAX_LOCAL_MEDIA_BACKUP_BYTES` in `backup.ts`). No object storage, no
