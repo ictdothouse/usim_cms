@@ -4,7 +4,6 @@ import { rm } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { buffer as streamToBuffer } from "node:stream/consumers";
 import Fastify from "fastify";
-import type { FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import multipart from "@fastify/multipart";
@@ -17,7 +16,7 @@ import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
 import { getLivePreview, newLivePreviewId, setLivePreview } from "./live-preview-store.js";
 import { recordRequest, renderMetrics } from "./metrics.js";
 import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
-import { validateLayout, validateOverrides, validateElement, isSafeUrl } from "./collections/validate-layout.js";
+import { validateOverrides, validateElement, isSafeUrl } from "./collections/validate-layout.js";
 import { validateMenuItems } from "./collections/validate-menu.js";
 import * as schema from "./db/schema.js";
 import {
@@ -74,11 +73,6 @@ import {
   recordLoginAttempt,
   isLoginRateLimited,
   insertAuditLog,
-  listPageBlueprints,
-  getPageBlueprint,
-  createPageBlueprint,
-  updatePageBlueprint,
-  deletePageBlueprint,
   getTenantMaintenanceMode,
   setTenantMaintenanceMode,
 } from "./db/tenant-pool.js";
@@ -95,7 +89,6 @@ import {
 import {
   verifyPassword,
   hashPassword,
-  signSession,
   verifySession,
   SESSION_TTL_MS,
   generateTotpSecret,
@@ -118,9 +111,8 @@ import {
   deleteClone,
   looksLikeDomain,
 } from "./backup.js";
-import { uploadFile, deleteFile, localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
+import { localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
 import { translatePlainText, translateHtmlBody } from "./translate.js";
-import { generateImageVariants, deleteImageVariants } from "./image-variants.js";
 import { PERMISSIONS, hasPermission, mergePermissions, validatePermissions } from "./routes/permissions.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPortalSettingsRoutes, validateThemeSettings } from "./routes/portal-settings.js";
@@ -129,6 +121,9 @@ import { registerTenantRoutes, maybeSyncCaddy, maybeSyncCaddyAtBoot } from "./ro
 import { registerUsersRolesLanguagesRoutes } from "./routes/users-roles-languages.js";
 import { registerImpersonationRoutes } from "./routes/impersonation.js";
 import { registerBackupCloneRoutes } from "./routes/backup-clone.js";
+import { registerMediaRoutes } from "./routes/media.js";
+import { registerPublicBlueprintRoutes, registerBlueprintRoutes } from "./routes/blueprints.js";
+import { registerRevisionsRoutes } from "./routes/revisions.js";
 import {
   pagesCollection,
   postsCollection,
@@ -336,33 +331,7 @@ await app.register(async (publicScope) => {
     return { maintenanceMode, bypass };
   });
 
-  // Backs apps/frontend's blueprint-preview.astro (Designer's blueprint
-  // Live Edit iframe) — a blueprint has no real slug/route, so unlike
-  // pages/posts there is no underlying public row this could "elevate"
-  // visibility on; the previewOnly token IS the entire access check. Never
-  // linked from anywhere a real visitor could reach.
-  publicScope.get("/api/blueprints/:id/preview", async (req, reply) => {
-    const auth = req.headers.authorization;
-    const session = auth?.startsWith("Bearer ") ? verifySession(auth.slice("Bearer ".length)) : null;
-    if (!session || !session.previewOnly || session.pendingMfa) {
-      reply.code(401);
-      return { error: "preview token required" };
-    }
-    const { id } = req.params as { id: string };
-    const bp = await getPageBlueprint(id);
-    if (!bp) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    // A tenant-scoped blueprint is only previewable by a token minted for
-    // that same tenant; a system-wide one (tenantHost null) has no tenant to
-    // check against, so any valid previewOnly token may render it.
-    if (bp.tenantHost !== null && bp.tenantHost !== session.tenantHost) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    return { item: bp };
-  });
+  registerPublicBlueprintRoutes(publicScope);
 });
 
 // Protected scope: tenant resolution + login required — this is what the
@@ -372,197 +341,13 @@ await app.register(async (protectedScope) => {
   await requireTenantAuth(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, pagesCollection);
 
-  // Mints a short-lived, read-only token for the admin's page "View" link —
-  // never the real session bearer (see auth.ts's previewOnly/exp and
-  // requireTenantAuth's rejection of it). Scoped to this tenant only, same
-  // granularity as every other read check here (no per-row ACL exists).
-  const PREVIEW_TOKEN_TTL_MS = 5 * 60 * 1000;
-  // Optional body: { layout?, settings?, translations? } — Designer's
-  // Preview/Live Edit now sends the canvas's current in-memory state
-  // directly, with no prior Save, mirroring Elementor/Avada's own "preview
-  // shows what's on screen, not what's persisted" behavior. Stored in the
-  // ephemeral live-preview-store (never pages.layout/settings/translations),
-  // referenced from the signed token by id only — see GET /api/live-preview.
-  // Omitting the body (or sending {}) keeps the old behavior: a plain
-  // draft-visibility token with nothing to override.
-  protectedScope.post("/api/pages/:id/preview-token", async (req) => {
-    const draft = req.body as { layout?: unknown; settings?: unknown; translations?: unknown } | undefined;
-    let livePreviewId: string | undefined;
-    if (draft && (draft.layout !== undefined || draft.settings !== undefined || draft.translations !== undefined)) {
-      livePreviewId = newLivePreviewId();
-      await setLivePreview(livePreviewId, draft);
-    }
-    const token = signSession({
-      userId: req.user.userId,
-      email: req.user.email,
-      role: req.user.role,
-      tenantHost: req.tenantHost,
-      permissions: [],
-      previewOnly: true,
-      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
-      ...(livePreviewId ? { livePreviewId } : {}),
-    });
-    return { token };
-  });
-
-  // Same shape as the pages preview-token route above — posts had none,
-  // which made a Preview button dead for Draft/Private posts.
-  protectedScope.post("/api/posts/:id/preview-token", async (req) => {
-    const token = signSession({
-      userId: req.user.userId,
-      email: req.user.email,
-      role: req.user.role,
-      tenantHost: req.tenantHost,
-      permissions: [],
-      previewOnly: true,
-      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
-    });
-    return { token };
-  });
+  registerRevisionsRoutes(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
   registerProtectedCollectionRoutes(protectedScope, menusCollection);
   registerProtectedCollectionRoutes(protectedScope, symbolsCollection);
   registerProtectedCollectionRoutes(protectedScope, eventsCollection);
   registerProtectedCollectionRoutes(protectedScope, siteChromeCollection);
-
-  // siteChrome's own GET is already publicly readable regardless of draft/
-  // published status (see chrome-preview.astro's own comment), so unlike the
-  // pages/blueprints preview-token routes above, this one exists purely to
-  // carry not-yet-saved canvas content for Designer's Header/Footer device
-  // preview — same ephemeral-store/livePreviewId mechanism, no draft-
-  // visibility elevation needed.
-  protectedScope.post("/api/siteChrome/:id/preview-token", async (req) => {
-    const draft = req.body as { layout?: unknown } | undefined;
-    let livePreviewId: string | undefined;
-    if (draft && draft.layout !== undefined) {
-      livePreviewId = newLivePreviewId();
-      await setLivePreview(livePreviewId, draft);
-    }
-    const token = signSession({
-      userId: req.user.userId,
-      email: req.user.email,
-      role: req.user.role,
-      tenantHost: req.tenantHost,
-      permissions: [],
-      previewOnly: true,
-      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
-      ...(livePreviewId ? { livePreviewId } : {}),
-    });
-    return { token };
-  });
-
-  // History/restore — a post-specific feature the generic CRUD mechanism
-  // doesn't cover (same reasoning as the preview-token route above), so
-  // hand-rolled rather than forced into registerProtectedCollectionRoutes.
-  protectedScope.get("/api/posts/:id/revisions", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "posts.update")) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    const { id } = req.params as { id: string };
-    const items = await req.db
-      .select()
-      .from(schema.postRevisions)
-      .where(eq(schema.postRevisions.postId, id))
-      .orderBy(desc(schema.postRevisions.createdAt));
-    return { items };
-  });
-
-  // Copies a snapshot's content fields back onto the live post as a new
-  // draft — never auto-republishes it, so restoring an old version always
-  // goes through a deliberate re-publish click, same as any other edit.
-  protectedScope.post("/api/posts/:id/revisions/:revisionId/restore", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "posts.update")) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    const { id, revisionId } = req.params as { id: string; revisionId: string };
-    const [revision] = await req.db
-      .select()
-      .from(schema.postRevisions)
-      .where(and(eq(schema.postRevisions.id, revisionId), eq(schema.postRevisions.postId, id)));
-    if (!revision) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    // Revision's category is a name snapshot — if a category with that exact
-    // name still exists, restore points at it; if renamed/deleted since,
-    // this goes to uncategorized rather than guessing (same known-ceiling
-    // tradeoff as the bookmark card snapshot in Phase 4).
-    let categoryId: string | null = null;
-    if (revision.category) {
-      const [cat] = await req.db.select().from(schema.categories).where(eq(schema.categories.name, revision.category));
-      categoryId = cat?.id ?? null;
-    }
-    const [item] = await req.db
-      .update(schema.posts)
-      .set({
-        title: revision.title,
-        body: revision.body,
-        excerpt: revision.excerpt,
-        bannerImageUrl: revision.bannerImageUrl,
-        categoryId,
-        tags: revision.tags,
-        status: "draft",
-        publishedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.posts.id, id))
-      .returning();
-    return { item };
-  });
-
-  // History/restore for pages — same reasoning as the posts revision routes
-  // above (a page-specific feature the generic CRUD mechanism doesn't cover),
-  // mirrored exactly minus the category-name resolution posts' restore does
-  // (pages have no category concept).
-  protectedScope.get("/api/pages/:id/revisions", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.update")) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    const { id } = req.params as { id: string };
-    const items = await req.db
-      .select()
-      .from(schema.pageRevisions)
-      .where(eq(schema.pageRevisions.pageId, id))
-      .orderBy(desc(schema.pageRevisions.createdAt));
-    return { items };
-  });
-
-  // Copies a snapshot's content fields back onto the live page as a new
-  // draft — never auto-republishes it, so restoring an old version always
-  // goes through a deliberate re-publish click, same as any other edit.
-  protectedScope.post("/api/pages/:id/revisions/:revisionId/restore", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, department: req.tenantHost, permissions: req.user.permissions }, "pages.update")) {
-      reply.code(403);
-      return { error: "forbidden" };
-    }
-    const { id, revisionId } = req.params as { id: string; revisionId: string };
-    const [revision] = await req.db
-      .select()
-      .from(schema.pageRevisions)
-      .where(and(eq(schema.pageRevisions.id, revisionId), eq(schema.pageRevisions.pageId, id)));
-    if (!revision) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    const [item] = await req.db
-      .update(schema.pages)
-      .set({
-        title: revision.title,
-        layout: revision.layout,
-        settings: revision.settings,
-        bannerImageUrl: revision.bannerImageUrl,
-        status: "draft",
-        publishedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.pages.id, id))
-      .returning();
-    return { item };
-  });
 
   // Cross-collection search for the admin's @-mention bookmark-card feature —
   // spans posts+pages, which generic-crud's per-table routes can't do. Own
@@ -616,249 +401,7 @@ await app.register(async (protectedScope) => {
   });
   registerProtectedCollectionRoutes(protectedScope, templatesCollection);
 
-  // Stores uploaded images (banners, etc.) on local disk under a per-tenant
-  // folder. Served back publicly at the returned URL — that's expected for
-  // site assets, not a tenant-isolation break (no read of any DB data here).
-  // No svg in the allowlist on purpose: svg can carry scripts. Extension is
-  // derived from THIS map (server-controlled), never the client's own
-  // filename — same fix as the branding-upload route above (~line 923)
-  // already applies: without it, a part declaring e.g. `Content-Type:
-  // video/mp4` with `filename: x.html` got stored and served back with a
-  // `.html` extension, executing as a page on this API's own origin (a
-  // stored-XSS → session-hijack chain, since GET /api/auth/session — same
-  // origin — returns the caller's csrfToken).
-  const MEDIA_EXT_BY_MIME: Record<string, string> = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-  };
-  const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
-
-  protectedScope.post("/api/media", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
-      reply.code(403);
-      return { error: "missing media.upload permission" };
-    }
-    const limits = await getMergedStorageLimits(req.tenantHost);
-    // Per-call override, not the plugin's registration-time default — same
-    // pattern the backup-restore upload already uses (~line 1207) to raise
-    // its own ceiling. This is what actually enforces a site-specific cap:
-    // busboy stops reading and truncates the stream once this many bytes
-    // are seen, rather than us buffering an oversized file just to reject it.
-    const file = await req.file({ limits: { fileSize: limits.maxUploadFileSizeMb * 1024 * 1024 } });
-    if (!file) {
-      reply.code(400);
-      return { error: "file required (multipart/form-data, field name 'file')" };
-    }
-    // folderId must be appended to the FormData BEFORE the file field —
-    // busboy only exposes fields that arrived ahead of the file stream here.
-    let folderId: string | null = null;
-    const folderField = file.fields.folderId;
-    if (folderField && !Array.isArray(folderField) && folderField.type === "field") {
-      folderId = (folderField.value as string) || null;
-    }
-    const ext = MEDIA_EXT_BY_MIME[file.mimetype];
-    if (!ext) {
-      reply.code(415);
-      return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp/mp4/webm only)` };
-    }
-    const safeTenant = tenantFolder(req.tenantHost);
-    const stem = randomUUID();
-    const filename = `${stem}${ext}`;
-    // Buffered (not streamed straight to storage) so the same bytes can also
-    // feed sharp for the responsive-variant pipeline below — bounded by
-    // limits.maxUploadFileSizeMb, already enforced on the multipart parser
-    // above, so this never buffers more than a site's own configured cap.
-    const fileBuffer = await streamToBuffer(file.file);
-    // Busboy truncates the stream at the multipart fileSize limit rather
-    // than erroring — detect it once the stream is fully drained (buffer()
-    // just did that) and refuse the partial file before anything is
-    // uploaded, rather than uploading then deleting.
-    if (file.file.truncated) {
-      reply.code(413);
-      return { error: `file too large (max ${limits.maxUploadFileSizeMb} MB)` };
-    }
-    if (limits.maxTotalStorageMb !== null) {
-      const [{ total }] = await req.db.select({ total: sql<string>`coalesce(sum(${schema.media.sizeBytes}), 0)` }).from(schema.media);
-      if (Number(total) + fileBuffer.byteLength > limits.maxTotalStorageMb * 1024 * 1024) {
-        reply.code(413);
-        return { error: `storage limit reached (${limits.maxTotalStorageMb} MB max for this site)` };
-      }
-    }
-    const { url: rawUrl } = await uploadFile(safeTenant, filename, Readable.from(fileBuffer));
-    // Responsive image pipeline: gif is skipped (animated — sharp would only
-    // read its first frame, silently breaking the animation in every
-    // generated variant). jpeg/png/webp get downsized WebP siblings plus
-    // their real pixel size embedded in the URL as `?w=&h=` — see
-    // image-variants.ts and SectionBlock.astro's buildSrcset for how the
-    // frontend reconstructs a real <img srcset> from that alone, no DB
-    // lookup needed at render time.
-    const meta =
-      file.mimetype.startsWith("image/") && file.mimetype !== "image/gif"
-        ? await generateImageVariants(safeTenant, stem, fileBuffer)
-        : null;
-    const url = meta ? `${rawUrl}?w=${meta.width}&h=${meta.height}` : rawUrl;
-    const [item] = await req.db
-      .insert(schema.media)
-      .values({
-        filename,
-        originalName: file.filename,
-        url,
-        mimeType: file.mimetype,
-        sizeBytes: fileBuffer.byteLength,
-        width: meta?.width ?? null,
-        height: meta?.height ?? null,
-        folderId,
-        uploadedBy: req.user.userId,
-        uploadedByEmail: req.user.email,
-      })
-      .returning();
-    return { url, item };
-  });
-
-  // Tenant-facing, read-only: what the merged limit resolves to for THIS
-  // site, plus current usage — any authenticated user, not gated behind
-  // media.upload (a webmaster who can't upload should still be able to see
-  // WHY, and the Content Manager's media library page needs this even for
-  // someone who only browses, not uploads).
-  protectedScope.get("/api/storage-limits", async (req) => {
-    const limits = await getMergedStorageLimits(req.tenantHost);
-    const [{ total }] = await req.db.select({ total: sql<string>`coalesce(sum(${schema.media.sizeBytes}), 0)` }).from(schema.media);
-    return { limits, usageBytes: Number(total) };
-  });
-
-  // A webmaster only ever sees/edits/deletes files they personally uploaded
-  // — other webmasters on the same tenant are invisible to each other here.
-  // Superadmin (browsing via the content-manager site picker, or a portal
-  // tool) is the one role that still sees the whole tenant's library.
-  const ownershipFilter = (req: { user: { role: string; userId: string } }) =>
-    req.user.role === "superadmin" ? undefined : eq(schema.media.uploadedBy, req.user.userId);
-
-  protectedScope.get("/api/media", async (req) => {
-    const { folderId } = req.query as { folderId?: string };
-    const conditions = [ownershipFilter(req), folderId ? eq(schema.media.folderId, folderId) : undefined].filter(
-      (c): c is Exclude<typeof c, undefined> => c !== undefined,
-    );
-    const query = req.db.select().from(schema.media).orderBy(desc(schema.media.createdAt));
-    const items = conditions.length ? await query.where(and(...conditions)) : await query;
-    return { items };
-  });
-
-  protectedScope.patch("/api/media/:id", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
-      reply.code(403);
-      return { error: "missing media.upload permission" };
-    }
-    const { id } = req.params as { id: string };
-    const body = req.body as {
-      originalName?: string;
-      altText?: string | null;
-      description?: string | null;
-      folderId?: string | null;
-      isDecorative?: boolean;
-    };
-    const idFilter = ownershipFilter(req);
-    // Allowlist fields explicitly — body is only TS-cast, not runtime
-    // validated, so spreading it into .set() would let a caller overwrite
-    // any column (uploadedBy, url, mimeType, ...) via extra JSON fields.
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-    if (body.originalName !== undefined) updates.originalName = body.originalName;
-    if (body.altText !== undefined) updates.altText = body.altText;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.folderId !== undefined) updates.folderId = body.folderId;
-    if (body.isDecorative !== undefined) updates.isDecorative = body.isDecorative;
-    const [item] = await req.db
-      .update(schema.media)
-      .set(updates)
-      .where(idFilter ? and(eq(schema.media.id, id), idFilter) : eq(schema.media.id, id))
-      .returning();
-    if (!item) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    return { item };
-  });
-
-  protectedScope.delete("/api/media/:id", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.delete")) {
-      reply.code(403);
-      return { error: "missing media.delete permission" };
-    }
-    const { id } = req.params as { id: string };
-    const idFilter = ownershipFilter(req);
-    const [row] = await req.db
-      .delete(schema.media)
-      .where(idFilter ? and(eq(schema.media.id, id), idFilter) : eq(schema.media.id, id))
-      .returning();
-    if (!row) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    const safeTenant = tenantFolder(req.tenantHost);
-    await deleteFile(safeTenant, row.filename);
-    await deleteImageVariants(safeTenant, path.parse(row.filename).name, row.width);
-    return { deleted: true, id };
-  });
-
-  protectedScope.get("/api/media/folders", async (req) => ({
-    items: await req.db.select().from(schema.mediaFolders).orderBy(schema.mediaFolders.name),
-  }));
-
-  protectedScope.post("/api/media/folders", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
-      reply.code(403);
-      return { error: "missing media.upload permission" };
-    }
-    const { name } = req.body as { name?: string };
-    if (!name?.trim()) {
-      reply.code(400);
-      return { error: "name required" };
-    }
-    const [item] = await req.db.insert(schema.mediaFolders).values({ name: name.trim() }).returning();
-    return { item };
-  });
-
-  protectedScope.patch("/api/media/folders/:id", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
-      reply.code(403);
-      return { error: "missing media.upload permission" };
-    }
-    const { id } = req.params as { id: string };
-    const { name } = req.body as { name?: string };
-    if (!name?.trim()) {
-      reply.code(400);
-      return { error: "name required" };
-    }
-    const [item] = await req.db
-      .update(schema.mediaFolders)
-      .set({ name: name.trim() })
-      .where(eq(schema.mediaFolders.id, id))
-      .returning();
-    if (!item) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    return { item };
-  });
-
-  protectedScope.delete("/api/media/folders/:id", async (req, reply) => {
-    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.delete")) {
-      reply.code(403);
-      return { error: "missing media.delete permission" };
-    }
-    const { id } = req.params as { id: string };
-    // Files inside fall back to "no folder" (folder_id ON DELETE SET NULL) —
-    // deleting a folder organizes, never bulk-deletes files.
-    const [row] = await req.db.delete(schema.mediaFolders).where(eq(schema.mediaFolders.id, id)).returning();
-    if (!row) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    return { deleted: true, id };
-  });
+  registerMediaRoutes(protectedScope);
 
   // A dept admin can only ever write their own row here — the global row is
   // out of reach from this scope. Writes to the control-plane site_theme
@@ -982,139 +525,7 @@ await app.register(async (protectedScope) => {
     return { switcherPosition, switcherStyle };
   });
 
-  // Page Blueprint (Sprint 5 sub-project 2) — control-plane CRUD, hand-
-  // written for the same reason /api/tenant-languages is (control-plane
-  // data via tenant-pool.ts, not req.db — generic-crud.ts only ever
-  // operates on a tenant's own database connection).
-  function canWriteBlueprint(req: FastifyRequest, targetTenantHost: string | null): boolean {
-    if (req.user.role === "superadmin") return true;
-    if (targetTenantHost === null) return false; // only superadmin may touch a system blueprint
-    return targetTenantHost === req.tenantHost && hasPermission({ role: req.user.role, permissions: req.user.permissions }, "blueprints.write");
-  }
-
-  protectedScope.get("/api/blueprints", async (req) => {
-    const { category } = req.query as { category?: string };
-    const items = await listPageBlueprints(req.tenantHost, category || undefined);
-    return { items };
-  });
-
-  protectedScope.post("/api/blueprints", async (req, reply) => {
-    const body = req.body as {
-      name?: string;
-      description?: string | null;
-      category?: string | null;
-      layout?: unknown;
-      settings?: unknown;
-      scope?: "system" | "tenant";
-    };
-    if (!body.name || typeof body.name !== "string") {
-      reply.code(400);
-      return { error: "name is required" };
-    }
-    const targetTenantHost = body.scope === "system" ? null : req.tenantHost;
-    if (!canWriteBlueprint(req, targetTenantHost)) {
-      reply.code(403);
-      return { error: "missing blueprints.write permission" };
-    }
-    const layoutErr = validateLayout(body.layout ?? []);
-    if (layoutErr) {
-      reply.code(400);
-      return { error: layoutErr };
-    }
-    const row = await createPageBlueprint({
-      tenantHost: targetTenantHost,
-      name: body.name,
-      description: body.description ?? null,
-      category: body.category ?? null,
-      layout: body.layout ?? [],
-      settings: body.settings ?? {},
-      createdBy: req.user.userId,
-      createdByEmail: req.user.email,
-    });
-    return { item: row };
-  });
-
-  protectedScope.patch("/api/blueprints/:id", async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await getPageBlueprint(id);
-    if (!existing) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    if (!canWriteBlueprint(req, existing.tenantHost)) {
-      reply.code(403);
-      return { error: "missing blueprints.write permission" };
-    }
-    const body = req.body as { name?: string; description?: string | null; category?: string | null; layout?: unknown; settings?: unknown };
-    if (body.layout !== undefined) {
-      const layoutErr = validateLayout(body.layout);
-      if (layoutErr) {
-        reply.code(400);
-        return { error: layoutErr };
-      }
-    }
-    // Allowlist fields explicitly — body is only TS-cast, not runtime
-    // validated, so passing it straight through would let a caller overwrite
-    // any column (tenantHost, createdBy, createdByEmail, id, ...) via extra
-    // JSON fields, e.g. escalating a tenant-scoped blueprint to system-wide.
-    const updates: { name?: string; description?: string | null; category?: string | null; layout?: unknown; settings?: unknown } = {};
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.category !== undefined) updates.category = body.category;
-    if (body.layout !== undefined) updates.layout = body.layout;
-    if (body.settings !== undefined) updates.settings = body.settings;
-    await updatePageBlueprint(id, updates);
-    return { saved: true };
-  });
-
-  protectedScope.delete("/api/blueprints/:id", async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await getPageBlueprint(id);
-    if (!existing) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    if (!canWriteBlueprint(req, existing.tenantHost)) {
-      reply.code(403);
-      return { error: "missing blueprints.write permission" };
-    }
-    await deletePageBlueprint(id);
-    return { deleted: true };
-  });
-
-  // Mints a preview credential for Designer's blueprint "Live Edit" iframe —
-  // same previewOnly/exp shape as the pages preview-token route above. A
-  // blueprint has no live route of its own (no slug), so the counterpart
-  // read route below is public (never behind requireTenantAuth) and instead
-  // gates purely on this token, mirroring how [...slug].astro's own
-  // designerEdit bridge only ever activates alongside a valid previewToken.
-  protectedScope.post("/api/blueprints/:id/preview-token", async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const existing = await getPageBlueprint(id);
-    if (!existing) {
-      reply.code(404);
-      return { error: "not found" };
-    }
-    // Same not-yet-saved-content override as the pages preview-token route
-    // above — see its comment.
-    const draft = req.body as { layout?: unknown; settings?: unknown } | undefined;
-    let livePreviewId: string | undefined;
-    if (draft && (draft.layout !== undefined || draft.settings !== undefined)) {
-      livePreviewId = newLivePreviewId();
-      await setLivePreview(livePreviewId, draft);
-    }
-    const token = signSession({
-      userId: req.user.userId,
-      email: req.user.email,
-      role: req.user.role,
-      tenantHost: req.tenantHost,
-      permissions: [],
-      previewOnly: true,
-      exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
-      ...(livePreviewId ? { livePreviewId } : {}),
-    });
-    return { token };
-  });
+  registerBlueprintRoutes(protectedScope);
 });
 
 const port = Number(process.env.PORT ?? 3000);
