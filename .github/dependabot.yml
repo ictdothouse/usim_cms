@@ -1,13 +1,22 @@
 version: 2
 updates:
-  # pnpm workspace — root + all apps/* covered by one entry
+  # pnpm workspace — root + all apps/* covered by one entry. Grouped so a PR's
+  # own title/size tells you which risk tier it is without opening it: routine
+  # patch/minor bumps land as one small bundled PR per group, while any major
+  # (React 19, Vite 8, Tailwind v4-for-admin, etc.) arrives standalone and
+  # un-grouped — same semver-major boundary the deployment skill's own
+  # Postgres ignore rule below already treats as "needs a deliberate pass".
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
     groups:
-      dev-dependencies:
+      dev-dependencies-patch-minor:
         dependency-type: "development"
+        update-types: ["patch", "minor"]
+      prod-dependencies-patch-minor:
+        dependency-type: "production"
+        update-types: ["patch", "minor"]
     open-pull-requests-limit: 10
 
   # Docker base images (node:22-alpine in each apps/*/Dockerfile)

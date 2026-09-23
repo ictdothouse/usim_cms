@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev:api": "pnpm --filter @ucms/api dev",
     "dev:admin": "pnpm --filter @ucms/admin dev",
