@@ -1,6 +1,84 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* v4 defaults dark-mode to prefers-color-scheme — this app toggles dark mode
+   by adding .dark to an ancestor (next-themes), same as it did under v3's
+   darkMode:["class"], so the variant has to be declared explicitly here. */
+@custom-variant dark (&:is(.dark *));
+
+/* Was tailwind.config.js's theme.extend (colors/fontFamily/borderRadius/
+   keyframes/animation) under v3 — v4 is CSS-first, so the same tokens live
+   here as --color-*/--font-*/--radius-*/--animate-* theme variables instead
+   of a JS config object. Values that were already `var(--foo)` referencing
+   the :root/.dark custom properties below are unchanged, just re-homed
+   under the --color-* namespace v4 requires for a token to generate
+   utilities like bg-card/text-card-foreground. */
+/* inline: these tokens reference OTHER custom properties (the :root/.dark
+   block below) that differ between light/dark — inline keeps them as live
+   var() references in the generated utility CSS instead of Tailwind baking
+   in whatever they statically resolve to at build time, which is also what
+   was making @apply border-border/bg-background below fail to resolve. */
+@theme inline {
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-display: Space Grotesk, sans-serif;
+
+  --color-ink: #1d1d1f;
+  --color-sub: #86868b;
+  --color-body: #515154;
+  --color-line: #d2d2d7;
+  --color-canvas: #f5f5f7;
+  --color-accent: #0071e3;
+  --color-accent-foreground: #ffffff;
+  --color-ok: #34c759;
+  --color-warn: #ff9500;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from { height: 0; }
+  to { height: var(--radix-accordion-content-height); }
+}
+@keyframes accordion-up {
+  from { height: var(--radix-accordion-content-height); }
+  to { height: 0; }
+}
 
 @layer base {
   :root {
@@ -75,11 +153,20 @@
 }
 
 @layer base {
+  /* Plain CSS instead of @apply border-border/bg-background text-foreground
+     — v4's Vite plugin left those two @apply lines completely unexpanded in
+     the build output (verified in dist: the literal text "@apply
+     border-border;" survived into the shipped CSS), so lightningcss's own
+     minifier choked on them as unknown syntax. Same result, no @apply
+     resolution to depend on — these are exactly what those two lines would
+     have expanded to, referencing the SAME theme-aliased custom properties
+     border/background/foreground defined above. */
   * {
-    @apply border-border;
+    border-color: var(--border);
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--background);
+    color: var(--foreground);
   }
 }
 
