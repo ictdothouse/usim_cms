@@ -1,16 +1,10 @@
-import { createContext, Fragment, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, Link } from "react-router-dom";
+import { createContext, lazy, Suspense, useContext, useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
-  Check,
   ChevronRight,
-  Copy,
-  Download,
-  ExternalLink,
   FileText,
-  Folder,
   Globe,
-  Image as ImageIcon,
   Inbox,
   KeyRound,
   Languages,
@@ -21,58 +15,35 @@ import {
   Loader2,
   LogOut,
   Menu,
-  Newspaper,
   Palette,
   PanelTop,
-  Pencil,
   Rss,
-  Search,
   Settings as SettingsIcon,
   ShieldCheck,
-  Sparkles,
-  Trash2,
-  UploadCloud,
   Users as UsersIcon,
-  Wrench,
   X,
 } from "lucide-react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { toast } from "sonner";
 import * as api from "@/lib/api";
-import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Session } from "@/lib/api";
 import { dict, type Key, type Lang } from "@/i18n";
-import { useConfirm, ConfirmDialogProvider } from "@/hooks/useConfirm";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { QrCode } from "@/components/QrCode";
+import { ConfirmDialogProvider } from "@/hooks/useConfirm";
 // PostEditorPage (BlockNote rich-text editor) and BlueprintGallery are
 // heavy routed views — code-split so a session that only ever opens
 // Media/Menus/etc never downloads them. Designer itself is code-split from
 // inside DesignerRoutes.tsx, the only place that renders it.
 export const BlueprintGallery = lazy(() => import("./BlueprintGallery").then((m) => ({ default: m.BlueprintGallery })));
-import CategoriesPanel from "./CategoriesPanel";
 import SetupWizard from "./SetupWizard";
 import LoginForm from "./LoginForm";
-import { PageDesignerRoute, BlueprintDesignerRoute, SymbolDesignerRoute, HeaderFooterDesignerRoute } from "./DesignerRoutes";
+import { BlueprintDesignerRoute, SymbolDesignerRoute, HeaderFooterDesignerRoute } from "./DesignerRoutes";
 import { Dashboard, PortalFeedPanel } from "./Dashboard";
 import TenantLanguagesForm from "./TenantLanguagesForm";
 import SecurityPanel from "./SecurityPanel";
 import RolesPanel from "./RolesPanel";
 import UsersPanel from "./UsersPanel";
-import PostsPanel from "./PostsPanel";
-import PagesPanel from "./PagesPanel";
-import MediaManager from "./MediaManager";
 import ContentManager from "./ContentManager";
 import TenantsPanel from "./TenantsPanel";
 import SettingsPanel from "./SettingsPanel";
 import { ThemeForm } from "./ThemeForm";
-const PostEditorPage = lazy(() => import("./PostEditorPage"));
 import MenusPanel from "./MenusPanel";
 import HeaderFooterPanel from "./HeaderFooterPanel";
 import EventsPanel from "./EventsPanel";

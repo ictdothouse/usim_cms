@@ -19,6 +19,7 @@ export function escapeHtml(s: string): string {
 // (relative) URL passes; anything else (javascript:, data:, etc.) is
 // rejected — returns null so each call site picks its own fallback.
 export function sanitizeUrl(u: string): string | null {
+  // eslint-disable-next-line no-control-regex -- control chars are the whole point, see above
   const v = u.replace(/[\x00-\x20]+/g, "");
   if (!v) return null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return /^https?:/i.test(v) ? v : null;

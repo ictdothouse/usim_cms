@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- test-only deep-indexing into Caddy's generated JSON config, no local type modeled for it */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildCaddyConfig, parseCertExpiry, isValidDialTargets } from "./proxy-sync.js";

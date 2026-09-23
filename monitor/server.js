@@ -13,14 +13,17 @@
 //               ensure_postgres actually installed it — if it instead
 //               reused an already-running cluster, restarting it could take
 //               down some other app on this VPS that also depends on it).
-"use strict";
-
-const http = require("http");
-const https = require("https");
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
-const { execFile, spawn } = require("child_process");
+import http from "node:http";
+import https from "node:https";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { execFile, spawn } from "node:child_process";
+import process from "node:process";
+import console from "node:console";
+import { Buffer } from "node:buffer";
+import { URL } from "node:url";
+import { setInterval } from "node:timers";
 
 const PORT = Number(process.env.MONITOR_PORT || 5555);
 const REPO_DIR = process.env.REPO_DIR || process.cwd();
@@ -367,7 +370,7 @@ function isServiceUp(state) {
 // healthcheck comment for why that gap mattered specifically for Caddy).
 function selfHealRestart(name) {
   composeArgsFor(name, (args) => {
-    runCompose([...args, "restart", name], (err, stdout, stderr) => {
+    runCompose([...args, "restart", name], (err) => {
       sendAlert(
         err
           ? `[usim_cms/${PUBLIC_HOST}] self-heal restart of ${name} FAILED: ${String(err.message || err)}`

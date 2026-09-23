@@ -40,7 +40,7 @@ export default function TenantsPanel({ token, setSiteHost }: { token: string; se
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [usage, setUsage] = useState<Record<string, api.TenantUsage>>({});
   const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg] = useState<string | null>(null);
   const [manageHost, setManageHost] = useState<string | null>(null);
   const form = useForm<TenantCreateForm>({
     resolver: zodResolver(tenantCreateSchema),
@@ -486,7 +486,6 @@ function CloneBox({ token, sourceHost, onNewSite }: { token: string; sourceHost:
   const [type, setType] = useState<"full" | "design">("full");
   const [label, setLabel] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
