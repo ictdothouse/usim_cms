@@ -52,6 +52,7 @@ export function isSafeUrl(v: string): boolean {
   // the permissive `return true`) while still executing as javascript: once
   // rendered — strip them first so this check sees what a browser actually
   // parses.
+  // eslint-disable-next-line no-control-regex -- control chars are the whole point, see above
   const stripped = v.replace(/[\x00-\x20]+/g, "");
   if (/^[a-z][a-z0-9+.-]*:/i.test(stripped)) return /^https?:/i.test(stripped);
   return true;

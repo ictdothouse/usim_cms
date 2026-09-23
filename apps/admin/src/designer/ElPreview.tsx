@@ -30,7 +30,7 @@ import {
   Users,
   Video,
 } from "lucide-react";
-import type { Block, El, Sel, SectionProps } from "./types";
+import type { El, Sel, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
 import { getNode } from "../designerTree";
 import { ELS } from "./elements";
@@ -41,11 +41,6 @@ import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
   elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
 } from "./style";
-
-// Only the one shape ElPreview's mutate() calls actually touch (props/bp on
-// a row's column's element) — avoids importing SectionProps just for this.
-type SectionPropsLike = { rows: { columns: { elements: { props: Record<string, string>; bp?: Record<string, string> }[] }[] }[] };
-const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionPropsLike;
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 

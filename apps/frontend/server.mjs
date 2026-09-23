@@ -2,6 +2,8 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import process from "node:process";
+import console from "node:console";
 import { handler } from "./dist/server/entry.mjs";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4321;

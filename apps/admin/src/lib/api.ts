@@ -109,6 +109,7 @@ async function request(path: string, tenantHost: string | null, token: string | 
 // mid-response, a proxy timeout) — res.json() throws a raw, unreadable
 // SyntaxError ("Unexpected end of JSON input") in that case. Read the text
 // first so a broken response surfaces a real, actionable message instead.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- generic JSON body, typed by each call site as it's read
 async function parseJsonBody(res: Response): Promise<any> {
   const text = await res.text();
   try {

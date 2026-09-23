@@ -12,7 +12,7 @@ import type { Menu, Category, Symbol } from "@/lib/api";
 import type { Key } from "@/i18n";
 import type { Field, Bp, SlideItem, Block, SectionProps } from "./types";
 import { SHADOW_DEFAULT_PARTS } from "./fields";
-import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, DragNumber, BpToggle } from "./FieldControls";
+import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, DragNumber } from "./FieldControls";
 import {
   parsePairs,
   parseSlides,

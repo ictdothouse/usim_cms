@@ -1,123 +1,35 @@
-import { randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
-import path from "node:path";
-import { rm } from "node:fs/promises";
-import { Readable } from "node:stream";
-import { buffer as streamToBuffer } from "node:stream/consumers";
+import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
-import { requireTenantAuth, verifySuperadmin, verifyAnyUser } from "./plugins/auth.js";
+import { requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
-import { getLivePreview, newLivePreviewId, setLivePreview } from "./live-preview-store.js";
 import { recordRequest, renderMetrics } from "./metrics.js";
-import type { AccessArgs, CollectionConfig } from "./collections/config-types.js";
-import { validateOverrides, validateElement, isSafeUrl } from "./collections/validate-layout.js";
-import { validateMenuItems } from "./collections/validate-menu.js";
 import * as schema from "./db/schema.js";
 import {
   closePool,
-  listSharedContent,
-  getGlobalTheme,
-  setGlobalTheme,
-  listThemePresets,
-  createThemePreset,
-  deleteThemePreset,
-  findUserByEmail,
-  listTenants,
-  createTenant,
-  deleteTenant,
-  getTenantDbSizeBytes,
-  listUsers,
-  createUser,
-  updateUserRole,
-  updateUserPassword,
-  updateUserTenantHosts,
-  deleteUser,
-  getRolePermissions,
-  listRoles,
-  createRole,
-  updateRole,
-  deleteRole,
-  listLanguages,
-  createLanguage,
-  updateLanguage,
-  deleteLanguage,
   getTenantLanguageSelection,
   setTenantLanguageSelection,
   getMergedTheme,
   setTenantTheme,
-  getGlobalStorageLimits,
-  setGlobalStorageLimits,
-  getTenantStorageLimits,
-  setTenantStorageLimits,
-  getMergedStorageLimits,
-  getProxyAutomationEnabled,
-  setProxyAutomationEnabled,
-  setTenantCertInfo,
-  getMfaEnabled,
-  setMfaEnabled,
-  getMfaRequired,
-  setMfaRequired,
-  getEntraSettings,
-  setEntraSettings,
   getLanguageSwitcherDefaults,
   setLanguageSwitcherDefaults,
-  findUserById,
-  setUserTotpSecret,
-  setUserTotpEnabled,
-  recordLoginAttempt,
-  isLoginRateLimited,
   insertAuditLog,
   getTenantMaintenanceMode,
-  setTenantMaintenanceMode,
 } from "./db/tenant-pool.js";
-import sanitizeHtml from "sanitize-html";
-import {
-  syncCaddy,
-  pingCaddy,
-  parseCertExpiry,
-  loadCaddyCert,
-  unloadCaddyCert,
-  isValidDialTargets,
-  type CaddyUpstreams,
-} from "./proxy-sync.js";
-import {
-  verifyPassword,
-  hashPassword,
-  verifySession,
-  SESSION_TTL_MS,
-  generateTotpSecret,
-  verifyTotpCode,
-  totpAuthUri,
-  generateCsrfToken,
-  isMfaSetupRequired,
-} from "./db/auth.js";
-import { setSessionCookie, clearSessionCookie, setEntraStateCookie, getEntraStateCookie, clearEntraStateCookie } from "./lib/cookies.js";
-import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "./entra.js";
-import {
-  exportTenantBackup,
-  importTenantBackup,
-  exportStaticSite,
-  exportTenantDesignClone,
-  prepareClone,
-  listClones,
-  getClone,
-  markCloneStaged,
-  deleteClone,
-  looksLikeDomain,
-} from "./backup.js";
-import { localUploadsDir, isLocalDriver, dirSizeBytes } from "./storage.js";
+import { verifySession } from "./db/auth.js";
+import { localUploadsDir, isLocalDriver } from "./storage.js";
 import { translatePlainText, translateHtmlBody } from "./translate.js";
-import { PERMISSIONS, hasPermission, mergePermissions, validatePermissions } from "./routes/permissions.js";
+import { hasPermission } from "./routes/permissions.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPortalSettingsRoutes, validateThemeSettings } from "./routes/portal-settings.js";
 import { registerThemePresetRoutes } from "./routes/theme-presets.js";
-import { registerTenantRoutes, maybeSyncCaddy, maybeSyncCaddyAtBoot } from "./routes/tenants.js";
+import { registerTenantRoutes, maybeSyncCaddyAtBoot } from "./routes/tenants.js";
 import { registerUsersRolesLanguagesRoutes } from "./routes/users-roles-languages.js";
 import { registerImpersonationRoutes } from "./routes/impersonation.js";
 import { registerBackupCloneRoutes } from "./routes/backup-clone.js";

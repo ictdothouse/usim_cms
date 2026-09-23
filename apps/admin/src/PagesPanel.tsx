@@ -121,7 +121,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
   // `window.prompt` is fine here: a single plain-text "what's the new page
   // called" step, not the repeated-JS-dialog pattern the "don't use
   // window.prompt" lesson elsewhere in this codebase actually concerns.
-  async function useBlueprint(bp: api.PageBlueprint) {
+  async function applyBlueprint(bp: api.PageBlueprint) {
     const title = window.prompt(t("blueprints-name-prompt"));
     if (!title) return;
     const base = slugify(title) || "page";
@@ -385,7 +385,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
               <X className="h-4 w-4" />
             </button>
           </div>
-          <BlueprintGallery tenantHost={tenantHost} token={token} mode="picker" onUse={(bp) => void useBlueprint(bp)} isSuper={false} />
+          <BlueprintGallery tenantHost={tenantHost} token={token} mode="picker" onUse={(bp) => void applyBlueprint(bp)} isSuper={false} />
         </div>
       </div>
     )}

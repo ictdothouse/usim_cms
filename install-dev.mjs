@@ -26,6 +26,11 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "n
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as readline from "node:readline";
+import process from "node:process";
+import console from "node:console";
+import { setTimeout, clearTimeout } from "node:timers";
+
+/* global fetch, AbortController -- Web-standard runtime globals, no node: module to import them from */
 
 if (typeof fetch !== "function") {
   console.error("This needs Node 18 or newer (uses the global fetch API).");

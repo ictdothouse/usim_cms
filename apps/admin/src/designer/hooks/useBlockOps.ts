@@ -79,6 +79,7 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
   function copyStyleSection(b: number) {
     // rows is the section's content (children), never its "style" —
     // stripped so pasting style elsewhere can't overwrite content.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring-omit: strips rows from the copied style props
     const { rows: _rows, ...styleProps } = blocks[b].props as unknown as SectionProps;
     styleCopy("section", styleProps as unknown as Record<string, string>);
   }
@@ -214,6 +215,7 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     }
   }
   function copyStyleRow(b: number, r: number) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring-omit: strips columns from the copied style props
     const { columns: _columns, ...styleProps } = getNode(blocks, [b, r]) as Row;
     styleCopy("row", styleProps as unknown as Record<string, string>);
   }

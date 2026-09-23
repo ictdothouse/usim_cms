@@ -1,169 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Activity,
-  AlertCircle,
-  AlertTriangle,
-  Archive,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  ArrowUpRight,
-  AtSign,
-  Award,
-  BarChart3,
-  Battery,
-  Bell,
-  Bookmark,
-  BookOpen,
-  Briefcase,
-  Building2,
-  Calendar,
-  Camera,
-  Car,
-  Check,
-  CheckCircle,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
-  ChevronsUpDown,
   Clipboard,
   ClipboardPaste,
   Component,
-  Clock,
-  Cloud,
-  Code2,
-  Coffee,
-  Compass,
   Copy,
-  CreditCard,
-  DollarSign,
-  Download,
-  Dumbbell,
   ExternalLink,
-  Eye,
-  EyeOff,
-  FileText,
-  Film,
-  Flag,
-  Folder,
-  Frame,
-  GalleryHorizontal,
-  Gift,
-  Globe,
-  GraduationCap,
   GripVertical,
-  Handshake,
-  Heading1,
-  Headphones,
-  Heart,
-  HelpCircle,
   History,
-  Home,
-  Image as ImageIcon,
-  Images,
-  Inbox,
-  Info,
-  Laptop,
   Layers,
-  LayoutGrid,
-  LayoutPanelTop,
   LayoutTemplate,
-  Leaf,
-  Link2,
-  List,
   Lock,
-  Mail,
-  Map,
-  MapPin,
-  Megaphone,
   Menu,
-  MessageCircle,
-  MessageSquare,
-  Mic,
-  Minus,
   Monitor,
-  Moon,
   MousePointerClick,
-  MoveVertical,
-  Music,
-  Newspaper,
-  Package,
   Paintbrush,
   Pencil,
-  Percent,
-  Phone,
-  PhoneCall,
-  PieChart,
-  Plane,
   Plus,
-  Printer,
-  QrCode,
-  Receipt,
-  Recycle,
   Redo2,
-  RefreshCw,
-  Rocket,
-  Search,
-  Send,
   Settings,
-  Share2,
-  Shield,
-  ShieldCheck,
-  ShoppingBag,
-  ShoppingCart,
   Smartphone,
-  Sparkles,
-  SquareDashedBottom,
-  Star,
-  Stethoscope,
-  Store,
-  Sun,
   Tablet,
-  Tag,
-  Target,
-  ThumbsDown,
-  ThumbsUp,
-  Train,
   Trash2,
-  TrendingUp,
-  Truck,
-  Type,
-  Umbrella,
   Undo2,
   Unlink,
-  Unlock,
-  User,
-  Users,
-  Utensils,
-  Video,
-  Wallet,
-  Wifi,
   X,
-  XCircle,
-  Zap,
 } from "lucide-react";
 import * as api from "@/lib/api";
-import { slugify, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
+import { bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import type { Key } from "@/i18n";
-import { moveSection, moveColumn, childrenOf, getNode, removeAt, insertAt, moveWithin } from "./designerTree";
+import { moveSection, moveColumn } from "./designerTree";
 import { section } from "./designer/blockPath";
-import type { Field, FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, CardItem, Sel, PageSettings } from "./designer/types";
-import { parsePairs, parseSlides, stringifySlides, parseCards } from "./designer/parsers";
+import type { FieldGroupKey, Bp, ElType, El, Col, Row, SectionProps, Block, Sel } from "./designer/types";
 import { TemplatePreview } from "./designer/TemplatePreview";
 import {
-  PAD, RADIUS, BORDER, gapPx, hexToRgba, overlayColors, shadowToCss, lengthValue, colStyle, elRadius, typoStyle,
+  PAD, RADIUS, BORDER, overlayColors, shadowToCss, lengthValue, colStyle,
   SPACE, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK, RADIUS_CORNER_KEYS,
 } from "./designer/style";
-import { TYPOGRAPHY_FIELDS, FIELD_GROUP_BY_KEY, GROUP_META, FieldLabel, SECTION_FIELDS, COLUMN_FIELDS, COLUMN_SPACING_KEYS, CSS_CLASS_FIELD } from "./designer/fields";
-import { BufferedInput, BpToggle } from "./designer/FieldControls";
-import { FieldGroups } from "./designer/FieldGroups";
+import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./designer/fields";
 import { Inspector } from "./designer/Inspector";
 import { ElPreview } from "./designer/ElPreview";
 import { ELS } from "./designer/elements";
-import { ICONS } from "./designer/icons";
-import { BASE_LANG, type DesignerCtx, type ClipLevel } from "./designer/context";
+import { BASE_LANG, type DesignerCtx } from "./designer/context";
 import { useClipboard } from "./designer/hooks/useClipboard";
 import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import { useBpStyle } from "./designer/hooks/useBpStyle";
@@ -554,7 +434,7 @@ export default function Designer({
   // toggle back into Live, or a debounced structural/style reload) until
   // its onLoad fires — covers the skeleton overlay below so a reload never
   // shows the browser's own blank-frame flash, however brief.
-  const [reloading, setReloading] = useState(true);
+  const [, setReloading] = useState(true);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -599,7 +479,7 @@ export default function Designer({
   const {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
     renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    currentTranslationsPayload, mintPreviewLink, openDevicePreview,
+    mintPreviewLink, openDevicePreview,
   } = usePersist({
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings,
@@ -762,14 +642,7 @@ export default function Designer({
 
   const {
     mode,
-    liveSrc,
-    frameARef,
-    frameBRef,
-    liveFrame,
-    selectedRect,
-    enterLive,
     toggleLive,
-    handleFrameLoad,
   } = useLiveEditBridge({
     blocks,
     mutate,
@@ -900,7 +773,7 @@ export default function Designer({
   function toggleExpand(key: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   }
@@ -1129,105 +1002,6 @@ export default function Designer({
         </button>
       </span>
     );
-  }
-
-  // Grip-handle indicator for Live Edit mode — visual parity with Blocks
-  // mode's GripVertical (shown there only on a selected element), extended
-  // here to all 3 draggable depths (section/column/element) since Live
-  // Edit's own drag-reorder now covers all three too. Visual only: the
-  // actual grab still works from anywhere on the selected row, same as
-  // BaseLayout.astro's pointerdown already allows — this just makes the
-  // affordance discoverable. Reuses the same selectedRect + iframe-position
-  // math as LiveEditToolbar below.
-  function LiveEditGripHandle() {
-    if (!sel || !selectedRect || !liveFrame.current) return null;
-    const iframeRect = liveFrame.current.getBoundingClientRect();
-    const style: React.CSSProperties = {
-      position: "fixed",
-      left: iframeRect.left + selectedRect.left - 16,
-      top: iframeRect.top + selectedRect.top + selectedRect.height / 2 - 7,
-      zIndex: 50,
-    };
-    return (
-      <div style={style} className="pointer-events-none text-accent">
-        <GripVertical className="h-3.5 w-3.5" />
-      </div>
-    );
-  }
-
-  // Floating action toolbar for Live Edit mode — same actions Blocks mode
-  // already has at the matching selection level (see the extracted
-  // duplicate/copy/paste/etc. functions above), positioned over the
-  // selected block using selectedRect (reported by BaseLayout.astro) plus
-  // the iframe's own page position.
-  function LiveEditToolbar() {
-    if (!sel || !selectedRect || !liveFrame.current) return null;
-    const iframeRect = liveFrame.current.getBoundingClientRect();
-    const top = iframeRect.top + selectedRect.top;
-    const left = iframeRect.left + selectedRect.left;
-    const toolbarHeight = 32;
-    const showBelow = top < toolbarHeight + 8;
-    const style: React.CSSProperties = {
-      position: "fixed",
-      left,
-      top: showBelow ? top + selectedRect.height + 4 : top - toolbarHeight - 4,
-      zIndex: 50,
-    };
-    const iconBtn = "flex items-center justify-center rounded p-1 text-accent hover:bg-canvas disabled:opacity-30";
-    if (sel.length === 1) {
-      const [b] = sel;
-      return (
-        <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
-          <button onClick={() => duplicateSection(b)} className={iconBtn} title={t("designer-duplicate")}><Copy className="h-3.5 w-3.5" /></button>
-          <button onClick={() => copySection(b)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
-          <button onClick={() => pasteSection(b)} disabled={!clipHas("section")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
-          <button onClick={() => copyStyleSection(b)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
-          <button onClick={() => pasteStyleSection(b)} disabled={!styleHas("section")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
-          <button onClick={() => saveAsTemplate([b])} className={iconBtn} title={t("designer-templates-save")}><LayoutTemplate className="h-3.5 w-3.5" /></button>
-          <button onClick={() => deleteSection(b)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
-        </div>
-      );
-    }
-    if (sel.length === 3) {
-      const [b, r, c] = sel;
-      return (
-        <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
-          <button onClick={() => copyColumn(b, r, c)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
-          <button onClick={() => pasteColumn(b, r, c)} disabled={!clipHas("column")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
-          <button onClick={() => copyStyleColumn(b, r, c)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
-          <button onClick={() => pasteStyleColumn(b, r, c)} disabled={!styleHas("column")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
-          <button onClick={() => saveAsTemplate([b, r, c])} className={iconBtn} title={t("designer-templates-save")}><LayoutTemplate className="h-3.5 w-3.5" /></button>
-          <button onClick={() => deleteColumn(b, r, c)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
-        </div>
-      );
-    }
-    if (sel.length === 4) {
-      const [b, r, c, e] = sel;
-      // Slider/Banner bundles ALL its real content+style inside one "slides"
-      // JSON blob, which styleCopy/CONTENT_KEYS treats wholesale as content
-      // (see docs/SliderProblem.pdf #4) — copy-style/paste-style would only
-      // ever carry the slider's few top-level settings (nav/dots/transition/
-      // height) across, silently doing nothing to what an author actually
-      // means by "style" here (per-slide colors/images/text). Hidden instead
-      // of shipped half-working, per explicit user call: "tak perlu copy
-      // style" for slider.
-      const elType = (blocks[b].props as unknown as SectionProps).rows[r].columns[c].elements[e].type;
-      return (
-        <div style={style} className="flex items-center gap-0.5 rounded-lg border border-line/30 bg-white p-1 shadow-lg">
-          <button onClick={() => duplicateElement(b, r, c, e)} className={iconBtn} title={t("designer-duplicate")}><Copy className="h-3.5 w-3.5" /></button>
-          <button onClick={() => copyElement(b, r, c, e)} className={iconBtn} title={t("designer-copy")}><Clipboard className="h-3.5 w-3.5" /></button>
-          <button onClick={() => pasteElement(b, r, c, e)} disabled={!clipHas("element")} className={iconBtn} title={t("designer-paste")}><ClipboardPaste className="h-3.5 w-3.5" /></button>
-          {elType !== "slider" && (
-            <>
-              <button onClick={() => copyStyleElement(b, r, c, e)} className={iconBtn} title={t("designer-copy-style")}><Paintbrush className="h-3.5 w-3.5" /></button>
-              <button onClick={() => pasteStyleElement(b, r, c, e)} disabled={!styleHas("element")} className={iconBtn} title={t("designer-paste-style")}><Paintbrush className="h-3.5 w-3.5 opacity-50" /></button>
-            </>
-          )}
-          <button onClick={() => deleteElement(b, r, c, e)} className={`${iconBtn} text-red-500`} title={t("designer-delete")}><Trash2 className="h-3.5 w-3.5" /></button>
-        </div>
-      );
-    }
-    return null;
   }
 
   // Bundled closure for the extracted Inspector/ElPreview (Layer 1b of the

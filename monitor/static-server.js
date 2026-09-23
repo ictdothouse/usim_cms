@@ -5,11 +5,11 @@
 // serve the file if it exists, else index.html, so the SPA's client-side
 // router still works on a hard refresh of a deep link).
 // Usage: node static-server.js <dist-dir> <port>
-"use strict";
-
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import console from "node:console";
 
 const DIST_DIR = path.resolve(process.argv[2] || "./dist");
 const PORT = Number(process.argv[3] || 5173);
