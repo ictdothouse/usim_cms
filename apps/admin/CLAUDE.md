@@ -1337,3 +1337,18 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   see apps/api/CLAUDE.md's own maintenance-mode paragraph). `maintenanceMode` reads straight off the
   `managed` tenant row already fetched by `listPortalTenants`; toggling it patches local `tenants` state
   in place rather than a full `refresh()` round-trip.
+
+  **Designer sidebar merge (2026-09-25)**: the always-visible right-hand Inspector `<aside>` was
+  removed — `Designer.tsx`'s left `<aside>` (Elements/Layers) gained a third tab, **Settings**
+  (`activeLeftTab: "elements" | "layers" | "settings"`), which renders the exact same content the
+  right aside used to (the `kind === "siteChrome"` header/footer meta block, then `<Inspector
+  ctx={designerCtx} />`) — a pure JSX relocation, no Inspector-internal changes. The left aside widened
+  from `w-64`/`lg:w-44` to `w-72`/`lg:w-64` (the old right aside's own width) to fit Inspector's
+  typography/style fields comfortably. Losing the previous side-by-side visibility (palette+layers
+  always next to Inspector) needed one behavioral addition to not regress the click-to-edit flow: a
+  `useEffect` watching `sel` and `sliderInnerSel` auto-switches to the Settings tab on any new
+  selection (section/row/column/element, or a slider's own nested child), so selecting something on
+  canvas still surfaces its fields immediately instead of silently updating behind whichever tab was
+  open. Mobile's off-canvas drawer mechanism collapsed from two toggle buttons/states
+  (`mobilePanel: "palette" | "inspector" | null`) to one (`"palette" | null`) for the same reason — only
+  one drawer exists now.
