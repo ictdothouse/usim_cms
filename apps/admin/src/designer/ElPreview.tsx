@@ -644,9 +644,16 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
             : "#000000";
       return (
         <div
-          className={`ds-slide-box relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden rounded-lg`}
+          // Identifies this slide's own canvas box for the Inspector's free-
+          // position toggle, which measures the child's live rendered rect
+          // against this box (getBoundingClientRect) to preserve its visual
+          // spot when switching flow -> custom, instead of guessing a fixed
+          // x/y — see Inspector.tsx's childIsFree toggle handler.
+          data-slide-box={`${el.id}:${slideIdx}`}
+          className={`ds-slide-box relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden`}
           style={{
             height: resolvedHeight || undefined,
+            borderRadius: elRadius(p),
             color: slideTextColor,
             backgroundColor: slide.bgColor || undefined,
             backgroundImage: slide.imageUrl ? `url(${slide.imageUrl})` : undefined,
@@ -680,8 +687,8 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
           {(() => {
             const selectedChild = innerSel ? slide.rows[innerSel.r]?.columns[innerSel.c]?.elements[innerSel.e] : undefined;
             const selectedChildFree = !!selectedChild && bpGetValue(selectedChild.props.position, selectedChild.bp, "position") === "custom";
-            const selX = selectedChild ? Number(bpGetValue(selectedChild.props.x, selectedChild.bp, "x") || "10") : 0;
-            const selY = selectedChild ? Number(bpGetValue(selectedChild.props.y, selectedChild.bp, "y") || "10") : 0;
+            const selX = selectedChild ? Number(bpGetValue(selectedChild.props.x, selectedChild.bp, "x") || "50") : 0;
+            const selY = selectedChild ? Number(bpGetValue(selectedChild.props.y, selectedChild.bp, "y") || "50") : 0;
             // Origin-corner check only (not the far edge too, which would need
             // converting posWidth/posHeight from px to a % of this box) — cheap
             // and already catches the common "dragged mostly off the slide"
@@ -759,6 +766,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                       return (
                         <div
                           key={childEl.id}
+                          data-child-el={childEl.id}
                           data-editing={childEditing ? "true" : undefined}
                           onClick={() => setSliderInnerSel((m) => ({ ...m, [el.id]: { r, c, e } }))}
                           onDoubleClick={
@@ -794,8 +802,8 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                             childIsFree
                               ? {
                                   position: "absolute",
-                                  top: `${bpGetValue(childEl.props.y, childEl.bp, "y") || "10"}%`,
-                                  left: `${bpGetValue(childEl.props.x, childEl.bp, "x") || "10"}%`,
+                                  top: `${bpGetValue(childEl.props.y, childEl.bp, "y") || "50"}%`,
+                                  left: `${bpGetValue(childEl.props.x, childEl.bp, "x") || "50"}%`,
                                   width: bpGetValue(childEl.props.posWidth, childEl.bp, "posWidth") || undefined,
                                   height: bpGetValue(childEl.props.posHeight, childEl.bp, "posHeight") || undefined,
                                 }

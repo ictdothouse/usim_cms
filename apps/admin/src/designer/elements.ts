@@ -303,6 +303,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       // way — never a hard migration, upgrades silently on next edit, same
       // convention as every other schema evolution in this element.
       height: "32rem",
+      radius: "",
       navStyle: "arrows",
       dotsStyle: "dots",
       transition: "slide",
