@@ -1,0 +1,411 @@
+---
+// Core single-element cases (heading/text/image/video/button/badge/spacer/
+// divider/embed/icon/list/html/gallery) — extracted verbatim out of
+// SectionBlock.astro's own switch (god-file breakup, see SectionBlock.astro's
+// top-of-file comment on why shared *logic* goes through
+// lib/element-render.ts, never another .astro file's frontmatter). None of
+// these read designerEdit; only "image" reads blockIndex/r/c/e (LCP
+// first-element check).
+import {
+  ICON_PATHS,
+  SPACE,
+  TEXT_SIZE,
+  fluidTextSize,
+  shadowToCss,
+  safeUrl,
+  renderInline,
+  lengthValue,
+  marginStyle,
+  paddingStyle,
+  elBorderShadowStyle,
+  typoStyle,
+  elHoverClass,
+  elEntranceClass,
+  elRadius,
+  cls,
+  headingTag,
+} from "../lib/element-render";
+
+// Local, not imported from SectionBlock.astro's frontmatter — see that
+// file's top comment on the outage caused by sharing frontmatter bindings
+// across .astro files. Same duplication convention as ContainerBlock.astro/
+// RepeaterBlock.astro/MiscBlock.astro's own local copies.
+const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
+const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
+const SRCSET_WIDTHS = [400, 800, 1200, 1600];
+function buildSrcset(url: string): { srcset: string; sizes: string } | null {
+  const m = /[?&]w=(\d+)/.exec(url);
+  if (!m) return null;
+  const width = Number(m[1]);
+  const base = url.split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
+  if (candidates.length === 0) return null;
+  const entries = [...candidates.map((w) => `${stem}-${w}w.webp ${w}w`), `${base} ${width}w`];
+  return { srcset: entries.join(", "), sizes: "(min-width: 1024px) 800px, 100vw" };
+}
+
+interface El {
+  type: string;
+  props?: Record<string, string>;
+}
+interface Props {
+  el: El;
+  blockIndex: number;
+  r: number;
+  c: number;
+  e: number;
+}
+const { el, blockIndex, r, c, e } = Astro.props as Props;
+const p = el.props ?? {};
+---
+
+{(() => {
+switch (el.type) {
+  case "heading": {
+    const Tag = headingTag(p.level) as "h1";
+    return (
+      <Tag
+        class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p), elEntranceClass(p))}
+        style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
+          .filter(Boolean)
+          .join(";")}
+        set:html={p.text ? renderInline(p.text) : ""}
+      />
+    );
+  }
+  case "text":
+    return (
+      <p
+        class={cls("ds-text", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+        style={[
+          `font-size:${fluidTextSize(lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+          p.align ? `text-align:${p.align}` : null,
+          marginStyle(p),
+          paddingStyle(p),
+          typoStyle(p),
+          elBorderShadowStyle(p),
+        ]
+          .filter(Boolean)
+          .join(";")}
+        set:html={renderInline(p.text ?? "")}
+      />
+    );
+  case "image": {
+    // The very first element on the page (first section, first row/column/
+    // element) is the one most likely to be the LCP candidate — lazy-loading
+    // it (the old unconditional behavior) is exactly what PageSpeed's
+    // "loading=lazy should not apply to the LCP image" flag catches.
+    // fetchpriority=high additionally tells the browser to fetch it ahead of
+    // same-priority resources discovered later in the document.
+    const isFirst = blockIndex === 0 && r === 0 && c === 0 && e === 0;
+    const imgSrc = safeUrl(p.src);
+    const imgSrcset = imgSrc ? buildSrcset(imgSrc) : null;
+    return imgSrc ? (
+      <div style={p.align ? `text-align:${p.align}` : null}>
+        <img
+          class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          src={imgSrc}
+          srcset={imgSrcset?.srcset}
+          sizes={imgSrcset ? imgSrcset.sizes : undefined}
+          alt={p.alt ?? ""}
+          loading={isFirst ? undefined : "lazy"}
+          fetchpriority={isFirst ? "high" : undefined}
+          style={[
+            `border-radius:${elRadius(p)}`,
+            p.imgWidth ? `width:${p.imgWidth}` : null,
+            marginStyle(p),
+            paddingStyle(p),
+            elBorderShadowStyle(p),
+          ]
+            .filter(Boolean)
+            .join(";")}
+        />
+      </div>
+    ) : null;
+  }
+  case "video":
+    return safeUrl(p.src) ? (
+      <video
+        class={cls(p.cssClass)}
+        src={safeUrl(p.src)}
+        controls
+        style={[
+          `border-radius:${elRadius(p)}`,
+          "max-width:100%",
+          marginStyle(p),
+          paddingStyle(p),
+          elBorderShadowStyle(p),
+        ]
+          .filter(Boolean)
+          .join(";")}
+      />
+    ) : null;
+  case "button":
+    return p.label ? (
+      <div
+        style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
+      >
+        <a
+          class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          href={safeUrl(p.href) ?? "#"}
+          style={[p.color ? `color:${p.color}` : null, elBorderShadowStyle(p)].filter(Boolean).join(";") || undefined}
+        >
+          {p.label}
+        </a>
+      </div>
+    ) : null;
+  case "badge": {
+    if (!p.label) return null;
+    const badgeIconSize = { sm: 10, md: 12, lg: 14 }[p.scale ?? "md"] ?? 12;
+    const badgeIconPath = p.name ? ICON_PATHS[p.name] : undefined;
+    return (
+      <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+        <span
+          class={cls(`ds-badge ds-badge-${p.variant || "soft"} ds-badge-${p.scale || "md"}`, p.cssClass)}
+          style={p.color ? `color:${p.color}` : undefined}
+        >
+          {badgeIconPath && (
+            <svg width={badgeIconSize} height={badgeIconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d={badgeIconPath} />
+            </svg>
+          )}
+          {p.label}
+        </span>
+      </div>
+    );
+  }
+  case "spacer":
+    return <div style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} aria-hidden="true" />;
+  case "divider":
+    return (
+      <hr
+        class={cls("ds-divider", p.cssClass)}
+        style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";") || undefined}
+      />
+    );
+  case "embed":
+    return safeUrl(p.url) ? (
+      <iframe
+        class={cls("ds-embed", p.cssClass)}
+        src={safeUrl(p.url)}
+        style={[
+          `aspect-ratio:${RATIO[p.ratio ?? "16:9"] ?? RATIO["16:9"]}`,
+          `border-radius:${elRadius(p)}`,
+          shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
+          marginStyle(p),
+          paddingStyle(p),
+        ]
+          .filter(Boolean)
+          .join(";")}
+        loading="lazy"
+        allowfullscreen
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        referrerpolicy="strict-origin-when-cross-origin"
+      />
+    ) : null;
+  case "icon": {
+    const path = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
+    const size = lengthValue(p.size, ICON_SIZE, ICON_SIZE.md);
+    return (
+      <div
+        class={p.cssClass}
+        style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
+      >
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={p.color || "currentColor"}
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="display:inline-block;vertical-align:middle"
+        >
+          <path d={path} />
+        </svg>
+      </div>
+    );
+  }
+  case "list": {
+    const items = (p.items ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+    if (items.length === 0) return null;
+    const Tag = p.style === "numbered" ? "ol" : "ul";
+    return (
+      <Tag
+        class={cls("ds-list", p.style === "none" ? "ds-list-none" : undefined, p.cssClass)}
+        style={[marginStyle(p), paddingStyle(p), typoStyle(p)].filter(Boolean).join(";")}
+      >
+        {items.map((it) => (
+          <li set:html={renderInline(it)} />
+        ))}
+      </Tag>
+    );
+  }
+  case "html":
+    // Same trust tier as bgImage/embed src: only an authenticated webmaster/
+    // superadmin can write page layout, so this isn't a public-input XSS
+    // surface.
+    return p.html ? (
+      <div
+        class={cls("ds-html", p.cssClass)}
+        style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";") || undefined}
+        set:html={p.html}
+      />
+    ) : null;
+  case "gallery": {
+    const images = (p.images ?? "")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(safeUrl)
+      .filter((u): u is string => Boolean(u));
+    if (images.length === 0) return null;
+    return (
+      <div
+        class={cls("ds-gallery", p.cssClass)}
+        style={[`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`, marginStyle(p), paddingStyle(p)]
+          .filter(Boolean)
+          .join(";")}
+      >
+        {images.map((src) => {
+          const srcset = buildSrcset(src);
+          return (
+            <img
+              src={src}
+              srcset={srcset?.srcset}
+              sizes={srcset ? srcset.sizes : undefined}
+              alt=""
+              loading="lazy"
+              style={`border-radius:${elRadius(p)}`}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+  default:
+    return null;
+}
+})()}
+
+<style>
+  /* Byte-for-byte copies of the matching rules in SectionBlock.astro's own
+     <style> — Astro's scoped-CSS attribute doesn't cross component
+     boundaries (see SectionBlock.astro's top comment / ContainerBlock.astro's
+     own copy for the prod bug this convention avoids). SectionBlock no
+     longer renders any of these element types itself, so no duplicate
+     copies are left there. */
+  .ds-h {
+    margin: 0;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+  .ds-h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  .ds-h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); }
+  .ds-h3 { font-size: clamp(1.3rem, 3.2vw, 1.5rem); }
+  .ds-h4 { font-size: clamp(1.1rem, 2.6vw, 1.2rem); }
+  .ds-text {
+    margin: 0;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+  .ds-img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .ds-btn {
+    display: inline-block;
+    padding: 0.65em 1.6em;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    transition: opacity 0.15s ease;
+  }
+  .ds-btn:hover {
+    opacity: 0.85;
+  }
+  .ds-btn-primary {
+    background: var(--color-primary, #0f62fe);
+    color: var(--color-primary-content, #fff);
+  }
+  .ds-btn-outline {
+    border: 2px solid currentColor;
+    color: inherit;
+  }
+  .ds-btn-sm {
+    font-size: 0.8rem;
+  }
+  .ds-btn-lg {
+    font-size: 1.1rem;
+  }
+  .ds-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    border-radius: 9999px;
+    font-weight: 600;
+  }
+  .ds-badge-sm {
+    padding: 0.1em 0.6em;
+    font-size: 0.7rem;
+  }
+  .ds-badge-md {
+    padding: 0.15em 0.75em;
+    font-size: 0.8rem;
+  }
+  .ds-badge-lg {
+    padding: 0.2em 0.9em;
+    font-size: 0.9rem;
+  }
+  .ds-badge-filled {
+    background: var(--color-primary, #0f62fe);
+    color: var(--color-primary-content, #fff);
+  }
+  .ds-badge-outline {
+    border: 1.5px solid currentColor;
+    color: inherit;
+  }
+  .ds-badge-soft {
+    background: color-mix(in srgb, var(--color-primary, #0f62fe) 15%, transparent);
+    color: var(--color-primary, #0f62fe);
+  }
+  .ds-divider {
+    border: none;
+    border-top: 1px solid currentColor;
+    opacity: 0.2;
+    margin: 0;
+  }
+  .ds-embed {
+    width: 100%;
+    border: 0;
+  }
+  .ds-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    line-height: 1.7;
+  }
+  .ds-list-none {
+    list-style: none;
+    padding-left: 0;
+  }
+  .ds-gallery {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .ds-gallery img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    display: block;
+  }
+  @media (max-width: 768px) {
+    .ds-gallery {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+  }
+</style>
