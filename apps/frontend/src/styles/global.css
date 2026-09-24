@@ -251,3 +251,87 @@ body {
   .ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom { animation: none; }
   .ds-hover-scale:hover, .ds-hover-lift:hover { transform: none; }
 }
+
+/* Core design-system element classes (heading/text/image/button/badge/
+   divider) — single source of truth here rather than duplicated per
+   .astro <style> block. Astro's scoped-CSS attribute doesn't cross
+   component boundaries, so these used to be byte-for-byte copied into
+   ContainerBlock.astro, SliderBlock.astro and ElementBlock.astro's own
+   <style> blocks; plain global classes sidestep that entirely, since a
+   class match doesn't care which component rendered the element. */
+.ds-h {
+  margin: 0;
+  line-height: 1.2;
+  font-weight: 700;
+}
+.ds-h1 { font-size: clamp(2rem, 5vw, 3rem); }
+.ds-h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); }
+.ds-h3 { font-size: clamp(1.3rem, 3.2vw, 1.5rem); }
+.ds-h4 { font-size: clamp(1.1rem, 2.6vw, 1.2rem); }
+.ds-text {
+  margin: 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.ds-img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+.ds-btn {
+  display: inline-block;
+  padding: 0.65em 1.6em;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+.ds-btn:hover {
+  opacity: 0.85;
+}
+.ds-btn-primary {
+  background: var(--color-primary, #0f62fe);
+  color: var(--color-primary-content, #fff);
+}
+.ds-btn-outline {
+  border: 2px solid currentColor;
+  color: inherit;
+}
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+.ds-badge-sm {
+  padding: 0.1em 0.6em;
+  font-size: 0.7rem;
+}
+.ds-badge-md {
+  padding: 0.15em 0.75em;
+  font-size: 0.8rem;
+}
+.ds-badge-lg {
+  padding: 0.2em 0.9em;
+  font-size: 0.9rem;
+}
+.ds-badge-filled {
+  background: var(--color-primary, #0f62fe);
+  color: var(--color-primary-content, #fff);
+}
+.ds-badge-outline {
+  border: 1.5px solid currentColor;
+  color: inherit;
+}
+.ds-badge-soft {
+  background: color-mix(in srgb, var(--color-primary, #0f62fe) 15%, transparent);
+  color: var(--color-primary, #0f62fe);
+}
+.ds-divider {
+  border: none;
+  border-top: 1px solid currentColor;
+  opacity: 0.2;
+  margin: 0;
+}
