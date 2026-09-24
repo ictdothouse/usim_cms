@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown,
@@ -53,6 +53,7 @@ import { useTemplateLibrary } from "./designer/hooks/useTemplateLibrary";
 import { usePageAndLanguage } from "./designer/hooks/usePageAndLanguage";
 import { useSiteChrome } from "./designer/hooks/useSiteChrome";
 import { usePersist } from "./designer/hooks/usePersist";
+import { useStableFns } from "./designer/hooks/useStableFn";
 import MediaPickerModal from "./MediaPickerModal";
 
 // Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
@@ -1018,32 +1019,72 @@ export default function Designer({
     );
   }
 
+  // React.memo on ElPreview/Inspector (Layer (a)) only bails on a render
+  // where EVERY prop keeps its identity — every mutator below is otherwise a
+  // fresh closure every render (none of the owning hooks memoize their own
+  // return values), so without this, memo would never bail on an edit
+  // elsewhere in the tree. useStableFns wraps each one in a permanently-
+  // stable ref-passthrough instead of a hand-tracked useCallback dependency
+  // array per function — several of these call through 2-3 layers of other
+  // unmemoized functions (bumpStructural, isSectionLocked), where a missed
+  // transitive dependency would silently reintroduce a stale closure; a
+  // ref-passthrough can't have that bug by construction.
+  const stableFns = useStableFns({
+    mutate, isSectionLocked,
+    bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
+    setFourSideValue, setColSideValue, setElSideValue,
+    toggleGroup, uploadImage, openMediaPicker,
+    setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, patchPageChrome,
+    hasLangSlot, clickPageLanguagePill, retranslatePageLanguage,
+    langKeysOverridden, toggleLangKeys, langStackKeysOverridden, toggleLangStackKeys, setLangValue,
+    setRowGap, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow, clipHas, styleHas,
+    nudgeColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, saveAsTemplate,
+    moveElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, duplicateElement, deleteElement,
+  });
+
   // Bundled closure for the extracted Inspector/ElPreview (Layer 1b of the
   // God Component refactor, see designer/context.ts's own header comment)
   // — every value/mutator both of those need, in one place so adding a new
   // element/field only ever means adding a field here, not touching every
-  // call site.
-  const designerCtx: DesignerCtx = {
-    t, bp, mode, kind, sel, setSel, blocks, mutate,
-    isSuper, isSectionLocked,
-    bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
-    setFourSideValue, setColSideValue, setElSideValue,
+  // call site. Memoized (render-perf refactor Layer (c)) so React.memo on
+  // ElPreview/Inspector can actually bail on an edit elsewhere in the tree —
+  // depends on every plain value here plus stableFns (itself
+  // reference-stable across the component's lifetime, so its presence in
+  // the array never triggers a recompute, only satisfies the lint rule).
+  const designerCtx: DesignerCtx = useMemo(() => ({
+    t, bp, mode, kind, sel, setSel, blocks,
+    isSuper,
+    ...stableFns,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
-    collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
+    collapsedGroups, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
-    sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing, uploadImage, openMediaPicker,
+    sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing,
     availableMenus, availableCategories, availableSymbols,
-    pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
-    pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
+    pageSettings, themePresets,
+    pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
-    siteLanguages, pageLanguage, setPageLanguage, activeLang, hasLangSlot,
-    clickPageLanguagePill, translating, retranslatePageLanguage,
-    isTextKey, pathKey, langKeysOverridden, toggleLangKeys, langStackKeysOverridden, toggleLangStackKeys, setLangValue,
-    setRowGap, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow, clipHas, styleHas,
-    nudgeColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, saveAsTemplate,
-    moveElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, duplicateElement, deleteElement,
+    siteLanguages, pageLanguage, setPageLanguage, activeLang,
+    translating,
+    isTextKey, pathKey,
     editingText,
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [
+    t, bp, mode, kind, sel, setSel, blocks,
+    isSuper,
+    stableFns,
+    linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
+    collapsedGroups, inspectorTab, setInspectorTab,
+    iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
+    sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing,
+    availableMenus, availableCategories, availableSymbols,
+    pageSettings, themePresets,
+    pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters,
+    siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
+    siteLanguages, pageLanguage, setPageLanguage, activeLang,
+    translating,
+    isTextKey, pathKey,
+    editingText,
+  ]);
 
   // ---------- render ----------
   return (
@@ -2132,7 +2173,7 @@ export default function Designer({
                                       className="absolute -bottom-2 -right-2 z-20 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-accent shadow-sm"
                                     />
                                   )}
-                                  {ElPreview({ ctx: designerCtx, el, path: [b, r, c, e] })}
+                                  <ElPreview ctx={designerCtx} el={el} path={[b, r, c, e]} />
                                 </div>
                               ))}
                               </div>
@@ -2272,7 +2313,7 @@ export default function Designer({
               )}
             </div>
           )}
-          {Inspector({ ctx: designerCtx })}
+          <Inspector ctx={designerCtx} />
         </aside>
       </div>
 

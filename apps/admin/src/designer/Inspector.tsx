@@ -6,6 +6,11 @@
 // Holds no hooks of its own (verified during extraction — every piece of
 // state it reads comes from `ctx`), so it's safe to call directly as a plain
 // function, same as FieldGroups/FieldInput already are.
+//
+// Rendered as real JSX + wrapped in React.memo (2026-09-24 render-perf pass,
+// see docs/superpowers/specs/2026-09-24-designer-render-perf-design.md) —
+// memo can't yet skip a re-render (ctx isn't memoized upstream until that
+// doc's parts (b)/(c) land), this only removes the structural blocker.
 import {
   AlignHorizontalJustifyCenter,
   AlignHorizontalJustifyEnd,
@@ -38,7 +43,7 @@ import {
   Tablet,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { Key } from "@/i18n";
 import type { Bp, Block, El, ElType, Field, Row, SectionProps } from "./types";
 import { BASE_LANG, type DesignerCtx } from "./context";
@@ -450,7 +455,7 @@ function VisibilityToggle({ get, set, t }: { get: (k: VisKey) => boolean; set: (
 
 const section = (bs: Block[], b: number) => bs[b].props as unknown as SectionProps;
 
-export function Inspector({ ctx }: { ctx: DesignerCtx }) {
+function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
   const {
     t, bp, kind, sel, setSel, blocks, mutate,
     bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
@@ -1807,3 +1812,6 @@ export function Inspector({ ctx }: { ctx: DesignerCtx }) {
   }
   return null;
 }
+
+export const Inspector = memo(InspectorImpl);
+Inspector.displayName = "Inspector";
