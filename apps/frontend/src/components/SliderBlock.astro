@@ -383,6 +383,18 @@ const p = el.props ?? {};
           [marginStyle(mp), paddingStyle(mp), posStyle(mp)].filter(Boolean).join(";"),
         ),
       );
+      // The flow-spacer rendered below (for a free-positioned child) needs
+      // its own height to track posHeight per breakpoint too — without this,
+      // a bp override would reserve the desktop height at every breakpoint,
+      // reintroducing the sibling-reflow bug this spacer exists to prevent,
+      // just scoped to mobile/tablet instead of desktop.
+      if (ep.position === "custom") {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${elId}"] [data-slide-spacer="${el.id}"]`, el.bp, ep, (mp) =>
+            mp.position === "custom" && mp.posHeight ? `height:${mp.posHeight}` : "",
+          ),
+        );
+      }
     }
     switch (el.type) {
       case "heading": {
@@ -588,7 +600,23 @@ const p = el.props ?? {};
                       >
                         {(row.columns ?? []).map((col, c) => (
                           <div class="ds-slide-row">
-                            {(col.elements ?? []).map((el, e) => renderSlideEl(el, slideIdx, r, c, e))}
+                            {(col.elements ?? []).map((el, e) => {
+                              const elIsFree = (el.props ?? {}).position === "custom";
+                              return (
+                                <>
+                                  {elIsFree && (
+                                    // Reserves this child's flow slot — `.ds-slide-row`
+                                    // is a flex column, and an absolutely positioned
+                                    // child isn't a flex item at all (no height, no
+                                    // gap), so every sibling below it would otherwise
+                                    // shift up the instant free-position is on. Mirrors
+                                    // apps/admin's ElPreview.tsx spacer fix.
+                                    <div aria-hidden data-slide-spacer={el.id} style={`visibility:hidden${el.props?.posHeight ? `;height:${el.props.posHeight}` : ""}`} />
+                                  )}
+                                  {renderSlideEl(el, slideIdx, r, c, e)}
+                                </>
+                              );
+                            })}
                           </div>
                         ))}
                       </div>
