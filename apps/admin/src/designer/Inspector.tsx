@@ -1372,18 +1372,28 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                           childSetValue("position", "");
                           return;
                         }
-                        // Measure the child's REAL rendered position (relative to its
-                        // slide's own canvas box) before switching it to position:absolute
-                        // — whatever the canvas is currently previewing (desktop/tablet/
-                        // mobile bp all resolve through the same real DOM rect), so
-                        // unlocking never visibly moves it. Falls back to dead-center
-                        // only if the canvas isn't mounted (e.g. Inspector open without a
-                        // live canvas), same fallback ElPreview's own render already uses
-                        // for an unset x/y.
+                        // Measure the child's REAL rendered position AND size (relative
+                        // to its slide's own canvas box) before switching it to
+                        // position:absolute — whatever the canvas is currently
+                        // previewing (desktop/tablet/mobile bp all resolve through the
+                        // same real DOM rect), so unlocking never visibly moves it.
+                        // Size matters too, not just x/y: a flow element with no
+                        // explicit width renders at its column's full width, but an
+                        // absolutely-positioned one with posWidth/posHeight left unset
+                        // defaults to shrink-to-content — without capturing the
+                        // pre-toggle pixel size into posWidth/posHeight here, the box
+                        // (and any text alignment inside it) visibly snaps to a
+                        // different size the instant free position turns on, reading
+                        // as a jump even though x/y alone were correct. Falls back to
+                        // dead-center/auto-size only if the canvas isn't mounted (e.g.
+                        // Inspector open without a live canvas), same fallback
+                        // ElPreview's own render already uses for an unset x/y.
                         const box = document.querySelector<HTMLElement>(`[data-slide-box="${el.id}:${slideIdx}"]`);
                         const node = box?.querySelector<HTMLElement>(`[data-child-el="${childEl.id}"]`);
                         let x = "50";
                         let y = "50";
+                        let posWidth = "";
+                        let posHeight = "";
                         if (box && node) {
                           const boxRect = box.getBoundingClientRect();
                           const nodeRect = node.getBoundingClientRect();
@@ -1391,8 +1401,10 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                             x = String(Math.max(0, Math.min(100, Math.round(((nodeRect.left - boxRect.left) / boxRect.width) * 1000) / 10)));
                             y = String(Math.max(0, Math.min(100, Math.round(((nodeRect.top - boxRect.top) / boxRect.height) * 1000) / 10)));
                           }
+                          if (nodeRect.width > 0) posWidth = `${Math.round(nodeRect.width)}px`;
+                          if (nodeRect.height > 0) posHeight = `${Math.round(nodeRect.height)}px`;
                         }
-                        childSetValues({ position: "custom", x, y });
+                        childSetValues({ position: "custom", x, y, posWidth, posHeight });
                       }}
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         childIsFree ? "bg-accent text-white" : "bg-white text-sub"
