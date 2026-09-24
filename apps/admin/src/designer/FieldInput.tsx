@@ -878,7 +878,19 @@ export function FieldInput({
                   {(["heading", "text", "button", "image"] as const).map((t2) => (
                     <button
                       key={t2}
-                      onClick={() => replaceSlide(i, addSlideElement(s, t2, { ...ELS[t2].defaults }))}
+                      onClick={() =>
+                        replaceSlide(
+                          i,
+                          addSlideElement(s, t2, {
+                            ...ELS[t2].defaults,
+                            // A slide almost always sits over a dark image/overlay — heading/text's
+                            // own default color ("") inherits the page's normal (often dark) body
+                            // color, invisible against that. Button already contrasts itself (its
+                            // theme-primary bg + bestTextColor label), so it's excluded here.
+                            ...(t2 === "heading" || t2 === "text" ? { color: "#ffffff" } : {}),
+                          }),
+                        )
+                      }
                       className="text-[10px] font-semibold text-accent"
                     >
                       {t(

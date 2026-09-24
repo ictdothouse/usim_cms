@@ -145,8 +145,8 @@ function posStyle(mp: Record<string, string>): string | null {
   return mp.position === "custom"
     ? [
         "position:absolute",
-        `top:${mp.y || "10"}%`,
-        `left:${mp.x || "10"}%`,
+        `top:${mp.y || "50"}%`,
+        `left:${mp.x || "50"}%`,
         mp.posWidth ? `width:${mp.posWidth}` : null,
         mp.posHeight ? `height:${mp.posHeight}` : null,
       ]
@@ -535,7 +535,7 @@ const p = el.props ?? {};
         data-grab-cursor={p.grabCursor === "false" ? "false" : undefined}
         data-slide-to-clicked={p.slideToClickedSlide === "true" ? "true" : undefined}
       >
-      <div class="ds-slider-viewport">
+      <div class="ds-slider-viewport" style={`border-radius:${elRadius(p)}`}>
         <div class="ds-slider-track">
           {slides.map((s, slideIdx) => {
             const bgUrl = s.imageUrl ? safeCssUrl(bgVariantUrl(s.imageUrl)) : undefined;
@@ -630,7 +630,6 @@ const p = el.props ?? {};
   }
   .ds-slider-viewport {
     overflow: hidden;
-    border-radius: 0.5rem;
     height: 100%;
   }
   .ds-slider-track {

@@ -1284,6 +1284,19 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
               ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { [key]: v })
               : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:${key}`]: v }),
           );
+        // Same bp routing as childSetValue, batched into one mutate — used by
+        // the free-position toggle below to write position+x+y atomically
+        // (one undo step, and x/y never briefly resolve against a stale
+        // "position" value mid-mutation).
+        const childSetValues = (patch: Record<string, string>) =>
+          withChildSlide((s0) =>
+            bp === "desktop"
+              ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, patch)
+              : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, {
+                  ...(childEl.bp ?? {}),
+                  ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [`${bp}:${k}`, v])),
+                }),
+          );
         const childToggleOverride = (keys: string[]) =>
           withChildSlide((s0) => updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, toggleBpKeys(childEl.bp, keys)));
         const childFieldGroupsProps = {
@@ -1354,7 +1367,33 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => childSetValue("position", childIsFree ? "" : "custom")}
+                      onClick={() => {
+                        if (childIsFree) {
+                          childSetValue("position", "");
+                          return;
+                        }
+                        // Measure the child's REAL rendered position (relative to its
+                        // slide's own canvas box) before switching it to position:absolute
+                        // — whatever the canvas is currently previewing (desktop/tablet/
+                        // mobile bp all resolve through the same real DOM rect), so
+                        // unlocking never visibly moves it. Falls back to dead-center
+                        // only if the canvas isn't mounted (e.g. Inspector open without a
+                        // live canvas), same fallback ElPreview's own render already uses
+                        // for an unset x/y.
+                        const box = document.querySelector<HTMLElement>(`[data-slide-box="${el.id}:${slideIdx}"]`);
+                        const node = box?.querySelector<HTMLElement>(`[data-child-el="${childEl.id}"]`);
+                        let x = "50";
+                        let y = "50";
+                        if (box && node) {
+                          const boxRect = box.getBoundingClientRect();
+                          const nodeRect = node.getBoundingClientRect();
+                          if (boxRect.width > 0 && boxRect.height > 0) {
+                            x = String(Math.max(0, Math.min(100, Math.round(((nodeRect.left - boxRect.left) / boxRect.width) * 1000) / 10)));
+                            y = String(Math.max(0, Math.min(100, Math.round(((nodeRect.top - boxRect.top) / boxRect.height) * 1000) / 10)));
+                          }
+                        }
+                        childSetValues({ position: "custom", x, y });
+                      }}
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         childIsFree ? "bg-accent text-white" : "bg-white text-sub"
                       }`}
@@ -1373,7 +1412,7 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                           <BufferedInput
                             className="w-full rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
                             value={bpGetValue(childEl.props[key], childEl.bp, key)}
-                            placeholder={key === "x" || key === "y" ? "10" : "auto"}
+                            placeholder={key === "x" || key === "y" ? "50" : "auto"}
                             onCommit={(v) => childSetValue(key, v)}
                           />
                         </label>
@@ -1560,7 +1599,7 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                 ...langOverrideProps(pathKey(b, r, c, e), Object.values(PADDING_SIDE_KEYS)),
               }}
               radius={
-                el.type === "image" || el.type === "embed" || el.type === "gallery"
+                el.type === "image" || el.type === "embed" || el.type === "gallery" || el.type === "slider"
                   ? {
                       labelKey: "designer-f-radius",
                       linked: linkedRadius,
