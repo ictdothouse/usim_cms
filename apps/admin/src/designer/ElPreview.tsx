@@ -193,17 +193,20 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
   // hint) — just enough to see layout/arrangement while dragging/
   // reordering. Live Edit is untouched below: same real rendering
   // (fonts/colors/images/slider drag, canvas text edit) it always had.
-  // "image" is exempted from the skeleton: the Header/Footer Designer
-  // (kind === "siteChrome") has no Live Edit toggle at all (Designer.tsx
-  // only renders it for kind !== "siteChrome"), so a logo/image element
-  // there could never be seen or usefully drag-resized — it only ever
-  // showed the generic hint chip below, with the resize handle (Designer.tsx,
-  // gated on mode !== "live") floating over that tiny box instead of the
-  // actual picture. "menu" gets the same exemption there for the same
-  // reason: a header/footer nav bar's whole point is showing its real
-  // items (and, at mobile bp, the hamburger settings), never just a
-  // "Menu — <name>" label chip with no toggle to ever see past it.
-  const skipSkeleton = el.type === "image" || (el.type === "menu" && kind === "siteChrome");
+  // "image"/"menu" are exempted from the skeleton, but ONLY in the
+  // Header/Footer Designer (kind === "siteChrome"), which has no Live Edit
+  // toggle at all (Designer.tsx only renders it for kind !== "siteChrome")
+  // — a logo/image or nav menu there could never otherwise be seen or
+  // usefully drag-resized, only ever showing the generic hint chip with a
+  // resize handle floating over a tiny box instead of the actual picture/
+  // items (a header/footer nav bar's whole point is showing its real items,
+  // including the mobile hamburger settings). A regular page DOES have a
+  // Live Edit toggle to see the real picture, so its Blocks view should stay
+  // a consistent structure-only skeleton for every element type, image
+  // included — this used to exempt "image" unconditionally (any kind),
+  // which leaked the real, potentially large picture straight into the
+  // Blocks canvas layout on ordinary pages too.
+  const skipSkeleton = (el.type === "image" || el.type === "menu") && kind === "siteChrome";
   if (mode === "blocks" && !skipSkeleton) {
     const Icon = ELS[el.type].icon;
     const hint = ((): string => {
