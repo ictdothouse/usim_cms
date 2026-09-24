@@ -9,8 +9,8 @@
 // drag helper.
 import { useRef, useState } from "react";
 import type React from "react";
+import { produce } from "immer";
 import type { Block, Sel } from "../types";
-import { clone } from "@/lib/utils";
 
 type SetHoverBand = React.Dispatch<React.SetStateAction<string | null>>;
 
@@ -38,21 +38,32 @@ function undoRedoFns(
   // the LAST call's single-side change actually stuck (every other side's
   // change was silently discarded), even though the linked value looked
   // right in the input itself. Do not regress to that form.
+  // produce() never mutates its base argument — every past snapshot pushed
+  // onto history/future is therefore permanently safe to hold onto as-is,
+  // no clone needed. It also gives real structural sharing: only the nodes
+  // on the path `fn` actually writes through get new identity, every
+  // untouched sibling subtree keeps its old object reference (see
+  // 2026-09-24-designer-render-perf-design.md part (b) — this is what
+  // finally makes React.memo on ElPreview/Inspector able to bail out).
   function mutate(fn: (next: Block[]) => void) {
-    history.current.push(clone(getRawBlocks()));
+    history.current.push(getRawBlocks());
     if (history.current.length > 50) history.current.shift();
     future.current = [];
-    setRawBlocksFn((prev) => {
-      const next = clone(prev);
-      fn(next);
-      return next;
-    });
+    // fn is wrapped in its own block body so its return value is always
+    // discarded before reaching produce() — some call sites pass a single-
+    // expression arrow like `(bs) => bs.push(x)`, and push()/splice()/
+    // Object.assign() all return a non-undefined value despite mutating in
+    // place. produce() throws ("returned a new value *and* modified its
+    // draft") if the recipe it's given returns anything other than
+    // undefined or the draft itself while also mutating — wrapping fn here
+    // means that check only ever sees undefined, whatever fn itself returns.
+    setRawBlocksFn((prev) => produce(prev, (draft) => { fn(draft); }));
     onDirty();
   }
   function undo() {
     const prev = history.current.pop();
     if (!prev) return;
-    future.current.push(clone(getRawBlocks()));
+    future.current.push(getRawBlocks());
     setRawBlocksFn(() => prev);
     onSelReset();
     onDirty();
@@ -61,7 +72,7 @@ function undoRedoFns(
   function redo() {
     const next = future.current.pop();
     if (!next) return;
-    history.current.push(clone(getRawBlocks()));
+    history.current.push(getRawBlocks());
     setRawBlocksFn(() => next);
     onSelReset();
     onDirty();
@@ -156,8 +167,11 @@ export function useUndoRedo(
     e.stopPropagation();
     e.preventDefault();
     const startPos = axis === "x" ? e.clientX : e.clientY;
-    const base = clone(rawBlocks);
-    history.current.push(clone(rawBlocks));
+    // No clone: produce() never mutates `rawBlocks`, so it's safe to reuse
+    // directly as both the history entry and the per-move produce() base —
+    // this used to JSON-clone the whole tree on EVERY mousemove tick.
+    const base = rawBlocks;
+    history.current.push(rawBlocks);
     if (history.current.length > 50) history.current.shift();
     future.current = [];
     draggingBand.current = true;
@@ -165,8 +179,7 @@ export function useUndoRedo(
     function onMove(ev: MouseEvent) {
       const pos = axis === "x" ? ev.clientX : ev.clientY;
       const px = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
-      const next = clone(base);
-      apply(next, px);
+      const next = produce(base, (draft) => { apply(draft, px); });
       setRawBlocks(next);
       setDirty(true);
     }

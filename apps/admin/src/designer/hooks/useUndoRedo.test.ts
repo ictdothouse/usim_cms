@@ -63,6 +63,32 @@ test("multiple synchronous mutate() calls each build on the previous result (no 
   assert.equal(props.d, "4");
 });
 
+test("mutate() preserves untouched sibling identity (structural sharing, not a full deep clone)", () => {
+  let blocks: Block[] = [
+    { type: "section", props: { rows: [] } } as unknown as Block,
+    { type: "section", props: { rows: [] } } as unknown as Block,
+  ];
+  const before0 = blocks[0];
+  const before1 = blocks[1];
+  const { mutate } = __testOnly_undoRedoFns(
+    () => blocks,
+    (updater) => { blocks = updater(blocks); },
+  );
+  mutate((bs) => { (bs[0].props as Record<string, unknown>).paddingY = "lg"; });
+  assert.notEqual(blocks[0], before0);
+  assert.equal(blocks[1], before1);
+});
+
+test("mutate() tolerates a fn whose single-expression body both mutates the draft and returns a non-void value (bs.push/splice, Object.assign, removeAt — Immer's produce() throws on this unless mutate() shields it)", () => {
+  let blocks = sampleBlocks();
+  const { mutate } = __testOnly_undoRedoFns(
+    () => blocks,
+    (updater) => { blocks = updater(blocks); },
+  );
+  mutate((bs) => bs.push({ type: "section", props: {} } as unknown as Block));
+  assert.equal(blocks.length, 2);
+});
+
 test("history is capped at 50 entries", () => {
   let blocks = sampleBlocks();
   const { mutate, history } = __testOnly_undoRedoFns(

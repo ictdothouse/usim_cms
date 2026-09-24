@@ -8,6 +8,12 @@
 // Holds no hooks of its own (verified during extraction — every piece of
 // state it reads/writes comes from `ctx`), so it's safe to call directly as
 // a plain function, same as FieldGroups/FieldInput/Inspector already are.
+//
+// Rendered as real JSX + wrapped in React.memo (2026-09-24 render-perf pass,
+// see docs/superpowers/specs/2026-09-24-designer-render-perf-design.md) —
+// memo can't yet skip a re-render (ctx/props aren't memoized upstream until
+// that doc's parts (b)/(c) land), this only removes the structural blocker.
+import { memo } from "react";
 import {
   BarChart3,
   Bell,
@@ -166,7 +172,7 @@ function mergeElBp(
   return merged;
 }
 
-export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: number[] }) {
+function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: number[] }) {
   const {
     mode, kind, t, mutate, bp, availableMenus, availableCategories, availableSymbols,
     sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
@@ -851,7 +857,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                               {editingText.current[childEl.id]}
                             </div>
                           ) : (
-                            ElPreview({ ctx, el: childEl })
+                            <ElPreview ctx={ctx} el={childEl} />
                           )}
                           {selected && childIsFree && path && (
                             <div
@@ -975,7 +981,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
       // editing the resolved subtree happens via "Edit Master" (Designer.tsx),
       // never by selecting into it here (path: undefined disables click-to-
       // select on any of its own nested children too, see "container" case).
-      return ElPreview({ ctx, el: linked.node as unknown as El, path: undefined });
+      return <ElPreview ctx={ctx} el={linked.node as unknown as El} path={undefined} />;
     }
     case "cardgrid": {
       const cards = parseCards(p.cards);
@@ -1220,7 +1226,7 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
                 }`}
                 style={{ ...elMarginStyle(childP), ...elPaddingStyle(childP) }}
               >
-                {ElPreview({ ctx, el: child, path: childPath })}
+                <ElPreview ctx={ctx} el={child} path={childPath} />
               </div>
             );
           })}
@@ -1229,3 +1235,43 @@ export function ElPreview({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: 
     }
   }
 }
+
+// Render-perf design doc step (d): the default shallow-per-prop compare
+// can't bail here because Designer.tsx hands every instance the SAME
+// designerCtx object (which bundles blocks/sel — both churn on nearly every
+// edit) and `path` is a freshly-allocated array literal on every render
+// regardless of whether it actually changed. This comparator only checks
+// the ctx fields ElPreviewImpl actually reads (never blocks/the other ~70
+// fields), compares `path` by value, and treats selection as a DERIVED
+// per-instance check (selEq(sel, path) flipping) rather than comparing
+// `sel`'s own identity, which changes on every click regardless of which
+// element that click affects. If ElPreviewImpl's own top destructure ever
+// grows a new ctx field, this must gain a matching line too.
+function arePropsEqual(
+  prev: { ctx: DesignerCtx; el: El; path?: number[] },
+  next: { ctx: DesignerCtx; el: El; path?: number[] },
+): boolean {
+  if (prev.el !== next.el) return false;
+  const p1 = prev.path, p2 = next.path;
+  if (p1 !== p2) {
+    if (!p1 || !p2 || p1.length !== p2.length || !p1.every((v, i) => v === p2[i])) return false;
+  }
+  const a = prev.ctx, b = next.ctx;
+  if (
+    a.mode !== b.mode || a.kind !== b.kind || a.t !== b.t || a.bp !== b.bp ||
+    a.mutate !== b.mutate || a.setSel !== b.setSel || a.bpGetValue !== b.bpGetValue ||
+    a.availableMenus !== b.availableMenus || a.availableCategories !== b.availableCategories ||
+    a.availableSymbols !== b.availableSymbols || a.editingText !== b.editingText
+  ) return false;
+  if (p2 && selEq(a.sel, p2) !== selEq(b.sel, p2)) return false;
+  const id = next.el.id;
+  if (
+    a.sliderSlideIdx[id] !== b.sliderSlideIdx[id] ||
+    a.sliderInnerSel[id] !== b.sliderInnerSel[id] ||
+    a.sliderInnerEditing[id] !== b.sliderInnerEditing[id]
+  ) return false;
+  return true;
+}
+
+export const ElPreview = memo(ElPreviewImpl, arePropsEqual);
+ElPreview.displayName = "ElPreview";
