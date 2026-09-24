@@ -300,11 +300,11 @@ export default function Designer({
     redo,
     draggingBand,
   } = useUndoRedo(clone((page.layout as Block[] | undefined) ?? []), setDirty, setSel, bumpStructural, setHoverBand);
-  const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers">("elements");
+  const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers" | "settings">("elements");
   // Sprint 2: below `lg` the palette/inspector asides become off-canvas
   // drawers (same pattern as Shell's mobile nav) instead of the fixed
   // 3-column layout — `null` means both are closed.
-  const [mobilePanel, setMobilePanel] = useState<"palette" | "inspector" | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"palette" | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Grouped Styles panel: which Inspector field-groups are collapsed. Shared
   // across every selection (not reset per-select) — matches Framer/Webflow,
@@ -677,6 +677,16 @@ export default function Designer({
   // that child's own id — see designer/context.ts's DesignerCtx comment for
   // why this can't just reuse sliderInnerSel/editingText directly.
   const [sliderInnerEditing, setSliderInnerEditing] = useState<Record<string, boolean>>({});
+
+  // The Settings/Inspector tab shares the left sidebar with Elements/Layers
+  // now (previously a permanently-visible right-hand aside) — without this,
+  // clicking a section/row/column/element (or a slider's own nested child)
+  // would update Inspector's content invisibly behind whichever tab the
+  // author was already on. Jumps to Settings on any new selection so the
+  // click-to-edit flow still feels immediate.
+  useEffect(() => {
+    if (sel || Object.values(sliderInnerSel).some(Boolean)) setActiveLeftTab("settings");
+  }, [sel, sliderInnerSel]);
 
   // Auto-expand the Layers tree around the current selection so switching to
   // the tab, or changing selection via the canvas/Live Edit, always reveals
@@ -1099,14 +1109,6 @@ export default function Designer({
         >
           <Menu className="h-4 w-4" />
         </button>
-        <button
-          onClick={() => setMobilePanel(mobilePanel === "inspector" ? null : "inspector")}
-          className={`rounded-full p-1.5 lg:hidden ${mobilePanel === "inspector" ? "bg-accent/15 text-accent" : "text-body hover:bg-canvas"}`}
-          aria-label={t("designer-inspector")}
-          title={t("designer-inspector")}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
         <span className="text-xs font-bold text-ink">{page.title as string}</span>
         {kind === "page" && (
           <>
@@ -1352,7 +1354,7 @@ export default function Designer({
         )}
         {/* palette */}
         <aside
-          className={`absolute inset-y-0 left-0 z-40 w-64 transform overflow-y-auto border-r border-line/30 bg-white p-3 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-44 lg:translate-x-0 ${
+          className={`absolute inset-y-0 left-0 z-40 w-72 transform overflow-y-auto border-r border-line/30 bg-white p-3 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-64 lg:translate-x-0 ${
             mobilePanel === "palette" ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -1368,6 +1370,12 @@ export default function Designer({
               className={`flex-1 rounded-md py-1 inline-flex items-center justify-center gap-1 ${activeLeftTab === "layers" ? "bg-white shadow-sm" : "text-sub"}`}
             >
               <Layers className="h-3 w-3" /> {t("designer-tab-layers")}
+            </button>
+            <button
+              onClick={() => setActiveLeftTab("settings")}
+              className={`flex-1 rounded-md py-1 inline-flex items-center justify-center gap-1 ${activeLeftTab === "settings" ? "bg-white shadow-sm" : "text-sub"}`}
+            >
+              <Settings className="h-3 w-3" /> {t("designer-inspector")}
             </button>
           </div>
           {activeLeftTab === "elements" ? (
@@ -1392,7 +1400,7 @@ export default function Designer({
               })}
               <p className="pt-2 text-[10px] leading-relaxed text-sub">{t("designer-drop-hint")}</p>
             </div>
-          ) : (
+          ) : activeLeftTab === "layers" ? (
             <LayersTreeView
               blocks={blocks}
               treeDropHint={treeDropHint}
@@ -1403,6 +1411,84 @@ export default function Designer({
               toggleExpand={toggleExpand}
               t={t}
             />
+          ) : (
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
+              {kind === "siteChrome" && (
+                <div className="mb-1 space-y-3 rounded-lg border border-line/30 p-3">
+                  <p className="text-xs font-bold text-ink">{t("header-footer-settings")}</p>
+                  <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+                    <input
+                      type="checkbox"
+                      checked={chromeIsDefault}
+                      onChange={(e) => void patchChromeMeta({ isDefault: e.target.checked })}
+                    />
+                    {t("header-footer-set-default")}
+                  </label>
+                  {chromeKind === "header" && (
+                    <div className="space-y-2 border-t border-line/20 pt-2">
+                      <p className="text-[11px] font-semibold text-body">{t("header-footer-mobile-nav")}</p>
+                      <label className="block text-[11px] text-body">
+                        {t("header-footer-mobile-style")}
+                        <select
+                          value={chromeMobileNav.style ?? "dropdown"}
+                          onChange={(e) => void patchChromeMeta({ mobileNav: { style: e.target.value } })}
+                          className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                        >
+                          <option value="dropdown">{t("header-footer-mobile-style-dropdown")}</option>
+                          <option value="fly">{t("header-footer-mobile-style-fly")}</option>
+                          <option value="fullscreen">{t("header-footer-mobile-style-fullscreen")}</option>
+                        </select>
+                      </label>
+                      <label className="block text-[11px] text-body">
+                        {t("header-footer-mobile-position")}
+                        <select
+                          value={chromeMobileNav.position ?? "right"}
+                          onChange={(e) => void patchChromeMeta({ mobileNav: { position: e.target.value } })}
+                          className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                        >
+                          <option value="left">{t("header-footer-mobile-left")}</option>
+                          <option value="right">{t("header-footer-mobile-right")}</option>
+                        </select>
+                      </label>
+                      <label className="block text-[11px] text-body">
+                        {t("header-footer-mobile-size")}
+                        <select
+                          value={chromeMobileNav.size ?? "md"}
+                          onChange={(e) => void patchChromeMeta({ mobileNav: { size: e.target.value } })}
+                          className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                        >
+                          <option value="sm">{t("header-footer-mobile-sm")}</option>
+                          <option value="md">{t("header-footer-mobile-md")}</option>
+                          <option value="lg">{t("header-footer-mobile-lg")}</option>
+                        </select>
+                      </label>
+                      <label className="block text-[11px] text-body">
+                        {t("header-footer-mobile-color")}
+                        <input
+                          type="color"
+                          value={chromeMobileNav.color ?? "#111827"}
+                          onChange={(e) => void patchChromeMeta({ mobileNav: { color: e.target.value } })}
+                          className="mt-1 h-7 w-full rounded-md border border-line/30"
+                        />
+                      </label>
+                      <label className="block text-[11px] text-body">
+                        {t("header-footer-mobile-animation")}
+                        <select
+                          value={chromeMobileNav.animation ?? "slide"}
+                          onChange={(e) => void patchChromeMeta({ mobileNav: { animation: e.target.value } })}
+                          className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+                        >
+                          <option value="slide">{t("header-footer-mobile-slide")}</option>
+                          <option value="fade">{t("header-footer-mobile-fade")}</option>
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
+              <Inspector ctx={designerCtx} />
+            </div>
           )}
         </aside>
 
@@ -2232,89 +2318,6 @@ export default function Designer({
             </div>
           )}
         </main>
-
-        {/* inspector */}
-        <aside
-          className={`absolute inset-y-0 right-0 z-40 w-72 transform overflow-y-auto border-l border-line/30 bg-white p-4 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-64 lg:translate-x-0 ${
-            mobilePanel === "inspector" ? "translate-x-0" : "translate-x-full"
-          }`}
-        >
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
-          {kind === "siteChrome" && (
-            <div className="mb-4 space-y-3 rounded-lg border border-line/30 p-3">
-              <p className="text-xs font-bold text-ink">{t("header-footer-settings")}</p>
-              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
-                <input
-                  type="checkbox"
-                  checked={chromeIsDefault}
-                  onChange={(e) => void patchChromeMeta({ isDefault: e.target.checked })}
-                />
-                {t("header-footer-set-default")}
-              </label>
-              {chromeKind === "header" && (
-                <div className="space-y-2 border-t border-line/20 pt-2">
-                  <p className="text-[11px] font-semibold text-body">{t("header-footer-mobile-nav")}</p>
-                  <label className="block text-[11px] text-body">
-                    {t("header-footer-mobile-style")}
-                    <select
-                      value={chromeMobileNav.style ?? "dropdown"}
-                      onChange={(e) => void patchChromeMeta({ mobileNav: { style: e.target.value } })}
-                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-                    >
-                      <option value="dropdown">{t("header-footer-mobile-style-dropdown")}</option>
-                      <option value="fly">{t("header-footer-mobile-style-fly")}</option>
-                      <option value="fullscreen">{t("header-footer-mobile-style-fullscreen")}</option>
-                    </select>
-                  </label>
-                  <label className="block text-[11px] text-body">
-                    {t("header-footer-mobile-position")}
-                    <select
-                      value={chromeMobileNav.position ?? "right"}
-                      onChange={(e) => void patchChromeMeta({ mobileNav: { position: e.target.value } })}
-                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-                    >
-                      <option value="left">{t("header-footer-mobile-left")}</option>
-                      <option value="right">{t("header-footer-mobile-right")}</option>
-                    </select>
-                  </label>
-                  <label className="block text-[11px] text-body">
-                    {t("header-footer-mobile-size")}
-                    <select
-                      value={chromeMobileNav.size ?? "md"}
-                      onChange={(e) => void patchChromeMeta({ mobileNav: { size: e.target.value } })}
-                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-                    >
-                      <option value="sm">{t("header-footer-mobile-sm")}</option>
-                      <option value="md">{t("header-footer-mobile-md")}</option>
-                      <option value="lg">{t("header-footer-mobile-lg")}</option>
-                    </select>
-                  </label>
-                  <label className="block text-[11px] text-body">
-                    {t("header-footer-mobile-color")}
-                    <input
-                      type="color"
-                      value={chromeMobileNav.color ?? "#111827"}
-                      onChange={(e) => void patchChromeMeta({ mobileNav: { color: e.target.value } })}
-                      className="mt-1 h-7 w-full rounded-md border border-line/30"
-                    />
-                  </label>
-                  <label className="block text-[11px] text-body">
-                    {t("header-footer-mobile-animation")}
-                    <select
-                      value={chromeMobileNav.animation ?? "slide"}
-                      onChange={(e) => void patchChromeMeta({ mobileNav: { animation: e.target.value } })}
-                      className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
-                    >
-                      <option value="slide">{t("header-footer-mobile-slide")}</option>
-                      <option value="fade">{t("header-footer-mobile-fade")}</option>
-                    </select>
-                  </label>
-                </div>
-              )}
-            </div>
-          )}
-          <Inspector ctx={designerCtx} />
-        </aside>
       </div>
 
       {mediaPickerCallback && (
