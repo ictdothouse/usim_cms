@@ -1,0 +1,487 @@
+---
+// Standalone no-backend elements with no shared "repeater" shape (unlike
+// RepeaterBlock's batch) — extracted verbatim out of SectionBlock.astro's
+// own switch (god-file breakup, see SectionBlock.astro's top-of-file
+// comment on why shared *logic* goes through lib/element-render.ts, never
+// another .astro file's frontmatter). Only accordion reads
+// blockIndex/r/c/e (for its exclusive-group name); none read designerEdit.
+import { ICON_PATHS, safeUrl, cls, marginStyle, paddingStyle, renderInline, lengthValue } from "../lib/element-render";
+
+// Local, not imported from SectionBlock.astro's frontmatter — see that
+// file's top comment on the outage caused by sharing frontmatter bindings
+// across .astro files. Same duplication convention as ContainerBlock.astro/
+// RepeaterBlock.astro's own local copies.
+function parsePairs(raw?: string): { a: string; b: string }[] {
+  return (raw ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const i = line.indexOf("|");
+      return i === -1 ? { a: line, b: "" } : { a: line.slice(0, i), b: line.slice(i + 1) };
+    });
+}
+interface Card {
+  image: string;
+  title: string;
+  description: string;
+  href: string;
+  buttonLabel: string;
+}
+function parseCards(raw: string | undefined): Card[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => {
+      const c = (item ?? {}) as Record<string, unknown>;
+      return {
+        image: typeof c.image === "string" ? c.image : "",
+        title: typeof c.title === "string" ? c.title : "",
+        description: typeof c.description === "string" ? c.description : "",
+        href: typeof c.href === "string" ? c.href : "",
+        buttonLabel: typeof c.buttonLabel === "string" ? c.buttonLabel : "",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+const safeCssUrl = (u?: string) => {
+  const v = safeUrl(u);
+  return v && !/['";(){}\s]/.test(v) ? v : undefined;
+};
+const SRCSET_WIDTHS = [400, 800, 1200, 1600];
+function buildSrcset(url: string): { srcset: string; sizes: string } | null {
+  const m = /[?&]w=(\d+)/.exec(url);
+  if (!m) return null;
+  const width = Number(m[1]);
+  const base = url.split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
+  if (candidates.length === 0) return null;
+  const entries = [...candidates.map((w) => `${stem}-${w}w.webp ${w}w`), `${base} ${width}w`];
+  return { srcset: entries.join(", "), sizes: "(min-width: 1024px) 800px, 100vw" };
+}
+function bgVariantUrl(url: string): string {
+  const m = /[?&]w=(\d+)/.exec(url);
+  if (!m) return url;
+  const width = Number(m[1]);
+  const base = url.split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
+  if (candidates.length === 0) return url;
+  return `${stem}-${candidates[candidates.length - 1]}w.webp`;
+}
+
+interface El {
+  type: string;
+  props?: Record<string, string>;
+}
+interface Props {
+  el: El;
+  blockIndex: number;
+  r: number;
+  c: number;
+  e: number;
+}
+const { el, blockIndex, r, c, e } = Astro.props as Props;
+const p = el.props ?? {};
+---
+
+{(() => {
+switch (el.type) {
+  case "accordion": {
+    const items = parsePairs(p.items);
+    if (items.length === 0) return null;
+    const groupName = p.exclusive === "true" ? `ds-acc-${blockIndex}-${r}-${c}-${e}` : undefined;
+    return (
+      <div class={cls("ds-accordion", p.cssClass)} style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+        {items.map((it) => (
+          <details class="ds-accordion-item" name={groupName}>
+            <summary class="ds-accordion-q" set:html={renderInline(it.a)} />
+            <div class="ds-accordion-a" set:html={renderInline(it.b)} />
+          </details>
+        ))}
+      </div>
+    );
+  }
+  case "infobox": {
+    const iconPath = ICON_PATHS[p.name ?? "star"] ?? ICON_PATHS.star;
+    const left = p.iconPosition === "left";
+    return (
+      <div
+        class={cls(
+          "ds-infobox",
+          left ? "ds-infobox-left" : "ds-infobox-top",
+          !left && p.align === "center" ? "ds-infobox-center" : undefined,
+          p.cssClass,
+        )}
+        style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
+      >
+        <svg
+          class="ds-infobox-icon"
+          width="2rem"
+          height="2rem"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={p.color || "currentColor"}
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d={iconPath} />
+        </svg>
+        <div>
+          {p.heading && <p class="ds-infobox-heading" set:html={renderInline(p.heading)} />}
+          {p.text && <p class="ds-infobox-text" set:html={renderInline(p.text)} />}
+        </div>
+      </div>
+    );
+  }
+  case "tabs": {
+    const items = parsePairs(p.items);
+    if (items.length === 0) return null;
+    return (
+      <div class={cls("ds-tabs", p.cssClass)} style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+        <div class="ds-tabs-labels">
+          {items.map((it, i) => (
+            <button
+              type="button"
+              class={cls("ds-tabs-label", i === 0 ? "is-active" : undefined)}
+              data-idx={i}
+              set:html={renderInline(it.a)}
+            />
+          ))}
+        </div>
+        <div class="ds-tabs-panels">
+          {items.map((it, i) => (
+            <div class={cls("ds-tabs-panel", i === 0 ? "is-active" : undefined)} data-idx={i} set:html={renderInline(it.b)} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  case "cardgrid": {
+    const cards = parseCards(p.cards);
+    if (cards.length === 0) return null;
+    return (
+      <div
+        class={cls("ds-cardgrid", p.equalHeight === "false" ? undefined : "ds-cardgrid-equal", p.cssClass)}
+        style={[`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`, marginStyle(p), paddingStyle(p)]
+          .filter(Boolean)
+          .join(";")}
+      >
+        {cards.map((c) => {
+          const cardSrc = c.image ? safeUrl(c.image) : undefined;
+          const cardSrcset = cardSrc ? buildSrcset(cardSrc) : null;
+          return (
+          <div class="ds-card">
+            {cardSrc && <img src={cardSrc} srcset={cardSrcset?.srcset} sizes={cardSrcset ? cardSrcset.sizes : undefined} alt="" loading="lazy" />}
+            <div class="ds-card-body">
+              {c.title && <h3 class="ds-card-title">{c.title}</h3>}
+              {c.description && <p class="ds-card-desc">{c.description}</p>}
+              {c.buttonLabel && c.href && (
+                <a class="ds-btn ds-btn-primary ds-card-btn" href={safeUrl(c.href) ?? "#"}>
+                  {c.buttonLabel}
+                </a>
+              )}
+            </div>
+          </div>
+          );
+        })}
+      </div>
+    );
+  }
+  case "ctabanner":
+    if (!p.heading && !p.description) return null;
+    return (
+      <div
+        class={cls("ds-ctabanner", p.cssClass)}
+        style={[
+          p.align ? `text-align:${p.align}` : null,
+          p.bgColor ? `background-color:${p.bgColor}` : null,
+          p.bgImage && safeCssUrl(bgVariantUrl(p.bgImage))
+            ? `background-image:url('${safeCssUrl(bgVariantUrl(p.bgImage))}');background-size:cover;background-position:center`
+            : null,
+          marginStyle(p),
+          paddingStyle(p),
+        ]
+          .filter(Boolean)
+          .join(";")}
+      >
+        {p.heading && <h2 class="ds-ctabanner-heading">{p.heading}</h2>}
+        {p.description && <p class="ds-ctabanner-desc">{p.description}</p>}
+        {(p.button1Label || p.button2Label) && (
+          <div class="ds-ctabanner-actions">
+            {p.button1Label && (
+              <a class="ds-btn ds-btn-primary" href={safeUrl(p.button1Href) ?? "#"}>
+                {p.button1Label}
+              </a>
+            )}
+            {p.button2Label && (
+              <a class="ds-btn ds-btn-outline" href={safeUrl(p.button2Href) ?? "#"}>
+                {p.button2Label}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  case "announcementbar":
+    if (!p.text) return null;
+    return (
+      <div
+        class={cls("ds-announcementbar", p.cssClass)}
+        style={[`background:${p.bgColor || "#111827"}`, `color:${p.textColor || "#ffffff"}`]
+          .filter(Boolean)
+          .join(";")}
+      >
+        <span>{p.text}</span>
+        {p.linkLabel && p.linkHref && (
+          <a class="ds-announcementbar-link" href={safeUrl(p.linkHref) ?? "#"}>
+            {p.linkLabel}
+          </a>
+        )}
+        {p.dismissible !== "false" && (
+          <button type="button" class="ds-announcementbar-close" aria-label="Dismiss">
+            ×
+          </button>
+        )}
+      </div>
+    );
+  case "googlemap": {
+    const embedUrl = p.embedUrl ? safeUrl(p.embedUrl) : undefined;
+    if (!embedUrl) return p.address ? <p class={cls("ds-map-address", p.cssClass)}>{p.address}</p> : null;
+    const height = lengthValue(p.height, {}, "24rem");
+    return (
+      <div class={cls("ds-map", p.cssClass)}>
+        {p.requireConsent === "true" ? (
+          <div class="ds-map-consent" style={`height:${height}`} data-map-src={embedUrl}>
+            <button type="button" class="ds-map-consent-btn">Load map</button>
+          </div>
+        ) : (
+          <iframe class="ds-map-frame" src={embedUrl} style={`height:${height}`} loading="lazy" referrerpolicy="strict-origin-when-cross-origin" />
+        )}
+        {p.address && <p class="ds-map-address">{p.address}</p>}
+      </div>
+    );
+  }
+  default:
+    return null;
+}
+})()}
+
+<style>
+  /* Byte-for-byte copies of the matching rules in SectionBlock.astro's own
+     <style> — Astro's scoped-CSS attribute doesn't cross component
+     boundaries (see ContainerBlock.astro/RepeaterBlock.astro's own comment
+     on the bug this avoids). SectionBlock no longer renders any of these
+     element types itself, so no duplicate copies are left there. */
+  .ds-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .ds-accordion-item {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  .ds-accordion-q {
+    cursor: pointer;
+    padding: 0.85rem 1rem;
+    font-weight: 600;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .ds-accordion-q::-webkit-details-marker {
+    display: none;
+  }
+  .ds-accordion-q::after {
+    content: "+";
+    margin-left: 0.5rem;
+    transition: transform 0.15s ease;
+  }
+  .ds-accordion-item[open] .ds-accordion-q::after {
+    transform: rotate(45deg);
+  }
+  .ds-accordion-a {
+    padding: 0 1rem 1rem;
+    line-height: 1.6;
+  }
+  .ds-infobox {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .ds-infobox-left {
+    flex-direction: row;
+  }
+  .ds-infobox-center {
+    align-items: center;
+    text-align: center;
+  }
+  .ds-infobox-icon {
+    flex-shrink: 0;
+  }
+  .ds-infobox-heading {
+    margin: 0;
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+  .ds-infobox-text {
+    margin: 0.35rem 0 0;
+    line-height: 1.6;
+    opacity: 0.85;
+  }
+  .ds-tabs-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  }
+  .ds-tabs-label {
+    padding: 0.6rem 1.1rem;
+    font-weight: 600;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    cursor: pointer;
+    opacity: 0.6;
+    font: inherit;
+    color: inherit;
+  }
+  .ds-tabs-label.is-active {
+    opacity: 1;
+    border-bottom-color: var(--color-primary, #0f62fe);
+  }
+  .ds-tabs-panel {
+    display: none;
+    padding: 1rem 0.25rem;
+    line-height: 1.6;
+  }
+  .ds-tabs-panel.is-active {
+    display: block;
+  }
+  .ds-cardgrid {
+    display: grid;
+    gap: 1.5rem;
+  }
+  .ds-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 0.75rem;
+    overflow: hidden;
+  }
+  .ds-cardgrid-equal .ds-card {
+    height: 100%;
+  }
+  .ds-card img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    display: block;
+  }
+  .ds-card-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+  }
+  .ds-card-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+  .ds-card-desc {
+    margin: 0;
+    line-height: 1.6;
+    opacity: 0.85;
+  }
+  .ds-card-btn {
+    align-self: flex-start;
+    margin-top: auto;
+  }
+  .ds-ctabanner {
+    padding: 3rem 2rem;
+    border-radius: 1rem;
+  }
+  .ds-ctabanner-heading {
+    margin: 0 0 0.75rem;
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+  }
+  .ds-ctabanner-desc {
+    margin: 0 0 1.5rem;
+    line-height: 1.6;
+  }
+  .ds-ctabanner-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: inherit;
+  }
+  .ds-announcementbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+    text-align: center;
+  }
+  .ds-announcementbar-link {
+    color: inherit;
+    text-decoration: underline;
+  }
+  .ds-announcementbar-close {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+  }
+  .ds-map-frame,
+  .ds-map-consent {
+    width: 100%;
+    border: 0;
+    border-radius: 0.75rem;
+    display: block;
+  }
+  .ds-map-consent {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.06);
+  }
+  .ds-map-consent-btn {
+    border-radius: 9999px;
+    padding: 0.6rem 1.25rem;
+    font-weight: 600;
+    border: 1px solid currentColor;
+    background: transparent;
+    cursor: pointer;
+  }
+  .ds-map-address {
+    margin: 0.6rem 0 0;
+    font-size: 0.9rem;
+    opacity: 0.8;
+  }
+  @media (max-width: 768px) {
+    .ds-infobox-left {
+      flex-direction: column;
+    }
+    .ds-cardgrid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>
