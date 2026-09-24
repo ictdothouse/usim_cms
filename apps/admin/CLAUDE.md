@@ -153,6 +153,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   style={align}>`) had no explicit height, so the span's `height:100%` resolved against an auto-height
   box (i.e. did nothing); now that wrapper div also gets `width`/`height:100%` when free-positioned, so
   it actually stretches to match the resized box like the real site's own render already did.
+  **Size preserved on unlock (2026-09-24)**: toggling Free position used to only capture `x`/`y` off
+  the live DOM rect, so the element's box (previously flow-width, or the button's shrunk-to-content
+  size) snapped to its CSS default the instant it went `position:absolute` — a visible shrink/jump.
+  The toggle handler (Inspector.tsx) now also reads `getBoundingClientRect()`'s width/height at the
+  same moment and writes them into `posWidth`/`posHeight`, so the element's on-screen size is
+  unchanged by the toggle, only its positioning model is. **Sibling reflow on unlock (2026-09-25)**:
+  even with size preserved, toggling Free position still visibly moved every OTHER element in the
+  column — `position:absolute` removes the toggled child from `.ds-slide-row`'s flex-column layout
+  entirely (no height, no `gap` contribution), so siblings below it shift up to fill the gap the
+  instant it leaves flow, even though the toggled element itself lands back exactly where it was
+  measured from. Fixed in both `ElPreview.tsx` (the column's `.map()`) and `SliderBlock.astro`
+  (mirrored) by rendering a `visibility:hidden` spacer of the same `posHeight` immediately before the
+  free child, so it still counts as a normal-flow sibling for layout purposes — bp overrides on
+  `posHeight` get their own `bpStyleRules` push targeting a separate `data-slide-spacer` selector on
+  the frontend (never the real element's own `data-slide-el` selector — that would also give the
+  spacer `position:absolute` and defeat the point). A free element with no `posHeight` yet (legacy
+  data predating the size-preservation fix above) still reflows siblings same as before — no data
+  migration, consistent with this whole feature's launch-era "no real content yet" call.
   **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;

@@ -13,7 +13,7 @@
 // see docs/superpowers/specs/2026-09-24-designer-render-perf-design.md) —
 // memo can't yet skip a re-render (ctx/props aren't memoized upstream until
 // that doc's parts (b)/(c) land), this only removes the structural blocker.
-import { memo } from "react";
+import { Fragment, memo } from "react";
 import {
   BarChart3,
   Bell,
@@ -766,9 +766,21 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                           target.props.slides = stringifySlides(currentSlides);
                         });
                       };
+                      const childPosWidth = childIsFree ? bpGetValue(childEl.props.posWidth, childEl.bp, "posWidth") : undefined;
+                      const childPosHeight = childIsFree ? bpGetValue(childEl.props.posHeight, childEl.bp, "posHeight") : undefined;
                       return (
+                        <Fragment key={childEl.id}>
+                          {childIsFree && (
+                            // A `position: absolute` element is removed from the flex
+                            // column entirely — it contributes no height and no gap,
+                            // so without this spacer every sibling below it shifts up
+                            // the instant free-position turns on, even though the
+                            // freed element itself lands back at the exact spot it
+                            // measured from (Inspector.tsx's toggle handler). Same fix
+                            // needed in SliderBlock.astro's posStyle() mirror.
+                            <div aria-hidden style={{ height: childPosHeight || undefined, visibility: "hidden" }} />
+                          )}
                         <div
-                          key={childEl.id}
                           data-child-el={childEl.id}
                           data-editing={childEditing ? "true" : undefined}
                           onClick={() => setSliderInnerSel((m) => ({ ...m, [el.id]: { r, c, e } }))}
@@ -807,8 +819,8 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                   position: "absolute",
                                   top: `${bpGetValue(childEl.props.y, childEl.bp, "y") || "50"}%`,
                                   left: `${bpGetValue(childEl.props.x, childEl.bp, "x") || "50"}%`,
-                                  width: bpGetValue(childEl.props.posWidth, childEl.bp, "posWidth") || undefined,
-                                  height: bpGetValue(childEl.props.posHeight, childEl.bp, "posHeight") || undefined,
+                                  width: childPosWidth || undefined,
+                                  height: childPosHeight || undefined,
                                 }
                               : {
                                   ...elMarginStyle(childEl.props ?? {}),
@@ -906,6 +918,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                             />
                           )}
                         </div>
+                        </Fragment>
                       );
                     })}
                     </div>
