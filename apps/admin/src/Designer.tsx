@@ -783,6 +783,12 @@ export default function Designer({
     setSliderInnerSel,
   });
 
+  // Blocks-mode tablet/mobile simulate only — Live Edit's own iframe mode has
+  // no dead-space problem (the real page IS the iframe's full content), and
+  // desktop's own maxWidth (56rem) is a reading-width convenience, not a
+  // device simulation, so neither gets the device-frame treatment below.
+  const isDeviceSim = mode !== "live" && bp !== "desktop";
+
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
@@ -1461,7 +1467,7 @@ export default function Designer({
 
         {/* canvas */}
         <main
-          className="min-w-0 flex-1 overflow-y-auto p-6"
+          className={`min-w-0 flex-1 overflow-y-auto p-6 ${isDeviceSim ? "bg-canvas" : ""}`}
           onClick={() => setSel(null)}
           style={
             {
@@ -1473,7 +1479,12 @@ export default function Designer({
               "--font-family": effectiveTheme?.fontFamily,
               "--font-heading": effectiveTheme?.headingFont,
               "--font-subheading": effectiveTheme?.subHeadingFont,
-              background: "var(--color-bg, #ffffff)",
+              // Device-sim (tablet/mobile, Blocks mode) moves the theme bg
+              // off <main> and onto the framed box below instead, so the
+              // area outside the simulated screen reads as canvas backdrop
+              // (bg-canvas above) rather than looking like unfilled/leftover
+              // theme-bg space.
+              background: isDeviceSim ? undefined : "var(--color-bg, #ffffff)",
               color: "var(--color-text, inherit)",
               fontFamily: "var(--font-family, inherit)",
             } as React.CSSProperties
@@ -1491,8 +1502,12 @@ export default function Designer({
             </div>
           )}
           <div
-            className={`mx-auto ${mode === "live" ? "" : "space-y-4"}`}
-            style={{ maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem" }}
+            className={`mx-auto ${mode === "live" ? "" : "space-y-4"} ${isDeviceSim ? "rounded-[1.5rem] border border-line/60 shadow-lg overflow-hidden" : ""}`}
+            style={{
+              maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem",
+              background: isDeviceSim ? "var(--color-bg, #ffffff)" : undefined,
+              color: isDeviceSim ? "var(--color-text, inherit)" : undefined,
+            }}
           >
             {blocks.length === 0 && <p className="py-10 text-center text-xs text-sub">{t("designer-empty")}</p>}
             {blocks.map((block, b) => {
