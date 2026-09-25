@@ -697,6 +697,7 @@ export function FieldInput({
                   #{i + 1} {isPreviewing ? `· ${t("designer-slide-previewing")}` : ""}
                 </span>
                 <button
+                  type="button"
                   onClick={() => {
                     // Unlike every other repeater's "Remove" (gallery image,
                     // pairs, cards — a single flat value), a slide can carry a
