@@ -1494,13 +1494,32 @@ export default function Designer({
           }
         >
           <div
-            className={`mx-auto ${isCanvasMode ? "rounded-[1.5rem] border border-line/60 shadow-lg overflow-hidden" : ""}`}
+            className="relative mx-auto"
             style={{
               maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem",
-              background: isCanvasMode ? "var(--color-bg, #ffffff)" : undefined,
-              color: isCanvasMode ? "var(--color-text, inherit)" : undefined,
             }}
           >
+            {isCanvasMode && (
+              // Decorative-only layer (bg/rounded corners/border/shadow), kept
+              // OUT of the real content below — same split this file's own
+              // per-section render already uses (see its "Split so
+              // overflow-hidden ... only ever wraps a decorative backdrop
+              // layer" comment a bit further down): an overflow-hidden box
+              // around the real content would clip every padding/margin
+              // drag-handle badge that deliberately overhangs its own edge by
+              // design, and here that overhang lands right on this box's own
+              // left/right edge (sections span its full width, no gap to
+              // absorb it) — that was clipping the "0px" badges at
+              // tablet/mobile. The sibling content div right below is
+              // `relative` (not static) so it still stacks above this
+              // `absolute` one despite coming later in paint order only by
+              // position, not z-index.
+              <div
+                className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem] border border-line/60 shadow-lg"
+                style={{ background: "var(--color-bg, #ffffff)" }}
+              />
+            )}
+            <div className="relative" style={{ color: isCanvasMode ? "var(--color-text, inherit)" : undefined }}>
             {resolvedHeaderId && (
               // Inside the same bp-width-constrained box as the page content below
               // (was a full-width sibling of it) — the iframe's own real CSS media
@@ -2308,6 +2327,7 @@ export default function Designer({
                 />
               </div>
             )}
+            </div>
           </div>
         </main>
       </div>

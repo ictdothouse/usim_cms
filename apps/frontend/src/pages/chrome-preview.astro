@@ -58,6 +58,20 @@ const fonts = collectFonts(chrome?.layout ?? []);
   )}
 </BaseLayout>
 {embed && (
+  // The host (Designer.tsx) sizes this iframe's box exactly to the chrome's
+  // own reported height via postMessage below — this page's <html>/<body>
+  // should never need (or show) its own scrollbar for that to work. Without
+  // this, a real BaseLayout page is taller than just the header/footer band
+  // (global.css/daisyUI full-page defaults), so the iframe showed its own
+  // internal scrollbar the moment the narrowed tablet/mobile bp box made
+  // that extra height more likely to exceed the assigned iframe box.
+  <style is:global>
+    html, body {
+      overflow: hidden !important;
+    }
+  </style>
+)}
+{embed && (
   <script is:inline define:vars={{ kind }}>
     function reportHeight() {
       const el = document.querySelector(kind);
