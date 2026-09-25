@@ -1401,8 +1401,29 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                             x = String(Math.max(0, Math.min(100, Math.round(((nodeRect.left - boxRect.left) / boxRect.width) * 1000) / 10)));
                             y = String(Math.max(0, Math.min(100, Math.round(((nodeRect.top - boxRect.top) / boxRect.height) * 1000) / 10)));
                           }
-                          if (nodeRect.width > 0) posWidth = `${Math.round(nodeRect.width)}px`;
-                          if (nodeRect.height > 0) posHeight = `${Math.round(nodeRect.height)}px`;
+                          // heading/text renders as a plain block with no explicit
+                          // width, so it stretches to its column's full width in flow
+                          // regardless of how short the text actually is — capturing
+                          // THAT as posWidth "preserves size" technically, but for a
+                          // short heading/subheader it just freezes a box far wider
+                          // than the text, with no way back to a content-fit size
+                          // except a manual drag. Range's content-only bounding box
+                          // (ignores the block's own layout width — the standard no-
+                          // dependency text-measurement trick) gives the actual glyph
+                          // extent instead, so a heading/text starts free-positioned
+                          // already hugging its own text. image/button keep the
+                          // node's own rect — their rendered box (not a text run) IS
+                          // the real thing to preserve.
+                          const sizeRect =
+                            childEl.type === "heading" || childEl.type === "text"
+                              ? (() => {
+                                  const range = document.createRange();
+                                  range.selectNodeContents(node);
+                                  return range.getBoundingClientRect();
+                                })()
+                              : nodeRect;
+                          if (sizeRect.width > 0) posWidth = `${Math.round(sizeRect.width)}px`;
+                          if (sizeRect.height > 0) posHeight = `${Math.round(sizeRect.height)}px`;
                         }
                         childSetValues({ position: "custom", x, y, posWidth, posHeight });
                       }}

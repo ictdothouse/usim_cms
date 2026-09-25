@@ -348,6 +348,14 @@ export default function Designer({
     activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,
     langOverrides, isTextKey, pathKey, langKeysOverridden, toggleLangKeys, langStackKeysOverridden, toggleLangStackKeys, setLangValue,
   } = usePageAndLanguage({ rawBlocks, page, tenantHost, token, bp, bpKey, setDirty, setSel });
+  // Page Settings' Theme picker snapshots a preset onto pageSettings.theme
+  // (setPageThemePreset, above) — the canvas below used to read siteTheme
+  // (the SITE-WIDE default) directly, so a page using a non-default preset
+  // rendered the wrong colors/fonts here while the published site correctly
+  // merged the two (apps/frontend's [...slug].astro: `{ ...siteTheme,
+  // ...page.settings.theme }`) — mirrored exactly here so Live Edit and the
+  // real page agree again.
+  const effectiveTheme = pageSettings.theme ? { ...siteTheme, ...pageSettings.theme } : siteTheme;
   // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
   // — this is real (SectionBlock.astro renders the matching @media rule on
   // the published site), so the Blocks canvas ghosting it here isn't just
@@ -1498,14 +1506,14 @@ export default function Designer({
           onClick={() => setSel(null)}
           style={
             {
-              "--color-primary": siteTheme?.primaryColor,
-              "--color-primary-content": siteTheme?.primaryColor ? bestTextColor(siteTheme.primaryColor) : undefined,
-              "--color-secondary": siteTheme?.secondaryColor,
-              "--color-bg": siteTheme?.backgroundColor,
-              "--color-text": siteTheme?.textColor,
-              "--font-family": siteTheme?.fontFamily,
-              "--font-heading": siteTheme?.headingFont,
-              "--font-subheading": siteTheme?.subHeadingFont,
+              "--color-primary": effectiveTheme?.primaryColor,
+              "--color-primary-content": effectiveTheme?.primaryColor ? bestTextColor(effectiveTheme.primaryColor) : undefined,
+              "--color-secondary": effectiveTheme?.secondaryColor,
+              "--color-bg": effectiveTheme?.backgroundColor,
+              "--color-text": effectiveTheme?.textColor,
+              "--font-family": effectiveTheme?.fontFamily,
+              "--font-heading": effectiveTheme?.headingFont,
+              "--font-subheading": effectiveTheme?.subHeadingFont,
               background: "var(--color-bg, #ffffff)",
               color: "var(--color-text, inherit)",
               fontFamily: "var(--font-family, inherit)",
@@ -1547,7 +1555,7 @@ export default function Designer({
               // single overflow-hidden div clipped those badges away entirely
               // whenever there wasn't enough padding to absorb the overhang.
               const { padding: sectionPadding, margin: sectionMargin, color: sectionColor, opacity: sectionOpacity, ...sectionBgStyle } = sectionBpStyle(sp);
-              const sectionEffectiveBg = sp.bg || siteTheme?.backgroundColor || "#ffffff";
+              const sectionEffectiveBg = sp.bg || effectiveTheme?.backgroundColor || "#ffffff";
               const sectionOverlay = overlayColors(sectionEffectiveBg);
               // Real stroke set (new fields or the legacy preset) already
               // draws its own border via sectionBgStyle.border — the overlay
