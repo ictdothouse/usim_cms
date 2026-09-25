@@ -1472,7 +1472,13 @@ export default function Designer({
 
         {/* canvas */}
         <main
-          className={`min-w-0 flex-1 overflow-y-auto p-6 ${isCanvasMode ? "bg-canvas" : ""}`}
+          // No isCanvasMode means genuinely edge-to-edge content (Live Edit
+          // desktop, or a "full" contentWidth page) — the old unconditional
+          // p-6 left a same-color gap around it with nothing to explain it,
+          // reading as an accidental leftover margin ("macam island") rather
+          // than a deliberate frame. Only the boxed/backdropped case gets
+          // that breathing room now.
+          className={`min-w-0 flex-1 overflow-y-auto ${isCanvasMode ? "bg-canvas p-6" : ""}`}
           onClick={() => setSel(null)}
           style={
             {
