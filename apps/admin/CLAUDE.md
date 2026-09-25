@@ -171,6 +171,28 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   spacer `position:absolute` and defeat the point). A free element with no `posHeight` yet (legacy
   data predating the size-preservation fix above) still reflows siblings same as before — no data
   migration, consistent with this whole feature's launch-era "no real content yet" call.
+  **Heading resize didn't scale font (2026-09-25)**: the drag-resize handle already grew a free
+  "text" child's font size with its box (`scaleLength`/`widthRatio`), but a free "heading" child's box
+  grew while its text stayed its fixed `level`-preset size (`H_SIZE`) — `level` is a discrete preset,
+  not a continuous value a ratio can scale, so heading was silently excluded from the whole feature.
+  Fixed by adding `posFontSize`, a free-position-only override (same idea as `posWidth`/`posHeight`
+  overriding the normal box): the resize handler now scales off `posFontSize` (falling back to the
+  current `H_SIZE[level]`) for a "heading" child, `size` for a "text" child, same as before. Both
+  `ElPreview.tsx` (base + per-bp `bpStyleRules`) and `SliderBlock.astro` (mirrored) read it back.
+  **Slide delete had no confirm (2026-09-25)**: every other repeater's own "Remove" (gallery image,
+  pairs, cards) is a flat single value — no confirm needed, Ctrl+Z covers it. A slide can carry a whole
+  nested row/column/element tree an author spent real time building, so `FieldInput.tsx`'s slides
+  "Remove" now gates on `confirm(t("designer-slide-remove-confirm"))` first — the one repeater-remove
+  in this file that does.
+  **`wordSpacing`/`fontSize` 400'd every save touching them (2026-09-25)**: both are real
+  `TYPOGRAPHY_FIELDS` (`fields.tsx`, kind `"drag-number"`) that shipped without a matching
+  `LENGTH_KEYS` entry in `@ucms/element-schema` — the exact "padding" omission incident this file
+  already documents, recurring because `elements.test.ts`'s cross-check only asserted kind
+  `"length"` fields, never `"drag-number"` ones (which write the identical CSS-length string).
+  Fixed both the missing `LENGTH_KEYS` entries (plus `posFontSize` above, same bucket) and the test's
+  blind spot (`"length" || "drag-number"` now both checked) so a future drag-number field can't ship
+  the same way. This blocked the WHOLE page save, not just the one field — any other change made in
+  the same edit session looked like it silently "had no effect" until the offending field was removed.
   **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;
