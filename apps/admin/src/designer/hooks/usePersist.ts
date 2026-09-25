@@ -36,8 +36,6 @@ export interface PersistDeps {
   setError: (msg: string | null) => void;
   setSavedAny: (v: boolean) => void;
   setMsg: (v: string | null) => void;
-  setPreviewMinting: (v: boolean) => void;
-  setPreviewLink: (v: string | null) => void;
   setPreviewModal: (v: { src: string; device: "desktop" | "tablet" | "mobile" } | null) => void;
   t: (k: Key) => string;
 }
@@ -49,7 +47,7 @@ export function usePersist(deps: PersistDeps) {
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     setDirty, setBusy, setError, setSavedAny, setMsg,
-    setPreviewMinting, setPreviewLink, setPreviewModal, t,
+    setPreviewModal, t,
   } = deps;
 
   // Page revision history (kind === "page" only — see api.PageRevision).
@@ -235,56 +233,15 @@ export function usePersist(deps: PersistDeps) {
     return translations;
   }
 
-  // Only reached when there's unsaved content or the page is a draft — a
-  // saved+published page renders a plain <a href target="_blank"> instead,
-  // since a real anchor click is a genuine browser navigation and never
-  // hits the popup/redirect-blocking heuristic below.
-  //
-  // No Save first (Elementor/Avada-style: Preview shows whatever's on
-  // screen, not whatever's persisted) — the canvas's current in-memory state
-  // is sent straight to the preview-token mint, which stashes it in an
-  // ephemeral server-side store (see apps/api's live-preview-store.ts) and
-  // embeds a reference in the token; nothing is written to pages/blueprints.
-  //
-  // Two clicks, deliberately, not window.open()+later-navigate: opening a
-  // blank tab synchronously then setting its location after this mint's
-  // await used to leave a permanently blank about:blank tab in some
-  // browsers/settings — script-driven navigation of an already-open window,
-  // once any await separates the two, is exactly what a popup/redirect
-  // blocker can silently eat, with no error and no console trace. A real
-  // anchor click is a genuine user-gesture navigation and has no such window.
-  async function mintPreviewLink() {
-    setError(null);
-    setPreviewMinting(true);
-    try {
-      const previewToken =
-        kind === "blueprint"
-          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string, {
-              layout: clone(rawBlocks),
-              settings: pageSettings,
-            })
-          : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
-              layout: clone(rawBlocks),
-              settings: pageSettings,
-              translations: currentTranslationsPayload(),
-            });
-      setPreviewLink(
-        kind === "blueprint"
-          ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
-          : api.previewUrl(tenantHost, page.slug as string, previewToken),
-      );
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setPreviewMinting(false);
-    }
-  }
-
-  // Modal iframe, not a new tab — no popup blocker to fight, so unlike
-  // mintPreviewLink() above this can mint straight into the iframe's src in
-  // one call. No Save first either (same draft-override mechanism as
-  // mintPreviewLink): the canvas's current in-memory state goes into the
-  // token mint, nothing is written to pages/blueprints/site_chrome.
+  // Modal iframe, not a new tab — no popup blocker to fight. No Save first
+  // (Elementor/Avada-style: Preview shows whatever's on screen, not whatever
+  // is persisted) — the canvas's current in-memory state goes straight into
+  // the token mint, which stashes it in an ephemeral server-side store (see
+  // apps/api's live-preview-store.ts); nothing is written to
+  // pages/blueprints/site_chrome. Used for every kind now (page included —
+  // this used to be a separate mintPreviewLink()+new-tab flow for pages, but
+  // that meant pages previewed differently from blueprint/siteChrome for no
+  // real reason, so it's one flow).
   async function openDevicePreview() {
     setError(null);
     try {
@@ -324,6 +281,6 @@ export function usePersist(deps: PersistDeps) {
   return {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
     renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    currentTranslationsPayload, mintPreviewLink, openDevicePreview,
+    currentTranslationsPayload, openDevicePreview,
   };
 }

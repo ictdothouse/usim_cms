@@ -221,6 +221,17 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   CSS vars, `sectionEffectiveBg`'s contrast fallback) — mirrors the frontend's own merge exactly.
   `ctx.siteTheme` itself (threaded into Inspector/FieldInput for the unrelated "use site logo/favicon"
   quick-pick buttons) is untouched — that one genuinely means the site's own asset, not a themeable color.
+  **Page preview unified onto the header/footer modal flow (2026-09-25)**: pages used to get a
+  separate `mintPreviewLink()` two-click new-tab flow (mint a token, then click a real `<a
+  target="_blank">` — needed because a script-driven `window.open()`-then-navigate after an `await`
+  is exactly what popup/redirect blockers can silently eat) while blueprint/siteChrome (incl.
+  header/footer) already had `openDevicePreview()`: mints straight into a modal `<iframe>` with a
+  desktop/tablet/mobile switcher, no popup blocker to fight since nothing ever navigates the top
+  window. `openDevicePreview()` already branched correctly for `kind === "page"` (same
+  `getPagePreviewToken`/`previewUrl` as the old flow) — it just wasn't wired to the page toolbar
+  button. Removed `mintPreviewLink`/`previewLink`/`previewMinting` entirely and pointed the page
+  Preview button at `openDevicePreview()`, same as blueprint/siteChrome — one preview UX for every
+  content kind instead of two.
   **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;

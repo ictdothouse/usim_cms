@@ -563,28 +563,11 @@ export default function Designer({
   // navigate to) and for anyone who'd rather check breakpoints without
   // leaving the Designer.
   const [previewModal, setPreviewModal] = useState<{ src: string; device: "desktop" | "tablet" | "mobile" } | null>(null);
-  // preview()'s new-tab flow (kind === "page", draft-or-dirty branch) below —
-  // a real `<a target="_blank">` click the user makes themselves, never a
-  // script-driven window.open()+later-navigate. That combo is what a
-  // browser's popup/redirect heuristics can silently eat (a permanently
-  // blank about:blank tab, no error) once any await happens in between the
-  // open and the navigate — a real anchor click has no such window. Two
-  // steps: click "Preview" mints the token (previewMinting), then the same
-  // slot becomes a real link the user clicks to actually open the tab.
-  const [previewLink, setPreviewLink] = useState<string | null>(null);
-  const [previewMinting, setPreviewMinting] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
-  // A minted preview link is a snapshot of the canvas at mint time — any
-  // further edit before the user actually clicks it would make it stale
-  // (showing content older than what's now on screen), so drop it and
-  // require a fresh mint rather than silently open outdated content.
-  useEffect(() => {
-    setPreviewLink(null);
-  }, [rawBlocks, pageSettings]);
   const {
     chromeKind, chromeStatus, setChromeStatus, chromeIsDefault, chromeMobileNav, patchChromeMeta,
     availableHeaders, availableFooters,
@@ -595,14 +578,14 @@ export default function Designer({
   const {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
     renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    mintPreviewLink, openDevicePreview,
+    openDevicePreview,
   } = usePersist({
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     setDirty, setBusy, setError, setSavedAny, setMsg,
-    setPreviewMinting, setPreviewLink, setPreviewModal, t,
+    setPreviewModal, t,
   });
 
   // Autosave (2026-09-16): debounced silent save while dirty, restricted to
@@ -1277,7 +1260,7 @@ export default function Designer({
             </button>
           ))}
         </div>
-        {(kind === "blueprint" || kind === "siteChrome") && (
+        {(kind === "blueprint" || kind === "siteChrome" || kind === "page") && (
           <button
             onClick={() => void openDevicePreview()}
             className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
@@ -1285,35 +1268,6 @@ export default function Designer({
             <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
           </button>
         )}
-        {kind === "page" &&
-          (page.status === "published" && !dirty ? (
-            <a
-              href={api.previewUrl(tenantHost, page.slug as string)}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview")}
-            </a>
-          ) : previewLink ? (
-            <a
-              href={previewLink}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => setPreviewLink(null)}
-              className="flex items-center gap-1 rounded-full bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25"
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> {t("designer-preview-ready")}
-            </a>
-          ) : (
-            <button
-              onClick={() => void mintPreviewLink()}
-              disabled={previewMinting}
-              className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas disabled:opacity-50"
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> {previewMinting ? t("designer-saving") : t("designer-preview")}
-            </button>
-          ))}
         {kind !== "page" && (
           <button
             onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "symbol" ? saveSymbol() : saveSiteChrome())}
