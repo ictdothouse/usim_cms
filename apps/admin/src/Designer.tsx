@@ -2316,7 +2316,7 @@ export default function Designer({
               onClick={() => setPreviewModal(null)}
             >
               <div
-                className="flex h-[90vh] w-[min(95vw,80rem)] flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+                className="flex h-[95vh] w-[min(97vw,120rem)] flex-col overflow-hidden rounded-xl bg-white shadow-xl"
                 onClick={(ev) => ev.stopPropagation()}
               >
                 <div className="flex items-center justify-between border-b border-line/30 px-4 py-2.5">
