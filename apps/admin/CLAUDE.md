@@ -193,6 +193,34 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   blind spot (`"length" || "drag-number"` now both checked) so a future drag-number field can't ship
   the same way. This blocked the WHOLE page save, not just the one field — any other change made in
   the same edit session looked like it silently "had no effect" until the offending field was removed.
+  **Image placeholder was a hardcoded box (2026-09-25)**: the "no src yet" empty-image placeholder
+  (dashed box + icon) ignored `position`/`posWidth`/`posHeight` entirely — a fixed `h-24` Tailwind
+  class, unlike the real `<img>` branch right above it which already fills a free-positioned box.
+  Resizing a free image element with no picture chosen yet visibly did nothing. Fixed by giving the
+  placeholder the same conditional `width`/`height: 100%` inline style the real `<img>` uses.
+  **Free-position capture used the block's full column width, not the text (2026-09-25)**: toggling
+  Free position on a heading/text child measured `getBoundingClientRect()` of its wrapper — correct
+  for image/button (their own real rendered box), but a heading/text div has no explicit width, so in
+  flow it stretches to its column's full width regardless of how short the actual text is. A short
+  "Sub header" toggled to Free position froze a box as wide as the whole column, with no way back to a
+  content-fit size except a manual drag. Fixed in `Inspector.tsx`'s toggle handler: for heading/text
+  only, measures a `Range` over the node's contents instead (`range.selectNodeContents(node);
+  range.getBoundingClientRect()`) — the standard no-dependency way to get a text run's actual glyph
+  extent, ignoring the parent block's own layout width. x/y still anchor off the wrapper's own rect
+  (unchanged) — only posWidth/posHeight source changes. image/button keep the wrapper's own rect,
+  unaffected — their rendered box IS the real thing to preserve.
+  **Live Edit ignored a page's own Theme override (2026-09-25)**: Page Settings' Theme picker
+  (`pageSettings.theme`, a preset snapshot written by `setPageThemePreset`) is genuinely per-page —
+  `apps/frontend`'s `[...slug].astro` already merges it over the site default
+  (`{ ...siteTheme, ...page.settings.theme }`) before rendering. `Designer.tsx`'s own canvas `<main>`
+  (the CSS custom properties every element's `var(--color-primary, ...)` etc. resolve against) read
+  raw `siteTheme` only, never `pageSettings.theme` — so a page using a non-default preset showed the
+  SITE's colors/fonts in Live Edit while the real published page correctly showed the preset's. Fixed
+  by computing `effectiveTheme = pageSettings.theme ? { ...siteTheme, ...pageSettings.theme } :
+  siteTheme` once and using it everywhere the canvas previously read `siteTheme` directly (the `<main>`
+  CSS vars, `sectionEffectiveBg`'s contrast fallback) — mirrors the frontend's own merge exactly.
+  `ctx.siteTheme` itself (threaded into Inspector/FieldInput for the unrelated "use site logo/favicon"
+  quick-pick buttons) is untouched — that one genuinely means the site's own asset, not a themeable color.
   **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;

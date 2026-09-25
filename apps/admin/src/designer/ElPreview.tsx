@@ -403,7 +403,18 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
           />
         </div>
       ) : (
-        <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub">
+        <div
+          className="flex h-24 items-center justify-center rounded-lg border border-dashed border-line/50 bg-canvas/50 text-sub"
+          // Same free-position fill need as the real <img> above — h-24 is
+          // just this placeholder's UNSIZED default, not a hardcoded final
+          // size; a free-positioned box's posWidth/posHeight still has to
+          // win once the author resizes it, image chosen or not.
+          style={
+            p.position === "custom"
+              ? { width: p.posWidth ? "100%" : undefined, height: p.posHeight ? "100%" : undefined }
+              : undefined
+          }
+        >
           <ImageIcon className="h-6 w-6" />
         </div>
       );
