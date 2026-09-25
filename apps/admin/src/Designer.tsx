@@ -1490,25 +1490,31 @@ export default function Designer({
             } as React.CSSProperties
           }
         >
-          {resolvedHeaderId && (
-            <div className="mb-3 overflow-hidden rounded-lg border border-dashed border-line/40">
-              <iframe
-                key={resolvedHeaderId}
-                src={api.chromePreviewUrl(tenantHost, resolvedHeaderId, "header", { embed: true })}
-                className="w-full border-0"
-                style={{ height: headerFrameHeight || 64, pointerEvents: "none" }}
-                title="Header preview"
-              />
-            </div>
-          )}
           <div
-            className={`mx-auto ${mode === "live" ? "" : "space-y-4"} ${isDeviceSim ? "rounded-[1.5rem] border border-line/60 shadow-lg overflow-hidden" : ""}`}
+            className={`mx-auto ${isDeviceSim ? "rounded-[1.5rem] border border-line/60 shadow-lg overflow-hidden" : ""}`}
             style={{
               maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem",
               background: isDeviceSim ? "var(--color-bg, #ffffff)" : undefined,
               color: isDeviceSim ? "var(--color-text, inherit)" : undefined,
             }}
           >
+            {resolvedHeaderId && (
+              // Inside the same bp-width-constrained box as the page content below
+              // (was a full-width sibling of it) — the iframe's own real CSS media
+              // queries only ever see this box's rendered width, so a tablet/mobile
+              // simulation needs the header iframe narrowed too, or its bp-only
+              // styles never activate and it always renders at the desktop tier.
+              <div className="overflow-hidden border-b border-dashed border-line/40">
+                <iframe
+                  key={resolvedHeaderId}
+                  src={api.chromePreviewUrl(tenantHost, resolvedHeaderId, "header", { embed: true })}
+                  className="w-full border-0"
+                  style={{ height: headerFrameHeight || 64, pointerEvents: "none" }}
+                  title="Header preview"
+                />
+              </div>
+            )}
+            <div className={mode === "live" ? "" : "space-y-4"}>
             {blocks.length === 0 && <p className="py-10 text-center text-xs text-sub">{t("designer-empty")}</p>}
             {blocks.map((block, b) => {
               // apps/api's pagesAfterRead upgrades any surviving legacy
@@ -2288,17 +2294,18 @@ export default function Designer({
               <Plus className="h-4 w-4" /> {t("designer-add-section")}
             </button>
           </div>
-          {resolvedFooterId && (
-            <div className="mt-3 overflow-hidden rounded-lg border border-dashed border-line/40">
-              <iframe
-                key={resolvedFooterId}
-                src={api.chromePreviewUrl(tenantHost, resolvedFooterId, "footer", { embed: true })}
-                className="w-full border-0"
-                style={{ height: footerFrameHeight || 96, pointerEvents: "none" }}
-                title="Footer preview"
-              />
-            </div>
-          )}
+            {resolvedFooterId && (
+              <div className="overflow-hidden border-t border-dashed border-line/40">
+                <iframe
+                  key={resolvedFooterId}
+                  src={api.chromePreviewUrl(tenantHost, resolvedFooterId, "footer", { embed: true })}
+                  className="w-full border-0"
+                  style={{ height: footerFrameHeight || 96, pointerEvents: "none" }}
+                  title="Footer preview"
+                />
+              </div>
+            )}
+          </div>
         </main>
       </div>
 
