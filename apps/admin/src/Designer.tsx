@@ -783,11 +783,11 @@ export default function Designer({
     setSliderInnerSel,
   });
 
-  // Blocks-mode tablet/mobile simulate only — Live Edit's own iframe mode has
-  // no dead-space problem (the real page IS the iframe's full content), and
-  // desktop's own maxWidth (56rem) is a reading-width convenience, not a
-  // device simulation, so neither gets the device-frame treatment below.
-  const isDeviceSim = mode !== "live" && bp !== "desktop";
+  // Blocks mode always renders the page as a distinct "paper" card over a
+  // grey canvas backdrop, at every bp including desktop — Live Edit's own
+  // iframe mode has no dead-space problem (the real page IS the iframe's
+  // full content), so it's the only one excluded here.
+  const isCanvasMode = mode !== "live";
 
   useEffect(() => {
     if (!ctxMenu) return;
@@ -1467,7 +1467,7 @@ export default function Designer({
 
         {/* canvas */}
         <main
-          className={`min-w-0 flex-1 overflow-y-auto p-6 ${isDeviceSim ? "bg-canvas" : ""}`}
+          className={`min-w-0 flex-1 overflow-y-auto p-6 ${isCanvasMode ? "bg-canvas" : ""}`}
           onClick={() => setSel(null)}
           style={
             {
@@ -1484,18 +1484,18 @@ export default function Designer({
               // area outside the simulated screen reads as canvas backdrop
               // (bg-canvas above) rather than looking like unfilled/leftover
               // theme-bg space.
-              background: isDeviceSim ? undefined : "var(--color-bg, #ffffff)",
+              background: isCanvasMode ? undefined : "var(--color-bg, #ffffff)",
               color: "var(--color-text, inherit)",
               fontFamily: "var(--font-family, inherit)",
             } as React.CSSProperties
           }
         >
           <div
-            className={`mx-auto ${isDeviceSim ? "rounded-[1.5rem] border border-line/60 shadow-lg overflow-hidden" : ""}`}
+            className={`mx-auto ${isCanvasMode ? "rounded-[1.5rem] border border-line/60 shadow-lg overflow-hidden" : ""}`}
             style={{
               maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem",
-              background: isDeviceSim ? "var(--color-bg, #ffffff)" : undefined,
-              color: isDeviceSim ? "var(--color-text, inherit)" : undefined,
+              background: isCanvasMode ? "var(--color-bg, #ffffff)" : undefined,
+              color: isCanvasMode ? "var(--color-text, inherit)" : undefined,
             }}
           >
             {resolvedHeaderId && (
