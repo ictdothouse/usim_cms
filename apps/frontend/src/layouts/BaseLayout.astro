@@ -65,6 +65,17 @@ const {
   lcpImage = null,
 } = Astro.props;
 
+// Set only by apps/admin's device-preview modal (openDevicePreview, via
+// ?deviceFrame=mobile|tablet on the preview/blueprint-preview/chrome-preview
+// URL it builds) when it wraps this same iframe in its own phone/tablet
+// bezel mockup — never present on a real visitor's URL. A real mobile
+// browser has no visible scrollbar and scrolls by touch-dragging the page
+// directly; the modal's bezel has neither, so without this the framed page
+// showed a plain desktop-style scrollbar and could only be scrolled by
+// grabbing that thin bar — this makes the framed page behave like the
+// device it's mocking up instead.
+const deviceFrame = Astro.url.searchParams.get("deviceFrame");
+
 function chromeLayout(chrome: SiteChrome) {
   if (!requestedLang) return chrome.layout;
   return chrome.translations[requestedLang]?.layout ?? chrome.layout;
@@ -176,6 +187,18 @@ const fontsHref = allFonts.length
     )}
     {faviconUrl && <link rel="icon" href={faviconUrl} />}
     <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
+    {deviceFrame && (
+      <style>
+        html,
+        body {
+          scrollbar-width: none; /* Firefox */
+        }
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+          display: none; /* Chrome/Safari/Edge */
+        }
+      </style>
+    )}
   </head>
   <body
     style={`font-family:var(--font-family, system-ui, sans-serif);background:var(--color-bg, inherit);color:var(--color-text, inherit)`}
@@ -283,6 +306,56 @@ const fontsHref = allFonts.length
           </a>
         ))}
       </nav>
+    )}
+    {deviceFrame && (
+      <script is:inline>
+        (() => {
+          // Mouse has no touch to drag-scroll with, and the phone/tablet
+          // bezel this page is framed in has no room for a real scrollbar
+          // either (the deviceFrame style block above already hides it) —
+          // this re-adds the one way a real device scrolls: press and drag
+          // the page itself, translating mouse deltas since a preview built
+          // on a desktop has no touchscreen. justDragged mirrors the same
+          // pattern designerEdit's own drag-reorder script uses below, so a
+          // drag that ends over a link doesn't also fire its navigation.
+          let dragging = false;
+          let moved = false;
+          let justDragged = false;
+          let startY = 0;
+          let startScrollY = 0;
+          document.addEventListener("pointerdown", (e) => {
+            if (e.button !== 0) return;
+            dragging = true;
+            moved = false;
+            startY = e.clientY;
+            startScrollY = window.scrollY;
+          });
+          document.addEventListener("pointermove", (e) => {
+            if (!dragging) return;
+            const dy = e.clientY - startY;
+            if (!moved) {
+              if (Math.abs(dy) < 6) return;
+              moved = true;
+              document.body.style.userSelect = "none";
+            }
+            e.preventDefault();
+            window.scrollTo(0, startScrollY - dy);
+          });
+          const stopDrag = () => {
+            if (moved) {
+              justDragged = true;
+              document.body.style.userSelect = "";
+              setTimeout(() => (justDragged = false), 50);
+            }
+            dragging = false;
+          };
+          document.addEventListener("pointerup", stopDrag);
+          document.addEventListener("pointercancel", stopDrag);
+          document.addEventListener("click", (e) => {
+            if (justDragged) e.preventDefault();
+          });
+        })();
+      </script>
     )}
     {designerEdit && (
       <script is:inline>

@@ -20,6 +20,7 @@ import {
   Pencil,
   Plus,
   Redo2,
+  RotateCw,
   Settings,
   Smartphone,
   Tablet,
@@ -562,7 +563,11 @@ export default function Designer({
   // published-and-clean case, this one is for blueprints (no public URL to
   // navigate to) and for anyone who'd rather check breakpoints without
   // leaving the Designer.
-  const [previewModal, setPreviewModal] = useState<{ src: string; device: "desktop" | "tablet" | "mobile" } | null>(null);
+  const [previewModal, setPreviewModal] = useState<{
+    src: string;
+    device: "desktop" | "tablet" | "mobile";
+    orientation: "portrait" | "landscape";
+  } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
   const [editingSlug, setEditingSlug] = useState(false);
@@ -578,7 +583,7 @@ export default function Designer({
   const {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
     renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    openDevicePreview,
+    openDevicePreview, withDeviceFrame,
   } = usePersist({
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings,
@@ -2296,11 +2301,15 @@ export default function Designer({
 
       {previewModal &&
         (() => {
-          const DEVICE_WIDTH: Record<"desktop" | "tablet" | "mobile", string> = {
-            desktop: "100%",
-            tablet: "48rem",
-            mobile: "24rem",
+          // Real device logical-pixel viewports (iPhone 14/15, iPad Air)
+          // instead of an arbitrary ratio — width still shrinks to fit the
+          // modal (via the max-height/max-width cap below), only the SHAPE
+          // now matches an actual phone/tablet.
+          const DEVICE_DIMS: Record<"mobile" | "tablet", { w: number; h: number }> = {
+            mobile: { w: 393, h: 852 },
+            tablet: { w: 820, h: 1180 },
           };
+          const landscape = previewModal.orientation === "landscape";
           return (
             <div
               className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4"
@@ -2312,26 +2321,46 @@ export default function Designer({
               >
                 <div className="flex items-center justify-between border-b border-line/30 px-4 py-2.5">
                   <p className="text-xs font-bold text-ink">{t("designer-preview")}</p>
-                  <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
-                    {(
-                      [
-                        { key: "desktop", icon: Monitor, labelKey: "designer-bp-desktop" },
-                        { key: "tablet", icon: Tablet, labelKey: "designer-bp-tablet" },
-                        { key: "mobile", icon: Smartphone, labelKey: "designer-bp-mobile" },
-                      ] as const
-                    ).map(({ key, icon: Icon, labelKey }) => (
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
+                      {(
+                        [
+                          { key: "desktop", icon: Monitor, labelKey: "designer-bp-desktop" },
+                          { key: "tablet", icon: Tablet, labelKey: "designer-bp-tablet" },
+                          { key: "mobile", icon: Smartphone, labelKey: "designer-bp-mobile" },
+                        ] as const
+                      ).map(({ key, icon: Icon, labelKey }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() =>
+                            setPreviewModal((m) =>
+                              m ? { ...m, device: key, src: withDeviceFrame(m.src, key), orientation: "portrait" } : m,
+                            )
+                          }
+                          title={t(labelKey)}
+                          className={`rounded-full p-1.5 ${
+                            previewModal.device === key ? "bg-white text-accent shadow-sm" : "text-sub hover:text-body"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                        </button>
+                      ))}
+                    </div>
+                    {previewModal.device !== "desktop" && (
                       <button
-                        key={key}
                         type="button"
-                        onClick={() => setPreviewModal((m) => (m ? { ...m, device: key } : m))}
-                        title={t(labelKey)}
-                        className={`rounded-full p-1.5 ${
-                          previewModal.device === key ? "bg-white text-accent shadow-sm" : "text-sub hover:text-body"
-                        }`}
+                        onClick={() =>
+                          setPreviewModal((m) =>
+                            m ? { ...m, orientation: m.orientation === "portrait" ? "landscape" : "portrait" } : m,
+                          )
+                        }
+                        title={t("designer-bp-rotate")}
+                        className="rounded-full p-1.5 text-sub hover:bg-canvas hover:text-body"
                       >
-                        <Icon className="h-3.5 w-3.5" />
+                        <RotateCw className="h-3.5 w-3.5" />
                       </button>
-                    ))}
+                    )}
                   </div>
                   <button
                     onClick={() => setPreviewModal(null)}
@@ -2341,41 +2370,49 @@ export default function Designer({
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="flex flex-1 items-start justify-center overflow-auto bg-canvas/60 p-4">
+                <div className="flex flex-1 items-center justify-center overflow-auto bg-canvas/60 p-4">
                   {previewModal.device === "desktop" ? (
                     <iframe
                       key={previewModal.src}
                       src={previewModal.src}
-                      className="h-full rounded-lg border border-line/30 bg-white shadow-sm"
-                      style={{ width: DEVICE_WIDTH[previewModal.device] }}
+                      className="h-full w-full rounded-lg border border-line/30 bg-white shadow-sm"
                       title={t("designer-preview")}
                     />
                   ) : (
                     // Device bezel so tablet/mobile preview reads as an actual
                     // phone/tablet instead of a plain narrowed box — the
-                    // iframe itself is unchanged, just wrapped.
-                    <div
-                      className={`flex shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
-                        previewModal.device === "mobile"
-                          ? "aspect-[9/19.5] h-full max-h-[42rem] rounded-[2.5rem] p-3"
-                          : "h-full rounded-[1.5rem] p-2.5"
-                      }`}
-                      style={
-                        previewModal.device === "mobile"
-                          ? undefined
-                          : { width: `calc(${DEVICE_WIDTH[previewModal.device]} + 1.5rem)` }
-                      }
-                    >
-                      {previewModal.device === "mobile" && (
-                        <div className="mx-auto h-1.5 w-16 shrink-0 rounded-full bg-white/25" />
-                      )}
-                      <iframe
-                        key={previewModal.src}
-                        src={previewModal.src}
-                        className={`w-full flex-1 bg-white ${previewModal.device === "mobile" ? "rounded-[1.75rem]" : "rounded-xl"}`}
-                        title={t("designer-preview")}
-                      />
-                    </div>
+                    // iframe itself is unchanged, just wrapped. Portrait is
+                    // height-driven (h-full, capped by max-height, width auto
+                    // from the aspect ratio); landscape mirrors that on the
+                    // other axis (w-full capped by max-width, height auto) —
+                    // same mechanism, just transposed, rather than the
+                    // trickier "both axes auto" approach.
+                    (() => {
+                      const dims = DEVICE_DIMS[previewModal.device];
+                      const ratio = landscape ? `${dims.h} / ${dims.w}` : `${dims.w} / ${dims.h}`;
+                      const cap = previewModal.device === "mobile" ? "46rem" : "56rem";
+                      const sizeStyle: React.CSSProperties = landscape
+                        ? { aspectRatio: ratio, maxWidth: cap }
+                        : { aspectRatio: ratio, maxHeight: cap };
+                      return (
+                        <div
+                          className={`flex shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
+                            previewModal.device === "mobile" ? "rounded-[2.5rem] p-3" : "rounded-[1.5rem] p-2.5"
+                          } ${landscape ? "h-auto w-full" : "h-full w-auto"}`}
+                          style={sizeStyle}
+                        >
+                          {previewModal.device === "mobile" && !landscape && (
+                            <div className="mx-auto h-1.5 w-16 shrink-0 rounded-full bg-white/25" />
+                          )}
+                          <iframe
+                            key={previewModal.src}
+                            src={previewModal.src}
+                            className={`w-full flex-1 bg-white ${previewModal.device === "mobile" ? "rounded-[1.75rem]" : "rounded-xl"}`}
+                            title={t("designer-preview")}
+                          />
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
               </div>

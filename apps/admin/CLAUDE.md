@@ -232,6 +232,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   button. Removed `mintPreviewLink`/`previewLink`/`previewMinting` entirely and pointed the page
   Preview button at `openDevicePreview()`, same as blueprint/siteChrome — one preview UX for every
   content kind instead of two.
+  **Device-preview modal: real dimensions, rotate, no in-frame scrollbar (2026-09-25)**: the
+  mobile/tablet bezel used an arbitrary `aspect-[9/19.5]` ratio capped at a fairly small `max-h`, and
+  had no rotate control at all — replaced with named real device viewports (`DEVICE_DIMS`: iPhone
+  14/15 393×852, iPad Air 820×1180) and a widened cap (46rem/56rem), plus a `RotateCw` button
+  (`previewModal.orientation`) that swaps the aspect ratio and switches the bezel from
+  height-driven-with-width-auto (portrait) to width-driven-with-height-auto (landscape) — same
+  shrink-to-fit mechanism either way, just transposed onto the other axis, rather than relying on
+  both dimensions being `auto` at once. Separately, the framed page itself (not just the bezel) had a
+  plain desktop-style scrollbar with no way to touch-drag it, since it's rendered by `apps/frontend`
+  (a different origin — `previewUrl`/`chromePreviewUrl` build an absolute `scheme://tenantHost/...`
+  URL, so the admin parent can't reach into that iframe's own document to restyle or scroll it).
+  Fixed on the frontend side instead: `openDevicePreview()`'s new `withDeviceFrame(src, device)`
+  appends `?deviceFrame=mobile|tablet` (skipped for desktop) to the token URL it already builds, and
+  `apps/frontend`'s `BaseLayout.astro` reads that param straight off `Astro.url` (no prop plumbing
+  needed — the Astro global is per-request and reaches every component in the tree) to conditionally
+  hide `html`/`body`'s own scrollbar and add a small `pointerdown`/`pointermove`/`pointerup` script
+  that drag-scrolls the page from mouse deltas, mirroring how a real touch device scrolls. Never
+  reaches a real visitor — the param only ever appears on a URL this modal itself constructs.
   **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;

@@ -36,7 +36,9 @@ export interface PersistDeps {
   setError: (msg: string | null) => void;
   setSavedAny: (v: boolean) => void;
   setMsg: (v: string | null) => void;
-  setPreviewModal: (v: { src: string; device: "desktop" | "tablet" | "mobile" } | null) => void;
+  setPreviewModal: (
+    v: { src: string; device: "desktop" | "tablet" | "mobile"; orientation: "portrait" | "landscape" } | null,
+  ) => void;
   t: (k: Key) => string;
 }
 
@@ -233,6 +235,21 @@ export function usePersist(deps: PersistDeps) {
     return translations;
   }
 
+  // Tags the iframe src with the device it's about to be framed in (skipped
+  // for desktop, which gets no bezel/scrollbar-hiding treatment at all) —
+  // apps/frontend's BaseLayout reads this same param to hide its own
+  // scrollbar and turn on mouse drag-scrolling, since the modal's bezel
+  // mockup has no room for a real scrollbar and a desktop mouse has no touch
+  // to drag-scroll with otherwise. src is always an absolute URL with at
+  // least a `token` param already on it (every caller below passes a fresh
+  // previewToken), so this always has a `?` to build on.
+  function withDeviceFrame(src: string, device: "desktop" | "tablet" | "mobile") {
+    if (device === "desktop") return src;
+    const url = new URL(src);
+    url.searchParams.set("deviceFrame", device);
+    return url.toString();
+  }
+
   // Modal iframe, not a new tab — no popup blocker to fight. No Save first
   // (Elementor/Avada-style: Preview shows whatever's on screen, not whatever
   // is persisted) — the canvas's current in-memory state goes straight into
@@ -254,8 +271,12 @@ export function usePersist(deps: PersistDeps) {
         // Mobile/Tablet and hitting Preview used to silently jump back to
         // desktop, a mismatch reported as "preview tak tepat".
         setPreviewModal({
-          src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken }),
+          src: withDeviceFrame(
+            api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken }),
+            bp,
+          ),
           device: bp,
+          orientation: "portrait",
         });
         return;
       }
@@ -272,7 +293,7 @@ export function usePersist(deps: PersistDeps) {
           ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
           : api.previewUrl(tenantHost, page.slug as string, previewToken);
       // Same bp-matches-canvas fix as the siteChrome branch above.
-      setPreviewModal({ src, device: bp });
+      setPreviewModal({ src: withDeviceFrame(src, bp), device: bp, orientation: "portrait" });
     } catch (err) {
       setError((err as Error).message);
     }
@@ -281,6 +302,6 @@ export function usePersist(deps: PersistDeps) {
   return {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
     renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    currentTranslationsPayload, openDevicePreview,
+    currentTranslationsPayload, openDevicePreview, withDeviceFrame,
   };
 }
