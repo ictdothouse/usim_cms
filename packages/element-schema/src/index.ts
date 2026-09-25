@@ -185,7 +185,7 @@ export const LENGTH_KEYS = new Set([
   "padding", "paddingY", "paddingX", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "marginY", "marginX", "marginTop", "marginBottom", "marginLeft", "marginRight",
   "radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft",
-  "borderWidth", "opacity", "lineHeight", "letterSpacing", "size", "height", "gap",
+  "borderWidth", "opacity", "lineHeight", "letterSpacing", "wordSpacing", "fontSize", "size", "height", "gap",
   // Slider layout (spaceBetween/initialSlide) and nav/pagination module
   // customization (navSize/navOffset/paginationOffset/paginationBulletSize/
   // paginationBulletGap) — all plain px lengths or bare indices, same
@@ -201,8 +201,11 @@ export const LENGTH_KEYS = new Set([
   "imgWidth",
   // Slide-nested element free positioning (see ENUM_VALUES.position above) —
   // x/y are percent-ish bare numbers (LENGTH_RE's unit-less branch), posWidth/
-  // posHeight plain CSS lengths, same as any other size field.
-  "x", "y", "posWidth", "posHeight",
+  // posHeight plain CSS lengths, same as any other size field. posFontSize is
+  // the same idea for a free-positioned heading's drag-resize (ElPreview.tsx)
+  // — H_SIZE's "level" preset can't be scaled by a ratio, so the resize
+  // handle overrides it with a real CSS length instead.
+  "x", "y", "posWidth", "posHeight", "posFontSize",
 ]);
 export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so

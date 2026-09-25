@@ -380,7 +380,17 @@ const p = el.props ?? {};
     if (el.bp && Object.keys(el.bp).length > 0) {
       responsiveRules.push(
         ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"]`, el.bp, ep, (mp) =>
-          [marginStyle(mp), paddingStyle(mp), posStyle(mp)].filter(Boolean).join(";"),
+          [
+            marginStyle(mp),
+            paddingStyle(mp),
+            posStyle(mp),
+            // heading-only: mirrors the admin canvas's posFontSize override
+            // (ElPreview.tsx) so a per-breakpoint drag-resize's scaled font
+            // size actually shows up here too, not just on desktop.
+            el.type === "heading" && mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null,
+          ]
+            .filter(Boolean)
+            .join(";"),
         ),
       );
       // The flow-spacer rendered below (for a free-positioned child) needs
@@ -404,7 +414,19 @@ const p = el.props ?? {};
             class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
             data-slide-el={el.id}
             data-slide-sel={slideSel}
-            style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), typoStyle(ep), elBorderShadowStyle(ep), posStyle(ep)]
+            style={[
+              ep.align ? `text-align:${ep.align}` : null,
+              marginStyle(ep),
+              paddingStyle(ep),
+              typoStyle(ep),
+              elBorderShadowStyle(ep),
+              posStyle(ep),
+              // Drag-resizing a free-positioned heading on the admin canvas
+              // scales this (ElPreview.tsx) — placed after typoStyle/posStyle
+              // in the joined style string so it wins over a separately
+              // configured Typography font size while resize is active.
+              ep.position === "custom" && ep.posFontSize ? `font-size:${ep.posFontSize}` : null,
+            ]
               .filter(Boolean)
               .join(";")}
             set:html={ep.text ? renderInline(ep.text) : ""}

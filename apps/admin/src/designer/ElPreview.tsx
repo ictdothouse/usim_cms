@@ -344,7 +344,13 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
           className={elHoverClass(p)}
           style={{
             ...align,
-            fontSize: H_SIZE[p.level ?? "2"],
+            // A free-positioned heading's own drag-resize handle (the slider
+            // case below) writes posFontSize so the text visibly scales with
+            // its box instead of floating small in a corner of it — same
+            // free-position-override idea as posWidth/posHeight overriding
+            // the normal box, since "level" is a fixed preset, not something
+            // a drag ratio can scale in place.
+            fontSize: p.position === "custom" && p.posFontSize ? p.posFontSize : H_SIZE[p.level ?? "2"],
             fontWeight: 700,
             lineHeight: 1.2,
             fontFamily: headingFontFamily(p.level),
@@ -863,7 +869,12 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                               }}
                               style={
                                 childEl.type === "heading"
-                                  ? { fontSize: H_SIZE[childEl.props.level ?? "2"], fontWeight: 700, lineHeight: 1.2 }
+                                  ? {
+                                      fontSize:
+                                        childIsFree && childEl.props.posFontSize ? childEl.props.posFontSize : H_SIZE[childEl.props.level ?? "2"],
+                                      fontWeight: 700,
+                                      lineHeight: 1.2,
+                                    }
                                   : { fontSize: lengthValue(childEl.props.size, TEXT_SIZE, TEXT_SIZE.md), whiteSpace: "pre-wrap", lineHeight: 1.65 }
                               }
                               className="outline-none"
@@ -896,12 +907,21 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                     // Canva-style: a text child's font size grows/
                                     // shrinks with the box instead of just wrapping
                                     // inside a bigger, still-small-looking box.
-                                    const scaledSize =
-                                      childEl.type === "text"
-                                        ? scaleLength(bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md, widthRatio)
-                                        : null;
+                                    // heading has no continuous "size" field to scale
+                                    // (H_SIZE is a fixed preset per "level" — see
+                                    // ElPreview's own heading case) — posFontSize is a
+                                    // free-position-only override for it, same idea as
+                                    // posWidth/posHeight overriding the normal box.
+                                    const scaledSize = childTextType
+                                      ? scaleLength(
+                                          childEl.type === "heading"
+                                            ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || H_SIZE[bpGetValue(childEl.props.level, childEl.bp, "level") || "2"]
+                                            : bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md,
+                                          widthRatio,
+                                        )
+                                      : null;
                                     const patch: Record<string, string> = { posWidth: wv, posHeight: hv };
-                                    if (scaledSize) patch.size = scaledSize;
+                                    if (scaledSize) patch[childEl.type === "heading" ? "posFontSize" : "size"] = scaledSize;
                                     currentSlides[slideIdx] =
                                       bp === "desktop"
                                         ? updateSlideElementProps(s0, r, c, e, patch)

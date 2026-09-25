@@ -698,6 +698,13 @@ export function FieldInput({
                 </span>
                 <button
                   onClick={() => {
+                    // Unlike every other repeater's "Remove" (gallery image,
+                    // pairs, cards — a single flat value), a slide can carry a
+                    // whole nested row/column/element tree an author spent
+                    // real time building — one misclick here loses more than
+                    // Ctrl+Z's usual undo depth reliably covers, so this one
+                    // gets a confirm the others don't need.
+                    if (!confirm(t("designer-slide-remove-confirm"))) return;
                     setItems(items.filter((_, j) => j !== i));
                     clearInner();
                   }}

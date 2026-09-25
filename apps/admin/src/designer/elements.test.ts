@@ -18,7 +18,13 @@ import { LENGTH_KEYS, COLOR_KEYS, ENUM_VALUES, REPEATER_SCHEMAS } from "@ucms/el
 for (const [type, def] of Object.entries(ELS)) {
   for (const field of def.fields) {
     test(`${type}.${field.key} (${field.kind}) has a matching element-schema bucket`, () => {
-      if (field.kind === "length") {
+      // "drag-number" (fontSize/lineHeight/letterSpacing/wordSpacing, see
+      // fields.tsx's TYPOGRAPHY_FIELDS) writes the same plain CSS-length
+      // string a "length" field does — it's a distinct UI control, not a
+      // distinct validated shape — so it shares the same bucket. Missing
+      // this arm is exactly how "wordSpacing"/"fontSize" shipped without a
+      // LENGTH_KEYS entry and 400'd on first save (see CLAUDE.md).
+      if (field.kind === "length" || field.kind === "drag-number") {
         assert.ok(LENGTH_KEYS.has(field.key), `LENGTH_KEYS is missing "${field.key}"`);
       } else if (field.kind === "color") {
         assert.ok(COLOR_KEYS.has(field.key), `COLOR_KEYS is missing "${field.key}"`);
