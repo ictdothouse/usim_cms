@@ -783,11 +783,14 @@ export default function Designer({
     setSliderInnerSel,
   });
 
-  // Blocks mode always renders the page as a distinct "paper" card over a
-  // grey canvas backdrop, at every bp including desktop — Live Edit's own
-  // iframe mode has no dead-space problem (the real page IS the iframe's
-  // full content), so it's the only one excluded here.
-  const isCanvasMode = mode !== "live";
+  // Grey canvas backdrop + white "paper" box applies whenever a boxed,
+  // narrower-than-<main> surface is on screen: every Blocks-mode bp
+  // (including desktop, which keeps its own 56rem reading-width box) and
+  // Live Edit's tablet/mobile bp simulation (same narrower box, just with
+  // Live Edit's lighter-weight overlay chrome). Only Live Edit at desktop
+  // is genuinely edge-to-edge with no boxed content, so it's the sole
+  // exclusion.
+  const isCanvasMode = !(mode === "live" && bp === "desktop");
 
   useEffect(() => {
     if (!ctxMenu) return;
