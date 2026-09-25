@@ -1505,7 +1505,13 @@ export default function Designer({
           <div
             className="relative mx-auto"
             style={{
-              maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" || !desktopBoxed ? undefined : "56rem",
+              // 393px/820px mirror the device-preview modal's own DEVICE_DIMS
+              // (iPhone 14/15, iPad Air) — kept in sync by hand (no shared
+              // module-level constant for 2 numbers) so this bp simulation,
+              // that modal, and a real phone/tablet all agree on the same
+              // width a free-position element's fixed-px size gets judged
+              // against, instead of 3 independently-guessed approximations.
+              maxWidth: bp === "tablet" ? "820px" : bp === "mobile" ? "393px" : mode === "live" || !desktopBoxed ? undefined : "56rem",
             }}
           >
             {isCanvasMode && (
@@ -2441,13 +2447,19 @@ export default function Designer({
                     // other axis (w-full capped by max-width, height auto) —
                     // same mechanism, just transposed, rather than the
                     // trickier "both axes auto" approach.
+                    // The cross-axis also gets a hard cap at the device's own
+                    // true pixel size (dims.w) — without it, on a tall browser
+                    // window h-full can grow past 393px before the 46rem
+                    // height cap kicks in (measured ~440px wide instead of a
+                    // real iPhone's 393px), so a free-position element sized
+                    // here for "mobile" doesn't match a real phone.
                     (() => {
                       const dims = DEVICE_DIMS[previewModal.device];
                       const ratio = landscape ? `${dims.h} / ${dims.w}` : `${dims.w} / ${dims.h}`;
                       const cap = previewModal.device === "mobile" ? "46rem" : "56rem";
                       const sizeStyle: React.CSSProperties = landscape
-                        ? { aspectRatio: ratio, maxWidth: cap }
-                        : { aspectRatio: ratio, maxHeight: cap };
+                        ? { aspectRatio: ratio, maxWidth: cap, maxHeight: `${dims.w}px` }
+                        : { aspectRatio: ratio, maxHeight: cap, maxWidth: `${dims.w}px` };
                       return (
                         <div
                           className={`flex shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
