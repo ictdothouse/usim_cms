@@ -37,6 +37,7 @@ import {
 interface El {
   type: string;
   props?: Record<string, string>;
+  bp?: Record<string, string>;
   children?: El[];
 }
 interface Props {
@@ -47,6 +48,39 @@ const { symbolId, tenantHost } = Astro.props;
 
 const symbol = symbolId ? await getSymbol(tenantHost, symbolId) : null;
 const node = symbol?.node as El | undefined;
+
+// Heading/text's own real per-breakpoint typography override — same
+// bpStyleRules mechanism SectionBlock.astro/ContainerBlock.astro use for
+// theirs (duplicated here rather than shared, this codebase's established
+// convention). Nodes here have no dotted path of their own (a symbol's
+// resolved tree isn't individually selectable — see this file's own top
+// comment), so each node needing one gets a small counter-based id instead.
+const responsiveRules: string[] = [];
+let visIdCounter = 0;
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
 ---
 
 {node && (() => {
@@ -59,7 +93,10 @@ const renderNode = (el: El): unknown => {
   switch (el.type) {
     case "heading": {
       const Tag = headingTag(p.level) as "h1";
-      return (
+      const hasTypoBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasTypoBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-h`, el.bp!, p, typoStyle));
+      const headingNode = (
         <Tag
           class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p), elEntranceClass(p))}
           style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
@@ -68,9 +105,19 @@ const renderNode = (el: El): unknown => {
           set:html={p.text ? renderInline(p.text) : ""}
         />
       );
+      return visId ? (
+        <div data-vis={visId} style="display:contents">
+          {headingNode}
+        </div>
+      ) : (
+        headingNode
+      );
     }
-    case "text":
-      return (
+    case "text": {
+      const hasTypoBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasTypoBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-text`, el.bp!, p, typoStyle));
+      const textNode = (
         <p
           class={cls("ds-text", p.cssClass, elHoverClass(p), elEntranceClass(p))}
           style={[
@@ -86,6 +133,14 @@ const renderNode = (el: El): unknown => {
           set:html={renderInline(p.text ?? "")}
         />
       );
+      return visId ? (
+        <div data-vis={visId} style="display:contents">
+          {textNode}
+        </div>
+      ) : (
+        textNode
+      );
+    }
     case "image": {
       const src = safeUrl(p.src);
       return src ? (
@@ -171,5 +226,11 @@ const renderNode = (el: El): unknown => {
       return null;
   }
 };
-return renderNode(node!);
+const rendered = renderNode(node!);
+return (
+  <>
+    {rendered}
+    {responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
+  </>
+);
 })()}

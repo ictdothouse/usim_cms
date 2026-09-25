@@ -27,6 +27,7 @@ import {
   safeUrl,
   lengthValue,
   cls,
+  typoStyle,
 } from "../lib/element-render";
 
 interface El {
@@ -610,13 +611,29 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                   ...bpStyleRules(`[data-vis="${elId}"] .ds-slider`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`),
                 );
               }
+              // Heading/text's own real per-breakpoint typography override
+              // (fontSize/lineHeight/letterSpacing/wordSpacing/fontWeight/
+              // fontFamily/textTransform/fontStyle/textDecoration) — same
+              // bpStyleRules mechanism as imgWidth/slider-height above,
+              // reusing typoStyle() itself as build() so every
+              // TYPOGRAPHY_FIELDS key gets real bp support at once instead of
+              // one-off per-field wiring. Previously admin-canvas-preview-only
+              // (see this file's CLAUDE.md note) — a tablet/mobile-only font
+              // size set in the Inspector saved and previewed correctly but
+              // never rendered on the real published/Live-Edit page, which
+              // silently stayed at the desktop value.
+              const hasTypoBp = (el.type === "heading" || el.type === "text") && !!el.bp && Object.keys(el.bp).length > 0;
+              if (hasTypoBp) {
+                const typoSelector = el.type === "heading" ? `[data-vis="${elId}"] .ds-h` : `[data-vis="${elId}"] .ds-text`;
+                responsiveRules.push(...bpStyleRules(typoSelector, el.bp!, p, typoStyle));
+              }
               // Slider's wrapper always gets a data-vis id now (rather than
               // only when a nested slide element actually has a bp override)
               // — SliderBlock.astro is a separate render pass, so it can no
               // longer report that signal back synchronously; a harmless
               // always-present attribute on a `display:contents` wrapper,
               // not a visible behavior change.
-              const elVisId = respId(elId, p) ?? (hasWidthBp || hasHeightBp || el.type === "slider" ? elId : undefined);
+              const elVisId = respId(elId, p) ?? (hasWidthBp || hasHeightBp || hasTypoBp || el.type === "slider" ? elId : undefined);
               return designerEdit || elVisId ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}

@@ -64,6 +64,40 @@ interface Props {
 }
 const { el, blockIndex, r, c, e, designerEdit = false } = Astro.props as Props;
 const p = el.props ?? {};
+
+// Heading/text children's own real per-breakpoint typography override —
+// same bpStyleRules mechanism SectionBlock.astro uses for its own top-level
+// elements (see that file's comment), duplicated here rather than shared
+// (this codebase's established convention — see this file's own top
+// comment on why shared *logic* goes through lib/element-render.ts, never
+// another .astro file's frontmatter). A container child's own dotted path
+// (`childPath` below) is already unique per node, so it doubles as the
+// data-vis id directly — no separate id scheme needed.
+const responsiveRules: string[] = [];
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
 ---
 
 {(() => {
@@ -76,7 +110,9 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
   switch (child.type) {
     case "heading": {
       const Tag = headingTag(cp.level) as "h1";
-      return (
+      const hasTypoBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"] .ds-h`, child.bp!, cp, typoStyle));
+      const headingNode = (
         <Tag
           class={cls("ds-h", `ds-h${cp.level ?? "2"}`, cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
           data-designer-path={designerEdit ? childPath : undefined}
@@ -86,9 +122,18 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
           set:html={cp.text ? renderInline(cp.text) : ""}
         />
       );
+      return hasTypoBp ? (
+        <div data-vis={childPath} style="display:contents">
+          {headingNode}
+        </div>
+      ) : (
+        headingNode
+      );
     }
-    case "text":
-      return (
+    case "text": {
+      const hasTypoBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"] .ds-text`, child.bp!, cp, typoStyle));
+      const textNode = (
         <p
           class={cls("ds-text", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
           data-designer-path={designerEdit ? childPath : undefined}
@@ -105,6 +150,14 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
           set:html={renderInline(cp.text ?? "")}
         />
       );
+      return hasTypoBp ? (
+        <div data-vis={childPath} style="display:contents">
+          {textNode}
+        </div>
+      ) : (
+        textNode
+      );
+    }
     case "image": {
       const cpSrc = safeUrl(cp.src);
       const cpSrcset = cpSrc ? buildSrcset(cpSrc) : null;
@@ -205,27 +258,31 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
   }
 };
 const elDottedPath = `${blockIndex}.${r}.${c}.${e}`;
+const containerChildren = (el.children ?? []).map((child, i) => renderContainerChild(child, `${elDottedPath}.${i}`));
 return (
-  <div
-    class={p.cssClass}
-    style={[
-      "display:flex",
-      `flex-direction:${p.flexDirection || "row"}`,
-      `justify-content:${p.justifyContent || "flex-start"}`,
-      `align-items:${p.alignItems || "stretch"}`,
-      `flex-wrap:${p.flexWrap || "wrap"}`,
-      `gap:${p.gap || "1rem"}`,
-      p.bg ? `background:${p.bg}` : null,
-      `border-radius:${elRadius(p)}`,
-      marginStyle(p),
-      paddingStyle(p),
-      elBorderShadowStyle(p),
-    ]
-      .filter(Boolean)
-      .join(";")}
-  >
-    {(el.children ?? []).map((child, i) => renderContainerChild(child, `${elDottedPath}.${i}`))}
-  </div>
+  <>
+    <div
+      class={p.cssClass}
+      style={[
+        "display:flex",
+        `flex-direction:${p.flexDirection || "row"}`,
+        `justify-content:${p.justifyContent || "flex-start"}`,
+        `align-items:${p.alignItems || "stretch"}`,
+        `flex-wrap:${p.flexWrap || "wrap"}`,
+        `gap:${p.gap || "1rem"}`,
+        p.bg ? `background:${p.bg}` : null,
+        `border-radius:${elRadius(p)}`,
+        marginStyle(p),
+        paddingStyle(p),
+        elBorderShadowStyle(p),
+      ]
+        .filter(Boolean)
+        .join(";")}
+    >
+      {containerChildren}
+    </div>
+    {responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
+  </>
 );
 })()}
 
