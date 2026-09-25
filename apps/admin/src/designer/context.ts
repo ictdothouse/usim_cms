@@ -112,6 +112,7 @@ export interface DesignerCtx {
   setPageGap: (gap: string | undefined) => void;
   setPageContentWidth: (contentWidth: "contained" | "full" | undefined) => void;
   setPagePaddingX: (paddingX: string | undefined) => void;
+  setPageCanvasColor: (canvasColor: string | undefined) => void;
   setPageThemePreset: (preset: api.ThemePreset | null) => void;
   themePresets: api.ThemePreset[];
 

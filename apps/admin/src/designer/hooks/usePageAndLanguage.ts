@@ -342,6 +342,10 @@ export function usePageAndLanguage(deps: PageAndLanguageDeps) {
     setPageSettings((s) => ({ ...s, paddingX }));
     setDirty(true);
   }
+  function setPageCanvasColor(canvasColor: string | undefined) {
+    setPageSettings((s) => ({ ...s, canvasColor }));
+    setDirty(true);
+  }
   // Selecting a preset copies its settings in as a one-time snapshot (same
   // convention as every other "apply once, edit independently after" copy
   // in this codebase) — editing the preset later never retroactively
@@ -353,7 +357,7 @@ export function usePageAndLanguage(deps: PageAndLanguageDeps) {
 
   return {
     blocks,
-    pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
+    pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
     siteLanguages, pageLanguage, setPageLanguage,
     activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,

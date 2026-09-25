@@ -35,7 +35,7 @@ const THEME_COLOR_KEYS = ["primaryColor", "secondaryColor", "backgroundColor", "
 // (same "emit the var, wire a real consumer later" precedent secondaryColor
 // itself already set).
 const THEME_SEMANTIC_COLOR_KEYS = ["tertiaryColor", "successColor", "warningColor", "errorColor", "infoColor"] as const;
-const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+export const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 // Letters/digits/space only — this string ends up inside a Google Fonts URL
 // built by apps/frontend, so it must not carry `/`, `?`, `<`, etc.
 const FONT_FAMILY_RE = /^[A-Za-z0-9 ]*$/;

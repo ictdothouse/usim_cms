@@ -7,7 +7,7 @@ import { validateMenuItems } from "../collections/validate-menu.js";
 import * as schema from "../db/schema.js";
 import { getTenantLanguageSelection } from "../db/tenant-pool.js";
 import { hasPermission } from "./permissions.js";
-import { validateThemeSettings } from "./portal-settings.js";
+import { validateThemeSettings, HEX_COLOR_RE } from "./portal-settings.js";
 
 // pages.settings.gap (and Row.gap inside pages.layout) is interpolated
 // directly into a raw CSS string by SectionBlock.astro
@@ -114,6 +114,9 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
     if (settings.paddingX !== undefined && (typeof settings.paddingX !== "string" || !new RegExp(GAP_PATTERN).test(settings.paddingX))) {
       throw Object.assign(new Error("settings.paddingX must be a plain CSS length"), { statusCode: 400 });
     }
+    if (settings.canvasColor !== undefined && settings.canvasColor !== "" && !HEX_COLOR_RE.test(settings.canvasColor as string)) {
+      throw Object.assign(new Error("settings.canvasColor must be a hex color like #f5f5f7"), { statusCode: 400 });
+    }
     if (settings.theme !== undefined) {
       if (typeof settings.theme !== "object" || settings.theme === null) {
         throw Object.assign(new Error("settings.theme must be an object"), { statusCode: 400 });
@@ -204,6 +207,7 @@ export const pagesCollection: CollectionConfig = {
           gap: { type: "string", pattern: GAP_PATTERN },
           contentWidth: { type: "string", enum: ["contained", "full"] },
           paddingX: { type: "string", pattern: GAP_PATTERN },
+          canvasColor: { type: "string" },
           theme: { type: "object" },
           themePresetName: { type: "string" },
         },
