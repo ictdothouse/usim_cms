@@ -343,7 +343,7 @@ export default function Designer({
 
   const {
     blocks,
-    pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
+    pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
     siteLanguages, pageLanguage, setPageLanguage,
     activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,
@@ -783,14 +783,16 @@ export default function Designer({
     setSliderInnerSel,
   });
 
-  // Grey canvas backdrop + white "paper" box applies whenever a boxed,
-  // narrower-than-<main> surface is on screen: every Blocks-mode bp
-  // (including desktop, which keeps its own 56rem reading-width box) and
-  // Live Edit's tablet/mobile bp simulation (same narrower box, just with
-  // Live Edit's lighter-weight overlay chrome). Only Live Edit at desktop
-  // is genuinely edge-to-edge with no boxed content, so it's the sole
-  // exclusion.
-  const isCanvasMode = !(mode === "live" && bp === "desktop");
+  // Desktop only gets a boxed reading-width canvas (and the backdrop that
+  // marks it) when the page itself is set to "contained" content width —
+  // a page set to "full" is meant to render edge-to-edge at desktop, so
+  // boxing the Blocks-mode canvas there would show a backdrop around
+  // content that never actually has any dead space to mark. Tablet/mobile
+  // bp simulation always boxes (a narrower box is the whole point of
+  // simulating a smaller screen, independent of contentWidth), and Live
+  // Edit at desktop stays edge-to-edge same as before.
+  const desktopBoxed = (pageSettings.contentWidth ?? "contained") !== "full";
+  const isCanvasMode = bp !== "desktop" || (mode !== "live" && desktopBoxed);
 
   useEffect(() => {
     if (!ctxMenu) return;
@@ -1049,7 +1051,7 @@ export default function Designer({
     bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, fourSideValue,
     setFourSideValue, setColSideValue, setElSideValue,
     toggleGroup, uploadImage, openMediaPicker,
-    setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, patchPageChrome,
+    setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, patchPageChrome,
     hasLangSlot, clickPageLanguagePill, retranslatePageLanguage,
     langKeysOverridden, toggleLangKeys, langStackKeysOverridden, toggleLangStackKeys, setLangValue,
     setRowGap, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow, clipHas, styleHas,
@@ -1485,9 +1487,10 @@ export default function Designer({
               // Device-sim (tablet/mobile, Blocks mode) moves the theme bg
               // off <main> and onto the framed box below instead, so the
               // area outside the simulated screen reads as canvas backdrop
-              // (bg-canvas above) rather than looking like unfilled/leftover
-              // theme-bg space.
-              background: isCanvasMode ? undefined : "var(--color-bg, #ffffff)",
+              // (bg-canvas above, or pageSettings.canvasColor when the
+              // author picked one in Page Settings) rather than looking
+              // like unfilled/leftover theme-bg space.
+              background: isCanvasMode ? pageSettings.canvasColor || undefined : "var(--color-bg, #ffffff)",
               color: "var(--color-text, inherit)",
               fontFamily: "var(--font-family, inherit)",
             } as React.CSSProperties
@@ -1496,7 +1499,7 @@ export default function Designer({
           <div
             className="relative mx-auto"
             style={{
-              maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" ? undefined : "56rem",
+              maxWidth: bp === "tablet" ? "48rem" : bp === "mobile" ? "24rem" : mode === "live" || !desktopBoxed ? undefined : "56rem",
             }}
           >
             {isCanvasMode && (

@@ -465,7 +465,7 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
     sliderInnerSel, setSliderInnerSel, uploadImage, openMediaPicker,
     availableMenus, availableCategories, availableSymbols,
-    pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageThemePreset, themePresets,
+    pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
     siteLanguages, pageLanguage, setPageLanguage, activeLang, hasLangSlot,
@@ -546,6 +546,20 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
             <option value="full">full</option>
           </select>
         </label>
+        {(pageSettings.contentWidth ?? "contained") !== "full" && (
+          // Only meaningful once the page is boxed (desktop included) —
+          // "full" width has no canvas backdrop to color at all (see
+          // Designer.tsx's isCanvasMode).
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-canvas-color")}
+            <input
+              type="color"
+              value={pageSettings.canvasColor ?? "#f5f5f7"}
+              onChange={(e) => setPageCanvasColor(e.target.value)}
+              className="mt-1 h-8 w-full rounded-md border border-line/30 p-0.5"
+            />
+          </label>
+        )}
         <label className="block text-[11px] font-medium text-body">
           {t("designer-page-padding-x")}
           <BufferedInput

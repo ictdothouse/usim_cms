@@ -330,4 +330,9 @@ export interface PageSettings {
   paddingX?: string;
   theme?: Record<string, string>;
   themePresetName?: string;
+  // Admin-only cosmetic: Designer.tsx's Blocks/Live-Edit canvas backdrop
+  // color behind the boxed "paper" (only shown at all when contentWidth
+  // isn't "full" — see Designer.tsx's isCanvasMode). Never read by
+  // apps/frontend's real page render, unlike every other key here.
+  canvasColor?: string;
 }
