@@ -47,6 +47,20 @@ services:
       MONITOR_URL: ${MONITOR_URL:-}
       MONITOR_USER: ${MONITOR_USER:-admin}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
+      # Optional integrations — see docker-compose.release.yml's own comment
+      # on this same block; mirrored here so a trial-mode box behaves
+      # identically once promoted to the real blue-green flow.
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_REDIRECT_URI: ${ENTRA_REDIRECT_URI:-}
+      METRICS_SECRET: ${METRICS_SECRET:-}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

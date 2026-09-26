@@ -72,6 +72,22 @@ services:
       # front) — see proxy-sync.ts's own comment. Set to "cloudflare" only
       # once Cloudflare is genuinely proxying this domain's DNS.
       TRUSTED_PROXY_MODE: ${TRUSTED_PROXY_MODE:-}
+      # Optional integrations — every one of these is unset-means-off in
+      # apps/api's own code (entra.ts/metrics.ts/storage.ts each check for
+      # the var themselves), so forwarding an empty default here is always
+      # safe: an org that never touches install.sh's "Optional integrations"
+      # step gets byte-identical behavior to before these existed.
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_REDIRECT_URI: ${ENTRA_REDIRECT_URI:-}
+      METRICS_SECRET: ${METRICS_SECRET:-}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
