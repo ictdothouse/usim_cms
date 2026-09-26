@@ -279,6 +279,79 @@ write_pgbouncer_userlist() {
   chmod 640 pgbouncer/userlist.txt
 }
 
+# ---------------------------------------------------------------------------
+# Optional integrations (shared across docker/production/bare-metal modes) —
+# every one of these is unset-means-off in the app code itself (entra.ts/
+# metrics.ts/storage.ts each check for their own var, same convention as
+# REDIS_URL/ALERT_WEBHOOK_URL elsewhere in this project), so skipping every
+# prompt below (Enter through all of them, or a non-interactive run) leaves
+# a fresh install byte-identical to one without this function at all.
+#
+# Each block is intentionally self-contained — its own y/N gate, its own
+# set_env_kv calls, no shared state with any other block — so adding a
+# future integration is "copy one block, rename it", never a change to an
+# existing one. $1 = the env file THIS install's mode actually reads
+# (.env for docker/production — see docker-compose.release.yml/.trial.yml's
+# own environment: passthrough for these same keys; apps/api/.env for
+# bare-metal, a real systemd EnvironmentFile).
+# ---------------------------------------------------------------------------
+configure_optional_integrations() {
+  local file="$1"
+  if [ ! -t 0 ]; then
+    return # non-interactive run — every integration below stays off
+  fi
+  echo ""
+  echo "-- Optional integrations (press Enter to skip any — off by default) --"
+
+  # --- Microsoft Entra ID / SSO (apps/api/src/entra.ts) ---
+  local entra_yn=""
+  read -r -p "Enable Microsoft Entra ID SSO? [y/N]: " entra_yn
+  if [ "$entra_yn" = "y" ] || [ "$entra_yn" = "Y" ]; then
+    local entra_secret="" entra_redirect=""
+    read -r -p "  Entra client secret: " entra_secret
+    read -r -p "  Entra redirect URI (must exactly match the app registration): " entra_redirect
+    set_env_kv "$file" ENTRA_CLIENT_SECRET "$entra_secret"
+    set_env_kv "$file" ENTRA_REDIRECT_URI "$entra_redirect"
+    echo "  Saved — still needs turning on in Settings > Login Methods after first boot."
+  fi
+
+  # --- Prometheus-style metrics scrape endpoint (apps/api/src/metrics.ts) ---
+  local metrics_yn=""
+  read -r -p "Enable the /metrics scrape endpoint? [y/N]: " metrics_yn
+  if [ "$metrics_yn" = "y" ] || [ "$metrics_yn" = "Y" ]; then
+    local metrics_secret
+    metrics_secret=$(openssl rand -hex 24)
+    set_env_kv "$file" METRICS_SECRET "$metrics_secret"
+    echo "  Generated METRICS_SECRET — send it as an x-metrics-secret header when scraping."
+  fi
+
+  # --- S3-compatible object storage (apps/api/src/storage.ts) ---
+  local s3_yn=""
+  read -r -p "Use S3-compatible storage for uploads instead of local disk? [y/N]: " s3_yn
+  if [ "$s3_yn" = "y" ] || [ "$s3_yn" = "Y" ]; then
+    local s3_endpoint="" s3_region="" s3_bucket="" s3_key="" s3_secret="" s3_path_style_yn="" s3_public_url=""
+    read -r -p "  S3 endpoint (e.g. https://s3.amazonaws.com, or a MinIO/Sangfor URL): " s3_endpoint
+    read -r -p "  S3 region (default us-east-1): " s3_region
+    read -r -p "  S3 bucket name: " s3_bucket
+    read -r -p "  S3 access key ID: " s3_key
+    read -r -s -p "  S3 secret access key: " s3_secret
+    echo ""
+    set_env_kv "$file" STORAGE_DRIVER "s3"
+    set_env_kv "$file" S3_ENDPOINT "$s3_endpoint"
+    set_env_kv "$file" S3_REGION "${s3_region:-us-east-1}"
+    set_env_kv "$file" S3_BUCKET "$s3_bucket"
+    set_env_kv "$file" S3_ACCESS_KEY_ID "$s3_key"
+    set_env_kv "$file" S3_SECRET_ACCESS_KEY "$s3_secret"
+    read -r -p "  Path-style URLs needed (MinIO/Sangfor, not AWS)? [y/N]: " s3_path_style_yn
+    if [ "$s3_path_style_yn" = "y" ] || [ "$s3_path_style_yn" = "Y" ]; then
+      set_env_kv "$file" S3_FORCE_PATH_STYLE "true"
+    fi
+    read -r -p "  Public URL base for served media (blank = derive automatically): " s3_public_url
+    [ -n "$s3_public_url" ] && set_env_kv "$file" S3_PUBLIC_URL_BASE "$s3_public_url"
+  fi
+  echo ""
+}
+
 # Private, pinned Node runtime — never touches system Node (no NodeSource
 # repo, no global npm/pnpm), so it can never conflict with whatever Node
 # version any other project on this VPS already relies on. Referenced only
@@ -654,6 +727,7 @@ install_docker_mode() {
   set_env_kv .env API_PORT "$api_port"
   set_env_kv .env FRONTEND_PORT "$frontend_port"
   set_env_kv .env ADMIN_PORT "$admin_port"
+  configure_optional_integrations .env
   # Remove a stale override from a previous run of this script (pre-fix
   # versions generated one) — leaving it in place would still trigger the
   # same bind-both-ports bug described above.
@@ -902,11 +976,19 @@ install_production_mode() {
   set_env_kv .env ADMIN_ORIGIN "https://${ADMIN_DOMAIN}"
   set_env_kv .env VITE_API_URL "https://${API_DOMAIN}"
   set_env_kv .env VITE_FRONTEND_URL "https://${TENANT_DOMAINS%% *}"
+  # scripts/deploy.sh's own smoke_test() reads this — a real tenant domain
+  # to fetch through Caddy before promoting, so a broken deploy never goes
+  # live just because the api container's own /health happened to pass.
+  # The first TENANT_DOMAINS entry is always a real one already collected
+  # above, so this needs no separate prompt — unset before this fix meant
+  # every fresh production install silently fell back to health-check-only.
+  set_env_kv .env SMOKE_TEST_HOST "${TENANT_DOMAINS%% *}"
   # Default to 1 replica each, but never clobber a value from a previous
   # install/re-run — unlike the secrets above, this isn't meant to reset.
   grep -qE '^API_REPLICAS=.+' .env || set_env_kv .env API_REPLICAS "1"
   grep -qE '^FRONTEND_REPLICAS=.+' .env || set_env_kv .env FRONTEND_REPLICAS "1"
   grep -qE '^ADMIN_REPLICAS=.+' .env || set_env_kv .env ADMIN_REPLICAS "1"
+  configure_optional_integrations .env
 
   write_pgbouncer_userlist
 
@@ -1054,6 +1136,13 @@ install_baremetal_mode() {
 
   set_env_kv apps/api/.env PORT "$api_port"
   set_env_kv apps/api/.env STORAGE_DRIVER "local"
+  # Docker/production/trial modes all get this for free (the api Dockerfile
+  # bakes ENV NODE_ENV=production) — bare-metal's systemd unit just sources
+  # apps/api/.env directly with nothing else setting it, so it must be
+  # written here too. Without it, lib/cookies.ts only adds the `Secure`
+  # cookie attribute in production — silently shipping sessions without it
+  # even when this box is fronted by the operator's own TLS reverse proxy.
+  set_env_kv apps/api/.env NODE_ENV "production"
   # Bare-metal mode has no docker-compose.yml wrapping it, so there's no
   # localhost fallback to fall back to — apps/api/.env is the only place
   # this gets set, and it must match wherever the admin panel actually gets
@@ -1062,6 +1151,7 @@ install_baremetal_mode() {
   set_env_kv apps/api/.env ADMIN_ORIGIN "http://${public_host}:${admin_port}"
   grep -q '^SESSION_SECRET=' apps/api/.env || echo "SESSION_SECRET=" >> apps/api/.env
   fill_env_if_blank apps/api/.env SESSION_SECRET
+  configure_optional_integrations apps/api/.env
 
   echo ""
   echo "Installing dependencies (pnpm via corepack, first run can take a while)..."
