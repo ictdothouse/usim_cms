@@ -222,6 +222,30 @@ function getStatus(cb) {
   return getSystemdStatus(cb);
 }
 
+// Plain `docker ps`, no `-p`/`-f` project scoping — unlike getComposeStatus
+// (which only ever asks about this repo's own base + currently-promoted
+// blue/green project), this sees every container on the box regardless of
+// which compose project (or none at all) started it. Added to hunt an
+// orphaned pre-blue-green/trial container that could still be answering
+// traffic and re-writing the frontend's Redis html-cache with stale output
+// even after a normal deploy correctly rebuilds+promotes a fresh color.
+function getAllContainers(cb) {
+  if (DEPLOY_MODE !== "docker") return cb(null, []);
+  execFile(
+    "docker",
+    ["ps", "-a", "--format", "json"],
+    { timeout: 15_000, maxBuffer: 10 * 1024 * 1024 },
+    (err, stdout) => {
+      if (err) return cb(null, []);
+      try {
+        cb(null, parseComposePs(stdout));
+      } catch {
+        cb(null, []);
+      }
+    },
+  );
+}
+
 function getGitInfo(cb) {
   execFile("git", ["log", "-1", "--format=%h %cI %s"], { cwd: REPO_DIR, timeout: 10_000 }, (err, stdout) => {
     cb(err ? null : stdout.trim());
@@ -491,7 +515,9 @@ function handleStatus(req, res) {
     if (err) return sendJson(res, 500, { error: String(err.message || err) });
     getGitInfo((git) => {
       getHostStats((host) => {
-        sendJson(res, 200, { services, git, host, deploy: deployState });
+        getAllContainers((_err2, containers) => {
+          sendJson(res, 200, { services, git, host, deploy: deployState, containers });
+        });
       });
     });
   });
@@ -850,6 +876,11 @@ const DASHBOARD_HTML = `<!doctype html>
 <h3>Services</h3>
 <div class="services-grid" id="services"></div>
 
+<h3>All containers (system-wide, every compose project)</h3>
+<p class="muted">Unlike Services above (which only ever asks about this repo's base project + whichever blue/green color is currently promoted), this is a plain <code>docker ps -a</code> — it shows a leftover trial-mode or otherwise-orphaned container too, which could still be answering real traffic and re-writing the frontend's Redis html-cache with stale output even right after a normal deploy.</p>
+<p id="containersWarning" style="display:none; margin: 0.5rem 0; padding: 0.5rem 0.8rem; border-radius: 8px; background: #b45309; color: #fff; font-weight: 600;"></p>
+<table id="containersTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+
 <h3>Database</h3>
 <div class="row">
   <span class="dot" id="dbDot"></span>
@@ -935,6 +966,46 @@ async function refreshSites() {
     }
   } catch (e) {
     document.querySelector("#sitesTable tbody").innerHTML = "<tr><td class=\\"muted\\">Error: " + escapeHtml(e.message) + "</td></tr>";
+  }
+}
+
+// Flags any base name (Names with a trailing "-N" replica suffix stripped)
+// that shows up more than once — the signal an orphaned container (trial
+// mode, an old un-stopped blue/green color, or anything started outside
+// compose entirely) is still alive alongside the one Services above thinks
+// is the only frontend/api/admin running.
+function renderContainers(containers) {
+  const tbody = document.querySelector("#containersTable tbody");
+  const warn = document.getElementById("containersWarning");
+  tbody.innerHTML = "";
+  if (!containers.length) {
+    tbody.innerHTML = "<tr><td class=\"muted\">No containers found (or docker ps failed).</td></tr>";
+    warn.style.display = "none";
+    return;
+  }
+  const baseCounts = {};
+  for (const c of containers) {
+    const base = String(c.Names || c.Name || "").replace(/-\d+$/, "");
+    baseCounts[base] = (baseCounts[base] || 0) + 1;
+  }
+  const dupes = Object.keys(baseCounts).filter((b) => baseCounts[b] > 1);
+  if (dupes.length) {
+    warn.style.display = "block";
+    warn.textContent = "⚠ More than one container shares a base name — possible orphan: " + dupes.join(", ");
+  } else {
+    warn.style.display = "none";
+  }
+  for (const c of containers) {
+    const name = String(c.Names || c.Name || "");
+    const base = name.replace(/-\d+$/, "");
+    const tr = document.createElement("tr");
+    if (baseCounts[base] > 1) tr.style.background = "#b4530933";
+    tr.innerHTML =
+      "<td style=\"padding:0.25rem 0.5rem 0.25rem 0; white-space:nowrap;\">" + escapeHtml(name) + "</td>" +
+      "<td style=\"padding:0.25rem 0.5rem;\" class=\"muted\">" + escapeHtml(String(c.Status || c.State || "")) + "</td>" +
+      "<td style=\"padding:0.25rem 0.5rem;\" class=\"muted\">" + escapeHtml(String(c.Image || "")) + "</td>" +
+      "<td style=\"padding:0.25rem 0 0.25rem 0.5rem;\" class=\"muted\">" + escapeHtml(String(c.RunningFor || c.CreatedAt || "")) + "</td>";
+    tbody.appendChild(tr);
   }
 }
 
@@ -1077,6 +1148,7 @@ async function refresh() {
       card.appendChild(actions);
       grid.appendChild(card);
     }
+    renderContainers(data.containers || []);
     const d = data.deploy;
     const track = document.getElementById("deployTrack");
     const fill = document.getElementById("deployFill");
