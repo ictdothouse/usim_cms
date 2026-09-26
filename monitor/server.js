@@ -513,12 +513,28 @@ function handleSites(req, res) {
 function handleStatus(req, res) {
   getStatus((err, services) => {
     if (err) return sendJson(res, 500, { error: String(err.message || err) });
-    getGitInfo((git) => {
-      getHostStats((host) => {
-        getAllContainers((_err2, containers) => {
-          sendJson(res, 200, { services, git, host, deploy: deployState, containers });
-        });
-      });
+    // git/host/containers are three independent shell-outs — run them
+    // concurrently rather than nested, so this endpoint's total latency is
+    // the slowest ONE of them (max ~15s, getAllContainers' own timeout)
+    // instead of all three added up in sequence.
+    let pending = 3;
+    let git = null;
+    let host = null;
+    let containers = [];
+    const done = () => {
+      if (--pending === 0) sendJson(res, 200, { services, git, host, deploy: deployState, containers });
+    };
+    getGitInfo((g) => {
+      git = g;
+      done();
+    });
+    getHostStats((h) => {
+      host = h;
+      done();
+    });
+    getAllContainers((_err2, c) => {
+      containers = c;
+      done();
     });
   });
 }
