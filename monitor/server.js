@@ -867,6 +867,16 @@ const DASHBOARD_HTML = `<!doctype html>
   .progress-fill.success { width: 100%; background: #2e7d32; }
   .progress-fill.fail { width: 100%; background: #d32f2f; }
   @keyframes indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+
+  .tabs { display: flex; gap: 0.2rem; margin: 1.2rem 0 0; border-bottom: 1px solid #8884; overflow-x: auto; }
+  .tab-btn { background: transparent; color: inherit; border: none; border-radius: 8px 8px 0 0; padding: 0.5rem 0.9rem; font-size: 0.85rem; font-weight: 500; opacity: 0.6; margin: 0; white-space: nowrap; }
+  .tab-btn:hover { opacity: 0.9; background: #8882; }
+  .tab-btn.active { opacity: 1; background: #8883; font-weight: 600; }
+  .tab-panel { display: none; padding-top: 1rem; }
+  .tab-panel.active { display: block; }
+
+  .role-badge { display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 0.12rem 0.5rem; border-radius: 999px; background: #0071e322; color: #0071e3; white-space: nowrap; }
+  .container-desc { max-width: 340px; }
 </style>
 </head>
 <body>
@@ -874,52 +884,82 @@ const DASHBOARD_HTML = `<!doctype html>
 <p class="muted" id="mode">loading…</p>
 <p class="muted" id="uptime"></p>
 
-<div class="grid" id="hostGrid"></div>
-
 <div id="updateBanner" style="display:none; margin: 0.8rem 0; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;"></div>
 
-<div class="row">
-  <button onclick="pull()">Pull latest &amp; deploy</button>
-  <button class="secondary" onclick="rollback()">Rollback</button>
-  <button class="secondary" onclick="applyBaseTier()">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
-  <button class="secondary" onclick="restartAll()">Restart all</button>
-  <button class="secondary" onclick="refresh()">Refresh now</button>
-</div>
-<p class="muted" id="deployState"></p>
-<div class="progress-track" id="deployTrack" style="display:none"><div class="progress-fill" id="deployFill"></div></div>
-<pre class="term" id="deployLog" style="display:none"></pre>
-
-<h3>Services</h3>
-<div class="services-grid" id="services"></div>
-
-<h3>All containers (system-wide, every compose project)</h3>
-<p class="muted">Unlike Services above (which only ever asks about this repo's base project + whichever blue/green color is currently promoted), this is a plain <code>docker ps -a</code> — it shows a leftover trial-mode or otherwise-orphaned container too, which could still be answering real traffic and re-writing the frontend's Redis html-cache with stale output even right after a normal deploy.</p>
-<p id="containersWarning" style="display:none; margin: 0.5rem 0; padding: 0.5rem 0.8rem; border-radius: 8px; background: #b45309; color: #fff; font-weight: 600;"></p>
-<table id="containersTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
-
-<h3>Database</h3>
-<div class="row">
-  <span class="dot" id="dbDot"></span>
-  <span class="muted" id="dbStatus">checking…</span>
-  <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
+<div class="tabs" id="tabs">
+  <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+  <button class="tab-btn" data-tab="containers" onclick="switchTab('containers')">Containers</button>
+  <button class="tab-btn" data-tab="data" onclick="switchTab('data')">Database &amp; Sites</button>
+  <button class="tab-btn" data-tab="ssl" onclick="switchTab('ssl')">SSL</button>
+  <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
 </div>
 
-<h3>Sites (uploads folder size per tenant)</h3>
-<p class="muted">Folder name is the tenant's slug (lowercase, non-alphanumeric replaced with <code>_</code>), not its full hostname — this dashboard has no database access to translate it back.</p>
-<table id="sitesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+<div class="tab-panel active" id="panel-overview">
+  <div class="grid" id="hostGrid"></div>
 
-<h3>SSL (certbot)</h3>
-<p class="muted">Issues/renews a Let's Encrypt cert for a domain already pointed at this box's nginx — requires certbot + the nginx plugin installed on the host (<code>apt install certbot python3-certbot-nginx</code>). Renewal is handled by certbot's own installed timer, not this dashboard.</p>
-<div class="row">
-  <input id="sslDomain" placeholder="admin.example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
-  <input id="sslEmail" placeholder="admin@example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
-  <button onclick="issueSsl()">Issue certificate</button>
+  <div class="row">
+    <button onclick="pull()">Pull latest &amp; deploy</button>
+    <button class="secondary" onclick="rollback()">Rollback</button>
+    <button class="secondary" onclick="applyBaseTier()">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
+    <button class="secondary" onclick="restartAll()">Restart all</button>
+    <button class="secondary" onclick="refresh()">Refresh now</button>
+  </div>
+  <p class="muted" id="deployState"></p>
+  <div class="progress-track" id="deployTrack" style="display:none"><div class="progress-fill" id="deployFill"></div></div>
+  <pre class="term" id="deployLog" style="display:none"></pre>
+
+  <h3>Services</h3>
+  <div class="services-grid" id="services"></div>
 </div>
-<pre class="term" id="sslLog" style="display:none"></pre>
 
-<h3>Logs</h3>
-<div class="row" id="logButtons"></div>
-<pre class="term" id="logs">Pick a service above to view its logs.</pre>
+<div class="tab-panel" id="panel-containers">
+  <h3>All containers (system-wide, every compose project)</h3>
+  <p class="muted">Unlike Services (which only ever asks about this repo's base project + whichever blue/green color is currently promoted), this is a plain <code>docker ps -a</code> — it shows a leftover trial-mode or otherwise-orphaned container too, which could still be answering real traffic and re-writing the frontend's Redis html-cache with stale output even right after a normal deploy.</p>
+  <p id="containersWarning" style="display:none; margin: 0.5rem 0; padding: 0.5rem 0.8rem; border-radius: 8px; background: #b45309; color: #fff; font-weight: 600;"></p>
+  <table id="containersTable" style="width:100%; border-collapse: collapse;">
+    <thead>
+      <tr class="muted" style="text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid #8884;">
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Container</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Role</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">What it does</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Status</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Image</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Created</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="tab-panel" id="panel-data">
+  <h3>Database</h3>
+  <div class="row">
+    <span class="dot" id="dbDot"></span>
+    <span class="muted" id="dbStatus">checking…</span>
+    <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
+  </div>
+
+  <h3>Sites (uploads folder size per tenant)</h3>
+  <p class="muted">Folder name is the tenant's slug (lowercase, non-alphanumeric replaced with <code>_</code>), not its full hostname — this dashboard has no database access to translate it back.</p>
+  <table id="sitesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+</div>
+
+<div class="tab-panel" id="panel-ssl">
+  <h3>SSL (certbot)</h3>
+  <p class="muted">Issues/renews a Let's Encrypt cert for a domain already pointed at this box's nginx — requires certbot + the nginx plugin installed on the host (<code>apt install certbot python3-certbot-nginx</code>). Renewal is handled by certbot's own installed timer, not this dashboard.</p>
+  <div class="row">
+    <input id="sslDomain" placeholder="admin.example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+    <input id="sslEmail" placeholder="admin@example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+    <button onclick="issueSsl()">Issue certificate</button>
+  </div>
+  <pre class="term" id="sslLog" style="display:none"></pre>
+</div>
+
+<div class="tab-panel" id="panel-logs">
+  <h3>Logs</h3>
+  <div class="row" id="logButtons"></div>
+  <pre class="term" id="logs">Pick a service above to view its logs.</pre>
+</div>
 
 <p id="git" style="opacity:0.35; font-size:0.7rem; margin-top:2rem;"></p>
 
@@ -934,6 +974,15 @@ async function api(path, opts) {
   const body = ct.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) throw new Error(typeof body === "string" ? body : (body.error || res.statusText));
   return body;
+}
+
+function switchTab(name) {
+  for (const btn of document.querySelectorAll(".tab-btn")) {
+    btn.classList.toggle("active", btn.dataset.tab === name);
+  }
+  for (const panel of document.querySelectorAll(".tab-panel")) {
+    panel.classList.toggle("active", panel.id === "panel-" + name);
+  }
 }
 
 function pctClass(pct) {
@@ -985,17 +1034,49 @@ async function refreshSites() {
   }
 }
 
+// What each container role actually does — plain-language, for whoever's
+// reading this tab without the rest of this codebase's own context. Matched
+// by substring against name+image (order matters: first match wins), not an
+// exact map, since a name always carries a "ucms-<color>-" or "usim_cms-"
+// prefix and a "-N" replica suffix this can't predict in full.
+const CONTAINER_INFO = [
+  { match: /admin/i, role: "Admin panel", desc: "The CMS editor UI (Designer, pages, media library) staff log into to manage content." },
+  { match: /frontend/i, role: "Public website", desc: "Renders the actual live site every visitor sees — the published pages." },
+  { match: /(^|[^a-z])api([^a-z]|$)/i, role: "Backend API", desc: "Handles data, auth, and business logic for both the admin panel and the public site." },
+  { match: /caddy|proxy/i, role: "Reverse proxy", desc: "Routes incoming HTTP/HTTPS traffic to the right container and terminates SSL certificates." },
+  { match: /pgbouncer/i, role: "Connection pooler", desc: "Sits in front of Postgres so many short-lived requests share a small pool of real DB connections." },
+  { match: /postgres|(^|[^a-z])db([^a-z]|$)/i, role: "Database", desc: "Postgres — the source of truth for every tenant's pages, posts, media, and settings." },
+  { match: /redis/i, role: "Cache", desc: "Speeds up repeated page loads (rendered-HTML cache) and backs cross-replica rate limiting." },
+];
+function describeContainer(c) {
+  const haystack = String(c.Names || c.Name || "") + " " + String(c.Image || "");
+  for (const entry of CONTAINER_INFO) {
+    if (entry.match.test(haystack)) return entry;
+  }
+  return { role: "—", desc: "—" };
+}
+
 // Flags any base name (Names with a trailing "-N" replica suffix stripped)
 // that shows up more than once — the signal an orphaned container (trial
 // mode, an old un-stopped blue/green color, or anything started outside
 // compose entirely) is still alive alongside the one Services above thinks
-// is the only frontend/api/admin running.
+// is the only frontend/api/admin running. Built entirely with DOM methods
+// (createElement/textContent), not innerHTML string-concat — this whole
+// file's DASHBOARD_HTML is itself one big template literal, so a raw \\"
+// inside a string built here has already broken this dashboard once (its
+// backslash gets eaten by that OUTER template literal before the browser
+// ever sees this code) — textContent has no such nesting hazard at all.
 function renderContainers(containers) {
   const tbody = document.querySelector("#containersTable tbody");
   const warn = document.getElementById("containersWarning");
-  tbody.innerHTML = "";
+  tbody.textContent = "";
   if (!containers.length) {
-    tbody.innerHTML = "<tr><td class=\\"muted\\">No containers found (or docker ps failed).</td></tr>";
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.className = "muted";
+    td.textContent = "No containers found (or docker ps failed).";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
     warn.style.display = "none";
     return;
   }
@@ -1011,16 +1092,36 @@ function renderContainers(containers) {
   } else {
     warn.style.display = "none";
   }
+  const cell = (text, opts) => {
+    const td = document.createElement("td");
+    td.style.padding = "0.35rem 0.6rem 0.35rem 0";
+    td.style.verticalAlign = "top";
+    if (opts && opts.muted) td.className = "muted";
+    if (opts && opts.nowrap) td.style.whiteSpace = "nowrap";
+    if (opts && opts.maxWidth) td.style.maxWidth = opts.maxWidth;
+    td.textContent = text;
+    return td;
+  };
   for (const c of containers) {
     const name = String(c.Names || c.Name || "");
     const base = name.replace(/-\d+$/, "");
+    const info = describeContainer(c);
     const tr = document.createElement("tr");
+    tr.style.borderBottom = "1px solid #8882";
     if (baseCounts[base] > 1) tr.style.background = "#b4530933";
-    tr.innerHTML =
-      "<td style=\\"padding:0.25rem 0.5rem 0.25rem 0; white-space:nowrap;\\">" + escapeHtml(name) + "</td>" +
-      "<td style=\\"padding:0.25rem 0.5rem;\\" class=\\"muted\\">" + escapeHtml(String(c.Status || c.State || "")) + "</td>" +
-      "<td style=\\"padding:0.25rem 0.5rem;\\" class=\\"muted\\">" + escapeHtml(String(c.Image || "")) + "</td>" +
-      "<td style=\\"padding:0.25rem 0 0.25rem 0.5rem;\\" class=\\"muted\\">" + escapeHtml(String(c.RunningFor || c.CreatedAt || "")) + "</td>";
+    tr.appendChild(cell(name, { nowrap: true }));
+    const roleTd = document.createElement("td");
+    roleTd.style.padding = "0.35rem 0.6rem 0.35rem 0";
+    roleTd.style.verticalAlign = "top";
+    const badge = document.createElement("span");
+    badge.className = "role-badge";
+    badge.textContent = info.role;
+    roleTd.appendChild(badge);
+    tr.appendChild(roleTd);
+    tr.appendChild(cell(info.desc, { muted: true, maxWidth: "340px" }));
+    tr.appendChild(cell(String(c.Status || c.State || ""), { muted: true, nowrap: true }));
+    tr.appendChild(cell(String(c.Image || ""), { muted: true, nowrap: true }));
+    tr.appendChild(cell(String(c.RunningFor || c.CreatedAt || ""), { muted: true, nowrap: true }));
     tbody.appendChild(tr);
   }
 }
