@@ -995,7 +995,7 @@ function renderContainers(containers) {
   const warn = document.getElementById("containersWarning");
   tbody.innerHTML = "";
   if (!containers.length) {
-    tbody.innerHTML = "<tr><td class=\"muted\">No containers found (or docker ps failed).</td></tr>";
+    tbody.innerHTML = "<tr><td class=\\"muted\\">No containers found (or docker ps failed).</td></tr>";
     warn.style.display = "none";
     return;
   }
@@ -1017,10 +1017,10 @@ function renderContainers(containers) {
     const tr = document.createElement("tr");
     if (baseCounts[base] > 1) tr.style.background = "#b4530933";
     tr.innerHTML =
-      "<td style=\"padding:0.25rem 0.5rem 0.25rem 0; white-space:nowrap;\">" + escapeHtml(name) + "</td>" +
-      "<td style=\"padding:0.25rem 0.5rem;\" class=\"muted\">" + escapeHtml(String(c.Status || c.State || "")) + "</td>" +
-      "<td style=\"padding:0.25rem 0.5rem;\" class=\"muted\">" + escapeHtml(String(c.Image || "")) + "</td>" +
-      "<td style=\"padding:0.25rem 0 0.25rem 0.5rem;\" class=\"muted\">" + escapeHtml(String(c.RunningFor || c.CreatedAt || "")) + "</td>";
+      "<td style=\\"padding:0.25rem 0.5rem 0.25rem 0; white-space:nowrap;\\">" + escapeHtml(name) + "</td>" +
+      "<td style=\\"padding:0.25rem 0.5rem;\\" class=\\"muted\\">" + escapeHtml(String(c.Status || c.State || "")) + "</td>" +
+      "<td style=\\"padding:0.25rem 0.5rem;\\" class=\\"muted\\">" + escapeHtml(String(c.Image || "")) + "</td>" +
+      "<td style=\\"padding:0.25rem 0 0.25rem 0.5rem;\\" class=\\"muted\\">" + escapeHtml(String(c.RunningFor || c.CreatedAt || "")) + "</td>";
     tbody.appendChild(tr);
   }
 }
