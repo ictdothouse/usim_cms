@@ -590,7 +590,7 @@ export default function Designer({
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     setDirty, setBusy, setError, setSavedAny, setMsg,
-    setPreviewModal, t,
+    previewModal, setPreviewModal, t,
   });
 
   // Autosave (2026-09-16): debounced silent save while dirty, restricted to

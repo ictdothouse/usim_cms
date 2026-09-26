@@ -5,12 +5,15 @@
 // paths, the preview-token minting flows). Groups renameSlug/save/
 // saveBlueprint/saveSymbol/saveSiteChrome (the kind-specific persistence
 // paths), page revision history, and the two preview-token mint flows.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import * as api from "@/lib/api";
 import { slugify, clone } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { BASE_LANG } from "../context";
 import type { Block, PageSettings, SectionProps } from "../types";
+
+type PreviewModalState = { src: string; device: "desktop" | "tablet" | "mobile"; orientation: "portrait" | "landscape" } | null;
 
 export interface PersistDeps {
   tenantHost: string;
@@ -36,9 +39,8 @@ export interface PersistDeps {
   setError: (msg: string | null) => void;
   setSavedAny: (v: boolean) => void;
   setMsg: (v: string | null) => void;
-  setPreviewModal: (
-    v: { src: string; device: "desktop" | "tablet" | "mobile"; orientation: "portrait" | "landscape" } | null,
-  ) => void;
+  previewModal: PreviewModalState;
+  setPreviewModal: Dispatch<SetStateAction<PreviewModalState>>;
   t: (k: Key) => string;
 }
 
@@ -49,7 +51,7 @@ export function usePersist(deps: PersistDeps) {
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     setDirty, setBusy, setError, setSavedAny, setMsg,
-    setPreviewModal, t,
+    previewModal, setPreviewModal, t,
   } = deps;
 
   // Page revision history (kind === "page" only — see api.PageRevision).
@@ -259,45 +261,88 @@ export function usePersist(deps: PersistDeps) {
   // this used to be a separate mintPreviewLink()+new-tab flow for pages, but
   // that meant pages previewed differently from blueprint/siteChrome for no
   // real reason, so it's one flow).
+  // Mints a fresh, un-framed preview URL from whatever's currently on the
+  // canvas — the shared core both openDevicePreview (first open, resets
+  // device/orientation to match the canvas's own bp) and the auto-refresh
+  // effect below (already-open modal, device/orientation left alone) build
+  // on, so there's exactly one place that knows how each `kind` mints its
+  // token instead of two copies drifting apart.
+  async function mintPreviewSrc(): Promise<string> {
+    if (kind === "siteChrome") {
+      const previewToken = await api.getSiteChromePreviewToken(tenantHost, token, page.id as string, {
+        layout: clone(rawBlocks),
+      });
+      return api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken });
+    }
+    const previewToken =
+      kind === "blueprint"
+        ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string, { layout: clone(rawBlocks), settings: pageSettings })
+        : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
+            layout: clone(rawBlocks),
+            settings: pageSettings,
+            translations: currentTranslationsPayload(),
+          });
+    return kind === "blueprint"
+      ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
+      : api.previewUrl(tenantHost, page.slug as string, previewToken);
+  }
+
+  // Modal iframe, not a new tab — no popup blocker to fight. No Save first
+  // (Elementor/Avada-style: Preview shows whatever's on screen, not whatever
+  // is persisted) — the canvas's current in-memory state goes straight into
+  // the token mint, which stashes it in an ephemeral server-side store (see
+  // apps/api's live-preview-store.ts); nothing is written to
+  // pages/blueprints/site_chrome. Used for every kind now (page included —
+  // this used to be a separate mintPreviewLink()+new-tab flow for pages, but
+  // that meant pages previewed differently from blueprint/siteChrome for no
+  // real reason, so it's one flow).
   async function openDevicePreview() {
     setError(null);
     try {
-      if (kind === "siteChrome") {
-        const previewToken = await api.getSiteChromePreviewToken(tenantHost, token, page.id as string, {
-          layout: clone(rawBlocks),
-        });
-        // Opens at whatever breakpoint the canvas itself is currently
-        // previewing (bp) instead of always "desktop" — editing under
-        // Mobile/Tablet and hitting Preview used to silently jump back to
-        // desktop, a mismatch reported as "preview tak tepat".
-        setPreviewModal({
-          src: withDeviceFrame(
-            api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken }),
-            bp,
-          ),
-          device: bp,
-          orientation: "portrait",
-        });
-        return;
-      }
-      const previewToken =
-        kind === "blueprint"
-          ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string, { layout: clone(rawBlocks), settings: pageSettings })
-          : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
-              layout: clone(rawBlocks),
-              settings: pageSettings,
-              translations: currentTranslationsPayload(),
-            });
-      const src =
-        kind === "blueprint"
-          ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
-          : api.previewUrl(tenantHost, page.slug as string, previewToken);
-      // Same bp-matches-canvas fix as the siteChrome branch above.
+      const src = await mintPreviewSrc();
+      // Opens at whatever breakpoint the canvas itself is currently
+      // previewing (bp) instead of always "desktop" — editing under
+      // Mobile/Tablet and hitting Preview used to silently jump back to
+      // desktop, a mismatch reported as "preview tak tepat".
       setPreviewModal({ src: withDeviceFrame(src, bp), device: bp, orientation: "portrait" });
     } catch (err) {
       setError((err as Error).message);
     }
   }
+
+  // Auto-refresh while the modal stays open (2026-09-26 — reported as
+  // "preview tak match live edit"): the modal used to mint its token ONCE
+  // on open, an ephemeral snapshot of rawBlocks/pageSettings/translations at
+  // that instant — editing the canvas afterward (with the modal left open,
+  // or just reopening a stale one without an intervening edit-then-click)
+  // kept showing that frozen snapshot forever, since nothing ever re-minted
+  // it. Debounced (900ms, shorter than autosave's 2000ms — this is a cheap
+  // ephemeral-store write, not a real save, and the whole point is feeling
+  // as live as the canvas itself) and only runs while a modal is actually
+  // open; device/orientation are left exactly as the viewer has them
+  // (unlike the initial open above, a background refresh must never yank
+  // the frame back to "desktop"/"portrait" out from under someone comparing
+  // breakpoints).
+  const previewRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!previewModal) return;
+    previewRefreshRef.current = setTimeout(() => {
+      void mintPreviewSrc()
+        .then((src) => {
+          setPreviewModal((m) => (m ? { ...m, src: withDeviceFrame(src, m.device) } : m));
+        })
+        .catch(() => {
+          // Best-effort — a failed background refresh just leaves the
+          // modal showing its last-good snapshot, same as before this
+          // feature existed, rather than surfacing an error over a
+          // still-open, still-usable preview.
+        });
+    }, 900);
+    return () => {
+      if (previewRefreshRef.current) clearTimeout(previewRefreshRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawBlocks, pageSettings, langOverrides, pageLanguage, pageMultilangEnabled]);
 
   return {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
