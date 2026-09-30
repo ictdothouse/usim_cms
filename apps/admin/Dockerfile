@@ -3,7 +3,7 @@
 # Static SPA — Vite envs are compile-time only, baked into the JS bundle here,
 # not read at container runtime. No pnpm deploy needed: nginx just serves
 # the built dist/, no node_modules at runtime.
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 RUN corepack enable
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
