@@ -28,8 +28,10 @@ ENV VITE_FRONTEND_URL=$VITE_FRONTEND_URL
 # via the workspace symlink. See apps/api/Dockerfile's own identical comment —
 # this exact class of mistake (missing build step for a new workspace package)
 # already broke this image once for element-schema, don't repeat it here.
-RUN pnpm --filter @ucms/element-schema build
+# element-style builds first: element-schema's isSafeUrl now delegates to its
+# sanitizeUrl, so element-schema's own build needs element-style's dist/ already present.
 RUN pnpm --filter @ucms/element-style build
+RUN pnpm --filter @ucms/element-schema build
 RUN pnpm --filter @ucms/element-render build
 # Test gate — see apps/api/Dockerfile's own comment for why this is enough
 # on its own to block a bad deploy, no separate CI step needed.

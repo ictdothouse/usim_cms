@@ -13,11 +13,14 @@ COPY apps/frontend/package.json apps/frontend/package.json
 COPY packages/element-schema/package.json packages/element-schema/package.json
 COPY packages/element-style/package.json packages/element-style/package.json
 RUN pnpm install --frozen-lockfile
+COPY packages/element-style packages/element-style
 COPY packages/element-schema packages/element-schema
 COPY apps/api apps/api
 # @ucms/element-schema (apps/api's own dependency, see its package.json)
 # ships no dist/ in the repo — build it before apps/api, which imports its
-# compiled output via the workspace symlink.
+# compiled output via the workspace symlink. element-style must build first
+# since element-schema's isSafeUrl now delegates to its sanitizeUrl.
+RUN pnpm --filter @ucms/element-style build
 RUN pnpm --filter @ucms/element-schema build
 RUN pnpm --filter @ucms/api build
 # Test gate: a failing test here fails this whole image build, which fails

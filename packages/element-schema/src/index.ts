@@ -28,6 +28,8 @@
 // HTML/CSS/JS embed is an intentional, documented trust boundary (same as
 // any page builder's "custom code" block), not a gap to close.
 
+import { sanitizeUrl } from "@ucms/element-style";
+
 // Plain CSS length, OR one of Designer.tsx's own legacy preset keywords
 // (PAD/SPACE/RADIUS/ICON_SIZE tables use none/sm/md/lg/xl/full, not every
 // table has every keyword — lengthValue() on the render side already falls
@@ -41,21 +43,21 @@ const CSS_CLASS_RE = /^[A-Za-z0-9_\- ]*$/;
 const ID_RE = /^[A-Za-z0-9_-]*$/;
 const NUM_RE = /^-?[0-9]+(\.[0-9]+)?$/;
 
-// Same scheme allowlist as SectionBlock.astro's own safeUrl() (http(s)/root-
+// Same scheme allowlist as apps/frontend's own safeUrl() (http(s)/root-
 // relative/anchor/bare-relative all fine, only a non-http(s) URI scheme like
 // javascript:/data: is rejected) — kept here too since API-side validation
-// must not rely solely on the frontend's render-time guard.
+// must not rely solely on the frontend's render-time guard. Delegates to
+// @ucms/element-style's sanitizeUrl (single source of truth for the
+// control-char-stripping + scheme check) rather than re-implementing the
+// same regex a second time — that exact duplication was a real audit
+// finding (2026-09-30). An empty/whitespace-only value is treated as safe
+// here (a blank href, not a scheme to reject) even though sanitizeUrl
+// itself returns null for "" — that null means "reject" for sanitizeUrl's
+// own callers (which use it to fall back to a default), not "unsafe" here.
 export function isSafeUrl(v: string): boolean {
-  // Browsers discard ASCII control/space chars (0x00-0x20) from anywhere in
-  // a URL before parsing its scheme, so "java\tscript:alert(1)" defeats a
-  // naive scheme regex here (the tab breaks the match, falling through to
-  // the permissive `return true`) while still executing as javascript: once
-  // rendered — strip them first so this check sees what a browser actually
-  // parses.
-  // eslint-disable-next-line no-control-regex -- control chars are the whole point, see above
-  const stripped = v.replace(/[\x00-\x20]+/g, "");
-  if (/^[a-z][a-z0-9+.-]*:/i.test(stripped)) return /^https?:/i.test(stripped);
-  return true;
+  // eslint-disable-next-line no-control-regex -- control chars are the whole point, see sanitizeUrl
+  if (!v.replace(/[\x00-\x20]+/g, "")) return true;
+  return sanitizeUrl(v) !== null;
 }
 
 // bgImage/imageUrl are concatenated into a raw `url('...')` CSS function

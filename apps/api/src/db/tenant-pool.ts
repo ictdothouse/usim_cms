@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve as dnsResolve } from "node:dns/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { Pool, type PoolClient } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema.js";
@@ -1365,7 +1365,10 @@ export async function getMergedTheme(tenantHost: string): Promise<Record<string,
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    const rows = await db.select().from(schema.siteTheme);
+    const rows = await db
+      .select()
+      .from(schema.siteTheme)
+      .where(inArray(schema.siteTheme.tenantHost, [GLOBAL_THEME_HOST, tenantHost]));
     const global = (rows.find((r) => r.tenantHost === GLOBAL_THEME_HOST)?.settings as Record<string, unknown>) ?? {};
     const tenant = (rows.find((r) => r.tenantHost === tenantHost)?.settings as Record<string, unknown>) ?? {};
     return { ...global, ...tenant };
