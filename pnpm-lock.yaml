@@ -278,8 +278,8 @@ importers:
         specifier: ^5.4.2
         version: 5.11.1
       swiper:
-        specifier: ^11.2.10
-        version: 11.2.10
+        specifier: ^14.2.0
+        version: 14.2.0
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -4487,8 +4487,8 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  swiper@11.2.10:
-    resolution: {integrity: sha512-RMeVUUjTQH+6N3ckimK93oxz6Sn5la4aDlgPzB+rBrG/smPdCTicXyhxa+woIpopz+jewEloiEE3lKo1h9w2YQ==}
+  swiper@14.2.0:
+    resolution: {integrity: sha512-GsL4M9Fq7Sg22OyL3SjdNj/0bxTfIxPJJHHW394Li0u5vYtExi0a09iBUc8CuLafJi5pAlH2AHUe1PocxHl45g==}
     engines: {node: '>= 4.7.0'}
 
   tabbable@6.5.0:
@@ -9028,7 +9028,7 @@ snapshots:
       picocolors: 1.1.1
       sax: 1.6.0
 
-  swiper@11.2.10: {}
+  swiper@14.2.0: {}
 
   tabbable@6.5.0: {}
 
