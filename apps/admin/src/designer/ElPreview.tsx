@@ -51,6 +51,16 @@ import {
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
+// One-render-stale cache of each slide box's own rendered pixel size, keyed
+// `${sliderElId}:${slideIdx}` — written by a plain ref callback on the
+// `.ds-slide-box` div (below, no hook needed, same as this file's other
+// imperative DOM reads) and read by the out-of-bounds check a few lines
+// later in the SAME render pass, which runs before that callback fires for
+// THIS pass. A slide box's size rarely changes except on window resize/bp
+// switch, so the one-frame lag is never visible; an unset entry (first
+// paint) just skips the far-edge check gracefully (see its own comment).
+const slideBoxSizeCache = new Map<string, { width: number; height: number }>();
+
 // See its one call site (top of ElPreview) for why this exists.
 // Slide-nested free-position drag: percentage math against the FULL slide
 // box (`.ds-slide-box`, the "slider" case's outer position:relative div) —
@@ -728,6 +738,9 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
           // spot when switching flow -> custom, instead of guessing a fixed
           // x/y — see Inspector.tsx's childIsFree toggle handler.
           data-slide-box={`${el.id}:${slideIdx}`}
+          ref={(node) => {
+            if (node) slideBoxSizeCache.set(`${el.id}:${slideIdx}`, { width: node.clientWidth, height: node.clientHeight });
+          }}
           className={`ds-slide-box relative flex ${resolvedHeight ? "" : "aspect-[21/9]"} items-center justify-center overflow-hidden`}
           style={{
             height: resolvedHeight || undefined,
@@ -767,11 +780,22 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
             const selectedChildFree = !!selectedChild && bpGetValue(selectedChild.props.position, selectedChild.bp, "position") === "custom";
             const selX = selectedChild ? Number(bpGetValue(selectedChild.props.x, selectedChild.bp, "x") || "50") : 0;
             const selY = selectedChild ? Number(bpGetValue(selectedChild.props.y, selectedChild.bp, "y") || "50") : 0;
-            // Origin-corner check only (not the far edge too, which would need
-            // converting posWidth/posHeight from px to a % of this box) — cheap
-            // and already catches the common "dragged mostly off the slide"
-            // case; a partial overflow on the far edge alone won't flag.
-            const selOutOfBounds = selectedChildFree && (selX < 0 || selX > 100 || selY < 0 || selY > 100);
+            // Far-edge check: converts posWidth/posHeight (px) to a % of
+            // this box via slideBoxSizeCache (a live measurement, not
+            // guessed) so "mostly in bounds but the far edge sticks out"
+            // gets flagged too, not just the origin corner. Skips cleanly
+            // (0% width/height) before the box's first paint or when
+            // posWidth/posHeight is still unset — same as the origin-only
+            // check already did in either case.
+            const cachedBoxSize = slideBoxSizeCache.get(`${el.id}:${slideIdx}`);
+            const selPosWidthPx = selectedChild ? parseFloat(bpGetValue(selectedChild.props.posWidth, selectedChild.bp, "posWidth")) : NaN;
+            const selPosHeightPx = selectedChild ? parseFloat(bpGetValue(selectedChild.props.posHeight, selectedChild.bp, "posHeight")) : NaN;
+            const selWidthPct = cachedBoxSize && cachedBoxSize.width > 0 && !Number.isNaN(selPosWidthPx) ? (selPosWidthPx / cachedBoxSize.width) * 100 : 0;
+            const selHeightPct =
+              cachedBoxSize && cachedBoxSize.height > 0 && !Number.isNaN(selPosHeightPx) ? (selPosHeightPx / cachedBoxSize.height) * 100 : 0;
+            const selOutOfBounds =
+              selectedChildFree &&
+              (selX < 0 || selX > 100 || selY < 0 || selY > 100 || selX + selWidthPct > 100 || selY + selHeightPct > 100);
             return (
               <div
                 // No `relative` here on purpose — a free-positioned child's
