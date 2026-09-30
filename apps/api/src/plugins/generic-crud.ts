@@ -1,13 +1,26 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, getTableColumns, ilike, sql, type SQL } from "drizzle-orm";
+import { and, desc, getTableColumns, ilike, sql, type SQL } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
-import { verifySession } from "../db/auth.js";
+import { verifySession, signSession } from "../db/auth.js";
 import { getSessionCookie } from "../lib/cookies.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "../cache.js";
+import { newLivePreviewId, setLivePreview } from "../live-preview-store.js";
 
 // Registers generic CRUD routes for a collection under /api/:collectionSlug,
 // so individual collections don't need hand-written route handlers.
+
+const PREVIEW_TOKEN_TTL_MS = 5 * 60 * 1000;
+
+// Inserts a revisions.snapshot() row for this write when revisions.shouldSnapshot(req)
+// says so — called right after config.hooks?.afterChange in both POST and PATCH below,
+// same spot the old hand-rolled pagesAfterChange/postsAfterChange hooks used to snapshot.
+async function maybeSnapshotRevision(config: CollectionConfig, item: Record<string, unknown>, req: FastifyRequest) {
+  const revisions = config.revisions;
+  if (!revisions || !revisions.shouldSnapshot(req)) return;
+  const fields = await revisions.snapshot(item, req);
+  await req.db.insert(revisions.table).values({ [revisions.foreignKey]: item.id, ...fields } as never);
+}
 
 function accessArgs(req: FastifyRequest): AccessArgs {
   return { role: req.user?.role, department: req.tenantHost, permissions: req.user?.permissions };
@@ -173,6 +186,7 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       try {
         const [item] = await req.db.insert(table).values(data as never).returning();
         await config.hooks?.afterChange?.(item, accessArgs(req), req);
+        await maybeSnapshotRevision(config, item as Record<string, unknown>, req);
         await cacheInvalidate(`ucms:cache:${req.tenantHost}:${config.slug}:`);
         // Same Redis instance, a sibling prefix: apps/frontend's rendered-HTML
         // cache (src/lib/html-cache.ts) has no way to know which pages a
@@ -256,10 +270,83 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
       return { error: "not found" };
     }
     await config.hooks?.afterChange?.(item, accessArgs(req), req);
+    await maybeSnapshotRevision(config, item, req);
     await cacheInvalidate(`ucms:cache:${req.tenantHost}:${config.slug}:`);
     await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
     return { collection: config.slug, item };
   });
+
+  if (config.previewToken) {
+    const { supportsLiveDraft } = config.previewToken;
+    app.post(`${base}/:id/preview-token`, async (req, reply) => {
+      if (!(await checkAccess(config.access?.update, req, reply))) return;
+      let livePreviewId: string | undefined;
+      if (supportsLiveDraft) {
+        const draft = req.body as Record<string, unknown> | undefined;
+        if (draft && Object.values(draft).some((v) => v !== undefined)) {
+          livePreviewId = newLivePreviewId();
+          await setLivePreview(livePreviewId, draft);
+        }
+      }
+      const token = signSession({
+        userId: req.user.userId,
+        email: req.user.email,
+        role: req.user.role,
+        tenantHost: req.tenantHost,
+        permissions: [],
+        previewOnly: true,
+        exp: Date.now() + PREVIEW_TOKEN_TTL_MS,
+        ...(livePreviewId ? { livePreviewId } : {}),
+      });
+      return { token };
+    });
+  }
+
+  if (config.revisions) {
+    const { table: revTable, foreignKey, restore } = config.revisions;
+    const revColumns = getTableColumns(revTable);
+
+    app.get(`${base}/:id/revisions`, async (req, reply) => {
+      if (!(await checkAccess(config.access?.update, req, reply))) return;
+      const { id } = req.params as { id: string };
+      const items = await req.db
+        .select()
+        .from(revTable)
+        .where(sql`${revColumns[foreignKey]} = ${id}`)
+        // Same unbounded-history cap the hand-rolled posts/pages revision
+        // routes used — History UI is a scrollable restore list, not a full
+        // archive; older snapshots stay in the DB, just unlisted.
+        .orderBy(desc(revColumns.createdAt as never))
+        .limit(50);
+      return { items };
+    });
+
+    app.post(`${base}/:id/revisions/:revisionId/restore`, async (req, reply) => {
+      if (!table) {
+        reply.code(501);
+        return { error: "not implemented" };
+      }
+      if (!(await checkAccess(config.access?.update, req, reply))) return;
+      const { id, revisionId } = req.params as { id: string; revisionId: string };
+      const [revision] = await req.db
+        .select()
+        .from(revTable)
+        .where(and(sql`${revColumns.id} = ${revisionId}`, sql`${revColumns[foreignKey]} = ${id}`));
+      if (!revision) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      const fields = await restore(revision as Record<string, unknown>, req);
+      // Never auto-republishes — restoring an old snapshot always goes
+      // through a deliberate re-publish click, same as any other edit.
+      const [item] = await req.db
+        .update(table)
+        .set({ ...fields, status: "draft", publishedAt: null, updatedAt: new Date() } as never)
+        .where(sql`id = ${id}`)
+        .returning();
+      return { item };
+    });
+  }
 
   app.delete(`${base}/:id`, async (req, reply) => {
     if (!table) {

@@ -167,26 +167,6 @@ const pagesAfterRead = (items: unknown[]) =>
     };
   });
 
-// Snapshots the page into page_revisions whenever a request explicitly
-// publishes it (req.body.status, the raw incoming payload — not just
-// "happens to already be published", so a plain content edit via Designer's
-// Save never re-snapshots). Mirrors postsAfterChange exactly, minus the
-// "private" branch — pages have no equivalent status.
-const pagesAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRequest) => {
-  const requested = (req.body as Record<string, unknown>)?.status;
-  if (requested !== "published") return;
-  const row = item as Record<string, unknown>;
-  await req.db.insert(schema.pageRevisions).values({
-    pageId: row.id as string,
-    title: row.title as string,
-    layout: (row.layout as unknown[]) ?? [],
-    settings: (row.settings as Record<string, unknown>) ?? {},
-    bannerImageUrl: row.bannerImageUrl as string | null,
-    status: row.status as string,
-    publishedAt: row.publishedAt as Date | null,
-  });
-};
-
 export const pagesCollection: CollectionConfig = {
   slug: "pages",
   table: schema.pages,
@@ -229,8 +209,33 @@ export const pagesCollection: CollectionConfig = {
   },
   hooks: {
     beforeChange: pagesBeforeChange,
-    afterChange: pagesAfterChange,
     afterRead: pagesAfterRead,
+  },
+  previewToken: { supportsLiveDraft: true },
+  revisions: {
+    table: schema.pageRevisions,
+    foreignKey: "pageId",
+    // Snapshots whenever a request explicitly publishes it (req.body.status,
+    // the raw incoming payload — not just "happens to already be published",
+    // so a plain content edit via Designer's Save never re-snapshots).
+    shouldSnapshot: (req) => (req.body as Record<string, unknown> | undefined)?.status === "published",
+    snapshot: (rowUnknown) => {
+      const row = rowUnknown as Record<string, unknown>;
+      return {
+        title: row.title as string,
+        layout: (row.layout as unknown[]) ?? [],
+        settings: (row.settings as Record<string, unknown>) ?? {},
+        bannerImageUrl: row.bannerImageUrl as string | null,
+        status: row.status as string,
+        publishedAt: row.publishedAt as Date | null,
+      };
+    },
+    restore: (revision) => ({
+      title: revision.title,
+      layout: revision.layout,
+      settings: revision.settings,
+      bannerImageUrl: revision.bannerImageUrl,
+    }),
   },
 };
 
@@ -322,34 +327,6 @@ const postsBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
   return record;
 };
 
-// Snapshots the post into post_revisions whenever a request explicitly
-// publishes or makes it private (req.body.status, the raw incoming payload —
-// not just "happens to already be published", so a plain content edit via
-// PostEditor's Save never re-snapshots). "private" gets a real history entry
-// too, same as "published" — both are "this went live" events, just with
-// different public visibility (see 0009's migration comment).
-const postsAfterChange = async (item: unknown, _args: AccessArgs, req: FastifyRequest) => {
-  const requested = (req.body as Record<string, unknown>)?.status;
-  if (requested !== "published" && requested !== "private") return;
-  const row = item as Record<string, unknown>;
-  let categoryName: string | null = null;
-  if (row.categoryId) {
-    const [cat] = await req.db.select().from(schema.categories).where(eq(schema.categories.id, row.categoryId as string));
-    categoryName = cat?.name ?? null;
-  }
-  await req.db.insert(schema.postRevisions).values({
-    postId: row.id as string,
-    title: row.title as string,
-    body: row.body as string,
-    excerpt: row.excerpt as string | null,
-    bannerImageUrl: row.bannerImageUrl as string | null,
-    category: categoryName,
-    tags: (row.tags as string[]) ?? [],
-    status: row.status as string,
-    publishedAt: row.publishedAt as Date | null,
-  });
-};
-
 // The public posts list/get returns the raw row, which only has categoryId
 // (uuid) — categories.name text column was dropped in migration 0010. The
 // frontend's Post.category: string | null contract (apps/frontend/src/lib/
@@ -412,8 +389,56 @@ export const postsCollection: CollectionConfig = {
   },
   hooks: {
     beforeChange: postsBeforeChange,
-    afterChange: postsAfterChange,
     afterRead: postsAfterRead,
+  },
+  previewToken: {},
+  revisions: {
+    table: schema.postRevisions,
+    foreignKey: "postId",
+    // "private" gets a real history entry too, same as "published" — both
+    // are "this went live" events, just with different public visibility
+    // (see 0009's migration comment).
+    shouldSnapshot: (req) => {
+      const status = (req.body as Record<string, unknown> | undefined)?.status;
+      return status === "published" || status === "private";
+    },
+    snapshot: async (rowUnknown, req) => {
+      const row = rowUnknown as Record<string, unknown>;
+      let categoryName: string | null = null;
+      if (row.categoryId) {
+        const [cat] = await req.db.select().from(schema.categories).where(eq(schema.categories.id, row.categoryId as string));
+        categoryName = cat?.name ?? null;
+      }
+      return {
+        title: row.title as string,
+        body: row.body as string,
+        excerpt: row.excerpt as string | null,
+        bannerImageUrl: row.bannerImageUrl as string | null,
+        category: categoryName,
+        tags: (row.tags as string[]) ?? [],
+        status: row.status as string,
+        publishedAt: row.publishedAt as Date | null,
+      };
+    },
+    // Revision's category is a name snapshot — if a category with that exact
+    // name still exists, restore points at it; if renamed/deleted since, this
+    // goes to uncategorized rather than guessing (same known-ceiling tradeoff
+    // as the bookmark card snapshot in Phase 4).
+    restore: async (revision, req) => {
+      let categoryId: string | null = null;
+      if (revision.category) {
+        const [cat] = await req.db.select().from(schema.categories).where(eq(schema.categories.name, revision.category as string));
+        categoryId = cat?.id ?? null;
+      }
+      return {
+        title: revision.title,
+        body: revision.body,
+        excerpt: revision.excerpt,
+        bannerImageUrl: revision.bannerImageUrl,
+        categoryId,
+        tags: revision.tags,
+      };
+    },
   },
 };
 
@@ -616,6 +641,11 @@ export const siteChromeCollection: CollectionConfig = {
     delete: (a) => hasPermission(a, "headerFooter.write"),
   },
   hooks: { beforeChange: siteChromeBeforeChange },
+  // siteChrome's own GET is already publicly readable regardless of draft/
+  // published status, so unlike pages/posts this exists purely to carry
+  // not-yet-saved canvas content for Designer's Header/Footer device preview
+  // — no draft-visibility elevation needed, but the mechanism is identical.
+  previewToken: { supportsLiveDraft: true },
 };
 
 // Reusable Designer section blocks. Protected-scope only (see registration

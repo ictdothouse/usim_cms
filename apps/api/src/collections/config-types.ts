@@ -24,6 +24,28 @@ export interface CollectionHooks<T = unknown> {
   afterRead?: (items: T[], req: FastifyRequest) => T[] | Promise<T[]>;
 }
 
+export interface RevisionsConfig<T = unknown> {
+  // Table backing this collection's revision history; must have "id"/
+  // "createdAt" columns plus the foreign-key column named below.
+  table: PgTable;
+  // Column name on `table` referencing this collection's own row id (e.g.
+  // "postId"/"pageId").
+  foreignKey: string;
+  // True when THIS write should snapshot — checked against the raw incoming
+  // req.body (not the persisted item), so a plain content edit never
+  // snapshots, only an explicit publish (pagesCollection) or publish/private
+  // (postsCollection).
+  shouldSnapshot: (req: FastifyRequest) => boolean;
+  // Fields to insert into the revision row (excluding id/createdAt/the FK,
+  // which generic-crud.ts fills in itself) — may run its own queries (e.g.
+  // postsCollection resolving categoryId -> a denormalized category name).
+  snapshot: (row: T, req: FastifyRequest) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  // Fields to write back onto the live row when a snapshot is restored.
+  // generic-crud.ts additionally always sets status:"draft"/publishedAt:null/
+  // updatedAt:now itself, so a restore never auto-republishes.
+  restore: (revision: Record<string, unknown>, req: FastifyRequest) => Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
 export interface CollectionConfig<T = unknown> {
   slug: string;
   // Drizzle table backing the generic CRUD routes; must have an "id" column.
@@ -45,4 +67,14 @@ export interface CollectionConfig<T = unknown> {
     delete?: AccessFn;
   };
   hooks?: CollectionHooks<T>;
+  // Enables GET /:id/revisions + POST /:id/revisions/:revisionId/restore,
+  // both gated on the same `access.update` check as PATCH.
+  revisions?: RevisionsConfig<T>;
+  // Enables POST /:id/preview-token — mints a short-lived previewOnly session
+  // token for Designer's "View"/device-preview button, gated on the same
+  // `access.update` check as PATCH. supportsLiveDraft additionally lets the
+  // request body carry an in-memory draft (Designer's Preview/Live Edit sends
+  // the canvas's current unsaved state) stashed in the ephemeral
+  // live-preview-store and referenced by the token's livePreviewId.
+  previewToken?: { supportsLiveDraft?: boolean };
 }
