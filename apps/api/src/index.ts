@@ -35,7 +35,6 @@ import { registerImpersonationRoutes } from "./routes/impersonation.js";
 import { registerBackupCloneRoutes } from "./routes/backup-clone.js";
 import { registerMediaRoutes } from "./routes/media.js";
 import { registerPublicBlueprintRoutes, registerBlueprintRoutes } from "./routes/blueprints.js";
-import { registerRevisionsRoutes } from "./routes/revisions.js";
 import {
   pagesCollection,
   postsCollection,
@@ -252,8 +251,6 @@ await app.register(async (protectedScope) => {
   await tenantPlugin(protectedScope);
   await requireTenantAuth(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, pagesCollection);
-
-  registerRevisionsRoutes(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
   registerProtectedCollectionRoutes(protectedScope, menusCollection);
