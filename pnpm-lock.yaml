@@ -310,6 +310,10 @@ importers:
         version: 5.9.3
 
   packages/element-schema:
+    dependencies:
+      '@ucms/element-style':
+        specifier: workspace:*
+        version: link:../element-style
     devDependencies:
       '@types/node':
         specifier: ^22.9.0

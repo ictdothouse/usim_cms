@@ -3,10 +3,11 @@
 // "slider" case (god-file breakup, part 2/2 — see ContainerBlock.astro's own
 // top-of-file comment on why shared *logic* goes through lib/element-render.ts,
 // never another .astro file's frontmatter, and why several small helpers
-// (SLIDER_HEIGHT, SRCSET_WIDTHS/buildSrcset, safeCssUrl/bgVariantUrl,
-// bpMerge/bpStyleRules) are re-declared here rather than imported from
-// SectionBlock.astro — SectionBlock.astro's own copies, still used by other
-// element cases there, are untouched). HEX_RE/bestTextColor/contrastRatio/
+// (SRCSET_WIDTHS/buildSrcset, safeCssUrl/bgVariantUrl, bpMerge/bpStyleRules)
+// are re-declared here rather than imported from SectionBlock.astro —
+// SectionBlock.astro's own copies, still used by other element cases there,
+// are untouched; SLIDER_HEIGHT itself moved into lib/element-render.ts, no
+// longer duplicated). HEX_RE/bestTextColor/contrastRatio/
 // relativeLuminance/posStyle/parseSlides and its Slide/legacySlideRows
 // machinery had no other caller in SectionBlock.astro, so those moved here
 // wholesale instead of staying duplicated in both places.
@@ -28,6 +29,7 @@
 // (`display:contents` wrapper), not a visible behavior change.
 import {
   TEXT_SIZE,
+  SLIDER_HEIGHT,
   fluidTextSize,
   hexToRgba,
   safeUrl,
@@ -45,10 +47,6 @@ import {
 } from "../lib/element-render";
 import { bestTextColor, computeFreePositionStyle, toCssText } from "@ucms/element-render";
 
-// Local, not imported from SectionBlock.astro's frontmatter — see this
-// file's own comment above and SectionBlock.astro's top comment on the
-// outage caused by sharing frontmatter bindings across .astro files.
-const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
 const SRCSET_WIDTHS = [400, 800, 1200, 1600];
 function buildSrcset(url: string): { srcset: string; sizes: string } | null {
   const m = /[?&]w=(\d+)/.exec(url);
@@ -817,4 +815,106 @@ const p = el.props ?? {};
       grid-template-columns: 1fr !important;
     }
   }
+</style>
+
+<script>
+  // Moved out of SectionBlock.astro (2026-09-30, perf audit finding): Astro
+  // bundles a component's own <script> once per page it's used on — since
+  // SectionBlock renders on every page, Swiper's full JS+CSS payload was
+  // shipping globally even to pages with zero slider elements, breaking this
+  // app's own "near-zero client JS" convention. Scoping it here means only a
+  // page that actually renders a slider (i.e. this component) pays for it.
+  import Swiper from "swiper";
+  import { Autoplay, Grid, EffectCoverflow, EffectCube, EffectFlip, EffectCards } from "swiper/modules";
+  import "swiper/css";
+  import "swiper/css/grid";
+  import "swiper/css/effect-coverflow";
+  import "swiper/css/effect-cube";
+  import "swiper/css/effect-flip";
+  import "swiper/css/effect-cards";
+
+  // Slider: Swiper (headless-enough, real 3D effect modules — see
+  // package.json) drives drag/swipe/momentum/looping/effects; this just
+  // wires our own prev/next/dot buttons + an optional autoplay plugin
+  // (data-autoplay = ms, set only when the author picked something other
+  // than "off") to its API instead of hand-rolling scroll math.
+  // wrapperClass/slideClass point Swiper at our own existing
+  // .ds-slider-track/.ds-slide instead of its default swiper-wrapper/
+  // swiper-slide, so no markup fork was needed to adopt it.
+  const EFFECT_MODULES: Record<string, typeof EffectCoverflow | undefined> = {
+    coverflow: EffectCoverflow,
+    cube: EffectCube,
+    flip: EffectFlip,
+    cards: EffectCards,
+  };
+  document.querySelectorAll<HTMLElement>(".ds-slider").forEach((slider) => {
+    // Dataset (autoplay/transition/layout knobs) lives on .ds-slider-box,
+    // not this outer element — .ds-slider itself only wraps it plus an
+    // optional "outside"-placement pagination strip (see the component
+    // above), so it stays a plain auto-height box with no dataset of its
+    // own. .ds-slider-dot lookups stay scoped to the outer element though,
+    // since outside-mode dots render as its sibling, not the box's.
+    const box = slider.querySelector<HTMLElement>(".ds-slider-box");
+    const viewport = slider.querySelector<HTMLElement>(".ds-slider-viewport");
+    const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
+    if (!box || !viewport) return;
+    const autoplayMs = Number(box.dataset.autoplay || "0");
+    const transition = box.dataset.transition || "slide";
+
+    // transition="fade": a real crossfade needs slides stacked absolutely
+    // (CSS above), which Swiper's own EffectFade also does, but this
+    // hand-rolled version predates the Swiper switch and still works fine —
+    // no reason to churn it just to route through another module.
+    if (transition === "fade") {
+      const slides = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slide"));
+      let idx = 0;
+      const show = (next: number) => {
+        idx = ((next % slides.length) + slides.length) % slides.length;
+        slides.forEach((s, si) => s.classList.toggle("is-active-fade", si === idx));
+        dots.forEach((d, di) => d.classList.toggle("is-active", di === idx));
+      };
+      slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => show(idx - 1));
+      slider.querySelector(".ds-slider-next")?.addEventListener("click", () => show(idx + 1));
+      dots.forEach((d, di) => d.addEventListener("click", () => show(di)));
+      show(0);
+      if (autoplayMs > 0) setInterval(() => show(idx + 1), autoplayMs);
+      return;
+    }
+
+    const effectModule = EFFECT_MODULES[transition];
+    // A 3D effect (coverflow/cube/flip/cards) only ever makes sense one
+    // slide at a time — force 1 rather than let a leftover slidesPerView>1/
+    // slidesRows>1 (e.g. author switches transition after already setting
+    // columns) render a broken multi-slide cube/flip.
+    const slidesPerView = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesPerView) || 1);
+    const slidesPerGroup = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesPerGroup) || 1);
+    const rows = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesRows) || 1);
+    const spaceBetweenAttr = box.dataset.spaceBetween;
+    const spaceBetween = spaceBetweenAttr && Number.isFinite(Number(spaceBetweenAttr)) ? Number(spaceBetweenAttr) : slidesPerView > 1 ? 16 : 0;
+    const swiper = new Swiper(viewport, {
+      modules: [Autoplay, ...(effectModule ? [effectModule] : []), ...(rows > 1 ? [Grid] : [])],
+      wrapperClass: "ds-slider-track",
+      slideClass: "ds-slide",
+      loop: true,
+      direction: box.dataset.direction === "vertical" ? "vertical" : "horizontal",
+      effect: effectModule ? transition : "slide",
+      centeredSlides: transition === "coverflow" || box.dataset.centeredSlides === "true",
+      slidesPerView,
+      slidesPerGroup,
+      ...(rows > 1 ? { grid: { rows, fill: "row" } } : {}),
+      spaceBetween,
+      initialSlide: Math.max(0, Number(box.dataset.initialSlide) || 0),
+      autoHeight: box.dataset.autoHeight === "true",
+      grabCursor: box.dataset.grabCursor !== "false",
+      slideToClickedSlide: box.dataset.slideToClicked === "true",
+      autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
+    });
+    const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
+    slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
+    slider.querySelector(".ds-slider-next")?.addEventListener("click", () => swiper.slideNext());
+    dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
+    swiper.on("slideChange", updateDots);
+    updateDots();
+  });
+</script>
 </style>

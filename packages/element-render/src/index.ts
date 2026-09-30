@@ -14,6 +14,11 @@ export const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem"
 export const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 export const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
 export const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
+export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
+export const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
+// Legacy pages saved before the height field became free-form ("length" kind)
+// still store one of these keywords.
+export const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
 // Legacy preset keywords (existing content saved before the custom shadow panel) still resolve
 // here. A new edit stores a pipe-delimited "x|y|blur|spread|color|opacity" string instead.
 export const LEGACY_SHADOW: Record<string, string | undefined> = {

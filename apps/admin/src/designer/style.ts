@@ -5,6 +5,9 @@ import {
   RADIUS,
   BORDER,
   SPACE,
+  TEXT_SIZE,
+  ICON_SIZE,
+  SLIDER_HEIGHT,
   LEGACY_SHADOW,
   lengthValue,
   hexToRgba,
@@ -16,7 +19,22 @@ import {
   elBorderShadowStyle as sharedElBorderShadowStyle,
   typoStyle as sharedTypoStyle,
 } from "@ucms/element-render";
-export { escapeHtml, PAD, RADIUS, BORDER, SPACE, LEGACY_SHADOW, lengthValue, hexToRgba, shadowToCss, elRadius, elHoverClass };
+export {
+  escapeHtml,
+  PAD,
+  RADIUS,
+  BORDER,
+  SPACE,
+  TEXT_SIZE,
+  ICON_SIZE,
+  SLIDER_HEIGHT,
+  LEGACY_SHADOW,
+  lengthValue,
+  hexToRgba,
+  shadowToCss,
+  elRadius,
+  elHoverClass,
+};
 
 // Style-computation pure helpers split out of Designer.tsx (Layer 0 of the
 // God Component refactor, see
@@ -27,14 +45,7 @@ export { escapeHtml, PAD, RADIUS, BORDER, SPACE, LEGACY_SHADOW, lengthValue, hex
 // never import back from Designer.tsx (see designer/types.ts's own note),
 // so anything a designer/ file needs has to live in designer/ too.
 
-export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 export const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
-export const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
-// Mirrors SectionBlock.astro's own SLIDER_HEIGHT table — legacy pages saved
-// before the height field became free-form ("length" kind) still store one of
-// these keywords; resolving it here lets the canvas preview show the real
-// height for those too, not just newly-typed literal values.
-export const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
 
 // Four-side padding/radius/margin field-name maps — shared by Inspector's
 // FourSideControl panels and the canvas's own bp*Style resolution. Plain

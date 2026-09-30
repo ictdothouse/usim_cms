@@ -10,6 +10,7 @@ import {
   ICON_PATHS,
   SPACE,
   TEXT_SIZE,
+  ICON_SIZE,
   fluidTextSize,
   shadowToCss,
   safeUrl,
@@ -31,7 +32,6 @@ import {
 // across .astro files. Same duplication convention as ContainerBlock.astro/
 // RepeaterBlock.astro/MiscBlock.astro's own local copies.
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
-const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
 const SRCSET_WIDTHS = [400, 800, 1200, 1600];
 function buildSrcset(url: string): { srcset: string; sizes: string } | null {
   const m = /[?&]w=(\d+)/.exec(url);

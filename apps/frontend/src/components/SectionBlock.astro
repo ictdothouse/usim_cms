@@ -23,6 +23,7 @@ import {
   PAD,
   RADIUS,
   BORDER,
+  SLIDER_HEIGHT,
   shadowToCss,
   safeUrl,
   lengthValue,
@@ -174,7 +175,6 @@ const {
   requestedLang = null,
 } = Astro.props;
 
-const SLIDER_HEIGHT: Record<string, string> = { sm: "24rem", md: "32rem", lg: "42rem", full: "100vh" };
 // Real per-breakpoint visibility (Designer.tsx's VisibilityToggle) AND, for
 // Section/Column, real per-breakpoint style overrides (Designer.tsx's `bp`
 // bag — Row/Element still admin-preview-only there for now, see CLAUDE.md).
@@ -488,7 +488,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                 // button/badge/spacer/divider/embed/icon/list/html/gallery)
                 // — extracted to ElementBlock.astro (god-file breakup); see
                 // that file's own comment for why its local helpers
-                // (RATIO/ICON_SIZE/buildSrcset) are duplicated there rather
+                // (RATIO/buildSrcset) are duplicated there rather
                 // than imported from here or promoted into
                 // lib/element-render.ts.
                 case "heading":
@@ -578,9 +578,8 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                   return <RepeaterBlock el={el} />;
                 // Recursive container render branch — extracted to
                 // ContainerBlock.astro (god-file breakup); see that file's
-                // own comment for why its two SectionBlock-local helpers
-                // (buildSrcset/ICON_SIZE) are duplicated there rather than
-                // imported from here or promoted into lib/element-render.ts.
+                // own comment for why its SectionBlock-local buildSrcset
+                // helper is duplicated there rather than imported from here.
                 case "container":
                   return <ContainerBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} designerEdit={designerEdit} />;
                 default:
@@ -801,15 +800,6 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
 </style>
 
 <script>
-  import Swiper from "swiper";
-  import { Autoplay, Grid, EffectCoverflow, EffectCube, EffectFlip, EffectCards } from "swiper/modules";
-  import "swiper/css";
-  import "swiper/css/grid";
-  import "swiper/css/effect-coverflow";
-  import "swiper/css/effect-cube";
-  import "swiper/css/effect-flip";
-  import "swiper/css/effect-cards";
-
   // Tabs: click a label -> activate its panel. Event-delegated on document
   // so one listener covers every .ds-tabs instance on the page (Astro
   // bundles this <script> once per page regardless of how many SectionBlock
@@ -854,87 +844,6 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
     holder.replaceWith(iframe);
   });
 
-  // Slider: Swiper (headless-enough, real 3D effect modules — see
-  // package.json) drives drag/swipe/momentum/looping/effects; this just
-  // wires our own prev/next/dot buttons + an optional autoplay plugin
-  // (data-autoplay = ms, set only when the author picked something other
-  // than "off") to its API instead of hand-rolling scroll math.
-  // wrapperClass/slideClass point Swiper at our own existing
-  // .ds-slider-track/.ds-slide instead of its default swiper-wrapper/
-  // swiper-slide, so no markup fork was needed to adopt it.
-  const EFFECT_MODULES: Record<string, typeof EffectCoverflow | undefined> = {
-    coverflow: EffectCoverflow,
-    cube: EffectCube,
-    flip: EffectFlip,
-    cards: EffectCards,
-  };
-  document.querySelectorAll<HTMLElement>(".ds-slider").forEach((slider) => {
-    // Dataset (autoplay/transition/layout knobs) lives on .ds-slider-box,
-    // not this outer element — .ds-slider itself only wraps it plus an
-    // optional "outside"-placement pagination strip (see the component
-    // above), so it stays a plain auto-height box with no dataset of its
-    // own. .ds-slider-dot lookups stay scoped to the outer element though,
-    // since outside-mode dots render as its sibling, not the box's.
-    const box = slider.querySelector<HTMLElement>(".ds-slider-box");
-    const viewport = slider.querySelector<HTMLElement>(".ds-slider-viewport");
-    const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
-    if (!box || !viewport) return;
-    const autoplayMs = Number(box.dataset.autoplay || "0");
-    const transition = box.dataset.transition || "slide";
-
-    // transition="fade": a real crossfade needs slides stacked absolutely
-    // (CSS above), which Swiper's own EffectFade also does, but this
-    // hand-rolled version predates the Swiper switch and still works fine —
-    // no reason to churn it just to route through another module.
-    if (transition === "fade") {
-      const slides = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slide"));
-      let idx = 0;
-      const show = (next: number) => {
-        idx = ((next % slides.length) + slides.length) % slides.length;
-        slides.forEach((s, si) => s.classList.toggle("is-active-fade", si === idx));
-        dots.forEach((d, di) => d.classList.toggle("is-active", di === idx));
-      };
-      slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => show(idx - 1));
-      slider.querySelector(".ds-slider-next")?.addEventListener("click", () => show(idx + 1));
-      dots.forEach((d, di) => d.addEventListener("click", () => show(di)));
-      show(0);
-      if (autoplayMs > 0) setInterval(() => show(idx + 1), autoplayMs);
-      return;
-    }
-
-    const effectModule = EFFECT_MODULES[transition];
-    // A 3D effect (coverflow/cube/flip/cards) only ever makes sense one
-    // slide at a time — force 1 rather than let a leftover slidesPerView>1/
-    // slidesRows>1 (e.g. author switches transition after already setting
-    // columns) render a broken multi-slide cube/flip.
-    const slidesPerView = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesPerView) || 1);
-    const slidesPerGroup = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesPerGroup) || 1);
-    const rows = effectModule ? 1 : Math.max(1, Number(box.dataset.slidesRows) || 1);
-    const spaceBetweenAttr = box.dataset.spaceBetween;
-    const spaceBetween = spaceBetweenAttr && Number.isFinite(Number(spaceBetweenAttr)) ? Number(spaceBetweenAttr) : slidesPerView > 1 ? 16 : 0;
-    const swiper = new Swiper(viewport, {
-      modules: [Autoplay, ...(effectModule ? [effectModule] : []), ...(rows > 1 ? [Grid] : [])],
-      wrapperClass: "ds-slider-track",
-      slideClass: "ds-slide",
-      loop: true,
-      direction: box.dataset.direction === "vertical" ? "vertical" : "horizontal",
-      effect: effectModule ? transition : "slide",
-      centeredSlides: transition === "coverflow" || box.dataset.centeredSlides === "true",
-      slidesPerView,
-      slidesPerGroup,
-      ...(rows > 1 ? { grid: { rows, fill: "row" } } : {}),
-      spaceBetween,
-      initialSlide: Math.max(0, Number(box.dataset.initialSlide) || 0),
-      autoHeight: box.dataset.autoHeight === "true",
-      grabCursor: box.dataset.grabCursor !== "false",
-      slideToClickedSlide: box.dataset.slideToClicked === "true",
-      autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
-    });
-    const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
-    slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
-    slider.querySelector(".ds-slider-next")?.addEventListener("click", () => swiper.slideNext());
-    dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
-    swiper.on("slideChange", updateDots);
-    updateDots();
-  });
+  // Slider init (Swiper) moved to SliderBlock.astro's own <script>
+  // (2026-09-30, perf audit finding) — see its comment for why.
 </script>

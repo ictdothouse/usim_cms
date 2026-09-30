@@ -22,6 +22,9 @@ import {
   RADIUS,
   BORDER,
   SPACE,
+  TEXT_SIZE,
+  ICON_SIZE,
+  SLIDER_HEIGHT,
   LEGACY_SHADOW,
   lengthValue,
   hexToRgba,
@@ -36,16 +39,26 @@ import {
   toCssText,
 } from "@ucms/element-render";
 
-export { PAD, RADIUS, BORDER, SPACE, LEGACY_SHADOW, lengthValue, hexToRgba, elRadius, elHoverClass, elEntranceClass };
+export {
+  PAD,
+  RADIUS,
+  BORDER,
+  SPACE,
+  TEXT_SIZE,
+  ICON_SIZE,
+  SLIDER_HEIGHT,
+  LEGACY_SHADOW,
+  lengthValue,
+  hexToRgba,
+  elRadius,
+  elHoverClass,
+  elEntranceClass,
+};
 // This app's own convention is `string | null` (not undefined) for an unset
 // shadow — kept as a thin wrapper so callers here are unaffected.
 export function shadowToCss(raw?: string): string | null {
   return sharedShadowToCss(raw) ?? null;
 }
-
-// Matches apps/admin's own TEXT_SIZE table — not part of @ucms/element-render
-// (no function there consumes it), kept local like every other size table.
-export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 // Matches apps/admin's ICONS map by name — hand-simplified stroke path data
 // (24x24, lucide-style) so this zero-JS renderer doesn't need lucide-react as
 // a dependency. Add a name to both places together.
