@@ -149,6 +149,7 @@ function posStyle(mp: Record<string, string>): string | null {
         `left:${mp.x || "50"}%`,
         mp.posWidth ? `width:${mp.posWidth}` : null,
         mp.posHeight ? `height:${mp.posHeight}` : null,
+        mp.zIndex ? `z-index:${mp.zIndex}` : null,
       ]
         .filter(Boolean)
         .join(";")

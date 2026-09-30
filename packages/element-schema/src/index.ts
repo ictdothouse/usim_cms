@@ -206,6 +206,10 @@ export const LENGTH_KEYS = new Set([
   // — H_SIZE's "level" preset can't be scaled by a ratio, so the resize
   // handle overrides it with a real CSS length instead.
   "x", "y", "posWidth", "posHeight", "posFontSize",
+  // Stacking order for a free-positioned slide child ("bring to front"/
+  // "send to back" in Inspector.tsx) — a bare, possibly-negative integer,
+  // same LENGTH_RE unit-less branch as x/y above.
+  "zIndex",
 ]);
 export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so

@@ -43,6 +43,7 @@ import { ELS } from "./elements";
 import { ICONS } from "./icons";
 import { bestTextColor } from "../lib/utils";
 import { parseCards, parsePairs, parseRepeaterItems, parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
+import { centerXCandidates, centerYCandidates, edgeXCandidates, edgeYCandidates, snapValue, type FreeRectPx } from "./snap";
 import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
   elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
@@ -62,7 +63,19 @@ const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length
 // Plain imperative pointer listeners, not a hook — ElPreview holds no
 // hooks of its own (see file header) since it's called as a plain function,
 // including recursively for nested slide elements.
-function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: number) => void) {
+// A free sibling's current box, in the % (x/y) + px (posWidth/posHeight)
+// units it's actually stored in — the caller (the "slider" case's own
+// `.map()`, which already has every sibling's resolved props at hand) reads
+// these off the slide directly; startFreeElDrag/Resize convert to a live
+// px FreeRectPx once they know the container's own rect.
+interface FreeSiblingPct {
+  xPct: number;
+  yPct: number;
+  widthPx: number;
+  heightPx: number;
+}
+
+function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], apply: (xPct: number, yPct: number) => void) {
   if ((ev.currentTarget as HTMLElement).dataset.editing === "true") return;
   ev.stopPropagation();
   // The slider element's own outer wrapper (Designer.tsx's column-elements
@@ -77,19 +90,38 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
   if (!container) return;
   const rect = container.getBoundingClientRect();
   const target = ev.currentTarget as HTMLElement;
+  const targetRect = target.getBoundingClientRect();
+  const halfW = targetRect.width / 2;
+  const halfH = targetRect.height / 2;
   const startLeft = target.offsetLeft;
   const startTop = target.offsetTop;
   const startX = ev.clientX;
   const startY = ev.clientY;
+  const freeSiblings: FreeRectPx[] = siblings.map((s) => ({
+    left: (s.xPct / 100) * rect.width,
+    top: (s.yPct / 100) * rect.height,
+    width: s.widthPx,
+    height: s.heightPx,
+  }));
+  const cxCandidates = centerXCandidates(rect.width, freeSiblings);
+  const cyCandidates = centerYCandidates(rect.height, freeSiblings);
   // No 0-100 clamp: an author may deliberately want a component to bleed
   // past the slide's own edge (e.g. a badge half-hanging off a photo) —
   // the Inspector's own X/Y inputs already allowed typing an out-of-range
   // number, this just gives drag the same freedom. The "safe area" overlay
   // (this file's slider case, near `.ds-slide-box`) is the actual
-  // guardrail: a visual warning, not a hard limit.
+  // guardrail: a visual warning, not a hard limit. Alignment snap (below)
+  // pulls the element's own CENTER — not its raw top-left — onto the
+  // slide's true center or another free sibling's center when within a few
+  // px, the two alignments an author reaches for by hand most often; it's
+  // a soft nudge (still just a `snapValue` clamp), never a hard restrict.
   function move(e: PointerEvent) {
-    const xPct = ((startLeft + (e.clientX - startX)) / rect.width) * 100;
-    const yPct = ((startTop + (e.clientY - startY)) / rect.height) * 100;
+    const rawLeft = startLeft + (e.clientX - startX);
+    const rawTop = startTop + (e.clientY - startY);
+    const snappedCenterX = snapValue(rawLeft + halfW, cxCandidates);
+    const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
+    const xPct = ((snappedCenterX - halfW) / rect.width) * 100;
+    const yPct = ((snappedCenterY - halfH) / rect.height) * 100;
     apply(Math.round(xPct * 10) / 10, Math.round(yPct * 10) / 10);
   }
   function up() {
@@ -112,7 +144,11 @@ function startFreeElDrag(ev: React.PointerEvent, apply: (xPct: number, yPct: num
 // call site) alongside the box itself — Canva-style "drag the corner,
 // the text grows with it" instead of the box just enclosing more
 // whitespace around a fixed-size font.
-function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heightPx: number, widthRatio: number) => void) {
+function startFreeElResize(
+  ev: React.PointerEvent,
+  siblings: FreeSiblingPct[],
+  apply: (widthPx: number, heightPx: number, widthRatio: number) => void,
+) {
   ev.stopPropagation();
   ev.preventDefault();
   const wrapper = (ev.currentTarget as HTMLElement).parentElement as HTMLElement | null;
@@ -122,9 +158,31 @@ function startFreeElResize(ev: React.PointerEvent, apply: (widthPx: number, heig
   const startH = rect.height;
   const startX = ev.clientX;
   const startY = ev.clientY;
+  // Snap the resized (right/bottom) edge to the safe-area margin or another
+  // free sibling's matching edge — left/top stay fixed during a resize, so
+  // unlike drag's center-snap, it's the far edge that benefits from a
+  // nearby-alignment nudge.
+  const container = wrapper.closest(".ds-slide-box") as HTMLElement | null;
+  const containerRect = container?.getBoundingClientRect();
+  const fixedLeft = containerRect ? rect.left - containerRect.left : null;
+  const fixedTop = containerRect ? rect.top - containerRect.top : null;
+  const exCandidates = containerRect
+    ? edgeXCandidates(
+        containerRect.width,
+        siblings.map((s) => ({ left: (s.xPct / 100) * containerRect.width, top: 0, width: s.widthPx, height: 0 })),
+      )
+    : [];
+  const eyCandidates = containerRect
+    ? edgeYCandidates(
+        containerRect.height,
+        siblings.map((s) => ({ left: 0, top: (s.yPct / 100) * containerRect.height, width: 0, height: s.heightPx })),
+      )
+    : [];
   function move(e: PointerEvent) {
-    const w = Math.max(20, Math.round(startW + (e.clientX - startX)));
-    const h = Math.max(20, Math.round(startH + (e.clientY - startY)));
+    let w = Math.max(20, Math.round(startW + (e.clientX - startX)));
+    let h = Math.max(20, Math.round(startH + (e.clientY - startY)));
+    if (fixedLeft !== null) w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
+    if (fixedTop !== null) h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
     apply(w, h, startW > 0 ? w / startW : 1);
   }
   function up() {
@@ -785,6 +843,25 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                       };
                       const childPosWidth = childIsFree ? bpGetValue(childEl.props.posWidth, childEl.bp, "posWidth") : undefined;
                       const childPosHeight = childIsFree ? bpGetValue(childEl.props.posHeight, childEl.bp, "posHeight") : undefined;
+                      // Every OTHER free-positioned element on this same slide
+                      // (any row/column) — the alignment-snap candidate set
+                      // for this child's own drag/resize (see startFreeElDrag/
+                      // Resize's own comments). Only computed when it'll
+                      // actually be used.
+                      const siblingsPct: FreeSiblingPct[] = childIsFree
+                        ? slide.rows.flatMap((rr) =>
+                            rr.columns.flatMap((cc) =>
+                              cc.elements
+                                .filter((ee) => ee.id !== childEl.id && bpGetValue(ee.props.position, ee.bp, "position") === "custom")
+                                .map((ee) => ({
+                                  xPct: Number(bpGetValue(ee.props.x, ee.bp, "x") || "50"),
+                                  yPct: Number(bpGetValue(ee.props.y, ee.bp, "y") || "50"),
+                                  widthPx: parseFloat(bpGetValue(ee.props.posWidth, ee.bp, "posWidth") || "") || 100,
+                                  heightPx: parseFloat(bpGetValue(ee.props.posHeight, ee.bp, "posHeight") || "") || 40,
+                                })),
+                            ),
+                          )
+                        : [];
                       return (
                         <Fragment key={childEl.id}>
                           {childIsFree && (
@@ -809,7 +886,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                           onPointerDown={
                             childIsFree && path && !childEditing
                               ? (ev) => {
-                                  startFreeElDrag(ev, (xPct, yPct) => {
+                                  startFreeElDrag(ev, siblingsPct, (xPct, yPct) => {
                                     mutate((bs) => {
                                       const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
                                       const currentSlides = parseSlides(target.props.slides);
@@ -838,6 +915,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                   left: `${bpGetValue(childEl.props.x, childEl.bp, "x") || "50"}%`,
                                   width: childPosWidth || undefined,
                                   height: childPosHeight || undefined,
+                                  zIndex: Number(bpGetValue(childEl.props.zIndex, childEl.bp, "zIndex") || "0") || undefined,
                                 }
                               : {
                                   ...elMarginStyle(childEl.props ?? {}),
@@ -907,7 +985,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                           {selected && childIsFree && path && (
                             <div
                               onPointerDown={(ev) => {
-                                startFreeElResize(ev, (widthPx, heightPx, widthRatio) => {
+                                startFreeElResize(ev, siblingsPct, (widthPx, heightPx, widthRatio) => {
                                   mutate((bs) => {
                                     const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
                                     const currentSlides = parseSlides(target.props.slides);
