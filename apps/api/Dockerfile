@@ -12,6 +12,15 @@ COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 COPY packages/element-schema/package.json packages/element-schema/package.json
 COPY packages/element-style/package.json packages/element-style/package.json
+# apps/api has no code dependency on @ucms/element-render (that's admin/
+# frontend only) — its package.json is still needed here because `pnpm
+# install --frozen-lockfile` resolves the WHOLE workspace graph against
+# pnpm-lock.yaml, not just this image's own deps; a missing workspace
+# package.json here is ERR_PNPM_WORKSPACE_PKG_NOT_FOUND even though nothing
+# in this image imports it. Same class of miss as element-schema/element-style
+# above (see apps/admin/Dockerfile's own comment) — a new workspace package
+# needs its package.json in every app's Dockerfile, not just the ones that use it.
+COPY packages/element-render/package.json packages/element-render/package.json
 RUN pnpm install --frozen-lockfile
 COPY packages/element-style packages/element-style
 COPY packages/element-schema packages/element-schema
