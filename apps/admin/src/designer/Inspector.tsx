@@ -1467,6 +1467,71 @@ function InspectorImpl({ ctx }: { ctx: DesignerCtx }) {
                     </div>
                   )}
                   {childIsFree && (
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          withChildSlide((s0) => {
+                            const siblingZ = s0.rows.flatMap((rr) =>
+                              rr.columns.flatMap((cc) =>
+                                cc.elements
+                                  .filter((ee) => ee.id !== childEl.id && bpGetValue(ee.props.position, ee.bp, "position") === "custom")
+                                  .map((ee) => Number(bpGetValue(ee.props.zIndex, ee.bp, "zIndex") || "0")),
+                              ),
+                            );
+                            const z = String(Math.max(0, ...siblingZ) + 1);
+                            return bp === "desktop"
+                              ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { zIndex: z })
+                              : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:zIndex`]: z });
+                          })
+                        }
+                        className="flex-1 rounded-lg border border-line/30 bg-white py-1 text-[10px] font-semibold text-body"
+                      >
+                        {t("designer-slide-bring-front")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          withChildSlide((s0) => {
+                            const siblingZ = s0.rows.flatMap((rr) =>
+                              rr.columns.flatMap((cc) =>
+                                cc.elements
+                                  .filter((ee) => ee.id !== childEl.id && bpGetValue(ee.props.position, ee.bp, "position") === "custom")
+                                  .map((ee) => Number(bpGetValue(ee.props.zIndex, ee.bp, "zIndex") || "0")),
+                              ),
+                            );
+                            const z = String(Math.min(0, ...siblingZ) - 1);
+                            return bp === "desktop"
+                              ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { zIndex: z })
+                              : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:zIndex`]: z });
+                          })
+                        }
+                        className="flex-1 rounded-lg border border-line/30 bg-white py-1 text-[10px] font-semibold text-body"
+                      >
+                        {t("designer-slide-send-back")}
+                      </button>
+                    </div>
+                  )}
+                  {childIsFree && bp !== "desktop" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        withChildSlide((s0) =>
+                          updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, {
+                            ...(childEl.bp ?? {}),
+                            [`${bp}:x`]: childEl.props.x || "50",
+                            [`${bp}:y`]: childEl.props.y || "50",
+                            [`${bp}:posWidth`]: childEl.props.posWidth || "",
+                            [`${bp}:posHeight`]: childEl.props.posHeight || "",
+                          }),
+                        )
+                      }
+                      className="w-full rounded-lg border border-dashed border-line/40 py-1 text-[10px] font-semibold text-accent"
+                    >
+                      {t("designer-slide-copy-desktop-pos")}
+                    </button>
+                  )}
+                  {childIsFree && (
                     <p className="text-[10px] italic text-sub/70">{t("designer-align-inert-free")}</p>
                   )}
                 </div>
