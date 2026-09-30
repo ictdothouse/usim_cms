@@ -26,6 +26,6 @@
     "@astrojs/check": "^0.9.9",
     "@types/node": "^22.9.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }
