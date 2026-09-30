@@ -858,6 +858,27 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   e.g. `typoStyle`'s `font-family` needs quotes only in the CSS-string form) that's a separate,
   lower-urgency follow-up if this class of drift bug recurs for a style property instead of a
   sanitizer.
+
+  **`packages/element-render`** (2026-09-30, third shared workspace package) is that exact
+  follow-up, triggered by the drift risk it warned about actually recurring: the slider
+  free-position feature's `zIndex` and far-edge-overflow logic shipped to `ElPreview.tsx` first
+  and had to be hand-ported to `SliderBlock.astro` separately, the recurring "Live Edit doesn't
+  match Preview/Published" bug pattern (`docs/SliderProblem.pdf`). Single-sources
+  `elMarginStyle`/`elPaddingStyle`/`elBorderShadowStyle`/`typoStyle`/`elRadius`/`elHoverClass`/
+  `elEntranceClass` plus `bestTextColor`/`contrastRatio`/`relativeLuminance` (previously ALSO
+  hand-copied a third time inside `SliderBlock.astro`, its own comment admitting "can't share
+  code across the two apps ... deliberate byte-for-byte port") and a new
+  `computeFreePositionStyle` (the slide free-position x/y/width/height/zIndex logic, factored out
+  of both `ElPreview.tsx`'s `childIsFree` branch and `SliderBlock.astro`'s `posStyle()`). Solves
+  the exact React-object-vs-CSS-string serialization gap the note above called out: every
+  function returns a plain camelCase `Record<string,string>` declaration map (already shaped like
+  `React.CSSProperties` wants it — `style.ts`'s wrappers just cast it), and the one new
+  `toCssText()` helper kebab-cases + joins it into a CSS string for `element-render.ts`'s
+  wrappers, quoting `font-family` only there. `colStyle` (Section/Column, not slider-related) and
+  the per-breakpoint *delivery* mechanism (admin resolves live via `bpGetValue`; frontend still
+  emits static `@media` rules via `bpStyleRules` — legitimately different, both stay) were
+  deliberately left out of this pass. Both Dockerfiles copy+build it, same pattern as the two
+  packages above; `apps/api`'s Dockerfile is untouched since it has no render logic.
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both

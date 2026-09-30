@@ -1,6 +1,22 @@
 import { bestTextColor } from "@/lib/utils";
 import { escapeHtml, sanitizeUrl } from "@ucms/element-style";
-export { escapeHtml };
+import {
+  PAD,
+  RADIUS,
+  BORDER,
+  SPACE,
+  LEGACY_SHADOW,
+  lengthValue,
+  hexToRgba,
+  shadowToCss,
+  elRadius,
+  elHoverClass,
+  elMarginStyle as sharedElMarginStyle,
+  elPaddingStyle as sharedElPaddingStyle,
+  elBorderShadowStyle as sharedElBorderShadowStyle,
+  typoStyle as sharedTypoStyle,
+} from "@ucms/element-render";
+export { escapeHtml, PAD, RADIUS, BORDER, SPACE, LEGACY_SHADOW, lengthValue, hexToRgba, shadowToCss, elRadius, elHoverClass };
 
 // Style-computation pure helpers split out of Designer.tsx (Layer 0 of the
 // God Component refactor, see
@@ -11,11 +27,6 @@ export { escapeHtml };
 // never import back from Designer.tsx (see designer/types.ts's own note),
 // so anything a designer/ file needs has to live in designer/ too.
 
-export const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
-export const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
-export const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
-
-export const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
 export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
 export const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
 export const ICON_SIZE: Record<string, string> = { sm: "1rem", md: "1.5rem", lg: "2.25rem", xl: "3rem" };
@@ -38,17 +49,6 @@ export const RADIUS_CORNER_KEYS = {
   bottom: "radiusBottomRight",
   left: "radiusBottomLeft",
 } as const;
-// Legacy preset keywords (existing pages' saved shadow="sm"/"md"/"lg" values)
-// still resolve via this table. New edits store a pipe-delimited custom
-// shadow instead — see shadowToCss() — no presets, a real X/Y/blur/spread/
-// color/opacity panel (user: "saya taknak preset...letakkan option nombor").
-export const LEGACY_SHADOW: Record<string, string | undefined> = {
-  none: undefined,
-  sm: "0 1px 3px rgba(0,0,0,.1)",
-  md: "0 4px 12px rgba(0,0,0,.12)",
-  lg: "0 12px 32px rgba(0,0,0,.16)",
-};
-
 // gapPx() round-trips a stored CSS length string to/from the <input
 // type="number"> shown in the Inspector; assumes rem = 16px.
 export function gapPx(v: string | undefined): number | "" {
@@ -56,13 +56,6 @@ export function gapPx(v: string | undefined): number | "" {
   const n = parseFloat(v);
   if (Number.isNaN(n)) return "";
   return Math.round(v.endsWith("rem") ? n * 16 : n);
-}
-
-export function hexToRgba(hex: string, alpha: number): string {
-  const h = (hex || "#000000").replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
-  const n = parseInt(full, 16) || 0;
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Number.isFinite(alpha) ? alpha : 1})`;
 }
 
 // Canvas overlay chrome (dashed guides, drop hints) is drawn straight on top
@@ -76,92 +69,27 @@ export function overlayColors(bg: string): { line: string; text: string } {
     : { line: hexToRgba("#ffffff", 0.45), text: hexToRgba("#ffffff", 0.75) };
 }
 
-export function shadowToCss(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  if (raw in LEGACY_SHADOW) return LEGACY_SHADOW[raw];
-  const [x, y, blur, spread, color, opacity] = raw.split("|");
-  if (!x) return undefined;
-  return `${x}px ${y}px ${blur ?? 0}px ${spread ?? 0}px ${hexToRgba(color, Number(opacity))}`;
-}
-
-// Resolves a spacing value that may be either a legacy preset keyword
-// ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
-// ("42px", "2.5rem") — existing pages keep their preset look, new edits get
-// free-form units. Duplicated in SectionBlock.astro like every other table.
-export function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
-  if (!v) return fallback;
-  if (v in table) return table[v];
-  // FourSideControl's per-side inputs are bare text boxes (no unit picker,
-  // unlike single "length"-kind fields) — a user typing "20" meant px, but
-  // unitless non-zero border-radius/padding/margin is invalid CSS and gets
-  // silently dropped by the browser. Coerce it here instead of guessing at
-  // every call site.
-  return /^-?\d+(\.\d+)?$/.test(v) ? `${v}px` : v;
-}
-
-// Plain (non-bp) margin/padding — for elements that don't carry a `bp` bag
-// of their own, e.g. slide-nested elements (see ElPreview's "slider" case).
-// Designer.tsx's bpMarginStyle()/bpPaddingStyle() do the same thing plus a
-// bp-merge step for top-level elements; those stay closures over Designer()
-// state, so this is the bp-less subset factored out for reuse here instead.
+// Plain (non-bp) margin/padding/border/shadow, and typography — now single-
+// sourced in @ucms/element-render (see that package's own header comment for
+// why: these were the CSS style-computation helpers apps/frontend's
+// element-render.ts hand-duplicated, the exact drift risk that package's
+// design closes). These wrappers just cast the shared Record<string,string>
+// declaration map to React.CSSProperties for this app's own call sites.
 export function elMarginStyle(p: Record<string, string>): React.CSSProperties | undefined {
-  if (!p.marginY && !p.marginX && !p.marginTop && !p.marginRight && !p.marginBottom && !p.marginLeft) return undefined;
-  const side = (per: string, axis: string) => lengthValue(p[per] || p[axis], SPACE, "0");
-  return {
-    margin: `${side("marginTop", "marginY")} ${side("marginRight", "marginX")} ${side("marginBottom", "marginY")} ${side("marginLeft", "marginX")}`,
-  };
+  return sharedElMarginStyle(p) as React.CSSProperties | undefined;
 }
 export function elPaddingStyle(p: Record<string, string>): React.CSSProperties | undefined {
-  if (!p.padding && !p.paddingTop && !p.paddingRight && !p.paddingBottom && !p.paddingLeft) return undefined;
-  const side = (per: string) => lengthValue(p[per] || p.padding, PAD, "0");
-  return { padding: `${side("paddingTop")} ${side("paddingRight")} ${side("paddingBottom")} ${side("paddingLeft")}` };
+  return sharedElPaddingStyle(p) as React.CSSProperties | undefined;
 }
-
-// Border/shadow escape hatch shared by heading/text/button/image — mirrors
-// colStyle()'s border/boxShadow lines, just factored out so any element type
-// can opt in without duplicating the borderWidth-wins-over-border fallback.
 export function elBorderShadowStyle(p: Record<string, string>): React.CSSProperties {
-  // Omit unset keys entirely (rather than setting them to `undefined`) so
-  // spreading this into a style object never clobbers a variant's own
-  // default border (e.g. button's outline variant) when the author hasn't
-  // overridden it.
-  const border = p.borderWidth
-    ? `${p.borderWidth}px ${p.borderStyle || "solid"} ${p.borderColor || "currentColor"}`
-    : p.border
-      ? BORDER[p.border]
-      : undefined;
-  const boxShadow = shadowToCss(p.shadow);
-  return { ...(border ? { border } : {}), ...(boxShadow ? { boxShadow } : {}) };
+  return sharedElBorderShadowStyle(p) as React.CSSProperties;
 }
 
-// Hover/entrance effect class names — :hover and scroll-linked animation
-// can't be expressed as inline React.CSSProperties, so these opt into fixed
-// CSS classes defined once in index.css (mirrored in apps/frontend's
-// global.css for the published site) instead of a computed style object.
-// Entrance is site-only (no matching helper/class use here) — replaying a
-// scroll-entrance animation on every canvas re-render would just flicker.
-export function elHoverClass(p: Record<string, string>): string | undefined {
-  return p.hoverEffect && p.hoverEffect !== "none" ? `ds-hover-${p.hoverEffect}` : undefined;
-}
-
+// elHoverClass is re-exported from @ucms/element-render above (:hover can't
+// be expressed as inline React.CSSProperties, so it just picks a fixed class
+// name — see that package's own comment).
 export function typoStyle(p: Record<string, string>): React.CSSProperties {
-  const s: React.CSSProperties = {};
-  if (p.fontFamily) s.fontFamily = p.fontFamily;
-  if (p.color) s.color = p.color;
-  if (p.fontSize) s.fontSize = `${p.fontSize}px`;
-  if (p.lineHeight) s.lineHeight = p.lineHeight;
-  // letterSpacing/wordSpacing need a real CSS length unit — a bare number
-  // string (what the old stepper control and this drag-number control both
-  // store) is an invalid CSS value on its own and browsers silently drop it,
-  // so appending "px" here isn't a behavior change for existing saved pages,
-  // it's what actually makes the property apply for the first time.
-  if (p.letterSpacing) s.letterSpacing = `${p.letterSpacing}px`;
-  if (p.wordSpacing) s.wordSpacing = `${p.wordSpacing}px`;
-  if (p.fontWeight) s.fontWeight = p.fontWeight;
-  if (p.textTransform) s.textTransform = p.textTransform as React.CSSProperties["textTransform"];
-  if (p.fontStyle) s.fontStyle = p.fontStyle;
-  if (p.textDecoration) s.textDecoration = p.textDecoration;
-  return s;
+  return sharedTypoStyle(p) as React.CSSProperties;
 }
 
 export function colStyle(cp?: Record<string, string>): React.CSSProperties {
@@ -189,13 +117,7 @@ export function colStyle(cp?: Record<string, string>): React.CSSProperties {
   };
 }
 
-// Element radius (image/embed/gallery): same per-corner freedom as Section/
-// Column, and the same RADIUS.none fallback — no element gets a rounded
-// corner unless the author explicitly sets one.
-export function elRadius(p: Record<string, string>): string {
-  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.none);
-  return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
-}
+// elRadius is re-exported from @ucms/element-render above.
 
 // Anchor-specific fallback convention (falls back to "#", never undefined) —
 // the actual scheme/control-char validation now lives once in

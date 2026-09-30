@@ -48,6 +48,7 @@ import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
   elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
 } from "./style";
+import { computeFreePositionStyle } from "@ucms/element-render";
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
@@ -933,14 +934,13 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                           } ${childIsFree ? "cursor-move" : ""}`}
                           style={
                             childIsFree
-                              ? {
-                                  position: "absolute",
-                                  top: `${bpGetValue(childEl.props.y, childEl.bp, "y") || "50"}%`,
-                                  left: `${bpGetValue(childEl.props.x, childEl.bp, "x") || "50"}%`,
-                                  width: childPosWidth || undefined,
-                                  height: childPosHeight || undefined,
-                                  zIndex: Number(bpGetValue(childEl.props.zIndex, childEl.bp, "zIndex") || "0") || undefined,
-                                }
+                              ? (computeFreePositionStyle({
+                                  x: bpGetValue(childEl.props.x, childEl.bp, "x"),
+                                  y: bpGetValue(childEl.props.y, childEl.bp, "y"),
+                                  posWidth: childPosWidth || undefined,
+                                  posHeight: childPosHeight || undefined,
+                                  zIndex: bpGetValue(childEl.props.zIndex, childEl.bp, "zIndex"),
+                                }) as React.CSSProperties)
                               : {
                                   ...elMarginStyle(childEl.props ?? {}),
                                   ...elPaddingStyle(childEl.props ?? {}),
