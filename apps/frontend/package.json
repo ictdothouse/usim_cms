@@ -12,12 +12,12 @@
     "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@astrojs/node": "^11.0.2",
+    "@astrojs/node": "^11.1.6",
     "@ucms/element-render": "workspace:*",
     "@ucms/element-style": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
-    "astro": "^7.3.1",
-    "daisyui": "^5.6.18",
+    "astro": "^7.3.5",
+    "daisyui": "^5.7.46",
     "ioredis": "^5.4.2",
     "swiper": "^11.2.10",
     "tailwindcss": "^4.3.3"
