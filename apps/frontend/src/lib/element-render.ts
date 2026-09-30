@@ -7,27 +7,48 @@
 // "ReferenceError: RADIUS is not defined" at runtime for every page, not just
 // ones using a symbol. A plain .ts module bundles like any normal ESM
 // import — no astro-compiler chunking involved, so this can't recur here.
+//
+// The CSS style-computation helpers below (margin/padding/border/shadow/
+// typography/radius) are now thin string-serializing wrappers over
+// @ucms/element-render's shared value computation — that package's own
+// header comment explains why (this file used to hand-duplicate them against
+// apps/admin's designer/style.ts, the exact drift risk that caused the
+// recurring "Live Edit doesn't match Preview/Published" bug pattern). Every
+// exported name/signature here is unchanged, so SectionBlock.astro/
+// SymbolBlock.astro/SliderBlock.astro need no changes.
 import { escapeHtml, sanitizeUrl } from "@ucms/element-style";
+import {
+  PAD,
+  RADIUS,
+  BORDER,
+  SPACE,
+  LEGACY_SHADOW,
+  lengthValue,
+  hexToRgba,
+  shadowToCss as sharedShadowToCss,
+  elRadius,
+  elHoverClass,
+  elEntranceClass,
+  elMarginStyle as sharedElMarginStyle,
+  elPaddingStyle as sharedElPaddingStyle,
+  elBorderShadowStyle as sharedElBorderShadowStyle,
+  typoStyle as sharedTypoStyle,
+  toCssText,
+} from "@ucms/element-render";
 
-export const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
-export const SPACE: Record<string, string> = { sm: "1rem", md: "2rem", lg: "4rem", xl: "6rem" };
-export const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
+export { PAD, RADIUS, BORDER, SPACE, LEGACY_SHADOW, lengthValue, hexToRgba, elRadius, elHoverClass, elEntranceClass };
+// This app's own convention is `string | null` (not undefined) for an unset
+// shadow — kept as a thin wrapper so callers here are unaffected.
+export function shadowToCss(raw?: string): string | null {
+  return sharedShadowToCss(raw) ?? null;
+}
+
+// Matches apps/admin's own TEXT_SIZE table — not part of @ucms/element-render
+// (no function there consumes it), kept local like every other size table.
 export const TEXT_SIZE: Record<string, string> = { sm: "0.875rem", md: "1rem", lg: "1.2rem" };
-export const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };
-// Legacy preset keywords (existing content saved before the custom shadow
-// panel) still resolve here. A new edit stores a pipe-delimited
-// "x|y|blur|spread|color|opacity" string instead — mirrors
-// apps/admin/src/Designer.tsx's shadowToCss()/LEGACY_SHADOW, kept in sync by
-// hand like every other lookup table this file duplicates from there.
-export const LEGACY_SHADOW: Record<string, string | undefined> = {
-  none: undefined,
-  sm: "0 1px 3px rgba(0,0,0,.1)",
-  md: "0 4px 12px rgba(0,0,0,.12)",
-  lg: "0 12px 32px rgba(0,0,0,.16)",
-};
-// Matches apps/admin/src/Designer.tsx's ICONS map by name — hand-simplified
-// stroke path data (24x24, lucide-style) so this zero-JS renderer doesn't
-// need lucide-react as a dependency. Add a name to both places together.
+// Matches apps/admin's ICONS map by name — hand-simplified stroke path data
+// (24x24, lucide-style) so this zero-JS renderer doesn't need lucide-react as
+// a dependency. Add a name to both places together.
 export const ICON_PATHS: Record<string, string> = {
   check: "M20 6 9 17l-5-5",
   "arrow-right": "M5 12h14M12 5l7 7-7 7",
@@ -139,39 +160,27 @@ export const ICON_PATHS: Record<string, string> = {
   "arrow-up-right": "M7 7h10v10M7 17 17 7",
 };
 
+// Same fluid treatment as apps/admin's fluidPreviewPx, generalized to
+// whatever unit the standalone Text element's own free-form "size" field
+// actually stores (px/rem/em — a preset like TEXT_SIZE.md or any custom
+// value an author typed) rather than the slider's always-bare-px string.
+// rem/em are converted to a px equivalent for the floor/vw math only
+// (assumes the 16px root, same assumption Designer.tsx's pxLabel() already
+// makes) — the ceiling term keeps the author's original unit untouched. `%`
+// (or anything unrecognized) passes through as-is: already relative to its
+// container, not a fixed size that can render "too big" on a narrow screen
+// the way px/rem/em can.
 function fluidClamp(px: number, ceiling: string): string {
   const floor = Math.max(14, Math.round(px * 0.55));
   const vw = Math.round((px / 10) * 100) / 100;
   return `clamp(${floor}px, ${vw}vw, ${ceiling})`;
 }
-// Same fluid treatment, generalized to whatever unit the standalone Text
-// element's own free-form "size" field actually stores (px/rem/em — a
-// preset like TEXT_SIZE.md or any custom value an author typed) rather than
-// the slider's always-bare-px string. rem/em are converted to a px
-// equivalent for the floor/vw math only (assumes the 16px root, same
-// assumption Designer.tsx's pxLabel() already makes) — the ceiling term
-// keeps the author's original unit untouched. `%` (or anything unrecognized)
-// passes through as-is: already relative to its container, not a fixed size
-// that can render "too big" on a narrow screen the way px/rem/em can.
 export function fluidTextSize(v: string): string {
   const m = /^(-?[0-9]+(?:\.[0-9]+)?)(px|rem|em)$/.exec(v);
   if (!m) return v;
   const num = parseFloat(m[1]);
   const px = m[2] === "px" ? num : num * 16;
   return fluidClamp(px, v);
-}
-export function hexToRgba(hex: string, alpha: number): string {
-  const h = (hex || "#000000").replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.padEnd(6, "0").slice(0, 6);
-  const n = parseInt(full, 16) || 0;
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Number.isFinite(alpha) ? alpha : 1})`;
-}
-export function shadowToCss(raw?: string): string | null {
-  if (!raw) return null;
-  if (raw in LEGACY_SHADOW) return LEGACY_SHADOW[raw] ?? null;
-  const [x, y, blur, spread, color, opacity] = raw.split("|");
-  if (!x) return null;
-  return `${x}px ${y}px ${blur ?? 0}px ${spread ?? 0}px ${hexToRgba(color, Number(opacity))}`;
 }
 // Image-src-style fallback convention (undefined so an <img>/bgImage can
 // skip rendering entirely) — the actual scheme/control-char validation now
@@ -192,85 +201,28 @@ export function renderInline(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 }
-// Resolves a spacing value that may be either a legacy preset keyword
-// ("sm"/"md"/"lg"/"xl"/"none") or a real CSS length the author typed
-// ("42px", "2.5rem") — existing pages keep their preset look, new edits get
-// free-form units. Duplicated in Designer.tsx like every other shared table.
-export function lengthValue(v: string | undefined, table: Record<string, string>, fallback: string) {
-  if (!v) return fallback;
-  if (v in table) return table[v];
-  // Mirrors Designer.tsx's own lengthValue fix: FourSideControl's per-side
-  // inputs are bare text boxes, so a typed "20" meant px — unitless non-zero
-  // border-radius/padding/margin is invalid CSS and silently dropped.
-  return /^-?\d+(\.\d+)?$/.test(v) ? `${v}px` : v;
-}
 // Every element accepts marginY/marginX, or independent per-side overrides
 // (see Designer.tsx's Inspector) — same fallback convention as paddingStyle.
-export function marginStyle(p: Record<string, string>) {
-  if (!p.marginY && !p.marginX && !p.marginTop && !p.marginRight && !p.marginBottom && !p.marginLeft) return null;
-  const top = lengthValue(p.marginTop || p.marginY, SPACE, "0");
-  const right = lengthValue(p.marginRight || p.marginX, SPACE, "0");
-  const bottom = lengthValue(p.marginBottom || p.marginY, SPACE, "0");
-  const left = lengthValue(p.marginLeft || p.marginX, SPACE, "0");
-  return `margin:${top} ${right} ${bottom} ${left}`;
+export function marginStyle(p: Record<string, string>): string | null {
+  const s = sharedElMarginStyle(p);
+  return s ? toCssText(s) : null;
 }
 // Universal per-element padding (all 4 sides) — unlike radius, which only
 // makes visual sense on image/embed/gallery, every element type gets this.
-export function paddingStyle(p: Record<string, string>) {
-  if (!p.padding && !p.paddingTop && !p.paddingRight && !p.paddingBottom && !p.paddingLeft) return null;
-  const side = (per: string) => lengthValue(p[per] || p.padding, PAD, "0");
-  return `padding:${side("paddingTop")} ${side("paddingRight")} ${side("paddingBottom")} ${side("paddingLeft")}`;
+export function paddingStyle(p: Record<string, string>): string | null {
+  const s = sharedElPaddingStyle(p);
+  return s ? toCssText(s) : null;
 }
 // Border/shadow escape hatch shared by heading/text/button/image — mirrors
 // apps/admin's elBorderShadowStyle(); returns null (not a stray "border:;")
-// when neither is set, so an existing default (e.g. button's outline
-// variant CSS class) isn't overridden by an empty declaration.
+// when neither is set.
 export function elBorderShadowStyle(p: Record<string, string>): string | null {
-  const border = p.borderWidth
-    ? `border:${p.borderWidth}px ${p.borderStyle || "solid"} ${p.borderColor || "currentColor"}`
-    : p.border
-      ? `border:${BORDER[p.border]}`
-      : null;
-  const shadow = shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null;
-  return [border, shadow].filter(Boolean).join(";") || null;
+  const s = sharedElBorderShadowStyle(p);
+  return Object.keys(s).length ? toCssText(s) : null;
 }
 // Full typography escape hatch for heading/text/list.
-export function typoStyle(p: Record<string, string>) {
-  return [
-    p.fontFamily ? `font-family:'${p.fontFamily}'` : null,
-    p.color ? `color:${p.color}` : null,
-    p.fontSize ? `font-size:${p.fontSize}px` : null,
-    p.lineHeight ? `line-height:${p.lineHeight}` : null,
-    // Bare number strings (what the drag-number control stores) are invalid
-    // CSS without a unit — browsers silently drop them, so this was
-    // previously a no-op field on the real site too. Mirrors the same fix in
-    // apps/admin's style.ts typoStyle().
-    p.letterSpacing ? `letter-spacing:${p.letterSpacing}px` : null,
-    p.wordSpacing ? `word-spacing:${p.wordSpacing}px` : null,
-    p.fontWeight ? `font-weight:${p.fontWeight}` : null,
-    p.textTransform ? `text-transform:${p.textTransform}` : null,
-    p.fontStyle ? `font-style:${p.fontStyle}` : null,
-    p.textDecoration ? `text-decoration:${p.textDecoration}` : null,
-  ]
-    .filter(Boolean)
-    .join(";");
-}
-// Hover/entrance effect classes — mirrors apps/admin's elHoverClass; the
-// classes themselves are defined once in global.css (ds-hover-*/ds-entrance-*).
-// entrance has no admin-canvas equivalent, see that file's own comment.
-export function elHoverClass(p: Record<string, string>): string | undefined {
-  return p.hoverEffect && p.hoverEffect !== "none" ? `ds-hover-${p.hoverEffect}` : undefined;
-}
-export function elEntranceClass(p: Record<string, string>): string | undefined {
-  return p.entrance && p.entrance !== "none" ? `ds-entrance-${p.entrance}` : undefined;
-}
-// Element radius (image/embed/gallery): per-corner freedom, same fallback-
-// chain convention as SectionBlock.astro's colStyle()/sectionStyle, and the
-// same RADIUS.none fallback — no element gets a rounded corner unless the
-// author explicitly sets one.
-export function elRadius(p: Record<string, string>): string {
-  const corner = (per: string) => lengthValue(p[per] || p.radius, RADIUS, RADIUS.none);
-  return `${corner("radiusTopLeft")} ${corner("radiusTopRight")} ${corner("radiusBottomRight")} ${corner("radiusBottomLeft")}`;
+export function typoStyle(p: Record<string, string>): string {
+  return toCssText(sharedTypoStyle(p));
 }
 export const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
 export const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");

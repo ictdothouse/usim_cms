@@ -43,6 +43,7 @@ import {
   cls,
   headingTag,
 } from "../lib/element-render";
+import { bestTextColor, computeFreePositionStyle, toCssText } from "@ucms/element-render";
 
 // Local, not imported from SectionBlock.astro's frontmatter — see this
 // file's own comment above and SectionBlock.astro's top comment on the
@@ -115,24 +116,9 @@ function bpStyleRules(selector: string, bp: Record<string, string>, base: Record
 // sole owner is this slider case (moved wholesale out of SectionBlock.astro,
 // not duplicated).
 const HEX_RE = /^#[0-9a-f]{6}$/i;
-// Mirrors apps/admin/src/lib/utils.ts's bestTextColor/contrastRatio — can't
-// share code across the two apps (no shared package for this), so this is a
-// deliberate byte-for-byte-equivalent port, not a rewrite.
-function relativeLuminance(hex: string): number {
-  const clean = hex.replace("#", "");
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(clean.slice(i, i + 2), 16) / 255);
-  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-function contrastRatio(hexA: string, hexB: string): number {
-  const lA = relativeLuminance(hexA);
-  const lB = relativeLuminance(hexB);
-  const [lighter, darker] = lA > lB ? [lA, lB] : [lB, lA];
-  return (lighter + 0.05) / (darker + 0.05);
-}
-function bestTextColor(hex: string): string {
-  return contrastRatio("#ffffff", hex) >= contrastRatio("#000000", hex) ? "#ffffff" : "#000000";
-}
+// bestTextColor is now single-sourced in @ucms/element-render (imported
+// above) — this used to be a hand-copied byte-for-byte port, the exact drift
+// risk that package's design closes.
 // Slide-nested element free positioning (props.position === "custom") — opts
 // an element out of the row/column stack and into position:absolute inside
 // `.ds-slide-content` (already `position:relative` for its own z-index — see
@@ -143,16 +129,7 @@ function bestTextColor(hex: string): string {
 // expression parser rejects a function declaration's TS type annotations.
 function posStyle(mp: Record<string, string>): string | null {
   return mp.position === "custom"
-    ? [
-        "position:absolute",
-        `top:${mp.y || "50"}%`,
-        `left:${mp.x || "50"}%`,
-        mp.posWidth ? `width:${mp.posWidth}` : null,
-        mp.posHeight ? `height:${mp.posHeight}` : null,
-        mp.zIndex ? `z-index:${mp.zIndex}` : null,
-      ]
-        .filter(Boolean)
-        .join(";")
+    ? toCssText(computeFreePositionStyle({ x: mp.x, y: mp.y, posWidth: mp.posWidth, posHeight: mp.posHeight, zIndex: mp.zIndex }))
     : null;
 }
 

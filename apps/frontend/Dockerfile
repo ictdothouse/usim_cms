@@ -12,8 +12,10 @@ COPY apps/admin/package.json apps/admin/package.json
 COPY apps/frontend/package.json apps/frontend/package.json
 COPY packages/element-schema/package.json packages/element-schema/package.json
 COPY packages/element-style/package.json packages/element-style/package.json
+COPY packages/element-render/package.json packages/element-render/package.json
 RUN pnpm install --frozen-lockfile
 COPY packages/element-style packages/element-style
+COPY packages/element-render packages/element-render
 COPY apps/frontend apps/frontend
 # @ucms/element-style (apps/frontend's own dependency, see
 # SectionBlock.astro's import and package.json) ships no dist/ in the repo —
@@ -21,6 +23,7 @@ COPY apps/frontend apps/frontend
 # compiled output via the workspace symlink. See apps/admin/Dockerfile's own
 # identical comment on why this step can't be skipped.
 RUN pnpm --filter @ucms/element-style build
+RUN pnpm --filter @ucms/element-render build
 # Test gate — no test files here, but `astro build` alone doesn't fully
 # type-check (unlike api/admin's tsc-based builds), so run `astro check`
 # explicitly. See apps/api/Dockerfile's own comment for why this is enough
