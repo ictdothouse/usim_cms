@@ -15,7 +15,7 @@
 import type React from "react";
 import type * as api from "@/lib/api";
 import type { Key } from "@/i18n";
-import type { Bp, Block, FieldGroupKey, PageSettings, Sel, SectionProps } from "./types";
+import type { Bp, Block, FieldGroupKey, PageSettings, Seo, Sel, SectionProps } from "./types";
 
 export type ClipLevel = "section" | "row" | "column" | "element";
 
@@ -115,6 +115,13 @@ export interface DesignerCtx {
   setPageCanvasColor: (canvasColor: string | undefined) => void;
   setPageThemePreset: (preset: api.ThemePreset | null) => void;
   themePresets: api.ThemePreset[];
+  pageSeo: Seo;
+  setPageSeo: (patch: Partial<Seo>) => void;
+  // Plain values used only by the SEO search-preview card (InspectorPageSettings) —
+  // not threaded further, unlike most of this context's fields.
+  tenantHost: string;
+  pageSlug: string;
+  pageTitle: string;
 
   // Page-level header/footer assignment ("nothing selected" panel, page kind only)
   pageHeaderId: string;

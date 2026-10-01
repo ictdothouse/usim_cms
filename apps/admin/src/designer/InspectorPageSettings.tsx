@@ -6,11 +6,13 @@ import { RefreshCw } from "lucide-react";
 import { BASE_LANG, type DesignerCtx } from "./context";
 import { BufferedInput } from "./FieldControls";
 import { gapPx } from "./style";
+import { SeoPreviewCard } from "../components/SeoPreviewCard";
 
 export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
   const {
     t, kind,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
+    pageSeo, setPageSeo, tenantHost, pageSlug, pageTitle, openMediaPicker,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled, setDirty,
     siteLanguages, pageLanguage, setPageLanguage, activeLang, hasLangSlot,
@@ -189,6 +191,61 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
           </select>
         )}
       </div>
+      )}
+      {kind === "page" && (
+        <div className="space-y-2 border-t border-line/30 pt-3">
+          <p className="text-[11px] font-bold text-ink">{t("designer-page-seo-heading")}</p>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-seo-title")}
+            <BufferedInput
+              value={pageSeo.title ?? ""}
+              placeholder={pageTitle}
+              onCommit={(v) => setPageSeo({ title: v || undefined })}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            />
+          </label>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-seo-description")}
+            <textarea
+              rows={3}
+              defaultValue={pageSeo.description ?? ""}
+              onBlur={(e) => setPageSeo({ description: e.target.value || undefined })}
+              className="mt-1 w-full resize-none rounded-md border border-line/30 px-2 py-1 text-xs"
+            />
+          </label>
+          <div className="flex items-center gap-2">
+            {pageSeo.ogImage && <img src={pageSeo.ogImage} alt="" className="h-10 w-10 rounded object-cover" />}
+            <button
+              type="button"
+              onClick={() => openMediaPicker((v) => setPageSeo({ ogImage: v }))}
+              className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+            >
+              {t("designer-page-seo-ogimage")}
+            </button>
+            {pageSeo.ogImage && (
+              <button type="button" onClick={() => setPageSeo({ ogImage: undefined })} className="text-[11px] text-sub hover:text-ink">
+                {t("designer-page-seo-ogimage-remove")}
+              </button>
+            )}
+          </div>
+          <label className="block text-[11px] font-medium text-body">
+            {t("designer-page-seo-canonical")}
+            <BufferedInput
+              value={pageSeo.canonicalUrl ?? ""}
+              onCommit={(v) => setPageSeo({ canonicalUrl: v || undefined })}
+              className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+            <input type="checkbox" checked={pageSeo.noindex ?? false} onChange={(e) => setPageSeo({ noindex: e.target.checked || undefined })} />
+            {t("designer-page-seo-noindex")}
+          </label>
+          <SeoPreviewCard
+            title={pageSeo.title || pageTitle}
+            url={`https://${tenantHost}/${pageSlug}`}
+            description={pageSeo.description ?? ""}
+          />
+        </div>
       )}
       <p className="text-[10px] text-sub">{t("designer-none-selected")}</p>
     </div>

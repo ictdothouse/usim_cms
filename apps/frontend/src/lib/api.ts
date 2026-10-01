@@ -17,6 +17,16 @@ const cache = new Map<string, unknown>();
 
 type PageLayout = Array<{ type: string; props?: Record<string, unknown> }>;
 
+// Native SEO + AEO (migration 0028) — author override on top of the row's own
+// title/bannerImageUrl/computed canonical URL. Shared shape for pages and posts.
+export interface Seo {
+  title?: string;
+  description?: string;
+  ogImage?: string;
+  noindex?: boolean;
+  canonicalUrl?: string;
+}
+
 export interface Page {
   id: string;
   slug: string;
@@ -29,6 +39,7 @@ export interface Page {
   // optional theme snapshot copied from a saved preset, overlaid onto the
   // tenant's own theme for this page's render only (see [...slug].astro).
   settings?: { gap?: string; contentWidth?: "contained" | "full"; paddingX?: string; theme?: Record<string, string> };
+  seo?: Seo;
   // i18n Phase 5 — language is null until an author picks one for this
   // page's own base content; translations holds every OTHER language's own
   // data on this SAME row, keyed by code (no separate page per language —
@@ -168,6 +179,13 @@ export async function getPageBySlug(tenantHost: string, slug: string, token?: st
   return items[0] ?? null;
 }
 
+// sitemap.xml's own data source — mirrors listPosts below.
+export async function listPages(tenantHost: string, query?: Record<string, string>): Promise<Page[]> {
+  const qs = query && Object.keys(query).length ? `?${new URLSearchParams(query)}` : "";
+  const { items } = await apiGet<{ items: Page[] }>(`/api/pages${qs}`, tenantHost);
+  return items;
+}
+
 export interface SiteChrome {
   id: string;
   kind: "header" | "footer";
@@ -248,6 +266,7 @@ export interface Post {
   // is just this staying empty, so resolveCategoryName falls through to
   // `category` above for every language.
   categoryTranslations: Record<string, { name: string }>;
+  seo?: Seo;
   tags: string[];
   authorEmail: string | null;
   status: "draft" | "published" | "private";

@@ -7,6 +7,15 @@ import type { SiteChrome } from "../lib/api";
 interface Props {
   title: string;
   ogImage?: string | null;
+  // Native SEO + AEO (migration 0028) — resolved server-side by the calling page
+  // ([...slug].astro/posts/[slug].astro) from that row's own seo override + computed
+  // fallbacks, so this layout only has to render, not re-resolve, the final values.
+  metaDescription?: string | null;
+  noindex?: boolean;
+  canonicalUrl?: string | null;
+  // schema.org JSON-LD object (WebPage/BlogPosting) — JSON.stringify'd verbatim into
+  // a <script type="application/ld+json">, the AEO half of this feature.
+  jsonLd?: Record<string, unknown> | null;
   theme: Record<string, unknown>;
   // Extra per-element Google Fonts used on this page (see
   // apps/frontend/src/lib/collectFonts.ts) — merged with the theme's own
@@ -54,6 +63,10 @@ interface Props {
 const {
   title,
   ogImage,
+  metaDescription = null,
+  noindex = false,
+  canonicalUrl = null,
+  jsonLd = null,
   theme,
   fonts = [],
   designerEdit = false,
@@ -171,6 +184,15 @@ const fontsHref = allFonts.length
     <title>{title}</title>
     <meta property="og:title" content={title} />
     {ogImage && <meta property="og:image" content={ogImage} />}
+    {metaDescription && (
+      <>
+        <meta name="description" content={metaDescription} />
+        <meta property="og:description" content={metaDescription} />
+      </>
+    )}
+    {noindex && <meta name="robots" content="noindex,nofollow" />}
+    {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
     {lcpImage && <link rel="preload" as="image" fetchpriority="high" href={lcpImage} />}
     {fontsHref && (
       <>

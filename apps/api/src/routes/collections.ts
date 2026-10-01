@@ -60,8 +60,27 @@ function lockedSectionViolation(oldLayout: unknown[], newLayout: unknown[]): str
 // publishedAt arrives as an ISO string over JSON; Drizzle's timestamp column
 // needs a Date. Same conversion as sanitizePostBody, plus the updatedAt bump
 // posts already gets and pages never did.
+// Native SEO + AEO (migration 0028) — seo.ogImage/canonicalUrl are author-supplied
+// URLs rendered straight into a <meta>/<link> attribute on the public site, exactly
+// as much of a CSS/XSS surface as bgImage or any other URL-type field this file
+// already guards with isSafeUrl. title/description are plain text, no URL risk.
+function validateSeo(seo: unknown): string | null {
+  if (seo === undefined || seo === null) return null;
+  if (typeof seo !== "object" || Array.isArray(seo)) return "seo must be an object";
+  const s = seo as Record<string, unknown>;
+  for (const key of ["ogImage", "canonicalUrl"] as const) {
+    const v = s[key];
+    if (typeof v === "string" && v !== "" && !isSafeUrl(v)) return `seo.${key} is not a safe URL`;
+  }
+  return null;
+}
+
 const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
+  if (record.seo !== undefined) {
+    const err = validateSeo(record.seo);
+    if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  }
   if (record.layout !== undefined) {
     const err = validateLayout(record.layout);
     // beforeChange has no `reply` in its signature (see config-types.ts) —
@@ -192,6 +211,17 @@ export const pagesCollection: CollectionConfig = {
           themePresetName: { type: "string" },
         },
       },
+      seo: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          ogImage: { type: "string" },
+          noindex: { type: "boolean" },
+          canonicalUrl: { type: "string" },
+        },
+      },
       language: { type: ["string", "null"] },
       multilangEnabled: { type: "boolean" },
       translations: { type: "object" },
@@ -225,6 +255,7 @@ export const pagesCollection: CollectionConfig = {
         title: row.title as string,
         layout: (row.layout as unknown[]) ?? [],
         settings: (row.settings as Record<string, unknown>) ?? {},
+        seo: (row.seo as Record<string, unknown>) ?? {},
         bannerImageUrl: row.bannerImageUrl as string | null,
         status: row.status as string,
         publishedAt: row.publishedAt as Date | null,
@@ -234,6 +265,7 @@ export const pagesCollection: CollectionConfig = {
       title: revision.title,
       layout: revision.layout,
       settings: revision.settings,
+      seo: revision.seo,
       bannerImageUrl: revision.bannerImageUrl,
     }),
   },
@@ -302,6 +334,10 @@ function sanitizePostBodyHtml(html: string): string {
 
 const postsBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
+  if (record.seo !== undefined) {
+    const err = validateSeo(record.seo);
+    if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  }
   // i18n Phase 3 — same thrown-.statusCode convention as pagesBeforeChange's
   // validateLayout check above: reject before generic-crud's insert/update
   // try block runs, so this is a clean 400, never a raw 500.
@@ -368,6 +404,17 @@ export const postsCollection: CollectionConfig = {
       body: { type: "string" },
       excerpt: { type: "string" },
       bannerImageUrl: { type: "string" },
+      seo: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          ogImage: { type: "string" },
+          noindex: { type: "boolean" },
+          canonicalUrl: { type: "string" },
+        },
+      },
       status: { type: "string", enum: ["draft", "published", "private"] },
       categoryId: { type: ["string", "null"] },
       tags: { type: "array", items: { type: "string" } },
@@ -414,6 +461,7 @@ export const postsCollection: CollectionConfig = {
         body: row.body as string,
         excerpt: row.excerpt as string | null,
         bannerImageUrl: row.bannerImageUrl as string | null,
+        seo: (row.seo as Record<string, unknown>) ?? {},
         category: categoryName,
         tags: (row.tags as string[]) ?? [],
         status: row.status as string,
@@ -435,6 +483,7 @@ export const postsCollection: CollectionConfig = {
         body: revision.body,
         excerpt: revision.excerpt,
         bannerImageUrl: revision.bannerImageUrl,
+        seo: revision.seo,
         categoryId,
         tags: revision.tags,
       };

@@ -107,6 +107,25 @@ function findLcpImageUrl(blocks: typeof layout): string | null {
   return null;
 }
 const lcpImage = page ? findLcpImageUrl(layout) : null;
+
+// Native SEO + AEO: page.seo overrides fall back to the row's own
+// title/bannerImageUrl/computed canonical URL — see BaseLayout.astro's own Props
+// comment for how these get rendered.
+const seo = page?.seo ?? {};
+const effectiveTitle = seo.title || page?.title || "";
+const effectiveDescription = seo.description || "";
+const effectiveOgImage = seo.ogImage || page?.bannerImageUrl || undefined;
+const canonicalUrl = seo.canonicalUrl || (page ? `https://${tenantHost}/${page.slug}` : undefined);
+const jsonLd = page
+  ? {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      name: effectiveTitle,
+      ...(effectiveDescription ? { description: effectiveDescription } : {}),
+      url: canonicalUrl,
+      ...(requestedLang || page.language ? { inLanguage: requestedLang ?? page.language } : {}),
+    }
+  : null;
 const pageLangLabel = (code: string | null) => siteLanguages.find((l) => l.code === code)?.label ?? code ?? "?";
 const availableCodes = page ? [page.language, ...Object.keys(page.translations)].filter((c): c is string => Boolean(c)) : [];
 const langSwitcher =
@@ -128,8 +147,12 @@ const { header: headerChrome, footer: footerChrome } = page
   : { header: null, footer: null };
 ---
 <BaseLayout
-  title={page?.title ?? "Halaman tidak dijumpai"}
-  ogImage={page?.bannerImageUrl}
+  title={page ? effectiveTitle : "Halaman tidak dijumpai"}
+  ogImage={effectiveOgImage}
+  metaDescription={effectiveDescription || null}
+  noindex={seo.noindex ?? false}
+  canonicalUrl={canonicalUrl}
+  jsonLd={jsonLd}
   theme={theme}
   fonts={fonts}
   designerEdit={designerEdit}

@@ -336,3 +336,13 @@ export interface PageSettings {
   // apps/frontend's real page render, unlike every other key here.
   canvasColor?: string;
 }
+
+// Native SEO + AEO (migration 0028) — shared by Designer's PageSettings and
+// PostEditorPage, mirrors apps/api's seo jsonb column / apps/frontend's Seo type.
+export interface Seo {
+  title?: string;
+  description?: string;
+  ogImage?: string;
+  noindex?: boolean;
+  canonicalUrl?: string;
+}
