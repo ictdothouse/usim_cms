@@ -150,15 +150,18 @@ function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], app
 // doesn't warrant. Reads the wrapper's actual rendered size as the drag's
 // starting point (not the stored posWidth/posHeight, which are often ""/
 // "auto") so a never-resized element starts from where it visibly is.
-// `widthRatio` (new width / width at drag start) lets a caller scale a
-// proportional value (a text child's font size, see the "slider" case's
-// call site) alongside the box itself — Canva-style "drag the corner,
-// the text grows with it" instead of the box just enclosing more
-// whitespace around a fixed-size font.
+// `sizeRatio` (new diagonal / diagonal at drag start — not just width) lets a
+// caller scale a proportional value (a text child's font size, see the
+// "slider" case's call site) alongside the box itself — Canva-style "drag
+// the corner, the text grows with it" instead of the box just enclosing more
+// whitespace around a fixed-size font. Diagonal, not plain width, so a drag
+// that's mostly vertical (box gets much taller, only slightly wider) still
+// scales the font — a width-only ratio barely moved for that drag, which
+// read as "I made it bigger but the text didn't follow."
 function startFreeElResize(
   ev: React.PointerEvent,
   siblings: FreeSiblingPct[],
-  apply: (widthPx: number, heightPx: number, widthRatio: number) => void,
+  apply: (widthPx: number, heightPx: number, sizeRatio: number) => void,
 ) {
   ev.stopPropagation();
   ev.preventDefault();
@@ -167,6 +170,7 @@ function startFreeElResize(
   const rect = wrapper.getBoundingClientRect();
   const startW = rect.width;
   const startH = rect.height;
+  const startDiag = Math.hypot(startW, startH);
   const startX = ev.clientX;
   const startY = ev.clientY;
   // Snap the resized (right/bottom) edge to the safe-area margin or another
@@ -194,7 +198,7 @@ function startFreeElResize(
     let h = Math.max(20, Math.round(startH + (e.clientY - startY)));
     if (fixedLeft !== null) w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
     if (fixedTop !== null) h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
-    apply(w, h, startW > 0 ? w / startW : 1);
+    apply(w, h, startDiag > 0 ? Math.hypot(w, h) / startDiag : 1);
   }
   function up() {
     window.removeEventListener("pointermove", move);
@@ -1009,7 +1013,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                           {selected && childIsFree && path && (
                             <div
                               onPointerDown={(ev) => {
-                                startFreeElResize(ev, siblingsPct, (widthPx, heightPx, widthRatio) => {
+                                startFreeElResize(ev, siblingsPct, (widthPx, heightPx, sizeRatio) => {
                                   mutate((bs) => {
                                     const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
                                     const currentSlides = parseSlides(target.props.slides);
@@ -1030,7 +1034,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                           childEl.type === "heading"
                                             ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || H_SIZE[bpGetValue(childEl.props.level, childEl.bp, "level") || "2"]
                                             : bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md,
-                                          widthRatio,
+                                          sizeRatio,
                                         )
                                       : null;
                                     const patch: Record<string, string> = { posWidth: wv, posHeight: hv };
