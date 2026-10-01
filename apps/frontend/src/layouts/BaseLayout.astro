@@ -680,9 +680,16 @@ const fontsHref = allFonts.length
             const eyCandidates = [insetY, containerRect.height - insetY, ...siblings.map((s) => s.top), ...siblings.map((s) => s.top + s.height)];
             const isTextLike = node.tagName === "P" || /^H[1-4]$/.test(node.tagName);
             const startFontPx = isTextLike ? parseFloat(getComputedStyle(node).fontSize) : 0;
+            // Diagonal, not plain width — mirrors apps/admin's ElPreview.tsx
+            // startFreeElResize fix: a mostly-vertical drag (box gets much
+            // taller, only slightly wider) still scales the font. A
+            // width-only ratio barely moved for that drag, which read as
+            // "I made it bigger but the text didn't follow."
+            const startDiag = Math.hypot(startW, startH);
             let moved = false;
             let finalW = startW;
             let finalH = startH;
+            let finalRatio = 1;
             function move(ev) {
               moved = true;
               let w = Math.max(20, Math.round(startW + (ev.clientX - startX)));
@@ -691,8 +698,9 @@ const fontsHref = allFonts.length
               h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
               node.style.width = w + "px";
               node.style.height = h + "px";
+              finalRatio = startDiag > 0 ? Math.hypot(w, h) / startDiag : 1;
               if (isTextLike && startFontPx > 0) {
-                node.style.fontSize = Math.max(8, Math.round(startFontPx * (w / startW))) + "px";
+                node.style.fontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
               }
               finalW = w;
               finalH = h;
@@ -705,7 +713,7 @@ const fontsHref = allFonts.length
                 if (sliderNode) {
                   const patch = { posWidth: finalW + "px", posHeight: finalH + "px" };
                   if (isTextLike && startFontPx > 0) {
-                    patch.posFontSize = Math.max(8, Math.round(startFontPx * (finalW / startW))) + "px";
+                    patch.posFontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
                   }
                   justDragged = true;
                   parent.postMessage(
