@@ -26,6 +26,12 @@ test("computeFreePositionStyle carries through explicit x/y/width/height/zIndex"
   assert.equal(s.zIndex, "3");
 });
 
+test("computeFreePositionStyle clamps width/height to remaining room past x/y, so it can't escape its slide on a narrower viewport", () => {
+  const s = computeFreePositionStyle({ x: "35.7", y: "55.4", posWidth: "334px", posHeight: "77px" });
+  assert.equal(s.maxWidth, "calc(100% - 35.7%)");
+  assert.equal(s.maxHeight, "calc(100% - 55.4%)");
+});
+
 test("computeFreePositionStyle treats zIndex 0 as unset", () => {
   const s = computeFreePositionStyle({ zIndex: "0" });
   assert.equal(s.zIndex, undefined);
