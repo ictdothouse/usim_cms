@@ -415,6 +415,7 @@ const p = el.props ?? {};
             class={cls("ds-text", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
             data-slide-el={el.id}
             data-slide-sel={slideSel}
+            data-slide-free={ep.position === "custom" ? "true" : undefined}
             style={[
               `font-size:${fluidTextSize(lengthValue(ep.size, TEXT_SIZE, TEXT_SIZE.md))}`,
               ep.align ? `text-align:${ep.align}` : null,
@@ -439,7 +440,7 @@ const p = el.props ?? {};
         const epSrc = safeUrl(ep.src);
         const epSrcset = epSrc ? buildSrcset(epSrc) : null;
         return epSrc ? (
-          <div data-slide-el={el.id} data-slide-sel={slideSel} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
+          <div data-slide-el={el.id} data-slide-sel={slideSel} data-slide-free={freePos ? "true" : undefined} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
             <img
               class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
               src={epSrc}
@@ -468,6 +469,7 @@ const p = el.props ?? {};
           <div
             data-slide-el={el.id}
             data-slide-sel={slideSel}
+            data-slide-free={freePos ? "true" : undefined}
             style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), posStyle(ep)].filter(Boolean).join(";")}
           >
             <a

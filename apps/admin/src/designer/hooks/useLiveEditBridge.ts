@@ -19,6 +19,7 @@ import type { Key } from "@/i18n";
 import { moveSection, moveColumn, removeAt, insertAt } from "../../designerTree";
 import { section } from "../blockPath";
 import { PAD, RADIUS, BORDER, colStyle, shadowToCss, lengthValue, typoStyle } from "../style";
+import { parseSlides, stringifySlides, updateSlideElementProps } from "../parsers";
 import type { Block, Sel, SectionProps } from "../types";
 
 export interface LiveEditBridgeDeps {
@@ -247,6 +248,34 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         setSel(sliderPath);
         setSliderSlideIdx((m) => ({ ...m, [sliderEl.id]: slideIdx }));
         setSliderInnerSel((m) => ({ ...m, [sliderEl.id]: { r: sr, c: sc, e: se } }));
+        return;
+      }
+      if (e.data?.type === "designer:slideElDrag") {
+        // Posted once, on pointerup, by BaseLayout.astro's own free-position
+        // drag/resize gesture (the whole drag runs natively inside the
+        // iframe's real DOM for instant feedback — this just persists the
+        // final value into blocks state, same as any other slide field edit
+        // the Inspector already makes via updateSlideElementProps). Mirrors
+        // designer:selectSlideEl's own path parsing right above.
+        const sliderPath = String(e.data.sliderPath ?? "")
+          .split(".")
+          .map(Number);
+        const slideSel = String(e.data.slideSel ?? "")
+          .split(".")
+          .map(Number);
+        if (sliderPath.length !== 4 || slideSel.length !== 4) return;
+        const [b, r, c, elIdx] = sliderPath;
+        const [slideIdx, sr, sc, se] = slideSel;
+        const patch = (e.data.patch ?? {}) as Record<string, string>;
+        mutate((bs) => {
+          const target = (bs[b]?.props as unknown as SectionProps | undefined)?.rows?.[r]?.columns?.[c]?.elements?.[elIdx];
+          if (!target || target.type !== "slider") return;
+          const currentSlides = parseSlides(target.props.slides);
+          const s0 = currentSlides[slideIdx];
+          if (!s0) return;
+          currentSlides[slideIdx] = updateSlideElementProps(s0, sr, sc, se, patch);
+          target.props.slides = stringifySlides(currentSlides);
+        });
         return;
       }
       const path = String(e.data?.path ?? "")
