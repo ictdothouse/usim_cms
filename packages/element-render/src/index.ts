@@ -149,8 +149,14 @@ export interface FreePositionInput {
 // admin resolves its own tier via bpGetValue before calling this, frontend via its pre-merged
 // prop bag — so this stays a pure value-to-style function with no bp-resolution logic inside it.
 export function computeFreePositionStyle(input: FreePositionInput): Record<string, string> {
-  const x = input.x || "50";
-  const y = input.y || "50";
+  // Clamped to [0,100] regardless of what's stored — the drag/resize
+  // handles (ElPreview.tsx, BaseLayout.astro's Live Edit bridge) now clamp
+  // on input too, but this is the one shared render path both read
+  // through, so it's also what makes an already-saved out-of-range value
+  // (from before that clamp existed, or hand-typed into the Inspector's
+  // X/Y fields) self-heal visually on next render, no data migration.
+  const x = Math.max(0, Math.min(100, Number(input.x || "50")));
+  const y = Math.max(0, Math.min(100, Number(input.y || "50")));
   const s: Record<string, string> = {
     position: "absolute",
     top: `${y}%`,
@@ -160,7 +166,8 @@ export function computeFreePositionStyle(input: FreePositionInput): Record<strin
   // author was dragging on (usually desktop) — on a narrower viewport
   // (mobile) that fixed px can be wider than the slide has room for at
   // this x/y, pushing the element past the slide's own edge into the next
-  // slide. Clamping to the remaining room (100% - x%/y%) shrinks it to fit
+  // slide. Clamping to the remaining room (100% - x%/y%, x/y already
+  // clamped above so this can never exceed 100%) shrinks it to fit
   // instead, so it never escapes its slide on any viewport.
   if (input.posWidth) {
     s.width = input.posWidth;

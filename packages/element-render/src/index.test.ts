@@ -32,6 +32,15 @@ test("computeFreePositionStyle clamps width/height to remaining room past x/y, s
   assert.equal(s.maxHeight, "calc(100% - 55.4%)");
 });
 
+test("computeFreePositionStyle clamps an out-of-range stored x/y (e.g. dragged past the edge before the drag handle itself clamped) into [0,100], so it self-heals without a data migration", () => {
+  const negative = computeFreePositionStyle({ x: "-23.6", y: "63.3", posWidth: "277px", posHeight: "67px" });
+  assert.equal(negative.left, "0%");
+  assert.equal(negative.maxWidth, "calc(100% - 0%)");
+  const over = computeFreePositionStyle({ x: "120", y: "150" });
+  assert.equal(over.left, "100%");
+  assert.equal(over.top, "100%");
+});
+
 test("computeFreePositionStyle treats zIndex 0 as unset", () => {
   const s = computeFreePositionStyle({ zIndex: "0" });
   assert.equal(s.zIndex, undefined);

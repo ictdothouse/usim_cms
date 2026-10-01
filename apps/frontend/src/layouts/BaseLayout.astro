@@ -622,14 +622,21 @@ const fontsHref = allFonts.length
             let moved = false;
             let finalX = 0;
             let finalY = 0;
+            const widthPct = (targetRect.width / rect.width) * 100;
+            const heightPct = (targetRect.height / rect.height) * 100;
             function move(ev) {
               moved = true;
               const rawLeft = startLeft + (ev.clientX - startX);
               const rawTop = startTop + (ev.clientY - startY);
               const snappedCenterX = snapValue(rawLeft + halfW, cxCandidates);
               const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
-              finalX = Math.round(((snappedCenterX - halfW) / rect.width) * 1000) / 10;
-              finalY = Math.round(((snappedCenterY - halfH) / rect.height) * 1000) / 10;
+              const xPct = ((snappedCenterX - halfW) / rect.width) * 100;
+              const yPct = ((snappedCenterY - halfH) / rect.height) * 100;
+              // Hard-clamped to [0, 100-sizePct] — mirrors apps/admin's
+              // ElPreview.tsx startFreeElDrag clamp, same "never bleed into
+              // the next carousel slide" requirement.
+              finalX = Math.round(Math.max(0, Math.min(100 - widthPct, xPct)) * 10) / 10;
+              finalY = Math.round(Math.max(0, Math.min(100 - heightPct, yPct)) * 10) / 10;
               node.style.left = finalX + "%";
               node.style.top = finalY + "%";
             }
@@ -702,6 +709,11 @@ const fontsHref = allFonts.length
               let h = Math.max(20, Math.round(startH + (ev.clientY - startY)));
               w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
               h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
+              // Hard clamp: the resized far edge must stay inside the slide
+              // (left/top are fixed during a resize) — mirrors apps/admin's
+              // ElPreview.tsx startFreeElResize clamp.
+              w = Math.min(w, Math.max(20, Math.round(containerRect.width - fixedLeft)));
+              h = Math.min(h, Math.max(20, Math.round(containerRect.height - fixedTop)));
               node.style.width = w + "px";
               node.style.height = h + "px";
               finalRatio = startDiag > 0 ? Math.hypot(w, h) / startDiag : 1;
