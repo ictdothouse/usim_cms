@@ -517,6 +517,12 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
           ? {
               ...(p.posWidth ? { width: "100%" } : {}),
               ...(p.posHeight ? { height: "100%", display: "flex", alignItems: "center", justifyContent: "center" } : {}),
+              // Mirrors the heading case's own posFontSize override — a
+              // free-positioned button's drag-resize handle (the slider
+              // case below) scales this alongside posWidth/posHeight so the
+              // label actually grows with the pill instead of staying a
+              // fixed text-sm while the pill balloons around it.
+              ...(p.posFontSize ? { fontSize: p.posFontSize } : {}),
             }
           : {};
       // The <span> above fills 100% of THIS div, not of the outer
@@ -1021,24 +1027,29 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                     if (!s0) return;
                                     const wv = `${widthPx}px`;
                                     const hv = `${heightPx}px`;
-                                    // Canva-style: a text child's font size grows/
-                                    // shrinks with the box instead of just wrapping
-                                    // inside a bigger, still-small-looking box.
-                                    // heading has no continuous "size" field to scale
-                                    // (H_SIZE is a fixed preset per "level" — see
-                                    // ElPreview's own heading case) — posFontSize is a
-                                    // free-position-only override for it, same idea as
-                                    // posWidth/posHeight overriding the normal box.
-                                    const scaledSize = childTextType
+                                    // Canva-style: a text/button child's font size
+                                    // grows/shrinks with the box instead of just
+                                    // wrapping/floating inside a bigger, still-
+                                    // small-looking box. heading/button have no
+                                    // continuous "size" field to scale (heading's
+                                    // H_SIZE is a fixed preset per "level"; button's
+                                    // default is a fixed Tailwind text-sm) —
+                                    // posFontSize is a free-position-only override
+                                    // for both, same idea as posWidth/posHeight
+                                    // overriding the normal box.
+                                    const scalesFont = childTextType || childEl.type === "button";
+                                    const scaledSize = scalesFont
                                       ? scaleLength(
                                           childEl.type === "heading"
                                             ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || H_SIZE[bpGetValue(childEl.props.level, childEl.bp, "level") || "2"]
-                                            : bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md,
+                                            : childEl.type === "button"
+                                              ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || "0.875rem"
+                                              : bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md,
                                           sizeRatio,
                                         )
                                       : null;
                                     const patch: Record<string, string> = { posWidth: wv, posHeight: hv };
-                                    if (scaledSize) patch[childEl.type === "heading" ? "posFontSize" : "size"] = scaledSize;
+                                    if (scaledSize) patch[childEl.type === "text" ? "size" : "posFontSize"] = scaledSize;
                                     currentSlides[slideIdx] =
                                       bp === "desktop"
                                         ? updateSlideElementProps(s0, r, c, e, patch)
