@@ -149,13 +149,27 @@ export interface FreePositionInput {
 // admin resolves its own tier via bpGetValue before calling this, frontend via its pre-merged
 // prop bag — so this stays a pure value-to-style function with no bp-resolution logic inside it.
 export function computeFreePositionStyle(input: FreePositionInput): Record<string, string> {
+  const x = input.x || "50";
+  const y = input.y || "50";
   const s: Record<string, string> = {
     position: "absolute",
-    top: `${input.y || "50"}%`,
-    left: `${input.x || "50"}%`,
+    top: `${y}%`,
+    left: `${x}%`,
   };
-  if (input.posWidth) s.width = input.posWidth;
-  if (input.posHeight) s.height = input.posHeight;
+  // posWidth/posHeight are a fixed px size captured on whatever canvas the
+  // author was dragging on (usually desktop) — on a narrower viewport
+  // (mobile) that fixed px can be wider than the slide has room for at
+  // this x/y, pushing the element past the slide's own edge into the next
+  // slide. Clamping to the remaining room (100% - x%/y%) shrinks it to fit
+  // instead, so it never escapes its slide on any viewport.
+  if (input.posWidth) {
+    s.width = input.posWidth;
+    s.maxWidth = `calc(100% - ${x}%)`;
+  }
+  if (input.posHeight) {
+    s.height = input.posHeight;
+    s.maxHeight = `calc(100% - ${y}%)`;
+  }
   const z = Number(input.zIndex || "0");
   if (z) s.zIndex = String(z);
   return s;
