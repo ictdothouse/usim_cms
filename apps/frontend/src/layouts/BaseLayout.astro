@@ -412,8 +412,10 @@ const fontsHref = allFonts.length
                 { type: "designer:selectSlideEl", path: sliderNode.dataset.designerPath, slideSel: slideNode.dataset.slideSel },
                 targetOrigin,
               );
+              selectSlideFreeNode(slideNode.dataset.slideFree === "true" ? slideNode : null);
               return;
             }
+            selectSlideFreeNode(null);
             const node = e.target.closest("[data-designer-path]");
             if (!node) return;
             e.preventDefault();
@@ -478,6 +480,13 @@ const fontsHref = allFonts.length
           let justDragged = false;
 
           document.addEventListener("pointerdown", (e) => {
+            // A slide-nested free-positioned element (data-slide-free) owns
+            // its own drag gesture below — bail here so this generic
+            // section/column/element reorder drag never hijacks it (without
+            // this, closest() would still resolve up to the slider's own
+            // data-designer-path ancestor and start an unrelated element-
+            // level reorder drag instead).
+            if (e.target.closest("[data-slide-free]")) return;
             const node = e.target.closest("[data-designer-path]");
             if (!node || node.isContentEditable) return;
             dragState = { path: node.dataset.designerPath, node, startX: e.clientX, startY: e.clientY, moved: false };
@@ -529,6 +538,186 @@ const fontsHref = allFonts.length
               setTimeout(() => (justDragged = false), 50);
             }
             dragState = null;
+          });
+
+          // Free-position drag/resize for a slide-nested element
+          // (props.position === "custom") — mirrors apps/admin's
+          // ElPreview.tsx startFreeElDrag/startFreeElResize (the Blocks-mode
+          // canvas's own implementation) closely enough that a drag here
+          // lands on the same x/y a Blocks-mode drag would, reusing the same
+          // center/edge-snap math (apps/admin/src/designer/snap.ts) —
+          // hand-ported, not imported, since this script stays a plain
+          // dependency-free `is:inline` tag (no bundler here to resolve a
+          // workspace package import). The whole gesture runs natively
+          // against this iframe's own real DOM (instant, no postMessage per
+          // frame); only the final value is posted once, on pointerup, same
+          // "report the result, not every frame" shape as designer:reorder
+          // above. ponytail: resize always scales a text child's font size
+          // off its live computed px size (getComputedStyle), not the
+          // original stored unit the way ElPreview.tsx's scaleLength()
+          // preserves — simpler (no posFontSize/size field value to read off
+          // a DOM node) and visually identical; upgrade if an author
+          // actually needs rem/em preserved through a drag-resize.
+          function snapValue(value, candidates) {
+            const range = 8;
+            let best = value;
+            let bestDist = range;
+            for (const c of candidates) {
+              const d = Math.abs(c - value);
+              if (d < bestDist) {
+                bestDist = d;
+                best = c;
+              }
+            }
+            return best;
+          }
+          function freeSiblingRects(node, slide) {
+            const rect = slide.getBoundingClientRect();
+            return Array.from(slide.querySelectorAll('[data-slide-free="true"]'))
+              .filter((n) => n !== node)
+              .map((n) => {
+                const r = n.getBoundingClientRect();
+                return { left: r.left - rect.left, top: r.top - rect.top, width: r.width, height: r.height };
+              });
+          }
+
+          let selectedSlideFreeNode = null;
+          let slideFreeHandle = null;
+          function selectSlideFreeNode(node) {
+            if (node === selectedSlideFreeNode) return;
+            if (slideFreeHandle) {
+              slideFreeHandle.remove();
+              slideFreeHandle = null;
+            }
+            selectedSlideFreeNode = node;
+            if (!node) return;
+            const handle = document.createElement("div");
+            handle.setAttribute("data-slide-resize-handle", "true");
+            handle.style.cssText =
+              "position:absolute;right:-5px;bottom:-5px;width:12px;height:12px;border-radius:2px;" +
+              "border:1px solid #fff;background:#0f62fe;cursor:nwse-resize;z-index:9999;";
+            node.appendChild(handle);
+            slideFreeHandle = handle;
+          }
+
+          document.addEventListener("pointerdown", (e) => {
+            if (e.target.closest("[data-slide-resize-handle]")) return;
+            const node = e.target.closest("[data-slide-free]");
+            if (!node || node.isContentEditable) return;
+            const slide = node.closest(".ds-slide");
+            if (!slide) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const rect = slide.getBoundingClientRect();
+            const targetRect = node.getBoundingClientRect();
+            const halfW = targetRect.width / 2;
+            const halfH = targetRect.height / 2;
+            const startLeft = node.offsetLeft;
+            const startTop = node.offsetTop;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const siblings = freeSiblingRects(node, slide);
+            const cxCandidates = [rect.width / 2, ...siblings.map((s) => s.left + s.width / 2)];
+            const cyCandidates = [rect.height / 2, ...siblings.map((s) => s.top + s.height / 2)];
+            let moved = false;
+            let finalX = 0;
+            let finalY = 0;
+            function move(ev) {
+              moved = true;
+              const rawLeft = startLeft + (ev.clientX - startX);
+              const rawTop = startTop + (ev.clientY - startY);
+              const snappedCenterX = snapValue(rawLeft + halfW, cxCandidates);
+              const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
+              finalX = Math.round(((snappedCenterX - halfW) / rect.width) * 1000) / 10;
+              finalY = Math.round(((snappedCenterY - halfH) / rect.height) * 1000) / 10;
+              node.style.left = finalX + "%";
+              node.style.top = finalY + "%";
+            }
+            function up() {
+              window.removeEventListener("pointermove", move);
+              window.removeEventListener("pointerup", up);
+              if (moved) {
+                const sliderNode = node.closest("[data-designer-path]");
+                if (sliderNode) {
+                  justDragged = true;
+                  parent.postMessage(
+                    {
+                      type: "designer:slideElDrag",
+                      sliderPath: sliderNode.dataset.designerPath,
+                      slideSel: node.dataset.slideSel,
+                      patch: { x: String(finalX), y: String(finalY) },
+                    },
+                    targetOrigin,
+                  );
+                  setTimeout(() => (justDragged = false), 50);
+                }
+              }
+            }
+            window.addEventListener("pointermove", move);
+            window.addEventListener("pointerup", up);
+          });
+
+          document.addEventListener("pointerdown", (e) => {
+            const handle = e.target.closest("[data-slide-resize-handle]");
+            if (!handle) return;
+            const node = handle.parentElement;
+            const slide = node && node.closest(".ds-slide");
+            if (!node || !slide) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const rect = node.getBoundingClientRect();
+            const containerRect = slide.getBoundingClientRect();
+            const startW = rect.width;
+            const startH = rect.height;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const fixedLeft = rect.left - containerRect.left;
+            const fixedTop = rect.top - containerRect.top;
+            const siblings = freeSiblingRects(node, slide);
+            const insetX = containerRect.width * 0.06;
+            const insetY = containerRect.height * 0.06;
+            const exCandidates = [insetX, containerRect.width - insetX, ...siblings.map((s) => s.left), ...siblings.map((s) => s.left + s.width)];
+            const eyCandidates = [insetY, containerRect.height - insetY, ...siblings.map((s) => s.top), ...siblings.map((s) => s.top + s.height)];
+            const isTextLike = node.tagName === "P" || /^H[1-4]$/.test(node.tagName);
+            const startFontPx = isTextLike ? parseFloat(getComputedStyle(node).fontSize) : 0;
+            let moved = false;
+            let finalW = startW;
+            let finalH = startH;
+            function move(ev) {
+              moved = true;
+              let w = Math.max(20, Math.round(startW + (ev.clientX - startX)));
+              let h = Math.max(20, Math.round(startH + (ev.clientY - startY)));
+              w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
+              h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
+              node.style.width = w + "px";
+              node.style.height = h + "px";
+              if (isTextLike && startFontPx > 0) {
+                node.style.fontSize = Math.max(8, Math.round(startFontPx * (w / startW))) + "px";
+              }
+              finalW = w;
+              finalH = h;
+            }
+            function up() {
+              window.removeEventListener("pointermove", move);
+              window.removeEventListener("pointerup", up);
+              if (moved) {
+                const sliderNode = node.closest("[data-designer-path]");
+                if (sliderNode) {
+                  const patch = { posWidth: finalW + "px", posHeight: finalH + "px" };
+                  if (isTextLike && startFontPx > 0) {
+                    patch.posFontSize = Math.max(8, Math.round(startFontPx * (finalW / startW))) + "px";
+                  }
+                  justDragged = true;
+                  parent.postMessage(
+                    { type: "designer:slideElDrag", sliderPath: sliderNode.dataset.designerPath, slideSel: node.dataset.slideSel, patch },
+                    targetOrigin,
+                  );
+                  setTimeout(() => (justDragged = false), 50);
+                }
+              }
+            }
+            window.addEventListener("pointermove", move);
+            window.addEventListener("pointerup", up);
           });
 
           function findByPath(path) {
@@ -609,6 +798,11 @@ const fontsHref = allFonts.length
             if (e.data.type === "designer:selected") {
               if (selectedNode) visualTarget(selectedNode).style.outline = "";
               selectionResizeObserver.disconnect();
+              // A sel sync from the Layers tree/Inspector (not a click inside
+              // this iframe) may point at the slider itself, not a specific
+              // slide-nested child — any stale resize handle from a previous
+              // in-iframe click no longer applies.
+              selectSlideFreeNode(null);
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
               if (selectedNode) {
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
