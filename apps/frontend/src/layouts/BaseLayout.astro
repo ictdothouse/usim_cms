@@ -622,8 +622,6 @@ const fontsHref = allFonts.length
             let moved = false;
             let finalX = 0;
             let finalY = 0;
-            const widthPct = (targetRect.width / rect.width) * 100;
-            const heightPct = (targetRect.height / rect.height) * 100;
             function move(ev) {
               moved = true;
               const rawLeft = startLeft + (ev.clientX - startX);
@@ -632,11 +630,13 @@ const fontsHref = allFonts.length
               const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
               const xPct = ((snappedCenterX - halfW) / rect.width) * 100;
               const yPct = ((snappedCenterY - halfH) / rect.height) * 100;
-              // Hard-clamped to [0, 100-sizePct] — mirrors apps/admin's
-              // ElPreview.tsx startFreeElDrag clamp, same "never bleed into
-              // the next carousel slide" requirement.
-              finalX = Math.round(Math.max(0, Math.min(100 - widthPct, xPct)) * 10) / 10;
-              finalY = Math.round(Math.max(0, Math.min(100 - heightPct, yPct)) * 10) / 10;
+              // No clamp here on purpose — mirrors apps/admin's
+              // ElPreview.tsx startFreeElDrag (same "author may deliberately
+              // bleed past the edge" freedom); .ds-slider-viewport's own
+              // overflow:hidden is the real guard against it painting into
+              // the next carousel slide.
+              finalX = Math.round(xPct * 10) / 10;
+              finalY = Math.round(yPct * 10) / 10;
               node.style.left = finalX + "%";
               node.style.top = finalY + "%";
             }

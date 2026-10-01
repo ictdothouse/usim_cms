@@ -116,19 +116,20 @@ function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], app
   }));
   const cxCandidates = centerXCandidates(rect.width, freeSiblings);
   const cyCandidates = centerYCandidates(rect.height, freeSiblings);
-  // Hard-clamped to [0, 100-sizePct]: a dragged element must stay fully
-  // inside its own slide (a prior version allowed dragging past the edge,
-  // "soft-guarded" only by the visual "safe area" warning below — that let
-  // x/y go negative or past the far edge, which on a narrower viewport
-  // than it was dragged on rendered as the element bleeding into the NEXT
-  // slide of the carousel, reported live). Clamps against the box's own
-  // live width/height too, so the FAR edge can't escape either, not just
-  // the origin corner. Alignment snap (above) still pulls the element's
-  // own CENTER onto the slide's true center or a sibling's center when
-  // within a few px — a soft nudge layered before this hard clamp, not a
-  // replacement for it.
-  const widthPct = (targetRect.width / rect.width) * 100;
-  const heightPct = (targetRect.height / rect.height) * 100;
+  // No 0-100 clamp: an author may deliberately want a component to bleed
+  // past the slide's own edge (e.g. a badge half-hanging off a photo) —
+  // the Inspector's own X/Y inputs already allowed typing an out-of-range
+  // number, this just gives drag the same freedom. The "safe area" overlay
+  // (this file's slider case, near `.ds-slide-box`) is the actual visual
+  // warning; the REAL guard against bleeding into the NEXT carousel slide
+  // is that box's own `overflow:hidden` (and SliderBlock.astro's mirrored
+  // `.ds-slider-viewport`) — a sibling slide is cropped against, never
+  // painted into, regardless of how far past this slide's edge the
+  // element sits. Alignment snap (above) pulls the element's own CENTER —
+  // not its raw top-left — onto the slide's true center or another free
+  // sibling's center when within a few px, the two alignments an author
+  // reaches for by hand most often; it's a soft nudge (still just a
+  // `snapValue` clamp), never a hard restrict.
   function move(e: PointerEvent) {
     const rawLeft = startLeft + (e.clientX - startX);
     const rawTop = startTop + (e.clientY - startY);
@@ -136,9 +137,7 @@ function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], app
     const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
     const xPct = ((snappedCenterX - halfW) / rect.width) * 100;
     const yPct = ((snappedCenterY - halfH) / rect.height) * 100;
-    const clampedX = Math.max(0, Math.min(100 - widthPct, xPct));
-    const clampedY = Math.max(0, Math.min(100 - heightPct, yPct));
-    apply(Math.round(clampedX * 10) / 10, Math.round(clampedY * 10) / 10);
+    apply(Math.round(xPct * 10) / 10, Math.round(yPct * 10) / 10);
   }
   function up() {
     window.removeEventListener("pointermove", move);
@@ -203,12 +202,6 @@ function startFreeElResize(
     let h = Math.max(20, Math.round(startH + (e.clientY - startY)));
     if (fixedLeft !== null) w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
     if (fixedTop !== null) h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
-    // Hard clamp: the resized far edge must stay inside the slide (left/
-    // top are fixed during a resize, so only the far edge can escape) —
-    // same "never bleed into the next carousel slide" requirement the
-    // drag handle's own clamp above enforces.
-    if (fixedLeft !== null) w = Math.min(w, Math.max(20, Math.round(containerRect!.width - fixedLeft)));
-    if (fixedTop !== null) h = Math.min(h, Math.max(20, Math.round(containerRect!.height - fixedTop)));
     apply(w, h, startDiag > 0 ? Math.hypot(w, h) / startDiag : 1);
   }
   function up() {
