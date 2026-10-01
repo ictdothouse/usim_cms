@@ -123,12 +123,24 @@ export function resolvePageLayout(page: Page, code: string | null): PageLayout {
 // requests so a draft-inclusive response never becomes the stale-fallback
 // served to an anonymous visitor if a later unauthenticated fetch fails.
 async function apiGet<T>(path: string, tenantHost: string, token?: string): Promise<T> {
-  const key = `${tenantHost}${path}${token ? ":preview" : ""}`;
+  // A token-bearing request's cache key now includes the token itself, not
+  // a generic ":preview" suffix — every preview-token mint is a DIFFERENT
+  // draft (Designer's Preview modal mints a fresh one on every open/
+  // refresh), so a shared key across tokens risked the stale-fetch-failure
+  // fallback below handing back a DIFFERENT, earlier draft instead of
+  // correctly falling through to the real saved row.
+  const key = `${tenantHost}${path}${token ? `:${token}` : ""}`;
   try {
     const headers: Record<string, string> = { "x-tenant-host": tenantHost };
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`${API_URL}${path}`, {
       headers,
+      // A token-bearing request's URL never changes (the token itself goes
+      // in the Authorization header, not the query string) even though the
+      // draft it names changes on every mint — no-store so nothing between
+      // here and apps/api (a proxy, a future fetch-level cache) can key a
+      // cached response off that stable URL and ignore the header.
+      ...(token ? { cache: "no-store" as RequestCache } : {}),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`${path} -> ${res.status}`);
