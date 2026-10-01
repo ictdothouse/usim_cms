@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import * as api from "@/lib/api";
+import type { Seo } from "./designer/types";
+import { SeoPreviewCard } from "./components/SeoPreviewCard";
 import type { Key } from "@/i18n";
 import { useT, inputCls, btnPrimary, btnGhost } from "./App";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -273,6 +275,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
   const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
+  const [seo, setSeoState] = useState<Seo>({});
+  function setSeo(patch: Partial<Seo>) {
+    setSeoState((s) => ({ ...s, ...patch }));
+  }
   const [status, setStatus] = useState<PostStatus>("draft");
   const [language, setLanguage] = useState("");
   const [showTags, setShowTags] = useState<DisplayOverride>("inherit");
@@ -331,6 +337,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     setTags((post.tags as string[] | null) ?? []);
     setTagDraft("");
     setBannerImageUrl((post.bannerImageUrl as string | null) ?? null);
+    setSeoState((post.seo as Seo | null) ?? {});
     setStatus((post.status as PostStatus) || "draft");
     setLanguage((post.language as string | null) ?? "");
     setMultilangEnabled(Boolean(post.multilangEnabled));
@@ -480,6 +487,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
       }
       await api.updatePost(tenantHost, token, post.id as string, {
         title: base.title, excerpt: base.excerpt.trim() || autoExcerpt(base.body), categoryId: categoryId || null, tags, bannerImageUrl,
+        seo,
         body: base.body,
         translations,
         language: language || null,
@@ -676,6 +684,46 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-excerpt")}</label>
               <textarea rows={3} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} placeholder={t("posts-excerpt-auto")} className={`${inputCls} resize-none`} />
+            </div>
+            <div className="space-y-2 border-t border-line/30 pt-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-page-seo-heading")}</p>
+              <input
+                type="text"
+                value={seo.title ?? ""}
+                placeholder={title}
+                onChange={(e) => setSeo({ title: e.target.value || undefined })}
+                className={inputCls}
+              />
+              <textarea
+                rows={2}
+                value={seo.description ?? ""}
+                onChange={(e) => setSeo({ description: e.target.value || undefined })}
+                placeholder={t("designer-page-seo-description")}
+                className={`${inputCls} resize-none`}
+              />
+              <input
+                type="text"
+                value={seo.ogImage ?? ""}
+                onChange={(e) => setSeo({ ogImage: e.target.value || undefined })}
+                placeholder={t("designer-page-seo-ogimage")}
+                className={inputCls}
+              />
+              <input
+                type="text"
+                value={seo.canonicalUrl ?? ""}
+                onChange={(e) => setSeo({ canonicalUrl: e.target.value || undefined })}
+                placeholder={t("designer-page-seo-canonical")}
+                className={inputCls}
+              />
+              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+                <input type="checkbox" checked={seo.noindex ?? false} onChange={(e) => setSeo({ noindex: e.target.checked || undefined })} />
+                {t("designer-page-seo-noindex")}
+              </label>
+              <SeoPreviewCard
+                title={seo.title || title}
+                url={api.previewUrl(tenantHost, `posts/${(post?.slug as string) ?? ""}`)}
+                description={seo.description || excerpt}
+              />
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-tags")}</label>

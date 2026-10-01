@@ -323,7 +323,7 @@ export const getPagePreviewToken = (
   tenantHost: string,
   token: string,
   id: string,
-  draft?: { layout?: unknown; settings?: unknown; translations?: unknown },
+  draft?: { layout?: unknown; settings?: unknown; seo?: unknown; translations?: unknown },
 ) =>
   request(`/api/pages/${id}/preview-token`, tenantHost, token, {
     method: "POST",

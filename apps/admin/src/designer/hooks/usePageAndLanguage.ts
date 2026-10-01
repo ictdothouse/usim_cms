@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import * as api from "@/lib/api";
 import { BASE_LANG } from "../context";
 import { TRANSLATABLE_TEXT_KEYS, isTextKey, pathKey, applyLangOverrides, migrateOldTranslation } from "../lang";
-import type { Block, ElType, PageSettings, SectionProps } from "../types";
+import type { Block, ElType, PageSettings, SectionProps, Seo } from "../types";
 import { clone } from "@/lib/utils";
 
 export interface PageAndLanguageDeps {
@@ -21,6 +21,7 @@ export interface PageAndLanguageDeps {
     language?: unknown;
     multilangEnabled?: unknown;
     settings?: unknown;
+    seo?: unknown;
     translations?: unknown;
   };
   tenantHost: string;
@@ -35,6 +36,13 @@ export function usePageAndLanguage(deps: PageAndLanguageDeps) {
   const { rawBlocks, page, tenantHost, token, bp, bpKey, setDirty, setSel } = deps;
 
   const [pageSettings, setPageSettings] = useState<PageSettings>(() => (page.settings as PageSettings) ?? {});
+  // Native SEO + AEO (migration 0028) — same lazy-init-from-page pattern as
+  // pageSettings above.
+  const [pageSeo, setPageSeoState] = useState<Seo>(() => (page.seo as Seo) ?? {});
+  function setPageSeo(patch: Partial<Seo>) {
+    setPageSeoState((s) => ({ ...s, ...patch }));
+    setDirty(true);
+  }
   // "Theme" picker in Page Settings — this user's saved presets, same list
   // ThemeForm's own collection reads (api.listThemePresets).
   const [themePresets, setThemePresets] = useState<api.ThemePreset[]>([]);
@@ -358,6 +366,7 @@ export function usePageAndLanguage(deps: PageAndLanguageDeps) {
   return {
     blocks,
     pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
+    pageSeo, setPageSeo,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
     siteLanguages, pageLanguage, setPageLanguage,
     activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,

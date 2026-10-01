@@ -64,10 +64,33 @@ const showAuthor = post ? (post.showAuthor ?? (theme.showPostAuthor !== "false")
 const showDate = post ? (post.showPublishedDate ?? (theme.showPostDate !== "false")) : false;
 
 const { header: headerChrome, footer: footerChrome } = await resolveDefaultHeaderFooter(tenantHost);
+
+// Native SEO + AEO — same pattern as [...slug].astro's own seo block.
+const seo = post?.seo ?? {};
+const effectiveTitle = seo.title || content?.title || "";
+const effectiveDescription = seo.description || content?.excerpt || "";
+const effectiveOgImage = seo.ogImage || post?.bannerImageUrl || undefined;
+const canonicalUrl = seo.canonicalUrl || (post ? `https://${tenantHost}/posts/${post.slug}` : undefined);
+const jsonLd = post
+  ? {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: effectiveTitle,
+      ...(effectiveDescription ? { description: effectiveDescription } : {}),
+      ...(effectiveOgImage ? { image: effectiveOgImage } : {}),
+      ...(post.publishedAt ? { datePublished: post.publishedAt } : {}),
+      url: canonicalUrl,
+      ...(requestedLang || post.language ? { inLanguage: requestedLang ?? post.language } : {}),
+    }
+  : null;
 ---
 <BaseLayout
-  title={content?.title ?? "Artikel tidak dijumpai"}
-  ogImage={post?.bannerImageUrl}
+  title={post ? effectiveTitle : "Artikel tidak dijumpai"}
+  ogImage={effectiveOgImage}
+  metaDescription={effectiveDescription || null}
+  noindex={seo.noindex ?? false}
+  canonicalUrl={canonicalUrl}
+  jsonLd={jsonLd}
   theme={theme}
   langSwitcher={langSwitcher}
   headerChrome={headerChrome}

@@ -11,7 +11,7 @@ import * as api from "@/lib/api";
 import { slugify, clone } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { BASE_LANG } from "../context";
-import type { Block, PageSettings, SectionProps } from "../types";
+import type { Block, PageSettings, SectionProps, Seo } from "../types";
 
 type PreviewModalState = { src: string; device: "desktop" | "tablet" | "mobile"; orientation: "portrait" | "landscape" } | null;
 
@@ -27,6 +27,7 @@ export interface PersistDeps {
   setRawBlocksDirectly: (next: Block[]) => void;
   pageSettings: PageSettings;
   setPageSettings: (s: PageSettings) => void;
+  pageSeo: Seo;
   pageLanguage: string;
   pageMultilangEnabled: boolean;
   langOverrides: Record<string, Record<string, Record<string, string>>>;
@@ -47,7 +48,7 @@ export interface PersistDeps {
 export function usePersist(deps: PersistDeps) {
   const {
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
-    rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings,
+    rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     setDirty, setBusy, setError, setSavedAny, setMsg,
@@ -103,6 +104,7 @@ export function usePersist(deps: PersistDeps) {
         layout: clone(rawBlocks),
         translations,
         settings: pageSettings,
+        seo: pageSeo,
         language: pageLanguage || null,
         multilangEnabled: pageMultilangEnabled,
         ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
@@ -280,6 +282,7 @@ export function usePersist(deps: PersistDeps) {
         : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
             layout: clone(rawBlocks),
             settings: pageSettings,
+            seo: pageSeo,
             translations: currentTranslationsPayload(),
           });
     return kind === "blueprint"

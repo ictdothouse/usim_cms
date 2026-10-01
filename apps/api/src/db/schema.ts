@@ -13,6 +13,11 @@ export const pages = pgTable("pages", {
   // default column gap for rows that don't set their own — see
   // apps/admin/src/Designer.tsx's Inspector "nothing selected" panel).
   settings: jsonb("settings").notNull().default({}),
+  // Native SEO + AEO override (migration 0028): { title?, description?, ogImage?,
+  // noindex?, canonicalUrl? } — falls back to title/bannerImageUrl/computed URL when
+  // a key is unset. Validated in pagesBeforeChange, rendered by BaseLayout.astro +
+  // the JSON-LD this page's own render builds, listed by sitemap.xml.ts.
+  seo: jsonb("seo").notNull().default({}),
   bannerImageUrl: text("banner_image_url"),
   status: text("status").notNull().default("draft"), // "draft" | "published"
   publishedAt: timestamp("published_at"),
@@ -144,6 +149,9 @@ export const posts = pgTable("posts", {
   body: text("body").notNull().default(""),
   excerpt: text("excerpt"),
   bannerImageUrl: text("banner_image_url"),
+  // Native SEO + AEO override (migration 0028) — same shape/consumers as
+  // pages.seo's own comment above.
+  seo: jsonb("seo").notNull().default({}),
   status: text("status").notNull().default("draft"), // "draft" | "published" | "private"
   publishedAt: timestamp("published_at"),
   // Category is a real FK into `categories` (a managed taxonomy) — tags stay
