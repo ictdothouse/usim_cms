@@ -7,10 +7,49 @@ import { BASE_LANG, type DesignerCtx } from "./context";
 import { BufferedInput } from "./FieldControls";
 import { gapPx } from "./style";
 import { SeoPreviewCard } from "../components/SeoPreviewCard";
+import type { Block } from "./types";
+
+// Native SEO + AEO: best-effort plain-text suggestion pulled from this
+// page's own heading/text/list content, used ONLY as the description
+// field's placeholder below — never auto-saved into pageSeo, same
+// suggestion-not-override convention the title field's own
+// placeholder={pageTitle} already uses just below it. Mirrors apps/
+// frontend's [...slug].astro extractAutoDescription in intent — no shared
+// code between the two apps (see CLAUDE.md), so this is a second, small
+// implementation operating on ctx.blocks instead of a fetched layout.
+// ponytail: naive heuristic (no markdown stripping) — good enough for a
+// placeholder suggestion, not a renderer.
+function extractAutoDescription(blocks: Block[]): string {
+  const parts: string[] = [];
+  outer: for (const block of blocks) {
+    if (block.type !== "section") continue;
+    const rows = (block.props as Record<string, unknown>).rows;
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows as Record<string, unknown>[]) {
+      const columns = row?.columns;
+      if (!Array.isArray(columns)) continue;
+      for (const col of columns as Record<string, unknown>[]) {
+        const elements = col?.elements;
+        if (!Array.isArray(elements)) continue;
+        for (const el of elements as Record<string, unknown>[]) {
+          const type = el?.type;
+          const p = (el?.props ?? {}) as Record<string, unknown>;
+          if ((type === "heading" || type === "text") && typeof p.text === "string" && p.text.trim()) {
+            parts.push(p.text.trim());
+          } else if (type === "list" && typeof p.items === "string" && p.items.trim()) {
+            parts.push(p.items.split("\n").map((s) => s.trim()).filter(Boolean).join(", "));
+          }
+          if (parts.join(" ").length >= 160) break outer;
+        }
+      }
+    }
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
 
 export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
   const {
-    t, kind,
+    t, kind, blocks,
     pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
     pageSeo, setPageSeo, tenantHost, pageSlug, pageTitle, openMediaPicker,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, availableHeaders, availableFooters, patchPageChrome,
@@ -210,6 +249,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
               rows={3}
               defaultValue={pageSeo.description ?? ""}
               onBlur={(e) => setPageSeo({ description: e.target.value || undefined })}
+              placeholder={extractAutoDescription(blocks)}
               className="mt-1 w-full resize-none rounded-md border border-line/30 px-2 py-1 text-xs"
             />
           </label>

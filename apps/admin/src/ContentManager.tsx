@@ -10,6 +10,7 @@ import {
   Newspaper,
   Palette,
   PanelTop,
+  Search,
 } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Key } from "@/i18n";
@@ -25,10 +26,11 @@ import MenusPanel from "./MenusPanel";
 import HeaderFooterPanel from "./HeaderFooterPanel";
 import EventsPanel from "./EventsPanel";
 import TenantLanguagesForm from "./TenantLanguagesForm";
+import TenantSeoForm from "./TenantSeoForm";
 
 const PostEditorPage = lazy(() => import("./PostEditorPage"));
 
-type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "menus" | "header-footer" | "blueprints" | "events";
+type ContentSubTab = "pages" | "posts" | "media" | "theme" | "languages" | "seo" | "menus" | "header-footer" | "blueprints" | "events";
 
 // Content Manager's sub-nav and the webmaster sidebar's own flat tab list
 // both grew past a comfortable single row (9 sub-tabs / 7 tabs) — grouped
@@ -46,6 +48,7 @@ const CONTENT_SUBTAB_GROUP: Record<ContentSubTab, NavGroup> = {
   "header-footer": "design",
   blueprints: "design",
   languages: "settings",
+  seo: "settings",
   events: "settings",
 };
 
@@ -76,6 +79,7 @@ export default function ContentManager({
       ? [
           { id: "theme" as const, labelKey: "theme-title" as const, icon: Palette },
           { id: "languages" as const, labelKey: "tenant-languages-title" as const, icon: Globe },
+          { id: "seo" as const, labelKey: "tenant-seo-title" as const, icon: Search },
           { id: "menus" as const, labelKey: "menus-title" as const, icon: ListTree },
           { id: "header-footer" as const, labelKey: "header-footer-title" as const, icon: PanelTop },
           { id: "blueprints" as const, labelKey: "blueprints-title" as const, icon: LayoutTemplate },
@@ -148,6 +152,9 @@ export default function ContentManager({
             )}
             {isSuper && (
               <Route path="languages" element={<TenantLanguagesForm key={siteHost} tenantHost={siteHost} token={token} />} />
+            )}
+            {isSuper && (
+              <Route path="seo" element={<TenantSeoForm key={siteHost} tenantHost={siteHost} token={token} />} />
             )}
             {isSuper && (
               <Route path="blueprints" element={<BlueprintGallery key={siteHost} tenantHost={siteHost} token={token} mode="manage" isSuper />} />

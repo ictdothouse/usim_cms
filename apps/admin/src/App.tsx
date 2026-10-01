@@ -18,6 +18,7 @@ import {
   Palette,
   PanelTop,
   Rss,
+  Search,
   Settings as SettingsIcon,
   ShieldCheck,
   Users as UsersIcon,
@@ -37,6 +38,7 @@ import LoginForm from "./LoginForm";
 import { BlueprintDesignerRoute, SymbolDesignerRoute, HeaderFooterDesignerRoute } from "./DesignerRoutes";
 import { Dashboard, PortalFeedPanel } from "./Dashboard";
 import TenantLanguagesForm from "./TenantLanguagesForm";
+import TenantSeoForm from "./TenantSeoForm";
 import SecurityPanel from "./SecurityPanel";
 import RolesPanel from "./RolesPanel";
 import UsersPanel from "./UsersPanel";
@@ -168,6 +170,7 @@ type Tab =
   | "content"
   | "theme"
   | "languages"
+  | "seo"
   | "menus"
   | "header-footer"
   | "blueprints"
@@ -185,6 +188,7 @@ const TAB_META: Record<Tab, { labelKey: Key; icon: React.ComponentType<{ classNa
   content: { labelKey: "tab-content", icon: FileText },
   theme: { labelKey: "tab-theme", icon: Palette },
   languages: { labelKey: "tab-languages", icon: Globe },
+  seo: { labelKey: "tab-seo", icon: Search },
   menus: { labelKey: "menus-title", icon: ListTree },
   "header-footer": { labelKey: "header-footer-title", icon: PanelTop },
   blueprints: { labelKey: "blueprints-title", icon: LayoutTemplate },
@@ -208,6 +212,7 @@ const TAB_GROUP: Partial<Record<Tab, NavGroup>> = {
   "header-footer": "design",
   blueprints: "design",
   languages: "settings",
+  seo: "settings",
   events: "settings",
 };
 
@@ -274,7 +279,7 @@ function Shell({
   const mainTabs: Tab[] = isSuper ? ["dashboard", "multisite", "users", "roles", "settings", "security"] : ["dashboard", "security"];
   const contentTabs: Tab[] = isSuper
     ? ["content", "global-theme", "feed"]
-    : ["content", "theme", "languages", "menus", "header-footer", "blueprints", "events"];
+    : ["content", "theme", "languages", "seo", "menus", "header-footer", "blueprints", "events"];
 
   return (
     <I18nCtx.Provider value={{ lang, t }}>
@@ -424,6 +429,7 @@ function Shell({
                 <Route path="content/*" element={<ContentManager isSuper={isSuper} showSitePicker={showSitePicker} siteHost={siteHost} setSiteHost={setSiteHost} tenants={siteOptions} token={session.token} />} />
                 <Route path="theme" element={!isSuper && session.tenantHost ? (<ThemeForm title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(session.tenantHost!, session.token)} save={(s) => api.putTheme(session.tenantHost!, session.token, s)} token={session.token} allowDeactivate previewTenantHost={session.tenantHost!} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="languages" element={!isSuper && session.tenantHost ? (<TenantLanguagesForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
+                <Route path="seo" element={!isSuper && session.tenantHost ? (<TenantSeoForm tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="menus" element={!isSuper && session.tenantHost ? (<MenusPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route path="header-footer" element={!isSuper && session.tenantHost ? (<HeaderFooterPanel tenantHost={session.tenantHost} token={session.token} />) : (<Navigate to="/dashboard" replace />)} />
                 <Route

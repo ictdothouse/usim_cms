@@ -698,7 +698,14 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 rows={2}
                 value={seo.description ?? ""}
                 onChange={(e) => setSeo({ description: e.target.value || undefined })}
-                placeholder={t("designer-page-seo-description")}
+                // Auto-generated suggestion, never auto-saved — same
+                // placeholder={pageTitle}-style convention the title field
+                // right above already uses. content[activeLang]?.body is
+                // the last-loaded/last-switched body text (not live-synced
+                // with every BlockNote keystroke, since that editor's own
+                // content only converts to a string async) — good enough
+                // for a suggestion, not a correctness requirement.
+                placeholder={excerpt || autoExcerpt(content[activeLang]?.body ?? "")}
                 className={`${inputCls} resize-none`}
               />
               <input

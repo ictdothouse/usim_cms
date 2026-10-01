@@ -382,6 +382,15 @@ export const platformSettings = pgTable("platform_settings", {
   // "Language Switcher" card, superadmin-only.
   switcherPosition: text("switcher_position").notNull().default("header"),
   switcherStyle: text("switcher_style").notNull().default("text"),
+  // Native SEO + AEO — instance-wide default title template (e.g. "%s —
+  // Universiti Sains Islam Malaysia", %s = the page/post's own effective
+  // title; "" = no template, title unchanged) and fallback meta description,
+  // used when a page/post has neither its own seo.description nor any
+  // auto-extracted text. Settings tab's "SEO & AEO Defaults" card,
+  // superadmin-only — same non-null-with-default global-seed shape as
+  // switcherPosition/switcherStyle above.
+  seoTitleTemplate: text("seo_title_template").notNull().default(""),
+  seoDefaultDescription: text("seo_default_description").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
@@ -442,6 +451,15 @@ export const siteTheme = pgTable("site_theme", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantHost: text("tenant_host").notNull().unique(),
   settings: jsonb("settings").notNull().default({}),
+  // Native SEO + AEO — per-tenant override of platformSettings.seoTitleTemplate/
+  // seoDefaultDescription above. Nullable = "inherit the global default",
+  // resolved at read time by getTenantSeoDefaults (tenant-pool/seo.ts), same
+  // resolve-on-read convention as tenant_languages.switcherPosition/
+  // switcherStyle. Lives on this row (not tenant_languages) since site_theme
+  // is already this codebase's per-tenant "site identity/presentation"
+  // settings row (logo/colors/fonts) — a closer semantic fit than languages.
+  seoTitleTemplate: text("seo_title_template"),
+  seoDefaultDescription: text("seo_default_description"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

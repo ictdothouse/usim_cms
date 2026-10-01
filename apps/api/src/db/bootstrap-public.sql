@@ -51,6 +51,12 @@ ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_only" b
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_tenant_id" text;
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_client_id" text;
 
+-- Native SEO + AEO — instance-wide default title template/description
+-- (Settings "SEO & AEO Defaults" card), the seed a tenant with no override
+-- resolves to (site_theme.seo_title_template/seo_default_description below).
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "seo_title_template" text DEFAULT '' NOT NULL;
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "seo_default_description" text DEFAULT '' NOT NULL;
+
 -- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
 -- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
 -- counter table.
@@ -94,6 +100,11 @@ CREATE TABLE IF NOT EXISTS "public"."site_theme" (
 	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
+
+-- Native SEO + AEO — per-tenant override of platform_settings.seo_title_template/
+-- seo_default_description above. Nullable = "inherit the global default".
+ALTER TABLE "public"."site_theme" ADD COLUMN IF NOT EXISTS "seo_title_template" text;
+ALTER TABLE "public"."site_theme" ADD COLUMN IF NOT EXISTS "seo_default_description" text;
 
 -- Per-tenant upload quota override, same global("")+override shape as
 -- site_theme above. Null column = not set at this level (see

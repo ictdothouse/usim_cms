@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import HeroBlock from "../../components/HeroBlock.astro";
-import { getPostBySlug, getTheme, getLanguages, resolvePostContent, resolveCategoryName, resolveDefaultHeaderFooter } from "../../lib/api";
+import { getPostBySlug, getTheme, getLanguages, getSeoDefaults, resolvePostContent, resolveCategoryName, resolveDefaultHeaderFooter } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro (see its comment for why this
 // is NOT gated on import.meta.env.DEV): Host header, with the
@@ -31,6 +31,7 @@ if (!post) {
 // (post.translations), so switching language means re-rendering this same
 // row under a `?lang=` query param, not linking to a different slug/row.
 const { enabled: siteLanguages, showHeaderSwitcher, switcherPosition, switcherStyle } = await getLanguages(tenantHost);
+const tenantSeoDefaults = await getSeoDefaults(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
 const content = post ? resolvePostContent(post, requestedLang) : null;
 // Bare language codes (e.g. "ar", "zh") work fine as Intl locales — no need
@@ -66,9 +67,19 @@ const showDate = post ? (post.showPublishedDate ?? (theme.showPostDate !== "fals
 const { header: headerChrome, footer: footerChrome } = await resolveDefaultHeaderFooter(tenantHost);
 
 // Native SEO + AEO — same pattern as [...slug].astro's own seo block.
+// content.excerpt already doubles as the "auto-generated" fallback here:
+// PostEditorPage.tsx's save() always fills a blank excerpt in with
+// autoExcerpt(body) before persisting, so by the time a post reaches this
+// render it's never actually empty for a real saved post — no separate
+// extractAutoDescription walk needed for posts the way pages need one
+// (pages have no excerpt concept at all).
 const seo = post?.seo ?? {};
-const effectiveTitle = seo.title || content?.title || "";
-const effectiveDescription = seo.description || content?.excerpt || "";
+const autoDescription = content?.excerpt || "";
+const effectiveTitleBase = seo.title || content?.title || "";
+const effectiveTitle = tenantSeoDefaults.titleTemplate
+  ? tenantSeoDefaults.titleTemplate.replace("%s", effectiveTitleBase)
+  : effectiveTitleBase;
+const effectiveDescription = seo.description || autoDescription || tenantSeoDefaults.defaultDescription || "";
 const effectiveOgImage = seo.ogImage || post?.bannerImageUrl || undefined;
 const canonicalUrl = seo.canonicalUrl || (post ? `https://${tenantHost}/posts/${post.slug}` : undefined);
 const jsonLd = post

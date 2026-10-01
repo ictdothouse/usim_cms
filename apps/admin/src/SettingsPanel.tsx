@@ -142,6 +142,11 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
   const [switcherErr, setSwitcherErr] = useState<string | null>(null);
   const [switcherBusy, setSwitcherBusy] = useState(false);
   const [switcherMsg, setSwitcherMsg] = useState<string | null>(null);
+  const [seoTitleTemplate, setSeoTitleTemplate] = useState("");
+  const [seoDefaultDescription, setSeoDefaultDescription] = useState("");
+  const [seoErr, setSeoErr] = useState<string | null>(null);
+  const [seoBusy, setSeoBusy] = useState(false);
+  const [seoMsg, setSeoMsg] = useState<string | null>(null);
   const [proxyTenants, setProxyTenants] = useState<Array<Record<string, unknown>>>(tenants);
   const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
@@ -319,6 +324,31 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
       setSwitcherErr((e as Error).message);
     } finally {
       setSwitcherBusy(false);
+    }
+  }
+
+  function reloadSeoSettings() {
+    void api
+      .getPortalSeoDefaults(token)
+      .then((s) => {
+        setSeoTitleTemplate(s.titleTemplate);
+        setSeoDefaultDescription(s.defaultDescription);
+      })
+      .catch((e) => setSeoErr((e as Error).message));
+  }
+  useEffect(reloadSeoSettings, [token]);
+
+  async function saveSeoSettings() {
+    setSeoErr(null);
+    setSeoMsg(null);
+    setSeoBusy(true);
+    try {
+      await api.setPortalSeoDefaults(token, seoTitleTemplate, seoDefaultDescription);
+      setSeoMsg(t("tenant-languages-saved"));
+    } catch (e) {
+      setSeoErr((e as Error).message);
+    } finally {
+      setSeoBusy(false);
     }
   }
 
@@ -759,6 +789,35 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
             </label>
             <button onClick={() => void saveSwitcherSettings()} disabled={switcherBusy} className={btnPrimary}>
               {switcherBusy ? t("settings-busy") : t("tenant-languages-save-btn")}
+            </button>
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="text-xs font-bold text-ink">{t("settings-seo-title")}</h3>
+            <p className="text-xs text-sub">{t("settings-seo-desc")}</p>
+            {seoErr && <p className="text-xs text-red-600">{seoErr}</p>}
+            {seoMsg && <p className="text-xs text-green-700">{seoMsg}</p>}
+            <label className="block text-xs text-ink">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-seo-title-template")}</span>
+              <input
+                type="text"
+                value={seoTitleTemplate}
+                onChange={(e) => setSeoTitleTemplate(e.target.value)}
+                placeholder="%s — Universiti Sains Islam Malaysia"
+                className={inputCls}
+              />
+              <span className="mt-1 block text-[11px] text-sub">{t("tenant-seo-title-template-hint")}</span>
+            </label>
+            <label className="block text-xs text-ink">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">{t("tenant-seo-default-description")}</span>
+              <textarea
+                rows={3}
+                value={seoDefaultDescription}
+                onChange={(e) => setSeoDefaultDescription(e.target.value)}
+                className={`${inputCls} resize-none`}
+              />
+            </label>
+            <button onClick={() => void saveSeoSettings()} disabled={seoBusy} className={btnPrimary}>
+              {seoBusy ? t("settings-busy") : t("tenant-languages-save-btn")}
             </button>
           </div>
         </>

@@ -56,6 +56,13 @@ export {
 } from "./tenant-pool/languages.js";
 
 export {
+  getSeoDefaults,
+  setSeoDefaults,
+  getTenantSeoDefaults,
+  setTenantSeoDefaults,
+} from "./tenant-pool/seo.js";
+
+export {
   getGlobalTheme,
   setGlobalTheme,
   getMergedTheme,
