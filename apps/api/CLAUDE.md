@@ -246,6 +246,50 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   just the uppercased language code, `"flag"` looks the code up in a small hardcoded `FLAG_MAP` (a
   language code is not a country code, so this is a best-effort table, not a full ISO-3166 mapping) and
   falls back to the plain text label for any code with no entry.
+- **SEO & AEO defaults — auto-generated suggestion + global/per-tenant menu** (follow-up to the native
+  SEO+AEO per-page/per-post fields, migration `0028_seo_fields.sql`): two parts.
+  **Auto-generated description suggestion** — shown as the SEO description field's `placeholder` only,
+  never auto-saved (an author's own typed `seo.description` always wins). Posts needed no new code:
+  `PostEditorPage.tsx`'s `save()` already fills a blank `excerpt` with `autoExcerpt(body)` before
+  persisting, so `content?.excerpt` is never actually empty for a saved post — the only fix was pointing
+  the description textarea's `placeholder` at `excerpt || autoExcerpt(content[activeLang]?.body ?? "")`
+  instead of a generic label string. Pages have no excerpt concept, so they get a real extraction
+  (`extractAutoDescription`): a naive walk of the whole layout tree's `heading`/`text`/`list` elements'
+  own text props, joined and trimmed to ~160 chars — implemented TWICE (`apps/frontend`'s
+  `[...slug].astro`, used as the real `effectiveDescription` fallback, and `apps/admin`'s
+  `InspectorPageSettings.tsx`, used only as that field's placeholder, operating on `ctx.blocks` instead
+  of a fetched layout) per this codebase's no-shared-render-code-between-admin-and-frontend convention.
+  **Global default + per-tenant override menu** — same two-level shape as the language-switcher
+  placement/style above: `platform_settings.seo_title_template`/`seo_default_description` (`schema.ts`,
+  both `NOT NULL DEFAULT ''`) is the instance-wide seed, managed via `GET/PUT
+  /api/portal/seo-defaults` (superadmin-only, `verifySuperadmin` + audit-logged as
+  `platform.seo_defaults`) and the Settings tab's "SEO & AEO Defaults" card. `site_theme.seo_title_template`/
+  `seo_default_description` (both nullable — null = inherit) is the per-tenant override, resolved
+  server-side by `getTenantSeoDefaults` (`tenant-pool/seo.ts`, mirrors `languages.ts`'s
+  `getLanguageSwitcherDefaults`/`getTenantLanguageSelection` almost line-for-line) so both callers
+  (public `GET /api/seo-defaults`, consumed directly by `apps/frontend` at render time AND reused as-is
+  by the per-tenant admin form's own load — no separate protected GET, same single-public-GET-reused-by-
+  admin shape `GET /api/theme` already has) always get an already-resolved value. `site_theme` (not
+  `tenant_languages`) is the per-tenant home — it's already this codebase's per-tenant "site identity/
+  presentation" row (logo/colors/fonts), and `setTenantSeoDefaults`'s partial `onConflictDoUpdate` only
+  ever touches its own two columns, never `settings`, so it can't clobber `theme.ts`'s own partial writes
+  to the same row (or vice versa). `PUT /api/seo-defaults` (protected) reuses the existing `theme.write`
+  permission — no new permission string, same reasoning the switcher's per-site write reuses
+  `languages.write`. Admin UI mounted the same two places `TenantLanguagesForm` is: a new `"seo"` tab
+  (superadmin's `ContentManager` sub-tab + a webmaster's own top-level `Tab`, both `settings`-grouped
+  alongside `languages`/`events`) rendering `TenantSeoForm.tsx`. Title resolution applies the tenant's
+  template LAST, on top of whatever title was already resolved (`seo.title || row.title`) —
+  `template.replace("%s", effectiveTitleBase)`, or the base title unchanged when the template is empty;
+  description fallback chain is `seo.description || autoDescription || tenantDefaults.defaultDescription
+  || ""`. **Schema-file gotcha worth remembering**: `platform_settings`/`site_theme` are control-plane
+  tables bootstrapped by `bootstrap-public.sql` (`ensurePublicSchema`, run once against `DATABASE_URL`),
+  NOT by anything in `src/db/migrations/` (which `ensureTenantDatabase` blindly replays into every
+  TENANT's own database, where these two tables don't exist at all — see this file's own "Multi-tenancy"
+  section above). A migration file targeting either table would 500 every tenant's first request per
+  process after deploy (and block new-tenant creation) with `relation "platform_settings" does not
+  exist`; these two columns' `ALTER TABLE` statements were added to `bootstrap-public.sql` instead,
+  matching every other `platform_settings`/`site_theme` column's own precedent there (switcher
+  position/style, MFA/Entra flags, etc).
 - Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
   the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
   `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is

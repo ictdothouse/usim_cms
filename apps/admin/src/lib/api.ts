@@ -748,6 +748,36 @@ export const setLanguageSwitcherSettings = (token: string, switcherPosition: Swi
     body: JSON.stringify({ switcherPosition, switcherStyle }),
   }) as Promise<LanguageSwitcherSettings>;
 
+// Native SEO + AEO — per-site title template/description (already resolved:
+// the site's own override, or the superadmin's global default when unset).
+// GET/PUT share one route (/api/seo-defaults) reused directly by both the
+// per-site form and apps/frontend's own render-time fetch, same shape as
+// theme's own single public-GET-plus-protected-PUT pair.
+export interface SeoDefaults {
+  titleTemplate: string;
+  defaultDescription: string;
+}
+
+export const getSeoDefaults = (tenantHost: string, token: string) =>
+  request("/api/seo-defaults", tenantHost, token) as Promise<SeoDefaults>;
+
+export const putSeoDefaults = (tenantHost: string, token: string, titleTemplate: string, defaultDescription: string) =>
+  request("/api/seo-defaults", tenantHost, token, {
+    method: "PUT",
+    body: JSON.stringify({ titleTemplate, defaultDescription }),
+  });
+
+// Instance-wide default (Settings tab's "SEO & AEO Defaults" card) — same
+// shape/pattern as getLanguageSwitcherSettings above.
+export const getPortalSeoDefaults = (token: string) =>
+  request("/api/portal/seo-defaults", null, token) as Promise<SeoDefaults>;
+
+export const setPortalSeoDefaults = (token: string, titleTemplate: string, defaultDescription: string) =>
+  request("/api/portal/seo-defaults", null, token, {
+    method: "PUT",
+    body: JSON.stringify({ titleTemplate, defaultDescription }),
+  }) as Promise<SeoDefaults>;
+
 // i18n Phase 5 — a translation is content living on the SAME post/page row
 // (see PostTranslations below), not a separate row — so there is no
 // per-language fetch/create route to call here anymore.

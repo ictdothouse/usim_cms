@@ -19,6 +19,10 @@ import {
   setTenantTheme,
   getLanguageSwitcherDefaults,
   setLanguageSwitcherDefaults,
+  getSeoDefaults,
+  setSeoDefaults,
+  getTenantSeoDefaults,
+  setTenantSeoDefaults,
   insertAuditLog,
   getTenantMaintenanceMode,
 } from "./db/tenant-pool.js";
@@ -225,6 +229,15 @@ await app.register(async (publicScope) => {
     return { enabled: allEnabled.map((l) => ({ code: l.code, label: l.label })), showHeaderSwitcher, switcherPosition, switcherStyle };
   });
 
+  // Native SEO + AEO — tenant-resolved title-template/description default
+  // (site_theme's own override, else the superadmin's global default).
+  // Public/unauthenticated, same openness as /api/languages and /api/theme:
+  // apps/frontend needs this pre-login at render time for every page/post's
+  // effective title/description fallback chain.
+  publicScope.get("/api/seo-defaults", async (req) => {
+    return await getTenantSeoDefaults(req.tenantHost);
+  });
+
   // apps/frontend's own middleware (src/middleware.ts) calls this on every
   // request to decide whether to show the maintenance page instead of real
   // content — deliberately its own tiny public route rather than folded
@@ -334,6 +347,24 @@ await app.register(async (protectedScope) => {
     return { saved: true };
   });
 
+  // Per-site override of the SEO defaults above — gated on theme.write
+  // (not a new permission string): this is a sub-concern of a site's
+  // presentation settings, same reasoning switcherPosition/switcherStyle's
+  // own per-site write reuses languages.write rather than inventing its own.
+  // Always writes the exact values the admin form showed (no separate
+  // reset-to-inherit affordance), same convention as PUT /api/tenant-languages.
+  protectedScope.put("/api/seo-defaults", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "theme.write")) {
+      reply.code(403);
+      return { error: "missing theme.write permission" };
+    }
+    const { titleTemplate, defaultDescription } = req.body as { titleTemplate?: string; defaultDescription?: string };
+    await setTenantSeoDefaults(req.tenantHost, titleTemplate ?? "", defaultDescription ?? "");
+    // SEO title/description render into every page/post's <title>/<meta>.
+    await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
+    return { saved: true };
+  });
+
   // i18n Phase 2 — any authenticated user of this tenant can view the
   // current selection; only languages.write can change it (superadmin
   // always bypasses, per hasPermission).
@@ -432,6 +463,32 @@ await app.register(async (protectedScope) => {
       ip: req.ip,
     });
     return { switcherPosition, switcherStyle };
+  });
+
+  // Instance-wide default title template/description (Settings "SEO & AEO
+  // Defaults" card) — same shape/gating as /api/portal/language-switcher-
+  // settings above (superadmin-only read too; a webmaster reads their own
+  // effective value already resolved through GET /api/seo-defaults).
+  app.get("/api/portal/seo-defaults", async (req, reply) => {
+    if (!verifySuperadmin(req, reply)) return;
+    return await getSeoDefaults();
+  });
+
+  app.put("/api/portal/seo-defaults", async (req, reply) => {
+    const session = verifySuperadmin(req, reply);
+    if (!session) return;
+    const body = req.body as { titleTemplate?: string; defaultDescription?: string };
+    const titleTemplate = body.titleTemplate ?? "";
+    const defaultDescription = body.defaultDescription ?? "";
+    await setSeoDefaults(titleTemplate, defaultDescription);
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.seo_defaults",
+      meta: { titleTemplate, defaultDescription },
+      ip: req.ip,
+    });
+    return { titleTemplate, defaultDescription };
   });
 
   registerBlueprintRoutes(protectedScope);

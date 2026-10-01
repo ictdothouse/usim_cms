@@ -374,6 +374,19 @@ export async function getLanguages(
   return apiGet("/api/languages", tenantHost);
 }
 
+// Native SEO + AEO — tenant-resolved title-template/description default
+// (the tenant's own site_theme override, or the superadmin's global
+// default). Used by [...slug].astro/posts/[slug].astro as the last fallback
+// in their effectiveDescription chain, and to apply the title template.
+export interface SeoDefaults {
+  titleTemplate: string;
+  defaultDescription: string;
+}
+
+export async function getSeoDefaults(tenantHost: string): Promise<SeoDefaults> {
+  return apiGet("/api/seo-defaults", tenantHost);
+}
+
 // src/middleware.ts's own maintenance-mode gate — see that file. token, when
 // given, is a maintenance-bypass credential (apps/admin's Manage Site "View"
 // link) forwarded as a Bearer header; apps/api only ever honors it for this

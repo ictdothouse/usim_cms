@@ -3,7 +3,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
-import { getPageBySlug, getTheme, getLanguages, resolvePageLayout, resolveHeaderFooter, getLivePreviewOverride } from "../lib/api";
+import { getPageBySlug, getTheme, getLanguages, getSeoDefaults, resolvePageLayout, resolveHeaderFooter, getLivePreviewOverride } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
 // Single instance, ~50 real department domains: tenant identity is always
@@ -71,6 +71,7 @@ const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boole
 // (page.translations), so switching language re-renders this same row
 // under a `?lang=` query param, not a link to a different slug/row.
 const { enabled: siteLanguages, showHeaderSwitcher, switcherPosition, switcherStyle } = await getLanguages(tenantHost);
+const tenantSeoDefaults = await getSeoDefaults(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
 const layout = page ? resolvePageLayout(page, requestedLang) : [];
 const fonts = collectFonts(layout);
@@ -108,12 +109,57 @@ function findLcpImageUrl(blocks: typeof layout): string | null {
 }
 const lcpImage = page ? findLcpImageUrl(layout) : null;
 
-// Native SEO + AEO: page.seo overrides fall back to the row's own
-// title/bannerImageUrl/computed canonical URL — see BaseLayout.astro's own Props
-// comment for how these get rendered.
+// Auto-generated description suggestion: best-effort plain text pulled from
+// the WHOLE layout tree's heading/text/list elements (not just the first
+// one, unlike findLcpImageUrl above — a page's first element is often a
+// hero image, not text), joined and trimmed to ~160 chars. Only ever used
+// as the effectiveDescription fallback below when the author hasn't set
+// seo.description — never written back to the row. apps/admin's
+// InspectorPageSettings.tsx has its own small mirror of this same walk
+// (operating on ctx.blocks instead of a fetched layout) used only as that
+// field's placeholder — no shared code between admin/frontend, see CLAUDE.md.
+// ponytail: naive heuristic (no markdown stripping) — good enough for a
+// meta description guess, not a renderer.
+function extractAutoDescription(blocks: typeof layout): string {
+  const parts: string[] = [];
+  outer: for (const block of blocks) {
+    if (block.type !== "section") continue;
+    const rows = (block.props as Record<string, unknown> | undefined)?.rows;
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows as Record<string, unknown>[]) {
+      const columns = (row as Record<string, unknown> | undefined)?.columns;
+      if (!Array.isArray(columns)) continue;
+      for (const col of columns as Record<string, unknown>[]) {
+        const elements = (col as Record<string, unknown> | undefined)?.elements;
+        if (!Array.isArray(elements)) continue;
+        for (const el of elements as Record<string, unknown>[]) {
+          const type = (el as Record<string, unknown> | undefined)?.type;
+          const p = ((el as Record<string, unknown> | undefined)?.props ?? {}) as Record<string, unknown>;
+          if ((type === "heading" || type === "text") && typeof p.text === "string" && p.text.trim()) {
+            parts.push(p.text.trim());
+          } else if (type === "list" && typeof p.items === "string" && p.items.trim()) {
+            parts.push(p.items.split("\n").map((s) => s.trim()).filter(Boolean).join(", "));
+          }
+          if (parts.join(" ").length >= 160) break outer;
+        }
+      }
+    }
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+// Native SEO + AEO: page.seo overrides fall back to an auto-extracted
+// suggestion, then the tenant's own SEO defaults — see BaseLayout.astro's
+// own Props comment for how these get rendered. Title gains the tenant's
+// title template LAST, on top of whichever base title was already resolved
+// (an unset/empty template leaves it completely unchanged).
 const seo = page?.seo ?? {};
-const effectiveTitle = seo.title || page?.title || "";
-const effectiveDescription = seo.description || "";
+const autoDescription = page ? extractAutoDescription(layout) : "";
+const effectiveTitleBase = seo.title || page?.title || "";
+const effectiveTitle = tenantSeoDefaults.titleTemplate
+  ? tenantSeoDefaults.titleTemplate.replace("%s", effectiveTitleBase)
+  : effectiveTitleBase;
+const effectiveDescription = seo.description || autoDescription || tenantSeoDefaults.defaultDescription || "";
 const effectiveOgImage = seo.ogImage || page?.bannerImageUrl || undefined;
 const canonicalUrl = seo.canonicalUrl || (page ? `https://${tenantHost}/${page.slug}` : undefined);
 const jsonLd = page
