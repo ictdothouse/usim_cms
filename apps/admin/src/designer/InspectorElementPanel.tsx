@@ -245,9 +245,24 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                         // (ignores the block's own layout width — the standard no-
                         // dependency text-measurement trick) gives the actual glyph
                         // extent instead, so a heading/text starts free-positioned
-                        // already hugging its own text. image/button keep the
-                        // node's own rect — their rendered box (not a text run) IS
-                        // the real thing to preserve.
+                        // already hugging its own text.
+                        // button/image used to keep `node`'s own rect on the
+                        // (once-true) assumption that "their rendered box IS the
+                        // real thing to preserve" — no longer true for button since
+                        // its flow wrapper became a deliberately full-width
+                        // text-align div (matching SectionBlock.astro's own real
+                        // render), so `node` here is column-width, not pill-width;
+                        // the same full-width-wrapper reasoning applies to a flow
+                        // image's own align wrapper. Measuring the actual rendered
+                        // pill/picture (one level — or two, for button — further in)
+                        // instead of the wrapper fixes the same "Free snaps to a
+                        // much bigger box" jump Range already fixed for text.
+                        const innerRect =
+                          childEl.type === "button"
+                            ? node.querySelector("span")?.getBoundingClientRect()
+                            : childEl.type === "image"
+                              ? node.querySelector("img")?.getBoundingClientRect()
+                              : undefined;
                         const sizeRect =
                           childEl.type === "heading" || childEl.type === "text"
                             ? (() => {
@@ -255,7 +270,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                                 range.selectNodeContents(node);
                                 return range.getBoundingClientRect();
                               })()
-                            : nodeRect;
+                            : (innerRect ?? nodeRect);
                         if (sizeRect.width > 0) posWidth = `${Math.round(sizeRect.width)}px`;
                         if (sizeRect.height > 0) posHeight = `${Math.round(sizeRect.height)}px`;
                       }

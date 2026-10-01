@@ -678,8 +678,14 @@ const fontsHref = allFonts.length
             const insetY = containerRect.height * 0.06;
             const exCandidates = [insetX, containerRect.width - insetX, ...siblings.map((s) => s.left), ...siblings.map((s) => s.left + s.width)];
             const eyCandidates = [insetY, containerRect.height - insetY, ...siblings.map((s) => s.top), ...siblings.map((s) => s.top + s.height)];
+            // Heading/text ARE the node itself; a free-positioned button is a
+            // wrapper div around its own <a class="ds-btn"> (SliderBlock.astro's
+            // button case) — .ds-btn sets its own font-size directly
+            // (global.css), so scaling the wrapper's font-size would do
+            // nothing there; find the real text-bearing node to scale instead.
             const isTextLike = node.tagName === "P" || /^H[1-4]$/.test(node.tagName);
-            const startFontPx = isTextLike ? parseFloat(getComputedStyle(node).fontSize) : 0;
+            const textTarget = isTextLike ? node : node.querySelector("a.ds-btn");
+            const startFontPx = textTarget ? parseFloat(getComputedStyle(textTarget).fontSize) : 0;
             // Diagonal, not plain width — mirrors apps/admin's ElPreview.tsx
             // startFreeElResize fix: a mostly-vertical drag (box gets much
             // taller, only slightly wider) still scales the font. A
@@ -699,8 +705,8 @@ const fontsHref = allFonts.length
               node.style.width = w + "px";
               node.style.height = h + "px";
               finalRatio = startDiag > 0 ? Math.hypot(w, h) / startDiag : 1;
-              if (isTextLike && startFontPx > 0) {
-                node.style.fontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
+              if (textTarget && startFontPx > 0) {
+                textTarget.style.fontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
               }
               finalW = w;
               finalH = h;
@@ -712,7 +718,7 @@ const fontsHref = allFonts.length
                 const sliderNode = node.closest("[data-designer-path]");
                 if (sliderNode) {
                   const patch = { posWidth: finalW + "px", posHeight: finalH + "px" };
-                  if (isTextLike && startFontPx > 0) {
+                  if (textTarget && startFontPx > 0) {
                     patch.posFontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
                   }
                   justDragged = true;

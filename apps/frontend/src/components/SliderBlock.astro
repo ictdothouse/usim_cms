@@ -369,6 +369,17 @@ const p = el.props ?? {};
             .join(";"),
         ),
       );
+      // Button's own posFontSize (same free-position drag-resize override as
+      // heading's, above) has to land on the inner <a> specifically, not
+      // this wrapper — .ds-btn sets its own font-size directly (global.css),
+      // so a value only set on an ancestor would never actually win over it.
+      if (el.type === "button") {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"] a`, el.bp, ep, (mp) =>
+            mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : "",
+          ),
+        );
+      }
       // The flow-spacer rendered below (for a free-positioned child) needs
       // its own height to track posHeight per breakpoint too — without this,
       // a bp override would reserve the desktop height at every breakpoint,
@@ -479,6 +490,7 @@ const p = el.props ?? {};
                 ep.color ? `color:${ep.color}` : null,
                 freePos && ep.posWidth ? "width:100%" : null,
                 freePos && ep.posHeight ? "height:100%;display:flex;align-items:center;justify-content:center" : null,
+                freePos && ep.posFontSize ? `font-size:${ep.posFontSize}` : null,
                 elBorderShadowStyle(ep),
               ]
                 .filter(Boolean)
