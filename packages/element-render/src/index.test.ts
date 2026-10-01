@@ -26,19 +26,12 @@ test("computeFreePositionStyle carries through explicit x/y/width/height/zIndex"
   assert.equal(s.zIndex, "3");
 });
 
-test("computeFreePositionStyle clamps width/height to remaining room past x/y, so it can't escape its slide on a narrower viewport", () => {
-  const s = computeFreePositionStyle({ x: "35.7", y: "55.4", posWidth: "334px", posHeight: "77px" });
-  assert.equal(s.maxWidth, "calc(100% - 35.7%)");
-  assert.equal(s.maxHeight, "calc(100% - 55.4%)");
-});
-
-test("computeFreePositionStyle clamps an out-of-range stored x/y (e.g. dragged past the edge before the drag handle itself clamped) into [0,100], so it self-heals without a data migration", () => {
-  const negative = computeFreePositionStyle({ x: "-23.6", y: "63.3", posWidth: "277px", posHeight: "67px" });
-  assert.equal(negative.left, "0%");
-  assert.equal(negative.maxWidth, "calc(100% - 0%)");
-  const over = computeFreePositionStyle({ x: "120", y: "150" });
-  assert.equal(over.left, "100%");
-  assert.equal(over.top, "100%");
+test("computeFreePositionStyle allows an out-of-range x/y through unchanged — cropping is the slide's own overflow:hidden, not a squish/clamp here", () => {
+  const s = computeFreePositionStyle({ x: "-23.6", y: "120", posWidth: "277px", posHeight: "67px" });
+  assert.equal(s.left, "-23.6%");
+  assert.equal(s.top, "120%");
+  assert.equal(s.maxWidth, undefined);
+  assert.equal(s.maxHeight, undefined);
 });
 
 test("computeFreePositionStyle treats zIndex 0 as unset", () => {
