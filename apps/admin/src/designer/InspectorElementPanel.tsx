@@ -230,11 +230,6 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                       let posHeight = "";
                       if (box && node) {
                         const boxRect = box.getBoundingClientRect();
-                        const nodeRect = node.getBoundingClientRect();
-                        if (boxRect.width > 0 && boxRect.height > 0) {
-                          x = String(Math.max(0, Math.min(100, Math.round(((nodeRect.left - boxRect.left) / boxRect.width) * 1000) / 10)));
-                          y = String(Math.max(0, Math.min(100, Math.round(((nodeRect.top - boxRect.top) / boxRect.height) * 1000) / 10)));
-                        }
                         // heading/text renders as a plain block with no explicit
                         // width, so it stretches to its column's full width in flow
                         // regardless of how short the text actually is — capturing
@@ -263,16 +258,27 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                             : childEl.type === "image"
                               ? node.querySelector("img")?.getBoundingClientRect()
                               : undefined;
-                        const sizeRect =
+                        // visualRect drives x/y too, not just size — the wrapper's
+                        // own rect (node) spans the full column (left edge == column
+                        // left edge) while the real pill/text sits centered inside
+                        // it, so anchoring x/y off the wrapper snapped a centered
+                        // button to the column's left edge instead of its own visible
+                        // spot (reported live: locked-centered button jumped to
+                        // x≈29% on toggling Free instead of staying ≈center).
+                        const visualRect =
                           childEl.type === "heading" || childEl.type === "text"
                             ? (() => {
                                 const range = document.createRange();
                                 range.selectNodeContents(node);
                                 return range.getBoundingClientRect();
                               })()
-                            : (innerRect ?? nodeRect);
-                        if (sizeRect.width > 0) posWidth = `${Math.round(sizeRect.width)}px`;
-                        if (sizeRect.height > 0) posHeight = `${Math.round(sizeRect.height)}px`;
+                            : (innerRect ?? node.getBoundingClientRect());
+                        if (boxRect.width > 0 && boxRect.height > 0) {
+                          x = String(Math.max(0, Math.min(100, Math.round(((visualRect.left - boxRect.left) / boxRect.width) * 1000) / 10)));
+                          y = String(Math.max(0, Math.min(100, Math.round(((visualRect.top - boxRect.top) / boxRect.height) * 1000) / 10)));
+                        }
+                        if (visualRect.width > 0) posWidth = `${Math.round(visualRect.width)}px`;
+                        if (visualRect.height > 0) posHeight = `${Math.round(visualRect.height)}px`;
                       }
                       childSetValues({ position: "custom", x, y, posWidth, posHeight });
                     }}
