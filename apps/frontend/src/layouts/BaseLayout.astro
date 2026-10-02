@@ -416,10 +416,10 @@ const fontsHref = allFonts.length
             if (slideNode && slideNode.closest("[data-designer-path]")) {
               e.preventDefault();
               postSelectSlide(slideNode);
-              selectSlideFreeNode(isSlideFree(slideNode) ? slideNode : null);
+              selectSlideNode(slideNode);
               return;
             }
-            selectSlideFreeNode(null);
+            selectSlideNode(null);
             const node = e.target.closest("[data-designer-path]");
             if (!node) return;
             e.preventDefault();
@@ -485,14 +485,10 @@ const fontsHref = allFonts.length
           let justDragged = false;
 
           document.addEventListener("pointerdown", (e) => {
-            // A slide-nested free-positioned element (position:absolute) owns
-            // its own drag gesture below — bail here so this generic
-            // section/column/element reorder drag never hijacks it (without
-            // this, closest() would still resolve up to the slider's own
-            // data-designer-path ancestor and start an unrelated element-
-            // level reorder drag instead).
-            const slideChild = e.target.closest("[data-slide-sel]");
-            if (slideChild && isSlideFree(slideChild)) return;
+            // Slide children are selected/edited by the slider bridge below.
+            // Don't let this generic handler turn a press on any of them into
+            // a drag of the slider's parent element.
+            if (e.target.closest("[data-slide-sel]")) return;
             const node = e.target.closest("[data-designer-path]");
             // e.target too: an element's data-designer-path node is its
             // display:contents wrapper, whose editable CHILD is what's
@@ -834,26 +830,51 @@ const fontsHref = allFonts.length
             el.addEventListener("click", (ev) => ev.stopPropagation());
           };
 
-          let selectedSlideFreeNode = null;
+          let selectedSlideNode = null;
           let slideChrome = null;
-          function selectSlideFreeNode(node) {
-            if (node === selectedSlideFreeNode) return;
+          function makeSlideFree(node) {
+            const slide = node.closest(".ds-slide");
+            if (!slide) return;
+            const slideRect = slide.getBoundingClientRect();
+            let visualRect = node.getBoundingClientRect();
+            const type = node.dataset.slideType;
+            if (type === "heading" || type === "text") {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              visualRect = range.getBoundingClientRect();
+            } else if (type === "image") {
+              visualRect = node.querySelector("img")?.getBoundingClientRect() ?? visualRect;
+            } else if (type === "button") {
+              visualRect = node.querySelector("a")?.getBoundingClientRect() ?? visualRect;
+            }
+            if (!slideRect.width || !slideRect.height || !visualRect.width || !visualRect.height) return;
+            commitSlide(node, {
+              position: "custom",
+              x: String(r1(((visualRect.left - slideRect.left) / slideRect.width) * 100)),
+              y: String(r1(((visualRect.top - slideRect.top) / slideRect.height) * 100)),
+              posWidth: `${Math.round(visualRect.width)}px`,
+              posHeight: `${Math.round(visualRect.height)}px`,
+            });
+          }
+          function selectSlideNode(node) {
+            if (node === selectedSlideNode) return;
             if (slideChrome) {
               cancelAnimationFrame(slideChrome.raf);
               slideChrome.box.remove();
               slideChrome.bar.remove();
               slideChrome = null;
             }
-            selectedSlideFreeNode = node;
+            selectedSlideNode = node;
             if (!node) return;
             const locked = node.dataset.slideLocked === "true";
             const type = node.dataset.slideType;
+            const hasGestureControls = !locked && isSlideFree(node);
 
             const box = document.createElement("div");
             box.dataset.slideChrome = "1";
             box.style.cssText = "position:fixed;pointer-events:none;z-index:2147483000;outline:2px solid " + ACCENT + ";";
             stopBubble(box);
-            if (!locked) {
+            if (hasGestureControls) {
               // Heading/text get no top/bottom pills — their height follows the text.
               const HANDLES = [[-1, -1, "nwse"], [1, -1, "nesw"], [-1, 1, "nesw"], [1, 1, "nwse"], [-1, 0, "ew"], [1, 0, "ew"], [0, -1, "ns"], [0, 1, "ns"]];
               for (const [dx, dy, cur] of HANDLES) {
@@ -938,12 +959,23 @@ const fontsHref = allFonts.length
             }
             const lockBtn = chromeBtn(locked ? "lock" : "unlock", locked ? L("unlock", "Unlock") : L("lock", "Lock"));
             if (locked) lockBtn.style.color = ACCENT;
+            if (!locked && !isSlideFree(node)) {
+              lockBtn.disabled = true;
+              lockBtn.style.opacity = ".4";
+            }
             lockBtn.addEventListener("click", () => actSlide(node, "lock", locked ? "" : "true"));
             const dup = chromeBtn("copy", L("duplicate", "Duplicate"));
             dup.addEventListener("click", () => actSlide(node, "duplicate"));
             const del = chromeBtn("trash", L("delete", "Delete"));
             del.addEventListener("click", () => actSlide(node, "delete"));
+            let moveBtn = null;
+            if (!isSlideFree(node) && !locked) {
+              moveBtn = chromeBtn("move", L("move", "Move"));
+              moveBtn.addEventListener("click", () => makeSlideFree(node));
+            }
             const more = chromeBtn("more", L("alignToSlide", "Align to slide"));
+            more.disabled = !hasGestureControls;
+            if (!hasGestureControls) more.style.opacity = ".4";
             more.addEventListener("click", () =>
               openMenu("align", () => {
                 menu.style.width = "11rem";
@@ -955,8 +987,8 @@ const fontsHref = allFonts.length
                 for (const [k, fallback] of ALIGN) {
                   const item = chromeBtn(null, "", L(k, fallback));
                   item.style.cssText += "width:100%;justify-content:flex-start;border-radius:6px;" + (k === "top" ? "margin-top:4px;" : "");
-                  item.disabled = locked;
-                  if (locked) item.style.opacity = ".4";
+                  item.disabled = !hasGestureControls;
+                  if (!hasGestureControls) item.style.opacity = ".4";
                   item.addEventListener("click", () => {
                     menu.style.display = "none";
                     alignSlide(node, k);
@@ -965,7 +997,9 @@ const fontsHref = allFonts.length
                 }
               }),
             );
-            bar.append(lockBtn, dup, del, more);
+            bar.append(lockBtn, dup, del);
+            if (moveBtn) bar.appendChild(moveBtn);
+            bar.appendChild(more);
 
             document.body.append(box, bar);
             const chrome = { box, bar, raf: 0 };
@@ -977,7 +1011,7 @@ const fontsHref = allFonts.length
             const place = () => {
               if (slideChrome !== chrome) return;
               if (!node.isConnected) {
-                selectSlideFreeNode(null);
+                selectSlideNode(null);
                 return;
               }
               const r = node.getBoundingClientRect();
@@ -991,8 +1025,10 @@ const fontsHref = allFonts.length
               const bw = bar.offsetWidth;
               const bh = bar.offsetHeight;
               bar.style.left = Math.max(4, Math.min(window.innerWidth - bw - 4, cx - bw / 2)) + "px";
-              // Flips below (past the Rotate/Move pair) near the viewport's top.
-              bar.style.top = (r.top - bh - 12 >= 4 ? r.top - bh - 12 : r.bottom + 50) + "px";
+              // Flips below near the viewport's top; free elements have the
+              // Rotate/Move pair between their box and the toolbar.
+              bar.style.top =
+                (r.top - bh - 12 >= 4 ? r.top - bh - 12 : r.bottom + (hasGestureControls ? 50 : 12)) + "px";
               chrome.raf = requestAnimationFrame(place);
             };
             place();
@@ -1006,13 +1042,17 @@ const fontsHref = allFonts.length
           });
           document.addEventListener("pointerdown", (e) => {
             const node = e.target.closest("[data-slide-sel]");
-            if (!node || !isSlideFree(node) || node.isContentEditable || !node.closest(".ds-slide")) return;
-            e.preventDefault();
-            e.stopPropagation();
-            // Select on press, not click, so a drag carries its chrome along.
-            selectSlideFreeNode(node);
+            if (!node || !node.closest(".ds-slide")) return;
+            // All nested slide elements get a visible selection toolbar. The
+            // direct-canvas Move/resize gestures stay exclusive to elements
+            // already in Free Position mode; flow text remains selectable.
+            selectSlideNode(node);
             postSelectSlide(node);
-            if (node.dataset.slideLocked !== "true") startSlideDrag(e, node);
+            if (isSlideFree(node) && !node.isContentEditable) {
+              e.preventDefault();
+              e.stopPropagation();
+              if (node.dataset.slideLocked !== "true") startSlideDrag(e, node);
+            }
           });
 
           function findByPath(path) {
@@ -1113,7 +1153,7 @@ const fontsHref = allFonts.length
                 selectedNode && e.data.slideSel
                   ? selectedNode.querySelector(`[data-slide-sel="${CSS.escape(e.data.slideSel)}"]`)
                   : null;
-              selectSlideFreeNode(isSlideFree(slideChild) ? slideChild : null);
+              selectSlideNode(slideChild);
               if (selectedNode) {
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
                 selectionResizeObserver.observe(visualTarget(selectedNode));

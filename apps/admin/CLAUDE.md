@@ -268,8 +268,9 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   with ds-entrance/ds-hover animations), registered in element-schema's LENGTH_KEYS, editable in the
   Inspector's free-position grid. No "Comment" button — there's no comment system to back it.
   **Same controls in Live Edit (2026-10-02)** — Live Edit is the primary editing surface; Blocks mode
-  is only a layout guide. `BaseLayout.astro`'s designerEdit bridge ports the whole set (8 handles,
-  Rotate/Move, magenta guides, toolbar) as `position:fixed` overlays on the iframe's `<body>` (never
+  is only a layout guide. `BaseLayout.astro`'s designerEdit bridge shows a selection outline and
+  common toolbar for every nested slide child; the full set (8 handles, Rotate/Move, magenta guides,
+  align) is active on free-positioned children. The overlays are `position:fixed` on the iframe's `<body>` (never
   inside the element — overflow:hidden would crop it, rotation would rotate the toolbar), re-placed
   every frame while selected. Gestures post `designer:slideElDrag` once on pointerup (`track()` ignores
   moves under 3px — a click's jitter used to commit a px-rounded position plus a reload); toolbar buttons
@@ -281,8 +282,9 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   together and reload open Designer tabs. A corner resize sends `fontScale`,
   not a px size — admin scales the STORED value with `style.ts`'s `scaledFreeFont` (shared with
   ElPreview). `SliderBlock.astro` stamps `data-slide-sel/free/type/locked` on slide children under
-  designerEdit only; the iframe also checks computed position so tablet/mobile-only free-position
-  children receive the same chrome at the active device viewport),
+  designerEdit only; the iframe checks computed position so tablet/mobile-only free-position children
+  receive the same gesture controls at the active device viewport. Free headings/text use
+  `min-width:min-content` so their resize outline cannot clip an unbreakable word,
   and text's per-bp `size` now gets a real `bpStyleRules` font-size rule. Toolbar labels arrive in
   `designer:selected.labels` (the iframe has no i18n).
   **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab
