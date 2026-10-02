@@ -230,6 +230,25 @@ export function deleteSlideElement(slide: SlideItem, r: number, c: number, e: nu
   return { ...slide, rows };
 }
 
+// Copies one nested element (fresh id) right after itself — the slide
+// canvas's floating-toolbar Duplicate. A free-positioned copy is nudged 3%
+// down-right so it doesn't land exactly on top of the original.
+export function duplicateSlideElement(slide: SlideItem, r: number, c: number, e: number): SlideItem {
+  const src = slide.rows[r]?.columns[c]?.elements[e];
+  if (!src) return slide;
+  const copy: El = { ...(JSON.parse(JSON.stringify(src)) as El), id: uid() };
+  if (copy.props.position === "custom") {
+    copy.props.x = String(Math.round((Number(copy.props.x || "50") + 3) * 10) / 10);
+    copy.props.y = String(Math.round((Number(copy.props.y || "50") + 3) * 10) / 10);
+  }
+  const rows = slide.rows.map((row, ri) =>
+    ri !== r
+      ? row
+      : { ...row, columns: row.columns.map((col, ci) => (ci !== c ? col : { ...col, elements: [...col.elements.slice(0, e + 1), copy, ...col.elements.slice(e + 1)] })) },
+  );
+  return { ...slide, rows };
+}
+
 // Removes an entire nested row (and everything in it).
 export function deleteSlideRow(slide: SlideItem, r: number): SlideItem {
   return { ...slide, rows: slide.rows.filter((_, ri) => ri !== r) };

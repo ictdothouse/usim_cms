@@ -291,16 +291,20 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                 </div>
                 {childIsFree && (
                   <div className="grid grid-cols-2 gap-1.5">
-                    {(["x", "y", "posWidth", "posHeight"] as const).map((key) => (
+                    {(["x", "y", "posWidth", "posHeight", "rotate"] as const).map((key) => (
                       <label key={key} className="space-y-0.5 text-[10px] text-sub">
                         <span className="inline-flex items-center gap-1">
-                          {key === "x" ? "X %" : key === "y" ? "Y %" : t(key === "posWidth" ? "designer-f-width" : "designer-f-height")}
+                          {key === "x"
+                            ? "X %"
+                            : key === "y"
+                              ? "Y %"
+                              : t(key === "posWidth" ? "designer-f-width" : key === "posHeight" ? "designer-f-height" : "designer-f-rotate")}
                           <BpToggle active={bpKeysOverridden(childEl.bp, [key])} onToggle={() => childToggleOverride([key])} bp={bp} t={t} />
                         </span>
                         <BufferedInput
                           className="w-full rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
                           value={bpGetValue(childEl.props[key], childEl.bp, key)}
-                          placeholder={key === "x" || key === "y" ? "50" : "auto"}
+                          placeholder={key === "x" || key === "y" ? "50" : key === "rotate" ? "0" : "auto"}
                           onCommit={(v) => childSetValue(key, v)}
                         />
                       </label>

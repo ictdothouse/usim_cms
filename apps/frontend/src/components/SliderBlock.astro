@@ -127,7 +127,7 @@ const HEX_RE = /^#[0-9a-f]{6}$/i;
 // expression parser rejects a function declaration's TS type annotations.
 function posStyle(mp: Record<string, string>): string | null {
   return mp.position === "custom"
-    ? toCssText(computeFreePositionStyle({ x: mp.x, y: mp.y, posWidth: mp.posWidth, posHeight: mp.posHeight, zIndex: mp.zIndex }))
+    ? toCssText(computeFreePositionStyle({ x: mp.x, y: mp.y, posWidth: mp.posWidth, posHeight: mp.posHeight, zIndex: mp.zIndex, rotate: mp.rotate }))
     : null;
 }
 

@@ -9,6 +9,7 @@ import {
   addSlideRow,
   deleteSlideElement,
   deleteSlideRow,
+  duplicateSlideElement,
   updateSlideElementProps,
   updateSlideElementBp,
   parseCards,
@@ -139,4 +140,15 @@ test("stringifyCards round-trips through parseCards", () => {
   const original = parseCards(JSON.stringify([{ title: "A", image: "a.jpg", description: "D", href: "/a", buttonLabel: "Go" }]));
   const roundTripped = parseCards(stringifyCards(original));
   assert.deepEqual(roundTripped, original);
+});
+
+test("duplicateSlideElement inserts a fresh-id copy right after, nudging a free one 3%", () => {
+  const s = updateSlideElementProps(addSlideElement(newSlide(), "button", { label: "Go" }), 0, 0, 0, { position: "custom", x: "10", y: "20" });
+  const d = duplicateSlideElement(s, 0, 0, 0);
+  const [a, b] = d.rows[0].columns[0].elements;
+  assert.notEqual(a.id, b.id);
+  assert.equal(b.props.label, "Go");
+  assert.equal(b.props.x, "13");
+  assert.equal(b.props.y, "23");
+  assert.equal(a.props.x, "10");
 });
