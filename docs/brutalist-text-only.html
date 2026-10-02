@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brutalist Text-Only — CodeFronts</title>
+
+<style>
+.hs-16 {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100vh;
+  padding: clamp(28px, 5vw, 64px) clamp(20px, 5vw, 56px);
+  background: #0a0a0a;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #ffffff;
+  box-sizing: border-box;
+}
+
+.hs-16__stack {
+  max-width: 760px;
+}
+
+.hs-16__num {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  background: #ff5e1a;
+  color: #0a0a0a;
+  padding: 4px 10px;
+  margin-bottom: 22px;
+}
+
+.hs-16__h {
+  margin: 0 0 22px;
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(40px, 7vw, 84px);
+  font-weight: 900;
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+
+.hs-16__h em {
+  color: #c4f048;
+  font-style: italic;
+  display: inline;
+}
+
+.hs-16__mark {
+  display: inline-block;
+  background: #ff5e1a;
+  color: #0a0a0a;
+  padding: 0 12px;
+  transform: rotate(-1deg);
+}
+
+.hs-16__p {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #a8a8a8;
+  margin: 0 0 26px;
+  max-width: 480px;
+  border-top: 2px solid #ff5e1a;
+  padding-top: 14px;
+}
+
+.hs-16__row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.hs-16__cta {
+  display: inline-block;
+  padding: 12px 18px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-decoration: none;
+  background: transparent;
+  color: #fff;
+  border: 2px solid #fff;
+  transition: background 0.12s, color 0.12s;
+}
+
+.hs-16__cta:hover {
+  background: #fff;
+  color: #0a0a0a;
+}
+
+.hs-16__cta-pri {
+  background: #ff5e1a;
+  color: #0a0a0a;
+  border-color: #ff5e1a;
+}
+
+.hs-16__cta-pri:hover {
+  background: #c4f048;
+  border-color: #c4f048;
+  color: #0a0a0a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-16__cta {
+    transition: none;
+  }
+}
+</style>
+</head>
+<body>
+<section class="hs-16" aria-label="Hero">
+  <div class="hs-16__stack">
+    <span class="hs-16__num">001 / 042</span>
+    <h2 class="hs-16__h">
+      THE WEB
+      <em>WAS NEVER</em>
+      MEANT TO
+      <span class="hs-16__mark">LOOK SAFE.</span>
+    </h2>
+    <p class="hs-16__p">A design studio for brands that would rather be remembered than liked.</p>
+    <div class="hs-16__row">
+      <a class="hs-16__cta hs-16__cta-pri" href="#work">[ WORK ]</a>
+      <a class="hs-16__cta" href="#talk">[ EMAIL ]</a>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

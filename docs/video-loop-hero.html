@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Video Loop Hero — CodeFronts</title>
+
+<style>
+.hs-06 {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100vh;
+  padding: clamp(28px, 5vw, 64px) clamp(20px, 5vw, 56px);
+  background: #f4f1ea;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #0b1f4a;
+  box-sizing: border-box;
+  contain: layout paint;
+}
+
+.hs-06__shapes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hs-06__shapes span {
+  position: absolute;
+  animation: hs-06-bounce 8s ease-in-out infinite alternate;
+}
+
+.hs-06__s1 {
+  top: 8%;
+  left: 6%;
+  width: 110px;
+  height: 110px;
+  background: #0b1f4a;
+  border-radius: 50%;
+}
+
+.hs-06__s2 {
+  top: 12%;
+  right: 10%;
+  width: 0;
+  height: 0;
+  border-left: 70px solid transparent;
+  border-right: 70px solid transparent;
+  border-bottom: 120px solid #f5d028;
+  animation-delay: -3s;
+}
+
+.hs-06__s3 {
+  bottom: 10%;
+  left: 12%;
+  width: 140px;
+  height: 50px;
+  background: #ee5253;
+  border-radius: 999px;
+  animation-delay: -5s;
+  transform: rotate(-12deg);
+}
+
+.hs-06__s4 {
+  bottom: 8%;
+  right: 8%;
+  width: 90px;
+  height: 90px;
+  background: #0b1f4a;
+  border-radius: 12px;
+  animation-delay: -7s;
+  transform: rotate(15deg);
+}
+
+@keyframes hs-06-bounce {
+  0% {
+    transform: translate(0,0) rotate(0deg);
+  }
+
+  100% {
+    transform: translate(20px,-15px) rotate(8deg);
+  }
+}
+
+.hs-06__s2 {
+  animation-name: hs-06-bounce-tri;
+}
+
+@keyframes hs-06-bounce-tri {
+  0% {
+    transform: translate(0,0);
+  }
+
+  100% {
+    transform: translate(-15px,20px);
+  }
+}
+
+.hs-06__content {
+  position: relative;
+  z-index: 1;
+  max-width: 600px;
+  text-align: center;
+}
+
+.hs-06__eye {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #0b1f4a;
+  color: #f5d028;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  margin-bottom: 22px;
+}
+
+.hs-06 h2 {
+  margin: 0 0 16px;
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(38px, 6vw, 64px);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.hs-06 h2 em {
+  color: #ee5253;
+  font-style: italic;
+  font-weight: 900;
+}
+
+.hs-06 p {
+  margin: 0 auto 28px;
+  font-size: 16px;
+  line-height: 1.55;
+  color: #4a5878;
+  max-width: 460px;
+}
+
+.hs-06__cta {
+  display: inline-block;
+  padding: 14px 28px;
+  background: #f5d028;
+  color: #0b1f4a;
+  font-weight: 800;
+  font-size: 14.5px;
+  text-decoration: none;
+  border-radius: 4px;
+  border: 3px solid #0b1f4a;
+  box-shadow: 6px 6px 0 #0b1f4a;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.hs-06__cta:hover {
+  transform: translate(2px,2px);
+  box-shadow: 4px 4px 0 #0b1f4a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-06__shapes span {
+    animation: none;
+  }
+
+  .hs-06__cta {
+    transition: none;
+  }
+}
+</style>
+</head>
+<body>
+<section class="hs-06" aria-label="Hero">
+  <div class="hs-06__shapes" aria-hidden="true">
+    <span class="hs-06__s1"></span>
+    <span class="hs-06__s2"></span>
+    <span class="hs-06__s3"></span>
+    <span class="hs-06__s4"></span>
+  </div>
+  <div class="hs-06__content">
+    <span class="hs-06__eye">▸ NOW PLAYING</span>
+    <h2>Your portfolio, <em>animated.</em></h2>
+    <p>Drop in your projects. We turn them into the kind of motion reel that gets the call back.</p>
+    <a class="hs-06__cta" href="#start">Play with it</a>
+  </div>
+</section>
+
+</body>
+</html>
