@@ -1,4 +1,4 @@
-import type { CardItem, El, ElType, Row, SlideItem } from "./types";
+import type { Block, CardItem, El, ElType, Row, SlideItem } from "./types";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -184,6 +184,18 @@ export function addSlideElement(slide: SlideItem, type: ElType, defaults: Record
 // full-width column, no elements yet.
 export function addSlideRow(slide: SlideItem): SlideItem {
   return { ...slide, rows: [...slide.rows, { columns: [{ span: 12, elements: [] }] }] };
+}
+
+// Fresh section/row factories — moved here (from a local DesignerCanvas.tsx
+// const and an inline object literal in its own "+add row" button) so the
+// Layout category's palette presets (elements.ts's LAYOUT_PRESETS, dropped
+// via useBlockOps.ts's dropIntoColumn) and the pre-existing click-to-add UI
+// both build the exact same shape through one place.
+export function newSection(): Block {
+  return { type: "section", props: { paddingY: "md", width: "contained", rows: [{ columns: [{ span: 1, elements: [] }] }] } };
+}
+export function newRow(spans: number[]): Row {
+  return { columns: spans.map((span) => ({ span, elements: [] })) };
 }
 
 // Quick-start presets — build a slide's whole rows tree in one click instead

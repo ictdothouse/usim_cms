@@ -32,6 +32,7 @@ import * as api from "@/lib/api";
 import { bestTextColor } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { section } from "./blockPath";
+import { newRow, newSection } from "./parsers";
 import {
   PAD, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK,
   SPACE, lengthValue, colStyle, overlayColors, shadowToCss, RADIUS, BORDER, RADIUS_CORNER_KEYS,
@@ -58,11 +59,6 @@ function pxLabel(len: string): string {
 
 // Row presets offered by "add row": each entry is the column span list.
 const ROW_PRESETS: number[][] = [[1], [1, 1], [1, 1, 1], [1, 1, 1, 1], [1, 2], [2, 1]];
-
-const newSection = (): Block => ({
-  type: "section",
-  props: { paddingY: "md", width: "contained", rows: [{ columns: [{ span: 1, elements: [] }] }] },
-});
 
 // Hatched spacing-overlay band: shown while a padding/margin drag handle is
 // selected so the actual area being resized is visible, not just its number.
@@ -1203,11 +1199,7 @@ export function DesignerCanvas({
                     {ROW_PRESETS.map((preset, i) => (
                       <button
                         key={i}
-                        onClick={() =>
-                          mutate((bs) =>
-                            section(bs, b).rows.push({ columns: preset.map((span) => ({ span, elements: [] })) }),
-                          )
-                        }
+                        onClick={() => mutate((bs) => section(bs, b).rows.push(newRow(preset)))}
                         className="flex h-6 items-center gap-0.5 rounded border border-line/40 bg-white px-1.5 hover:border-accent"
                         title={preset.join(" : ")}
                       >
@@ -1227,6 +1219,19 @@ export function DesignerCanvas({
           onClick={(ev) => {
             ev.stopPropagation();
             mutate((bs) => bs.push(newSection()));
+          }}
+          // Also a drop target for the Layout palette's "Section" preset
+          // (drag.current.kind === "new-section") — same append-to-end
+          // mutation as the click handler right above, just drag-triggered.
+          // Dropping that preset onto an EXISTING section's column instead
+          // inserts right after it (see useBlockOps.ts's dropIntoColumn).
+          onDragOver={(ev) => ev.preventDefault()}
+          onDrop={(ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const d = drag.current;
+            drag.current = null;
+            if (d?.kind === "new-section") mutate((bs) => bs.push(newSection()));
           }}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line/50 bg-white/60 py-4 text-xs font-semibold text-body hover:border-accent hover:text-accent"
         >

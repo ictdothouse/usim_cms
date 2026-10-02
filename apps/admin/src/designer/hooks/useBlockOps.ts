@@ -12,12 +12,18 @@ import { toast } from "sonner";
 import type { Key } from "@/i18n";
 import { getNode, childrenOf, insertAt, removeAt, moveWithin } from "../../designerTree";
 import { ELS } from "../elements";
+import { section } from "../blockPath";
+import { newRow, newSection } from "../parsers";
 import type { Block, Col, Row, El, ElType, Sel, SectionProps, Drag } from "../types";
 import type { ClipLevel } from "../context";
 import { clone } from "@/lib/utils";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const newEl = (type: ElType): El => ({ id: uid(), type, props: { ...ELS[type].defaults } });
+const newEl = (type: ElType, propsOverride?: Record<string, string>): El => ({
+  id: uid(),
+  type,
+  props: { ...ELS[type].defaults, ...propsOverride },
+});
 
 export interface BlockOpsClipboard {
   clipCopy: (level: ClipLevel, data: unknown) => void;
@@ -302,13 +308,28 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     // the "move" (element) branch below, which would destructure this payload's
     // section/column path as if it were an element's [b, r, c, e] path.
     if (!d || d.kind === "tree-reorder") return;
+    // Layout category's "Section"/row-count presets (elements.ts's
+    // LAYOUT_PRESETS) — neither produces an El, so both branch out before the
+    // El-insert/move logic below, matching the pre-existing "+add row"
+    // button/"+ Add Section" button's own lock-check-free behavior exactly
+    // (inserting a sibling row/section never mutates the hovered section's
+    // OWN locked content, same reasoning duplicateSection/pasteSection
+    // already rely on).
+    if (d.kind === "new-section") {
+      mutate((bs) => insertAt(bs, [], newSection(), colPath[0] + 1));
+      return;
+    }
+    if (d.kind === "new-row") {
+      mutate((bs) => section(bs, colPath[0]).rows.push(newRow(d.spans)));
+      return;
+    }
     if (isSectionLocked(colPath[0]) || (d.kind !== "new" && isSectionLocked(d.path[0]))) {
       toast.error(t("designer-section-locked-toast"));
       return;
     }
     mutate((bs) => {
       if (d.kind === "new") {
-        insertAt(bs, colPath, newEl(d.type), index);
+        insertAt(bs, colPath, newEl(d.type, d.propsOverride), index);
         return;
       }
       const [sb, sr, sc, se] = d.path;

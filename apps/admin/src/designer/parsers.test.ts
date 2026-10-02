@@ -14,6 +14,8 @@ import {
   updateSlideElementBp,
   parseCards,
   stringifyCards,
+  newSection,
+  newRow,
 } from "./parsers";
 
 test("parsePairs splits on the first pipe, defaults b to '', filters blank lines", () => {
@@ -140,6 +142,13 @@ test("stringifyCards round-trips through parseCards", () => {
   const original = parseCards(JSON.stringify([{ title: "A", image: "a.jpg", description: "D", href: "/a", buttonLabel: "Go" }]));
   const roundTripped = parseCards(stringifyCards(original));
   assert.deepEqual(roundTripped, original);
+});
+
+test("newSection/newRow build the same shape the canvas's own add-section/add-row buttons push", () => {
+  const sec = newSection();
+  assert.equal(sec.type, "section");
+  assert.deepEqual((sec.props as { rows: unknown[] }).rows, [{ columns: [{ span: 1, elements: [] }] }]);
+  assert.deepEqual(newRow([1, 2]), { columns: [{ span: 1, elements: [] }, { span: 2, elements: [] }] });
 });
 
 test("duplicateSlideElement inserts a fresh-id copy right after, nudging a free one 3%", () => {
