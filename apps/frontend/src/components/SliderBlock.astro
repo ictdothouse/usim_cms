@@ -375,6 +375,10 @@ const p = el.props ?? {};
             marginStyle(mp),
             paddingStyle(mp),
             posStyle(mp),
+            // Keep a free-positioned heading/subheading box at least as wide
+            // as its longest unbreakable word, so the rendered text stays
+            // inside the selection/resize outline on narrow viewports.
+            (el.type === "heading" || el.type === "text") && mp.position === "custom" ? "min-width:min-content" : null,
             // heading-only: mirrors the admin canvas's posFontSize override
             // (ElPreview.tsx) so a per-breakpoint drag-resize's scaled font
             // size actually shows up here too, not just on desktop.
@@ -426,6 +430,7 @@ const p = el.props ?? {};
               typoStyle(ep),
               elBorderShadowStyle(ep),
               posStyle(ep),
+              ep.position === "custom" ? "min-width:min-content" : null,
               // Drag-resizing a free-positioned heading on the admin canvas
               // scales this (ElPreview.tsx) — placed after typoStyle/posStyle
               // in the joined style string so it wins over a separately
@@ -452,6 +457,7 @@ const p = el.props ?? {};
               typoStyle(ep),
               elBorderShadowStyle(ep),
               posStyle(ep),
+              ep.position === "custom" ? "min-width:min-content" : null,
             ]
               .filter(Boolean)
               .join(";")}
