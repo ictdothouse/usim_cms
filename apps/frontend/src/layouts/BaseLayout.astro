@@ -856,5 +856,37 @@ const fontsHref = allFonts.length
         })();
       </script>
     )}
+    <script is:inline>
+      // Scroll-driven entrance animations (global.css's .ds-entrance-*,
+      // animation-timeline:view()) can get permanently stuck at their
+      // `from` keyframe (opacity:0) when the element is already inside the
+      // viewport and the page never needs to scroll to reveal it — a
+      // short page, or any above-the-fold hero/slider that fills the
+      // viewport on its own. The view-timeline then has no scroll distance
+      // to report progress against, so it never reaches "entered". The
+      // original @supports fallback (see global.css's own comment) only
+      // accounted for browsers that DON'T support animation-timeline —
+      // this covers the separate case of a supporting browser whose
+      // timeline simply never moves. Force those elements straight to
+      // their end state instead of waiting on a timeline that may never
+      // run; anything genuinely below the fold is left alone so real
+      // scroll-reveal still plays.
+      (() => {
+        const SEL = ".ds-entrance-fade,.ds-entrance-slide-up,.ds-entrance-zoom";
+        const settle = () => {
+          document.querySelectorAll(SEL).forEach((el) => {
+            if (el.dataset.dsEntranceDone) return;
+            const r = el.getBoundingClientRect();
+            if (r.top < window.innerHeight && r.bottom > 0) {
+              el.dataset.dsEntranceDone = "1";
+              el.style.animation = "none";
+            }
+          });
+        };
+        settle();
+        window.addEventListener("load", settle);
+        window.addEventListener("resize", settle);
+      })();
+    </script>
   </body>
 </html>
