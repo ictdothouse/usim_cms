@@ -527,7 +527,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                 case "tabs":
                   return <MiscBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
                 case "slider":
-                  return <SliderBlock el={el} designerEdit={designerEdit} elId={elId} responsiveRules={responsiveRules} />;
+                  return <SliderBlock el={el} designerEdit={designerEdit} elId={elId} />;
                 case "menu":
                   return (
                     <MenuBlock

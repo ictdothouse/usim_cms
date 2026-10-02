@@ -13,12 +13,8 @@
 // wholesale instead of staying duplicated in both places.
 //
 // `elId` (this element's `data-vis` id, e.g. `e${blockIndex}-${r}-${c}-${e}`,
-// computed by the caller) and `responsiveRules` (the page's shared @media-
-// rule collector, flushed into one <style> by SectionBlock.astro at the very
-// end of its render) are passed in as props — `responsiveRules` is the SAME
-// array instance the caller declared (arrays pass by reference in Astro SSR,
-// no serialization boundary since this isn't a client island), so a bp rule
-// pushed from here still lands in the final page's stylesheet.
+// computed by the caller) is passed in as a prop; bp @media rules are
+// collected and emitted by this component itself (see `responsiveRules`).
 //
 // hasSlideChildBp simplification: SectionBlock.astro used to track, via a
 // closure variable this case wrote to, whether any nested slide element had
@@ -298,9 +294,15 @@ interface Props {
   el: El;
   designerEdit?: boolean;
   elId: string;
-  responsiveRules: string[];
 }
-const { el, designerEdit = false, elId, responsiveRules } = Astro.props as Props;
+const { el, designerEdit = false, elId } = Astro.props as Props;
+// This slider's own @media bp rules, flushed by the <style> right after the
+// template below. NOT SectionBlock.astro's shared collector: a child
+// component renders AFTER its parent's template expressions are evaluated,
+// so SectionBlock's end-of-render <style> was already emitted by the time
+// renderSlideEl pushed into it — every slide-element tablet/mobile override
+// (position/margin/padding/font) silently never reached the page.
+const responsiveRules: string[] = [];
 const p = el.props ?? {};
 ---
 
@@ -658,6 +660,7 @@ const p = el.props ?? {};
     </div>
   );
 })()}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 
 <style>
   /* .ds-h/.ds-text/.ds-img/.ds-btn* now live in global.css (single source,

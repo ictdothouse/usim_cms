@@ -607,6 +607,11 @@ const fontsHref = allFonts.length
             slideFreeHandle = handle;
           }
 
+          // A free button is an <a>/image an <img> — the browser's native
+          // link/image drag would cancel the pointer stream mid-gesture.
+          document.addEventListener("dragstart", (e) => {
+            if (e.target.closest && e.target.closest("[data-slide-free]")) e.preventDefault();
+          });
           document.addEventListener("pointerdown", (e) => {
             if (e.target.closest("[data-slide-resize-handle]")) return;
             const node = e.target.closest("[data-slide-free]");
