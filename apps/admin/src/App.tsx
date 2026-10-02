@@ -16,6 +16,8 @@ import {
   LogOut,
   Menu,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelTop,
   Rss,
   Search,
@@ -217,19 +219,21 @@ const TAB_GROUP: Partial<Record<Tab, NavGroup>> = {
 };
 
 
-function NavButton({ tab, active, onClick }: { tab: Tab; active: boolean; onClick: () => void }) {
+function NavButton({ tab, active, onClick, collapsed }: { tab: Tab; active: boolean; onClick: () => void; collapsed: boolean }) {
   const { t } = useT();
   const { labelKey, icon: Icon } = TAB_META[tab];
   return (
     <button
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+      aria-label={t(labelKey)}
+      title={t(labelKey)}
+      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${collapsed ? "md:justify-center md:px-0" : ""} ${
         active ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
       }`}
     >
-      <Icon className="h-4 w-4" />
-      <span>{t(labelKey)}</span>
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className={collapsed ? "md:sr-only" : ""}>{t(labelKey)}</span>
     </button>
   );
 }
@@ -256,6 +260,12 @@ function Shell({
   // Sidebar is a fixed off-canvas drawer below md (Sprint 2: responsive admin
   // shell), static in-flow at md+ — see the `aside`/backdrop classes below.
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem("usim_cms_sidebar_collapsed") === "true",
+  );
+  useEffect(() => {
+    localStorage.setItem("usim_cms_sidebar_collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
   const goTo = (tb: Tab) => {
     navigate(`/${tb}`);
     setMobileNavOpen(false);
@@ -310,18 +320,28 @@ function Shell({
         )}
         {/* Sidebar: fixed off-canvas drawer below md, static in-flow at md+ */}
         <aside
-          className={`fixed inset-y-0 left-0 z-40 flex h-full w-64 shrink-0 transform flex-col border-r border-line/50 bg-white transition-transform duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 flex h-full w-64 shrink-0 transform flex-col border-r border-line/50 bg-white transition-all duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
             mobileNavOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
+          } ${sidebarCollapsed ? "md:w-20" : "md:w-64"}`}
         >
-          <div className="flex items-center gap-3 border-b border-line/30 p-6">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-accent to-[#00c6ff] text-sm font-bold text-white shadow-sm">
+          <div className={`flex items-center border-b border-line/30 ${sidebarCollapsed ? "gap-1 p-2 md:justify-center md:py-4" : "gap-3 p-6"}`}>
+            <div title="USIM CMS" className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-accent to-[#00c6ff] text-sm font-bold text-white shadow-sm">
               U
             </div>
-            <div>
+            <div className={sidebarCollapsed ? "md:sr-only" : ""}>
               <h1 className="font-display text-sm font-bold tracking-tight text-ink">USIM CMS</h1>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
             </div>
+            <button
+              onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              className={`hidden rounded-lg p-1 text-sub transition-colors hover:bg-canvas hover:text-ink md:inline-flex ${sidebarCollapsed ? "ml-0" : "ml-auto"}`}
+              aria-label={sidebarCollapsed ? t("nav-expand-sidebar") : t("nav-collapse-sidebar")}
+              title={sidebarCollapsed ? t("nav-expand-sidebar") : t("nav-collapse-sidebar")}
+              aria-expanded={!sidebarCollapsed}
+              aria-controls="admin-sidebar-nav"
+            >
+              {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </button>
             <button
               onClick={() => setMobileNavOpen(false)}
               className="ml-auto rounded-full p-1.5 text-sub hover:bg-canvas hover:text-ink md:hidden"
@@ -331,44 +351,46 @@ function Shell({
               <X className="h-4 w-4" />
             </button>
           </div>
-          <nav className="flex-1 space-y-1.5 overflow-y-auto p-4">
-            <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-main")}</div>
+          <nav id="admin-sidebar-nav" className={`flex-1 space-y-1.5 overflow-y-auto p-4 ${sidebarCollapsed ? "md:px-2" : ""}`}>
+            <div className={sidebarCollapsed ? "md:mb-3 md:border-b md:border-line/30 md:pb-3" : ""}>
+              <div className={`mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t("nav-main")}</div>
             {mainTabs.map((tb) => (
-              <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
+              <NavButton key={tb} tab={tb} active={activeTab === tb} collapsed={sidebarCollapsed} onClick={() => goTo(tb)} />
             ))}
+            </div>
             {isSuper ? (
-              <>
-                <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t("nav-content")}</div>
+              <div className={sidebarCollapsed ? "md:pt-1" : ""}>
+                <div className={`mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t("nav-content")}</div>
                 {contentTabs.map((tb) => (
-                  <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
+                  <NavButton key={tb} tab={tb} active={activeTab === tb} collapsed={sidebarCollapsed} onClick={() => goTo(tb)} />
                 ))}
-              </>
+              </div>
             ) : (
-              NAV_GROUP_ORDER.map((group) => {
+              NAV_GROUP_ORDER.map((group, groupIndex) => {
                 const tabs = contentTabs.filter((tb) => TAB_GROUP[tb] === group);
                 if (tabs.length === 0) return null;
                 return (
-                  <div key={group}>
-                    <div className="mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub">{t(NAV_GROUP_LABEL[group])}</div>
+                  <div key={group} className={sidebarCollapsed && groupIndex > 0 ? "md:mt-2 md:border-t md:border-line/30 md:pt-2" : ""}>
+                    <div className={`mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t(NAV_GROUP_LABEL[group])}</div>
                     {tabs.map((tb) => (
-                      <NavButton key={tb} tab={tb} active={activeTab === tb} onClick={() => goTo(tb)} />
+                      <NavButton key={tb} tab={tb} active={activeTab === tb} collapsed={sidebarCollapsed} onClick={() => goTo(tb)} />
                     ))}
                   </div>
                 );
               })
             )}
           </nav>
-          <div className="flex items-center gap-3 border-t border-line/30 bg-canvas/30 p-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold uppercase text-white">
+          <div className={`flex items-center gap-3 border-t border-line/30 bg-canvas/30 p-4 ${sidebarCollapsed ? "md:flex-col md:gap-2 md:p-2" : ""}`}>
+            <div title={session.role} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold uppercase text-white">
               {session.role[0]}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className={`min-w-0 flex-1 ${sidebarCollapsed ? "md:sr-only" : ""}`}>
               <h4 className="truncate text-xs font-semibold capitalize text-ink">{session.role}</h4>
               {session.tenantHost && <p className="truncate text-[10px] text-sub">{session.tenantHost}</p>}
             </div>
             <button
               onClick={onLogout}
-              className="rounded-full p-1.5 text-sub transition-colors hover:bg-canvas hover:text-ink"
+              className={`rounded-full p-1.5 text-sub transition-colors hover:bg-canvas hover:text-ink ${sidebarCollapsed ? "md:mx-auto" : ""}`}
               title={t("logout")}
               aria-label={t("logout")}
             >
