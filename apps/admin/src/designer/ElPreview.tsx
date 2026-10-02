@@ -70,7 +70,7 @@ import {
 import { centerXCandidates, centerYCandidates, edgeXCandidates, edgeYCandidates, snapValue, type FreeRectPx } from "./snap";
 import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
-  elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, shadowToCss, typoStyle,
+  elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, scaledFreeFont, shadowToCss, typoStyle,
 } from "./style";
 import { computeFreePositionStyle } from "@ucms/element-render";
 
@@ -321,21 +321,6 @@ const RESIZE_HANDLES: { dir: ResizeDir; cls: string; side?: "v" | "h" }[] = [
   { dir: { x: 0, y: -1 }, cls: "-top-1 left-1/2 -translate-x-1/2 cursor-ns-resize", side: "h" },
   { dir: { x: 0, y: 1 }, cls: "-bottom-1 left-1/2 -translate-x-1/2 cursor-ns-resize", side: "h" },
 ];
-
-// Scales a free-form "length" field's numeric part by `ratio`, keeping
-// whatever unit (or lack of one) it already had — used by the slider
-// case's free-position resize handle to grow a text child's font size
-// proportionally with its box. Anything that doesn't parse as a plain
-// number+unit (e.g. a "%"-relative value, where "bigger" is meaningless)
-// is left untouched rather than guessed at.
-function scaleLength(value: string, ratio: number): string | null {
-  const m = /^(\d+(?:\.\d+)?)(px|rem|em)?$/.exec(value.trim());
-  if (!m) return null;
-  const num = Number(m[1]) * ratio;
-  const unit = m[2] ?? "px";
-  const rounded = unit === "px" ? Math.max(8, Math.round(num)) : Math.max(0.5, Math.round(num * 100) / 100);
-  return `${rounded}${unit}`;
-}
 
 function mergeElBp(
   type: El["type"],
@@ -1157,24 +1142,14 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                         posHeight: `${box.heightPx}px`,
                                       };
                                       // Corner = Canva-style "text grows with the
-                                      // box": heading/button have no continuous
-                                      // size field (heading's H_SIZE is a preset
-                                      // per level, button a fixed text-sm), so
-                                      // posFontSize is a free-position-only
-                                      // override for both; text scales its own
-                                      // "size". Side handles pass ratio 1 — the
+                                      // box" (scaledFreeFont, shared with Live
+                                      // Edit). Side handles pass ratio 1 — the
                                       // text rewraps, the font stays.
                                       if (sizeRatio !== 1 && (childTextType || childEl.type === "button")) {
-                                        const scaled = scaleLength(
-                                          childEl.type === "heading"
-                                            ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") ||
-                                                H_SIZE[bpGetValue(childEl.props.level, childEl.bp, "level") || "2"]
-                                            : childEl.type === "button"
-                                              ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || "0.875rem"
-                                              : bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md,
-                                          sizeRatio,
+                                        Object.assign(
+                                          patch,
+                                          scaledFreeFont(childEl.type, (k) => bpGetValue(childEl.props[k], childEl.bp, k), sizeRatio),
                                         );
-                                        if (scaled) patch[childEl.type === "text" ? "size" : "posFontSize"] = scaled;
                                       }
                                       commitFree(patch);
                                     })

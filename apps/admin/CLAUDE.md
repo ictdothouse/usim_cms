@@ -267,6 +267,19 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (degrees) renders via `computeFreePositionStyle` as CSS `rotate:` (not `transform`, so it composes
   with ds-entrance/ds-hover animations), registered in element-schema's LENGTH_KEYS, editable in the
   Inspector's free-position grid. No "Comment" button — there's no comment system to back it.
+  **Same controls in Live Edit (2026-10-02)** — Live Edit is the primary editing surface; Blocks mode
+  is only a layout guide. `BaseLayout.astro`'s designerEdit bridge ports the whole set (8 handles,
+  Rotate/Move, magenta guides, toolbar) as `position:fixed` overlays on the iframe's `<body>` (never
+  inside the element — overflow:hidden would crop it, rotation would rotate the toolbar), re-placed
+  every frame while selected. Gestures post `designer:slideElDrag` once on pointerup; toolbar buttons
+  post `designer:slideElAction` (lock/duplicate/delete/href); `useLiveEditBridge` writes both through
+  the same parsers as Blocks mode, and the resulting reload re-attaches the chrome via
+  `designer:selected`'s `slideSel` (built from `sliderInnerSel`). A corner resize sends `fontScale`,
+  not a px size — admin scales the STORED value with `style.ts`'s `scaledFreeFont` (shared with
+  ElPreview). `SliderBlock.astro` stamps `data-slide-sel/free/type/locked` on slide children under
+  designerEdit only (heading had been missing `data-slide-free`, so headings weren't draggable live),
+  and text's per-bp `size` now gets a real `bpStyleRules` font-size rule. Toolbar labels arrive in
+  `designer:selected.labels` (the iframe has no i18n).
   **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab
   (DesignerPalette.tsx) now renders two groups instead of one flat list — "Layout" (a 2-column icon
   grid) then "Content" (the pre-existing full-width row list, `container` excluded since it now lives

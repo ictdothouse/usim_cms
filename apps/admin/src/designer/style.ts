@@ -47,6 +47,37 @@ export {
 
 export const H_SIZE: Record<string, string> = { "1": "2.6rem", "2": "2rem", "3": "1.5rem", "4": "1.2rem" };
 
+// Scales a free-form "length" field's numeric part by `ratio`, keeping
+// whatever unit (or lack of one) it already had. Anything that doesn't parse
+// as a plain number+unit (e.g. a "%"-relative value, where "bigger" is
+// meaningless) is left untouched rather than guessed at.
+export function scaleLength(value: string, ratio: number): string | null {
+  const m = /^(\d+(?:\.\d+)?)(px|rem|em)?$/.exec(value.trim());
+  if (!m) return null;
+  const num = Number(m[1]) * ratio;
+  const unit = m[2] ?? "px";
+  const rounded = unit === "px" ? Math.max(8, Math.round(num)) : Math.max(0.5, Math.round(num * 100) / 100);
+  return `${rounded}${unit}`;
+}
+
+// Corner-resize "text grows with the box" for a free-positioned slide child —
+// one rule for both the Blocks canvas (ElPreview.tsx) and Live Edit's iframe
+// resize (useLiveEditBridge.ts). Heading/button have no continuous size
+// field (heading's H_SIZE is a preset per level, button a fixed text-sm), so
+// posFontSize is a free-position-only override for both; text scales its own
+// "size". `get` resolves a prop at the current breakpoint.
+export function scaledFreeFont(type: string, get: (k: string) => string, ratio: number): Record<string, string> {
+  const size = get("size");
+  const base =
+    type === "heading"
+      ? get("posFontSize") || H_SIZE[get("level") || "2"]
+      : type === "button"
+        ? get("posFontSize") || "0.875rem"
+        : TEXT_SIZE[size] ?? (size || TEXT_SIZE.md);
+  const scaled = scaleLength(base, ratio);
+  return scaled ? { [type === "text" ? "size" : "posFontSize"]: scaled } : {};
+}
+
 // Four-side padding/radius/margin field-name maps — shared by Inspector's
 // FourSideControl panels and the canvas's own bp*Style resolution. Plain
 // literal maps, zero closure dependency.
