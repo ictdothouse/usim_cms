@@ -284,6 +284,11 @@ export const pagesCollection: CollectionConfig = {
     afterRead: pagesAfterRead,
   },
   previewToken: { supportsLiveDraft: true },
+  // A draft-only autosave (usePersist's saveDraft — body is exactly
+  // `{draft}`, nothing else) never changes what a real visitor sees, so it
+  // shouldn't evict their cached HTML. Any other PATCH shape (a real
+  // save/Update, or draft alongside something else) stays cache-affecting.
+  isPublicCacheAffecting: (body) => !(Object.keys(body).length === 1 && "draft" in body),
   revisions: {
     table: schema.pageRevisions,
     foreignKey: "pageId",

@@ -281,7 +281,9 @@ export function registerProtectedCollectionRoutes(app: FastifyInstance, config: 
     await config.hooks?.afterChange?.(item, accessArgs(req), req);
     await maybeSnapshotRevision(config, item, req);
     await cacheInvalidate(`ucms:cache:${req.tenantHost}:${config.slug}:`);
-    await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
+    if (config.isPublicCacheAffecting?.(req.body as Record<string, unknown>) ?? true) {
+      await cacheInvalidate(`ucms:htmlcache:${req.tenantHost}:`);
+    }
     return { collection: config.slug, item };
   });
 
