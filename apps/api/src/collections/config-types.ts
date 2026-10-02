@@ -77,4 +77,13 @@ export interface CollectionConfig<T = unknown> {
   // the canvas's current unsaved state) stashed in the ephemeral
   // live-preview-store and referenced by the token's livePreviewId.
   previewToken?: { supportsLiveDraft?: boolean };
+  // PATCH unconditionally drops the tenant's whole rendered-HTML cache
+  // (generic-crud.ts) since most collections' writes are visitor-visible.
+  // A write that ISN'T — e.g. pages.draft, Designer's unpublished autosave
+  // target — shouldn't pay for that: with autosave now firing every ~1s
+  // while a PUBLISHED page is being edited, invalidating on every one would
+  // otherwise evict real visitors' cached HTML for a change nobody can see
+  // yet. Takes the raw POST body (pre-beforeChange); omit to keep every
+  // write cache-affecting, the prior behavior.
+  isPublicCacheAffecting?: (body: Record<string, unknown>) => boolean;
 }
