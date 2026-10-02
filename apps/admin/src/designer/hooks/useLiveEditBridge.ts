@@ -18,7 +18,15 @@ import { toast } from "sonner";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn, removeAt, insertAt } from "../../designerTree";
 import { section } from "../blockPath";
-import { parseSlides, stringifySlides, updateSlideElementProps, updateSlideElementBp } from "../parsers";
+import {
+  deleteSlideElement,
+  duplicateSlideElement,
+  parseSlides,
+  stringifySlides,
+  updateSlideElementProps,
+  updateSlideElementBp,
+} from "../parsers";
+import { scaledFreeFont } from "../style";
 import type { Block, Sel, SectionProps } from "../types";
 
 export interface LiveEditBridgeDeps {
@@ -50,6 +58,9 @@ export interface LiveEditBridgeDeps {
   setCtxMenu: (v: { path: number[]; x: number; y: number } | null) => void;
   sliderSlideIdx: Record<string, number>;
   setSliderSlideIdx: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  // Read too, not just set: designer:selected re-sends the selected slide
+  // child so the iframe's Canva-style chrome survives every reload.
+  sliderInnerSel: Record<string, { r: number; c: number; e: number } | null>;
   setSliderInnerSel: React.Dispatch<React.SetStateAction<Record<string, { r: number; c: number; e: number } | null>>>;
   // Live Edit frames the real page at this device's exact viewport (see
   // DeviceViewport) — also decides which bp bag a free-position drag in the
@@ -76,7 +87,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
     tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
-    setError, setReloading, setCtxMenu, sliderSlideIdx, setSliderSlideIdx, setSliderInnerSel,
+    setError, setReloading, setCtxMenu, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     structuralTick, bumpStructural, bp,
   } = deps;
 
@@ -335,13 +346,13 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         setSliderInnerSel((m) => ({ ...m, [sliderEl.id]: { r: sr, c: sc, e: se } }));
         return;
       }
-      if (e.data?.type === "designer:slideElDrag") {
-        // Posted once, on pointerup, by BaseLayout.astro's own free-position
-        // drag/resize gesture (the whole drag runs natively inside the
-        // iframe's real DOM for instant feedback — this just persists the
-        // final value into blocks state, same as any other slide field edit
-        // the Inspector already makes via updateSlideElementProps). Mirrors
-        // designer:selectSlideEl's own path parsing right above.
+      if (e.data?.type === "designer:slideElDrag" || e.data?.type === "designer:slideElAction") {
+        // Posted by BaseLayout.astro's Canva-style slide-element chrome: a
+        // drag/resize/rotate/align (slideElDrag, once on pointerup — the
+        // gesture itself runs natively in the iframe's real DOM) or a
+        // toolbar action (slideElAction: lock/duplicate/delete/href). Same
+        // writes ElPreview.tsx's commitFree/toolbar make in Blocks mode; the
+        // blocks change then reloads the iframe through the real renderer.
         const sliderPath = String(e.data.sliderPath ?? "")
           .split(".")
           .map(Number);
@@ -351,27 +362,45 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         if (sliderPath.length !== 4 || slideSel.length !== 4) return;
         const [b, r, c, elIdx] = sliderPath;
         const [slideIdx, sr, sc, se] = slideSel;
-        const patch = (e.data.patch ?? {}) as Record<string, string>;
+        const sliderId = (blocks[b]?.props as unknown as SectionProps | undefined)?.rows?.[r]?.columns?.[c]?.elements?.[elIdx]?.id;
+        const action = e.data.type === "designer:slideElAction" ? String(e.data.action ?? "") : "drag";
         mutate((bs) => {
           const target = (bs[b]?.props as unknown as SectionProps | undefined)?.rows?.[r]?.columns?.[c]?.elements?.[elIdx];
           if (!target || target.type !== "slider") return;
           const currentSlides = parseSlides(target.props.slides);
           const s0 = currentSlides[slideIdx];
-          if (!s0) return;
-          // Tablet/mobile drags write that tier's own override ("mobile:x"),
-          // never the desktop base — same rule as ElPreview.tsx's commitFree.
-          // Writing base props here moved the element on DESKTOP too.
-          if (bp === "desktop") {
-            currentSlides[slideIdx] = updateSlideElementProps(s0, sr, sc, se, patch);
+          const child = s0?.rows[sr]?.columns[sc]?.elements[se];
+          if (!s0 || !child) return;
+          if (action === "duplicate") {
+            currentSlides[slideIdx] = duplicateSlideElement(s0, sr, sc, se);
+          } else if (action === "delete") {
+            currentSlides[slideIdx] = deleteSlideElement(s0, sr, sc, se);
+          } else if (action === "lock" || action === "href") {
+            // Neither is per-breakpoint (lock is editor-only, href is content).
+            currentSlides[slideIdx] = updateSlideElementProps(s0, sr, sc, se, { [action === "lock" ? "locked" : "href"]: String(e.data.value ?? "") });
+          } else if (action === "drag") {
+            const get = (k: string) => (bp !== "desktop" ? child.bp?.[`${bp}:${k}`] : undefined) ?? child.props[k] ?? "";
+            const { fontScale, ...rest } = (e.data.patch ?? {}) as Record<string, string>;
+            const ratio = Number(fontScale);
+            // The iframe only knows the live px it previewed; the stored
+            // value (rem/em/preset) is scaled here, same as Blocks mode.
+            const patch = ratio && ratio !== 1 ? { ...rest, ...scaledFreeFont(child.type, get, ratio) } : rest;
+            // Tablet/mobile drags write that tier's own override ("mobile:x"),
+            // never the desktop base — same rule as ElPreview.tsx's commitFree.
+            if (bp === "desktop") {
+              currentSlides[slideIdx] = updateSlideElementProps(s0, sr, sc, se, patch);
+            } else {
+              const nextBp = { ...(child.bp ?? {}) };
+              for (const [k, v] of Object.entries(patch)) nextBp[`${bp}:${k}`] = v;
+              currentSlides[slideIdx] = updateSlideElementBp(s0, sr, sc, se, nextBp);
+            }
           } else {
-            const child = s0.rows[sr]?.columns[sc]?.elements[se];
-            if (!child) return;
-            const nextBp = { ...(child.bp ?? {}) };
-            for (const [k, v] of Object.entries(patch)) nextBp[`${bp}:${k}`] = v;
-            currentSlides[slideIdx] = updateSlideElementBp(s0, sr, sc, se, nextBp);
+            return;
           }
           target.props.slides = stringifySlides(currentSlides);
         });
+        if (sliderId && action === "duplicate") setSliderInnerSel((m) => ({ ...m, [sliderId]: { r: sr, c: sc, e: se + 1 } }));
+        if (sliderId && action === "delete") setSliderInnerSel((m) => ({ ...m, [sliderId]: null }));
         return;
       }
       const path = String(e.data?.path ?? "")
@@ -468,15 +497,38 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         /* transient cross-origin mismatch during reload — see comment above */
       }
     };
-    post({ type: "designer:selected", path: sel?.join(".") ?? null });
-    if (!sel || sel.length !== 4) return;
-    const [b, r, c, e] = sel;
-    const el = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c]?.elements?.[e];
-    if (el && (el.type === "heading" || el.type === "text")) {
+    const selEl =
+      sel?.length === 4 ? (blocks[sel[0]]?.props as unknown as SectionProps)?.rows?.[sel[1]]?.columns?.[sel[2]]?.elements?.[sel[3]] : undefined;
+    const inner = selEl?.type === "slider" ? sliderInnerSel[selEl.id] : null;
+    post({
+      type: "designer:selected",
+      path: sel?.join(".") ?? null,
+      // "slideIdx.r.c.e" of the selected slide child, so the iframe re-attaches
+      // its handles/toolbar after a reload (BaseLayout.astro's bridge).
+      slideSel: inner && selEl ? `${sliderSlideIdx[selEl.id] ?? 0}.${inner.r}.${inner.c}.${inner.e}` : null,
+      // The iframe has no i18n of its own — its slide toolbar uses these.
+      labels: {
+        editLink: t("designer-edit-link"),
+        lock: t("designer-lock"),
+        unlock: t("designer-unlock"),
+        duplicate: t("designer-duplicate"),
+        delete: t("designer-delete"),
+        rotate: t("designer-rotate"),
+        move: t("designer-move"),
+        alignToSlide: t("designer-align-to-slide"),
+        left: t("designer-align-left"),
+        center: t("designer-align-center"),
+        right: t("designer-align-right"),
+        top: t("designer-align-top"),
+        middle: t("designer-align-middle"),
+        bottom: t("designer-align-bottom"),
+      },
+    });
+    if (sel && selEl && (selEl.type === "heading" || selEl.type === "text")) {
       post({ type: "designer:text", path: sel.join("."), editable: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sel, liveSrc]);
+  }, [mode, sel, liveSrc, sliderInnerSel, sliderSlideIdx]);
 
   return { mode, liveSrc, liveSrcA, liveSrcB, activeSlot, frameARef, frameBRef, liveFrame, selectedRect, enterLive, toggleLive, handleFrameLoad };
 }

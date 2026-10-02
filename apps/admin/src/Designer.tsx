@@ -417,6 +417,7 @@ export default function Designer({
   } = useLiveEditBridge({
     bp,
     sliderSlideIdx,
+    sliderInnerSel,
     blocks,
     mutate,
     sel,

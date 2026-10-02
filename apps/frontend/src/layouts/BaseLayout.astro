@@ -408,13 +408,9 @@ const fontsHref = allFonts.length
             // Blocks-mode canvas already uses) instead of just selecting
             // the whole slider element.
             const slideNode = e.target.closest("[data-slide-sel]");
-            const sliderNode = slideNode && slideNode.closest("[data-designer-path]");
-            if (slideNode && sliderNode) {
+            if (slideNode && slideNode.closest("[data-designer-path]")) {
               e.preventDefault();
-              parent.postMessage(
-                { type: "designer:selectSlideEl", path: sliderNode.dataset.designerPath, slideSel: slideNode.dataset.slideSel },
-                targetOrigin,
-              );
+              postSelectSlide(slideNode);
               selectSlideFreeNode(slideNode.dataset.slideFree === "true" ? slideNode : null);
               return;
             }
@@ -448,7 +444,8 @@ const fontsHref = allFonts.length
           // undo that wouldn't visually update the typed text anyway.
           document.addEventListener("keydown", (e) => {
             if (!(e.ctrlKey || e.metaKey)) return;
-            if (document.activeElement && document.activeElement.isContentEditable) return;
+            // Also skips an <input> (the slide toolbar's Edit link field).
+            if (document.activeElement && (document.activeElement.isContentEditable || document.activeElement.tagName === "INPUT")) return;
             const key = e.key.toLowerCase();
             if (key === "z" && e.shiftKey) {
               e.preventDefault();
@@ -547,28 +544,33 @@ const fontsHref = allFonts.length
             dragState = null;
           });
 
-          // Free-position drag/resize for a slide-nested element
-          // (props.position === "custom") — mirrors apps/admin's
-          // ElPreview.tsx startFreeElDrag/startFreeElResize (the Blocks-mode
-          // canvas's own implementation) closely enough that a drag here
-          // lands on the same x/y a Blocks-mode drag would, reusing the same
-          // center/edge-snap math (apps/admin/src/designer/snap.ts) —
-          // hand-ported, not imported, since this script stays a plain
-          // dependency-free `is:inline` tag (no bundler here to resolve a
-          // workspace package import). The whole gesture runs natively
-          // against this iframe's own real DOM (instant, no postMessage per
-          // frame); only the final value is posted once, on pointerup, same
-          // "report the result, not every frame" shape as designer:reorder
-          // above. ponytail: resize always scales a text child's font size
-          // off its live computed px size (getComputedStyle), not the
-          // original stored unit the way ElPreview.tsx's scaleLength()
-          // preserves — simpler (no posFontSize/size field value to read off
-          // a DOM node) and visually identical; upgrade if an author
-          // actually needs rem/em preserved through a drag-resize.
+          // Canva-style editing for a slide-nested free-positioned element
+          // (props.position === "custom") — the Live Edit port of apps/admin's
+          // ElPreview.tsx slider case: 8 resize handles, Rotate + Move under
+          // the box, magenta center-snap guides, and a floating toolbar (Edit
+          // link, Lock, Duplicate, Delete, "…" align to slide). Same math as
+          // there (snap candidates mirror apps/admin/src/designer/snap.ts),
+          // hand-ported since this script stays a plain dependency-free
+          // `is:inline` tag. Each gesture runs natively against this iframe's
+          // real DOM (instant) and posts its result once, on pointerup
+          // (designer:slideElDrag); toolbar buttons post designer:slideElAction.
+          // Either changes Designer's blocks, which reloads this page through
+          // the real renderer — the chrome is re-attached afterwards off
+          // designer:selected's slideSel. The chrome lives on <body> as
+          // position:fixed overlays, never inside the element: the slide's own
+          // overflow:hidden would crop it, a toolbar inside a rotated element
+          // would rotate with it, and appending into a heading changes its text.
+          const ACCENT = "#0f62fe";
+          let labels = {};
+          const L = (k, fallback) => labels[k] || fallback;
+          const r1 = (n) => Math.round(n * 10) / 10;
+          // Inline style mid-gesture must beat a tablet/mobile override, which
+          // renders as an !important @media rule (SliderBlock.astro's bpStyleRules).
+          const setImp = (node, prop, value) => node.style.setProperty(prop, value, "important");
+
           function snapValue(value, candidates) {
-            const range = 8;
             let best = value;
-            let bestDist = range;
+            let bestDist = 8;
             for (const c of candidates) {
               const d = Math.abs(c - value);
               if (d < bestDist) {
@@ -587,24 +589,400 @@ const fontsHref = allFonts.length
                 return { left: r.left - rect.left, top: r.top - rect.top, width: r.width, height: r.height };
               });
           }
+          function postSelectSlide(slideNode) {
+            const sliderNode = slideNode.closest("[data-designer-path]");
+            if (!sliderNode) return;
+            parent.postMessage(
+              { type: "designer:selectSlideEl", path: sliderNode.dataset.designerPath, slideSel: slideNode.dataset.slideSel },
+              targetOrigin,
+            );
+          }
+          function postSlide(type, node, extra) {
+            const sliderNode = node.closest("[data-designer-path]");
+            if (!sliderNode) return;
+            justDragged = true;
+            parent.postMessage({ type, sliderPath: sliderNode.dataset.designerPath, slideSel: node.dataset.slideSel, ...extra }, targetOrigin);
+            setTimeout(() => (justDragged = false), 50);
+          }
+          const commitSlide = (node, patch) => postSlide("designer:slideElDrag", node, { patch });
+          const actSlide = (node, action, value) => postSlide("designer:slideElAction", node, { action, value });
+
+          // pointermove/pointerup on window for one gesture; done(moved).
+          function track(move, done) {
+            let moved = false;
+            const onMove = (ev) => {
+              moved = true;
+              move(ev);
+            };
+            const onUp = () => {
+              window.removeEventListener("pointermove", onMove);
+              window.removeEventListener("pointerup", onUp);
+              done(moved);
+            };
+            window.addEventListener("pointermove", onMove);
+            window.addEventListener("pointerup", onUp);
+          }
+          // Magenta line across the whole slide while a drag is center-snapped.
+          function guideLine(slide, axis) {
+            const line = document.createElement("div");
+            line.style.cssText =
+              "position:absolute;pointer-events:none;z-index:60;background:#e100ff;display:none;" +
+              (axis === "x" ? "top:0;bottom:0;width:1px;" : "left:0;right:0;height:1px;");
+            slide.appendChild(line);
+            return {
+              show(px) {
+                line.style.display = px === null ? "none" : "block";
+                if (px !== null) line.style[axis === "x" ? "left" : "top"] = px + "px";
+              },
+              remove: () => line.remove(),
+            };
+          }
+
+          function startSlideDrag(e, node) {
+            const slide = node.closest(".ds-slide");
+            if (!slide) return;
+            const rect = slide.getBoundingClientRect();
+            // offsetWidth/Height, not getBoundingClientRect: CSS `rotate` grows
+            // the bounding box, but left/top (what's stored) place the unrotated box.
+            const halfW = node.offsetWidth / 2;
+            const halfH = node.offsetHeight / 2;
+            const startLeft = node.offsetLeft;
+            const startTop = node.offsetTop;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const siblings = freeSiblingRects(node, slide);
+            const cxs = [rect.width / 2, ...siblings.map((s) => s.left + s.width / 2)];
+            const cys = [rect.height / 2, ...siblings.map((s) => s.top + s.height / 2)];
+            const gx = guideLine(slide, "x");
+            const gy = guideLine(slide, "y");
+            let x = 0;
+            let y = 0;
+            track(
+              (ev) => {
+                const rawCx = startLeft + (ev.clientX - startX) + halfW;
+                const rawCy = startTop + (ev.clientY - startY) + halfH;
+                const sx = snapValue(rawCx, cxs);
+                const sy = snapValue(rawCy, cys);
+                gx.show(sx !== rawCx ? sx : null);
+                gy.show(sy !== rawCy ? sy : null);
+                // No clamp on purpose — an author may bleed past the edge (same
+                // freedom as ElPreview's startFreeElDrag); .ds-slider-viewport's
+                // overflow:hidden is the real guard against painting into the
+                // next slide.
+                x = r1(((sx - halfW) / rect.width) * 100);
+                y = r1(((sy - halfH) / rect.height) * 100);
+                setImp(node, "left", x + "%");
+                setImp(node, "top", y + "%");
+              },
+              (moved) => {
+                gx.remove();
+                gy.remove();
+                if (moved) commitSlide(node, { x: String(x), y: String(y) });
+              },
+            );
+          }
+
+          // dx/dy: which edge the handle moves (-1 left/top, 1 right/bottom,
+          // 0 untouched) — the opposite edge stays anchored, so a left/top
+          // handle also shifts x/y. Corners scale proportionally and grow the
+          // font with the box; sides change one dimension and edge-snap.
+          function startSlideResize(e, node, dx, dy) {
+            const slide = node.closest(".ds-slide");
+            if (!slide) return;
+            const box = slide.getBoundingClientRect();
+            const startL = node.offsetLeft;
+            const startT = node.offsetTop;
+            const startW = node.offsetWidth;
+            const startH = node.offsetHeight;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const corner = dx !== 0 && dy !== 0;
+            const siblings = freeSiblingRects(node, slide);
+            const exs = [box.width * 0.06, box.width * 0.94, ...siblings.flatMap((s) => [s.left, s.left + s.width])];
+            const eys = [box.height * 0.06, box.height * 0.94, ...siblings.flatMap((s) => [s.top, s.top + s.height])];
+            const type = node.dataset.slideType;
+            // A free button is a wrapper div around its <a class="ds-btn">,
+            // which sets its own font-size (global.css) — scale that one.
+            const textTarget = type === "button" ? node.querySelector("a") : type === "heading" || type === "text" ? node : null;
+            const startFont = textTarget ? parseFloat(getComputedStyle(textTarget).fontSize) : 0;
+            let out = null;
+            let ratio = 1;
+            track(
+              (ev) => {
+                let w = startW + (ev.clientX - startX) * dx;
+                let h = startH + (ev.clientY - startY) * dy;
+                ratio = 1;
+                if (corner) {
+                  ratio = Math.max(20 / startW, 20 / startH, (w / startW + h / startH) / 2);
+                  w = startW * ratio;
+                  h = startH * ratio;
+                } else {
+                  if (dx === 1) w = snapValue(startL + w, exs) - startL;
+                  if (dx === -1) w = startL + startW - snapValue(startL + startW - w, exs);
+                  if (dy === 1) h = snapValue(startT + h, eys) - startT;
+                  if (dy === -1) h = startT + startH - snapValue(startT + startH - h, eys);
+                  w = Math.max(20, w);
+                  h = Math.max(20, h);
+                }
+                const left = dx === -1 ? startL + startW - w : startL;
+                const top = dy === -1 ? startT + startH - h : startT;
+                out = { x: r1((left / box.width) * 100), y: r1((top / box.height) * 100), w: Math.round(w), h: Math.round(h) };
+                setImp(node, "left", out.x + "%");
+                setImp(node, "top", out.y + "%");
+                setImp(node, "width", out.w + "px");
+                setImp(node, "height", out.h + "px");
+                if (textTarget && startFont) setImp(textTarget, "font-size", Math.max(8, Math.round(startFont * ratio)) + "px");
+              },
+              (moved) => {
+                if (!moved || !out) return;
+                const patch = { x: String(out.x), y: String(out.y), posWidth: out.w + "px", posHeight: out.h + "px" };
+                // Designer scales the STORED size (rem/em/preset) by this ratio
+                // (style.ts's scaledFreeFont) — the px previewed here is only
+                // what this viewport happened to compute.
+                if (textTarget && ratio !== 1) patch.fontScale = String(ratio);
+                commitSlide(node, patch);
+              },
+            );
+          }
+
+          // Angle of the pointer around the element's center, relative to
+          // where the drag started; snaps to every 45° within 4°.
+          function startSlideRotate(e, node) {
+            const r = node.getBoundingClientRect();
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            const a0 = Math.atan2(e.clientY - cy, e.clientX - cx);
+            const startDeg = parseFloat(getComputedStyle(node).rotate) || 0;
+            let deg = startDeg;
+            track(
+              (ev) => {
+                let d = startDeg + ((Math.atan2(ev.clientY - cy, ev.clientX - cx) - a0) * 180) / Math.PI;
+                d = ((((d + 180) % 360) + 360) % 360) - 180;
+                const snap = Math.round(d / 45) * 45;
+                deg = Math.abs(d - snap) < 4 ? snap : Math.round(d);
+                setImp(node, "rotate", deg + "deg");
+              },
+              (moved) => {
+                if (moved) commitSlide(node, { rotate: String(deg) });
+              },
+            );
+          }
+
+          function alignSlide(node, k) {
+            const slide = node.closest(".ds-slide");
+            if (!slide) return;
+            const wPct = (node.offsetWidth / slide.clientWidth) * 100;
+            const hPct = (node.offsetHeight / slide.clientHeight) * 100;
+            const patch =
+              k === "left" ? { x: "0" }
+              : k === "center" ? { x: String(r1((100 - wPct) / 2)) }
+              : k === "right" ? { x: String(r1(100 - wPct)) }
+              : k === "top" ? { y: "0" }
+              : k === "middle" ? { y: String(r1((100 - hPct) / 2)) }
+              : { y: String(r1(100 - hPct)) };
+            if (patch.x) setImp(node, "left", patch.x + "%");
+            if (patch.y) setImp(node, "top", patch.y + "%");
+            commitSlide(node, patch);
+          }
+
+          const ICON = {
+            lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+            unlock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+            copy: '<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+            trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+            more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+            link: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><path d="M8 12h8"/>',
+            rotate: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+            move: '<path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/><path d="M19 9l3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>',
+          };
+          const chromeCss = document.createElement("style");
+          chromeCss.textContent = "[data-slide-chrome] button:hover:not(:disabled){background:#eef2f7}";
+          document.head.appendChild(chromeCss);
+          function chromeBtn(icon, title, text) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.title = title;
+            if (icon) {
+              b.innerHTML =
+                '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                ICON[icon] +
+                "</svg>";
+            }
+            if (text) b.append(text);
+            b.style.cssText =
+              "display:flex;align-items:center;justify-content:center;gap:4px;height:28px;min-width:28px;padding:0 6px;" +
+              "border:0;border-radius:999px;background:transparent;color:inherit;font:inherit;cursor:pointer;";
+            return b;
+          }
+          const stopBubble = (el) => {
+            // Keeps the document-level click/pointerdown handlers above (select,
+            // deselect, reorder drag) from seeing a press on the chrome itself.
+            el.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+            el.addEventListener("click", (ev) => ev.stopPropagation());
+          };
 
           let selectedSlideFreeNode = null;
-          let slideFreeHandle = null;
+          let slideChrome = null;
           function selectSlideFreeNode(node) {
             if (node === selectedSlideFreeNode) return;
-            if (slideFreeHandle) {
-              slideFreeHandle.remove();
-              slideFreeHandle = null;
+            if (slideChrome) {
+              cancelAnimationFrame(slideChrome.raf);
+              slideChrome.box.remove();
+              slideChrome.bar.remove();
+              slideChrome = null;
             }
             selectedSlideFreeNode = node;
             if (!node) return;
-            const handle = document.createElement("div");
-            handle.setAttribute("data-slide-resize-handle", "true");
-            handle.style.cssText =
-              "position:absolute;right:-5px;bottom:-5px;width:12px;height:12px;border-radius:2px;" +
-              "border:1px solid #fff;background:#0f62fe;cursor:nwse-resize;z-index:9999;";
-            node.appendChild(handle);
-            slideFreeHandle = handle;
+            const locked = node.dataset.slideLocked === "true";
+            const type = node.dataset.slideType;
+
+            const box = document.createElement("div");
+            box.dataset.slideChrome = "1";
+            box.style.cssText = "position:fixed;pointer-events:none;z-index:2147483000;outline:2px solid " + ACCENT + ";";
+            stopBubble(box);
+            if (!locked) {
+              // Heading/text get no top/bottom pills — their height follows the text.
+              const HANDLES = [[-1, -1, "nwse"], [1, -1, "nesw"], [-1, 1, "nesw"], [1, 1, "nwse"], [-1, 0, "ew"], [1, 0, "ew"], [0, -1, "ns"], [0, 1, "ns"]];
+              for (const [dx, dy, cur] of HANDLES) {
+                if (dx === 0 && (type === "heading" || type === "text")) continue;
+                const w = dx && dy ? 12 : dx ? 8 : 16;
+                const h = dx && dy ? 12 : dx ? 16 : 8;
+                const at = (d, s) => (d < 0 ? -s / 2 + "px" : d > 0 ? "calc(100% - " + s / 2 + "px)" : "calc(50% - " + s / 2 + "px)");
+                const hd = document.createElement("div");
+                hd.style.cssText =
+                  "position:absolute;pointer-events:auto;box-sizing:border-box;width:" + w + "px;height:" + h + "px;" +
+                  "left:" + at(dx, w) + ";top:" + at(dy, h) + ";border-radius:999px;background:#fff;border:1px solid " + ACCENT + ";" +
+                  "box-shadow:0 1px 3px rgba(0,0,0,.3);cursor:" + cur + "-resize;";
+                hd.addEventListener("pointerdown", (ev) => {
+                  ev.preventDefault();
+                  startSlideResize(ev, node, dx, dy);
+                });
+                box.appendChild(hd);
+              }
+              // Rotate + Move under the box (Canva's pair).
+              const pair = document.createElement("div");
+              pair.style.cssText = "position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);display:flex;gap:6px;pointer-events:auto;";
+              const rot = chromeBtn("rotate", L("rotate", "Rotate"));
+              rot.style.cssText += "height:24px;min-width:24px;padding:0;background:#fff;color:#1f2937;box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:grab;";
+              rot.addEventListener("pointerdown", (ev) => {
+                ev.preventDefault();
+                startSlideRotate(ev, node);
+              });
+              const mv = chromeBtn("move", L("move", "Move"));
+              mv.style.cssText += "height:24px;min-width:24px;padding:0;background:" + ACCENT + ";color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:move;";
+              mv.addEventListener("pointerdown", (ev) => {
+                ev.preventDefault();
+                startSlideDrag(ev, node);
+              });
+              pair.append(rot, mv);
+              box.appendChild(pair);
+            }
+
+            const bar = document.createElement("div");
+            bar.dataset.slideChrome = "1";
+            bar.style.cssText =
+              "position:fixed;z-index:2147483001;display:flex;align-items:center;gap:2px;padding:2px 4px;background:#fff;color:#1f2937;" +
+              "border:1px solid rgba(0,0,0,.12);border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.18);font:600 11px/1 system-ui,sans-serif;white-space:nowrap;";
+            stopBubble(bar);
+            const menu = document.createElement("div");
+            menu.style.cssText =
+              "position:absolute;top:calc(100% + 6px);display:none;padding:6px;background:#fff;border:1px solid rgba(0,0,0,.12);" +
+              "border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.18);";
+            const openMenu = (kind, fill) => {
+              const wasOpen = menu.style.display !== "none" && menu.dataset.kind === kind;
+              menu.replaceChildren();
+              menu.style.display = "none";
+              if (wasOpen) return;
+              menu.dataset.kind = kind;
+              menu.style.left = kind === "link" ? "0" : "auto";
+              menu.style.right = kind === "link" ? "auto" : "0";
+              fill();
+              menu.style.display = "block";
+            };
+            bar.appendChild(menu);
+            if (type === "button") {
+              const link = chromeBtn("link", L("editLink", "Edit link"), L("editLink", "Edit link"));
+              link.addEventListener("click", () =>
+                openMenu("link", () => {
+                  const a = node.querySelector("a");
+                  const raw = a ? a.getAttribute("href") || "" : "";
+                  const current = raw === "#" ? "" : raw;
+                  const input = document.createElement("input");
+                  input.value = current;
+                  input.placeholder = "https://";
+                  input.style.cssText = "width:15rem;padding:6px 8px;border:1px solid rgba(0,0,0,.2);border-radius:6px;font:12px system-ui,sans-serif;";
+                  input.addEventListener("keydown", (ev) => {
+                    if (ev.key === "Enter") input.blur();
+                  });
+                  input.addEventListener("blur", () => {
+                    if (input.value.trim() !== current) actSlide(node, "href", input.value.trim());
+                  });
+                  menu.appendChild(input);
+                  setTimeout(() => input.focus(), 0);
+                }),
+              );
+              bar.appendChild(link);
+            }
+            const lockBtn = chromeBtn(locked ? "lock" : "unlock", locked ? L("unlock", "Unlock") : L("lock", "Lock"));
+            if (locked) lockBtn.style.color = ACCENT;
+            lockBtn.addEventListener("click", () => actSlide(node, "lock", locked ? "" : "true"));
+            const dup = chromeBtn("copy", L("duplicate", "Duplicate"));
+            dup.addEventListener("click", () => actSlide(node, "duplicate"));
+            const del = chromeBtn("trash", L("delete", "Delete"));
+            del.addEventListener("click", () => actSlide(node, "delete"));
+            const more = chromeBtn("more", L("alignToSlide", "Align to slide"));
+            more.addEventListener("click", () =>
+              openMenu("align", () => {
+                menu.style.width = "11rem";
+                const head = document.createElement("div");
+                head.textContent = L("alignToSlide", "Align to slide");
+                head.style.cssText = "padding:2px 6px 6px;color:#6b7280;";
+                menu.appendChild(head);
+                const ALIGN = [["left", "Left"], ["center", "Center"], ["right", "Right"], ["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]];
+                for (const [k, fallback] of ALIGN) {
+                  const item = chromeBtn(null, "", L(k, fallback));
+                  item.style.cssText += "width:100%;justify-content:flex-start;border-radius:6px;" + (k === "top" ? "margin-top:4px;" : "");
+                  item.disabled = locked;
+                  if (locked) item.style.opacity = ".4";
+                  item.addEventListener("click", () => {
+                    menu.style.display = "none";
+                    alignSlide(node, k);
+                  });
+                  menu.appendChild(item);
+                }
+              }),
+            );
+            bar.append(lockBtn, dup, del, more);
+
+            document.body.append(box, bar);
+            const chrome = { box, bar, raf: 0 };
+            slideChrome = chrome;
+            // ponytail: re-measures every frame while something is selected
+            // (one getBoundingClientRect) — the simplest way to follow scroll,
+            // Swiper moves and live gestures at once; switch to observers if it
+            // ever shows up in a profile.
+            const place = () => {
+              if (slideChrome !== chrome) return;
+              if (!node.isConnected) {
+                selectSlideFreeNode(null);
+                return;
+              }
+              const r = node.getBoundingClientRect();
+              const cx = r.left + r.width / 2;
+              const cy = r.top + r.height / 2;
+              box.style.left = cx - node.offsetWidth / 2 + "px";
+              box.style.top = cy - node.offsetHeight / 2 + "px";
+              box.style.width = node.offsetWidth + "px";
+              box.style.height = node.offsetHeight + "px";
+              box.style.rotate = getComputedStyle(node).rotate;
+              const bw = bar.offsetWidth;
+              const bh = bar.offsetHeight;
+              bar.style.left = Math.max(4, Math.min(window.innerWidth - bw - 4, cx - bw / 2)) + "px";
+              // Flips below (past the Rotate/Move pair) near the viewport's top.
+              bar.style.top = (r.top - bh - 12 >= 4 ? r.top - bh - 12 : r.bottom + 50) + "px";
+              chrome.raf = requestAnimationFrame(place);
+            };
+            place();
           }
 
           // A free button is an <a>/image an <img> — the browser's native
@@ -613,152 +991,14 @@ const fontsHref = allFonts.length
             if (e.target.closest && e.target.closest("[data-slide-free]")) e.preventDefault();
           });
           document.addEventListener("pointerdown", (e) => {
-            if (e.target.closest("[data-slide-resize-handle]")) return;
             const node = e.target.closest("[data-slide-free]");
-            if (!node || node.isContentEditable) return;
-            const slide = node.closest(".ds-slide");
-            if (!slide) return;
+            if (!node || node.isContentEditable || !node.closest(".ds-slide")) return;
             e.preventDefault();
             e.stopPropagation();
-            const rect = slide.getBoundingClientRect();
-            const targetRect = node.getBoundingClientRect();
-            const halfW = targetRect.width / 2;
-            const halfH = targetRect.height / 2;
-            const startLeft = node.offsetLeft;
-            const startTop = node.offsetTop;
-            const startX = e.clientX;
-            const startY = e.clientY;
-            const siblings = freeSiblingRects(node, slide);
-            const cxCandidates = [rect.width / 2, ...siblings.map((s) => s.left + s.width / 2)];
-            const cyCandidates = [rect.height / 2, ...siblings.map((s) => s.top + s.height / 2)];
-            let moved = false;
-            let finalX = 0;
-            let finalY = 0;
-            function move(ev) {
-              moved = true;
-              const rawLeft = startLeft + (ev.clientX - startX);
-              const rawTop = startTop + (ev.clientY - startY);
-              const snappedCenterX = snapValue(rawLeft + halfW, cxCandidates);
-              const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
-              const xPct = ((snappedCenterX - halfW) / rect.width) * 100;
-              const yPct = ((snappedCenterY - halfH) / rect.height) * 100;
-              // No clamp here on purpose — mirrors apps/admin's
-              // ElPreview.tsx startFreeElDrag (same "author may deliberately
-              // bleed past the edge" freedom); .ds-slider-viewport's own
-              // overflow:hidden is the real guard against it painting into
-              // the next carousel slide.
-              finalX = Math.round(xPct * 10) / 10;
-              finalY = Math.round(yPct * 10) / 10;
-              // "important": a tablet/mobile override renders as an
-              // !important @media rule (SliderBlock.astro's bpStyleRules),
-              // which a plain inline style can't beat mid-gesture.
-              node.style.setProperty("left", finalX + "%", "important");
-              node.style.setProperty("top", finalY + "%", "important");
-            }
-            function up() {
-              window.removeEventListener("pointermove", move);
-              window.removeEventListener("pointerup", up);
-              if (moved) {
-                const sliderNode = node.closest("[data-designer-path]");
-                if (sliderNode) {
-                  justDragged = true;
-                  parent.postMessage(
-                    {
-                      type: "designer:slideElDrag",
-                      sliderPath: sliderNode.dataset.designerPath,
-                      slideSel: node.dataset.slideSel,
-                      patch: { x: String(finalX), y: String(finalY) },
-                    },
-                    targetOrigin,
-                  );
-                  setTimeout(() => (justDragged = false), 50);
-                }
-              }
-            }
-            window.addEventListener("pointermove", move);
-            window.addEventListener("pointerup", up);
-          });
-
-          document.addEventListener("pointerdown", (e) => {
-            const handle = e.target.closest("[data-slide-resize-handle]");
-            if (!handle) return;
-            const node = handle.parentElement;
-            const slide = node && node.closest(".ds-slide");
-            if (!node || !slide) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const rect = node.getBoundingClientRect();
-            const containerRect = slide.getBoundingClientRect();
-            const startW = rect.width;
-            const startH = rect.height;
-            const startX = e.clientX;
-            const startY = e.clientY;
-            const fixedLeft = rect.left - containerRect.left;
-            const fixedTop = rect.top - containerRect.top;
-            const siblings = freeSiblingRects(node, slide);
-            const insetX = containerRect.width * 0.06;
-            const insetY = containerRect.height * 0.06;
-            const exCandidates = [insetX, containerRect.width - insetX, ...siblings.map((s) => s.left), ...siblings.map((s) => s.left + s.width)];
-            const eyCandidates = [insetY, containerRect.height - insetY, ...siblings.map((s) => s.top), ...siblings.map((s) => s.top + s.height)];
-            // Heading/text ARE the node itself; a free-positioned button is a
-            // wrapper div around its own <a class="ds-btn"> (SliderBlock.astro's
-            // button case) — .ds-btn sets its own font-size directly
-            // (global.css), so scaling the wrapper's font-size would do
-            // nothing there; find the real text-bearing node to scale instead.
-            const isTextLike = node.tagName === "P" || /^H[1-4]$/.test(node.tagName);
-            const textTarget = isTextLike ? node : node.querySelector("a.ds-btn");
-            const startFontPx = textTarget ? parseFloat(getComputedStyle(textTarget).fontSize) : 0;
-            // Diagonal, not plain width — mirrors apps/admin's ElPreview.tsx
-            // startFreeElResize fix: a mostly-vertical drag (box gets much
-            // taller, only slightly wider) still scales the font. A
-            // width-only ratio barely moved for that drag, which read as
-            // "I made it bigger but the text didn't follow."
-            const startDiag = Math.hypot(startW, startH);
-            let moved = false;
-            let finalW = startW;
-            let finalH = startH;
-            let finalRatio = 1;
-            function move(ev) {
-              moved = true;
-              let w = Math.max(20, Math.round(startW + (ev.clientX - startX)));
-              let h = Math.max(20, Math.round(startH + (ev.clientY - startY)));
-              w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
-              h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
-              // Hard clamp: the resized far edge must stay inside the slide
-              // (left/top are fixed during a resize) — mirrors apps/admin's
-              // ElPreview.tsx startFreeElResize clamp.
-              w = Math.min(w, Math.max(20, Math.round(containerRect.width - fixedLeft)));
-              h = Math.min(h, Math.max(20, Math.round(containerRect.height - fixedTop)));
-              node.style.setProperty("width", w + "px", "important");
-              node.style.setProperty("height", h + "px", "important");
-              finalRatio = startDiag > 0 ? Math.hypot(w, h) / startDiag : 1;
-              if (textTarget && startFontPx > 0) {
-                textTarget.style.setProperty("font-size", Math.max(8, Math.round(startFontPx * finalRatio)) + "px", "important");
-              }
-              finalW = w;
-              finalH = h;
-            }
-            function up() {
-              window.removeEventListener("pointermove", move);
-              window.removeEventListener("pointerup", up);
-              if (moved) {
-                const sliderNode = node.closest("[data-designer-path]");
-                if (sliderNode) {
-                  const patch = { posWidth: finalW + "px", posHeight: finalH + "px" };
-                  if (textTarget && startFontPx > 0) {
-                    patch.posFontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
-                  }
-                  justDragged = true;
-                  parent.postMessage(
-                    { type: "designer:slideElDrag", sliderPath: sliderNode.dataset.designerPath, slideSel: node.dataset.slideSel, patch },
-                    targetOrigin,
-                  );
-                  setTimeout(() => (justDragged = false), 50);
-                }
-              }
-            }
-            window.addEventListener("pointermove", move);
-            window.addEventListener("pointerup", up);
+            // Select on press, not click, so a drag carries its chrome along.
+            selectSlideFreeNode(node);
+            postSelectSlide(node);
+            if (node.dataset.slideLocked !== "true") startSlideDrag(e, node);
           });
 
           function findByPath(path) {
@@ -848,14 +1088,18 @@ const fontsHref = allFonts.length
               return;
             }
             if (e.data.type === "designer:selected") {
+              if (e.data.labels) labels = e.data.labels;
               if (selectedNode) visualTarget(selectedNode).style.outline = "";
               selectionResizeObserver.disconnect();
-              // A sel sync from the Layers tree/Inspector (not a click inside
-              // this iframe) may point at the slider itself, not a specific
-              // slide-nested child — any stale resize handle from a previous
-              // in-iframe click no longer applies.
-              selectSlideFreeNode(null);
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
+              // Designer names the selected slide child ("slideIdx.r.c.e") —
+              // re-attaches its chrome after every reload, and drops it when
+              // selection moved elsewhere (Layers tree/Inspector).
+              const slideChild =
+                selectedNode && e.data.slideSel
+                  ? selectedNode.querySelector(`[data-slide-sel="${CSS.escape(e.data.slideSel)}"]`)
+                  : null;
+              selectSlideFreeNode(slideChild && slideChild.dataset.slideFree === "true" ? slideChild : null);
               if (selectedNode) {
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
                 selectionResizeObserver.observe(visualTarget(selectedNode));

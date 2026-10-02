@@ -355,6 +355,17 @@ const p = el.props ?? {};
   const renderSlideEl = (el: El, slideIdx: number, r: number, c: number, e: number) => {
     const slideSel = designerEdit ? `${slideIdx}.${r}.${c}.${e}` : undefined;
     const ep = el.props ?? {};
+    // Live Edit-only markers for BaseLayout.astro's Canva-style slide chrome:
+    // the tree address, whether it's draggable, which handles/toolbar
+    // buttons apply (type), and whether it's locked.
+    const editAttrs = designerEdit
+      ? {
+          "data-slide-sel": slideSel,
+          "data-slide-free": ep.position === "custom" ? "true" : undefined,
+          "data-slide-type": el.type,
+          "data-slide-locked": ep.locked === "true" ? "true" : undefined,
+        }
+      : {};
     if (el.bp && Object.keys(el.bp).length > 0) {
       responsiveRules.push(
         ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"]`, el.bp, ep, (mp) =>
@@ -366,6 +377,9 @@ const p = el.props ?? {};
             // (ElPreview.tsx) so a per-breakpoint drag-resize's scaled font
             // size actually shows up here too, not just on desktop.
             el.type === "heading" && mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null,
+            // text's own size (a tablet/mobile corner-resize scales it), same
+            // fluid clamp the base render uses below.
+            el.type === "text" && mp.size ? `font-size:${fluidTextSize(lengthValue(mp.size, TEXT_SIZE, TEXT_SIZE.md))}` : null,
           ]
             .filter(Boolean)
             .join(";"),
@@ -402,7 +416,7 @@ const p = el.props ?? {};
           <Tag
             class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
             data-slide-el={el.id}
-            data-slide-sel={slideSel}
+            {...editAttrs}
             style={[
               ep.align ? `text-align:${ep.align}` : null,
               marginStyle(ep),
@@ -427,8 +441,7 @@ const p = el.props ?? {};
           <p
             class={cls("ds-text", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
             data-slide-el={el.id}
-            data-slide-sel={slideSel}
-            data-slide-free={ep.position === "custom" ? "true" : undefined}
+            {...editAttrs}
             style={[
               `font-size:${fluidTextSize(lengthValue(ep.size, TEXT_SIZE, TEXT_SIZE.md))}`,
               ep.align ? `text-align:${ep.align}` : null,
@@ -453,7 +466,7 @@ const p = el.props ?? {};
         const epSrc = safeUrl(ep.src);
         const epSrcset = epSrc ? buildSrcset(epSrc) : null;
         return epSrc ? (
-          <div data-slide-el={el.id} data-slide-sel={slideSel} data-slide-free={freePos ? "true" : undefined} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
+          <div data-slide-el={el.id} {...editAttrs} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
             <img
               class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
               src={epSrc}
@@ -481,8 +494,7 @@ const p = el.props ?? {};
         return ep.label ? (
           <div
             data-slide-el={el.id}
-            data-slide-sel={slideSel}
-            data-slide-free={freePos ? "true" : undefined}
+            {...editAttrs}
             style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), posStyle(ep)].filter(Boolean).join(";")}
           >
             <a
