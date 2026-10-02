@@ -388,6 +388,11 @@ const fontsHref = allFonts.length
           const targetOrigin = document.referrer ? new URL(document.referrer).origin : null;
           if (!targetOrigin) return;
 
+          // Check the rendered position rather than the desktop-only marker:
+          // responsive CSS can make any child type absolute only on the
+          // tablet/mobile viewport currently rendered in Live Edit.
+          const isSlideFree = (node) => Boolean(node && getComputedStyle(node).position === "absolute");
+
           document.addEventListener("click", (e) => {
             // Lets Designer.tsx close its right-click context menu on any
             // click inside the iframe — a click here never bubbles to the
@@ -411,7 +416,7 @@ const fontsHref = allFonts.length
             if (slideNode && slideNode.closest("[data-designer-path]")) {
               e.preventDefault();
               postSelectSlide(slideNode);
-              selectSlideFreeNode(slideNode.dataset.slideFree === "true" ? slideNode : null);
+              selectSlideFreeNode(isSlideFree(slideNode) ? slideNode : null);
               return;
             }
             selectSlideFreeNode(null);
@@ -480,13 +485,14 @@ const fontsHref = allFonts.length
           let justDragged = false;
 
           document.addEventListener("pointerdown", (e) => {
-            // A slide-nested free-positioned element (data-slide-free) owns
+            // A slide-nested free-positioned element (position:absolute) owns
             // its own drag gesture below — bail here so this generic
             // section/column/element reorder drag never hijacks it (without
             // this, closest() would still resolve up to the slider's own
             // data-designer-path ancestor and start an unrelated element-
             // level reorder drag instead).
-            if (e.target.closest("[data-slide-free]")) return;
+            const slideChild = e.target.closest("[data-slide-sel]");
+            if (slideChild && isSlideFree(slideChild)) return;
             const node = e.target.closest("[data-designer-path]");
             // e.target too: an element's data-designer-path node is its
             // display:contents wrapper, whose editable CHILD is what's
@@ -582,7 +588,8 @@ const fontsHref = allFonts.length
           }
           function freeSiblingRects(node, slide) {
             const rect = slide.getBoundingClientRect();
-            return Array.from(slide.querySelectorAll('[data-slide-free="true"]'))
+            return Array.from(slide.querySelectorAll("[data-slide-sel]"))
+              .filter((n) => isSlideFree(n))
               .filter((n) => n !== node)
               .map((n) => {
                 const r = n.getBoundingClientRect();
@@ -991,14 +998,15 @@ const fontsHref = allFonts.length
             place();
           }
 
-          // A free button is an <a>/image an <img> — the browser's native
-          // link/image drag would cancel the pointer stream mid-gesture.
+          // A free image or button contains a natively draggable image/link;
+          // prevent that browser drag from cancelling our pointer gesture.
           document.addEventListener("dragstart", (e) => {
-            if (e.target.closest && e.target.closest("[data-slide-free]")) e.preventDefault();
+            const node = e.target.closest && e.target.closest("[data-slide-sel]");
+            if (isSlideFree(node)) e.preventDefault();
           });
           document.addEventListener("pointerdown", (e) => {
-            const node = e.target.closest("[data-slide-free]");
-            if (!node || node.isContentEditable || !node.closest(".ds-slide")) return;
+            const node = e.target.closest("[data-slide-sel]");
+            if (!node || !isSlideFree(node) || node.isContentEditable || !node.closest(".ds-slide")) return;
             e.preventDefault();
             e.stopPropagation();
             // Select on press, not click, so a drag carries its chrome along.
@@ -1105,7 +1113,7 @@ const fontsHref = allFonts.length
                 selectedNode && e.data.slideSel
                   ? selectedNode.querySelector(`[data-slide-sel="${CSS.escape(e.data.slideSel)}"]`)
                   : null;
-              selectSlideFreeNode(slideChild && slideChild.dataset.slideFree === "true" ? slideChild : null);
+              selectSlideFreeNode(isSlideFree(slideChild) ? slideChild : null);
               if (selectedNode) {
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
                 selectionResizeObserver.observe(visualTarget(selectedNode));
