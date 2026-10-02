@@ -117,3 +117,33 @@ test("dropIntoColumn: dragging a new element type inserts it and clears the drag
   assert.equal(els[1].type, "heading");
   assert.equal(ops.drag.current, null);
 });
+
+test("dropIntoColumn: dragging a new element with propsOverride merges it onto that type's own defaults", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new", type: "container", propsOverride: { flexDirection: "column" } };
+  ops.dropIntoColumn([0, 0, 0], 1);
+  const els = (state.blocks[0].props as { rows: { columns: { elements: { type: string; props: Record<string, string> }[] }[] }[] }).rows[0].columns[0].elements;
+  assert.equal(els[1].type, "container");
+  assert.equal(els[1].props.flexDirection, "column");
+  assert.equal(els[1].props.gap, "1rem", "container's own other defaults still apply, only the overridden key changes");
+});
+
+test("dropIntoColumn: a Layout 'new-row' preset pushes a whole Row onto that column's own section, ignoring the column itself", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-row", spans: [1, 2] };
+  ops.dropIntoColumn([0, 0, 0]);
+  const rows = (state.blocks[0].props as { rows: { columns: { span: number }[] }[] }).rows;
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[1].columns.map((c) => c.span), [1, 2]);
+});
+
+test("dropIntoColumn: a Layout 'new-section' preset inserts a fresh Block right after the hovered column's own section", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-section" };
+  ops.dropIntoColumn([0, 0, 0]);
+  assert.equal(state.blocks.length, 2);
+  assert.equal(state.blocks[1].type, "section");
+});

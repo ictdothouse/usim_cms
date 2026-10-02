@@ -267,6 +267,23 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (degrees) renders via `computeFreePositionStyle` as CSS `rotate:` (not `transform`, so it composes
   with ds-entrance/ds-hover animations), registered in element-schema's LENGTH_KEYS, editable in the
   Inspector's free-position grid. No "Comment" button — there's no comment system to back it.
+  **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab
+  (DesignerPalette.tsx) now renders two groups instead of one flat list — "Layout" (a 2-column icon
+  grid) then "Content" (the pre-existing full-width row list, `container` excluded since it now lives
+  in Layout). `elements.ts`'s new `LAYOUT_PRESETS` array drives the Layout group: Section, Container,
+  V Flex/H Flex (both just the `container` ElType with `flexDirection` pre-set via a new `Drag.new`
+  field `propsOverride`, not a second ElType), and 6 row-column presets (1/2/3/4 even columns, 1:2,
+  2:1 — same spans `ROW_PRESETS`'s inline "+add row" buttons already offered, now also draggable).
+  Two of these presets don't produce an `El` at all, so `Drag` gained two kinds: `"new-section"`
+  (insert a fresh Block) and `"new-row"` (push a fresh Row onto the hovered column's own section) —
+  both handled by `useBlockOps.ts`'s `dropIntoColumn` before it falls into the pre-existing
+  El-insert/move branch, dropped onto any existing column (section-insert lands right after that
+  column's section; row-insert ignores which column specifically and appends to that section's
+  `rows`) or onto the canvas's own "+ Add Section" button (always appends to the end, mirroring its
+  click handler). `newSection()`/`newRow()` (parsers.ts) are the one shared factory for both the
+  click buttons and the new drag path — no duplicated object literals. No lock check on either new
+  branch, matching the pre-existing add-row/add-section buttons' own behavior (inserting a sibling
+  row/section never mutates the hovered section's own locked content).
   **Device-preview modal: real dimensions, rotate, no in-frame scrollbar (2026-09-25)**: the
   mobile/tablet bezel used an arbitrary `aspect-[9/19.5]` ratio capped at a fairly small `max-h`, and
   had no rotate control at all — replaced with named real device viewports (`DEVICE_DIMS`: iPhone

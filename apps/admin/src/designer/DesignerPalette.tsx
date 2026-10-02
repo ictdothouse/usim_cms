@@ -15,7 +15,7 @@ import { ChevronDown, ChevronRight, Layers, Lock, Settings } from "lucide-react"
 import type { MutableRefObject } from "react";
 import type { Key } from "@/i18n";
 import { Inspector } from "./Inspector";
-import { ELS } from "./elements";
+import { ELS, LAYOUT_PRESETS } from "./elements";
 import type { Block, SectionProps, ElType, Drag } from "./types";
 import type { DesignerCtx } from "./context";
 import type { useSiteChrome } from "./hooks/useSiteChrome";
@@ -177,25 +177,51 @@ export function DesignerPalette({
         </button>
       </div>
       {activeLeftTab === "elements" ? (
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-elements")}</p>
-          {(Object.keys(ELS) as ElType[]).map((type) => {
-            const Icon = ELS[type].icon;
-            return (
-              <div
-                key={type}
-                draggable
-                onDragStart={(ev) => {
-                  drag.current = { kind: "new", type };
-                  ev.dataTransfer.effectAllowed = "copy";
-                }}
-                onDragEnd={() => (drag.current = null)}
-                className="flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
-              >
-                <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
-              </div>
-            );
-          })}
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-category-layout")}</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {LAYOUT_PRESETS.map((preset) => {
+                const Icon = preset.icon;
+                return (
+                  <div
+                    key={preset.key}
+                    draggable
+                    onDragStart={(ev) => {
+                      drag.current = preset.drag;
+                      ev.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onDragEnd={() => (drag.current = null)}
+                    className="flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-[10px] font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+                  >
+                    <Icon className="h-4 w-4 text-accent" /> {t(preset.labelKey)}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-category-content")}</p>
+            {(Object.keys(ELS) as ElType[])
+              .filter((type) => type !== "container")
+              .map((type) => {
+                const Icon = ELS[type].icon;
+                return (
+                  <div
+                    key={type}
+                    draggable
+                    onDragStart={(ev) => {
+                      drag.current = { kind: "new", type };
+                      ev.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onDragEnd={() => (drag.current = null)}
+                    className="flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+                  >
+                    <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
+                  </div>
+                );
+              })}
+          </div>
           <p className="pt-2 text-[10px] leading-relaxed text-sub">{t("designer-drop-hint")}</p>
         </div>
       ) : activeLeftTab === "layers" ? (

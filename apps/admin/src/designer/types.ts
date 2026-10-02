@@ -317,8 +317,20 @@ export type Sel = number[] | null;
 // Canvas drag-in-progress descriptor (Designer()'s own `drag` ref) — moved
 // here (Layer 2, useBlockOps) since dropIntoColumn needs it and designer/
 // files can't import a type back from Designer.tsx.
+// "new"'s `propsOverride` lets a palette entry drop the SAME ElType as
+// another but pre-set a default differently — the Layout category's "V
+// Flex"/"H Flex" presets are both just a "container" with flexDirection
+// forced to "column"/"row", not a whole new ElType (see elements.ts's
+// LAYOUT_PRESETS). "new-row"/"new-section" are two more Layout-category
+// presets that don't produce an El at all: dropping one inserts a whole Row
+// (into the hovered column's own section) or a whole Block (right after the
+// hovered column's own section) instead — see useBlockOps.ts's
+// dropIntoColumn, which branches on these before falling into the
+// El-insert/move logic every other kind already shared.
 export type Drag =
-  | { kind: "new"; type: ElType }
+  | { kind: "new"; type: ElType; propsOverride?: Record<string, string> }
+  | { kind: "new-row"; spans: number[] }
+  | { kind: "new-section" }
   | { kind: "move"; path: number[] }
   | { kind: "tree-reorder"; treeKind: "section" | "column"; path: number[] };
 

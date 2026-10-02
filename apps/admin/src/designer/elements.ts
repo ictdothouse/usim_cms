@@ -20,6 +20,9 @@ import {
   CalendarDays,
   ChevronsUpDown,
   Code2,
+  Columns2,
+  Columns3,
+  Columns4,
   Component,
   FileText,
   Frame,
@@ -31,6 +34,7 @@ import {
   Info,
   LayoutGrid,
   LayoutPanelTop,
+  LayoutTemplate,
   List,
   MapPin,
   Megaphone,
@@ -39,8 +43,12 @@ import {
   MousePointerClick,
   MoveVertical,
   Newspaper,
+  PanelLeft,
+  PanelRight,
   Quote,
   Radio,
+  RectangleHorizontal,
+  Rows2,
   Share2,
   Star,
   Tag,
@@ -49,7 +57,7 @@ import {
   Video,
 } from "lucide-react";
 import type { Key } from "@/i18n";
-import type { CardItem, ElType, Field } from "./types";
+import type { CardItem, Drag, ElType, Field } from "./types";
 import { TYPOGRAPHY_FIELDS } from "./fields";
 import { ICONS } from "./icons";
 import { newSlide } from "./parsers";
@@ -814,3 +822,34 @@ export const CONTENT_KEYS: Record<ElType, string[]> = {
   announcementticker: ["tickerItems"],
   container: [],
 };
+
+// Webflow-style "Layout" palette category (docs/SliderProblem.pdf's sibling
+// request, screenshot of Webflow's own Add Elements panel) — each entry is a
+// quick-insert structural preset, not its own ElType: "Section"/the
+// row-column presets don't produce an El at all (see types.ts's Drag
+// "new-section"/"new-row", handled by useBlockOps.ts's dropIntoColumn), and
+// "V Flex"/"H Flex" are just the existing "container" ElType with
+// flexDirection pre-set via the "new" kind's propsOverride instead of a
+// second ElType that would otherwise need its own ElPreview/validator/
+// SectionBlock.astro render-switch branch for zero actual behavior
+// difference. DesignerPalette.tsx renders these above the plain ELS list
+// (which excludes "container" — folded into this group instead of appearing
+// twice).
+export interface LayoutPreset {
+  key: string;
+  labelKey: Key;
+  icon: typeof Type;
+  drag: Drag;
+}
+export const LAYOUT_PRESETS: LayoutPreset[] = [
+  { key: "section", labelKey: "designer-el-section", icon: LayoutTemplate, drag: { kind: "new-section" } },
+  { key: "container", labelKey: "designer-el-container", icon: Frame, drag: { kind: "new", type: "container" } },
+  { key: "vflex", labelKey: "designer-el-vflex", icon: Rows2, drag: { kind: "new", type: "container", propsOverride: { flexDirection: "column" } } },
+  { key: "hflex", labelKey: "designer-el-hflex", icon: Columns2, drag: { kind: "new", type: "container", propsOverride: { flexDirection: "row" } } },
+  { key: "row-1", labelKey: "designer-layout-1col", icon: RectangleHorizontal, drag: { kind: "new-row", spans: [1] } },
+  { key: "row-2", labelKey: "designer-layout-2col", icon: Columns2, drag: { kind: "new-row", spans: [1, 1] } },
+  { key: "row-3", labelKey: "designer-layout-3col", icon: Columns3, drag: { kind: "new-row", spans: [1, 1, 1] } },
+  { key: "row-4", labelKey: "designer-layout-4col", icon: Columns4, drag: { kind: "new-row", spans: [1, 1, 1, 1] } },
+  { key: "row-1-2", labelKey: "designer-layout-1to2", icon: PanelLeft, drag: { kind: "new-row", spans: [1, 2] } },
+  { key: "row-2-1", labelKey: "designer-layout-2to1", icon: PanelRight, drag: { kind: "new-row", spans: [2, 1] } },
+];
