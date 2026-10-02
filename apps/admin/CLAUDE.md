@@ -232,6 +232,28 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   button. Removed `mintPreviewLink`/`previewLink`/`previewMinting` entirely and pointed the page
   Preview button at `openDevicePreview()`, same as blueprint/siteChrome — one preview UX for every
   content kind instead of two.
+  **Canva-style draft autosave + Preview reads the DB (2026-10-02)**: Preview used to hand the
+  canvas's in-memory state to apps/api's ephemeral `live-preview-store` (Redis-else-per-process
+  Map) via the preview-token POST body; on the multi-replica deploy that silently fell back to the
+  last REAL save whenever the mint and the SSR read-back landed on different replicas — reported
+  live as "Preview only matches after Update". Also found: Live Edit's `enterLive()` flushed with
+  the real `save()`, which on a **published** page wrote every edit straight onto the live site
+  with no Update click (contradicting the autosave effect's own "never push an unreviewed edit
+  live" rule). Fix: `pages.draft` jsonb (apps/api migration 0029) — `{layout, settings, seo,
+  translations, language, multilangEnabled}`, validated by the same `validatePageContent`
+  (collections.ts) as the live columns, stripped from every anonymous read by `pagesAfterRead`
+  (`isElevatedRequest`, generic-crud.ts). `usePersist`'s `autosave()` is the single autosave
+  target: published page → `saveDraft()` (PATCH `{draft}` only), unpublished page/blueprint/
+  symbol → its own row as before; `save()` (Update/Publish) writes the live columns AND
+  `draft: null`. Every write is serialized through one promise chain (`queued`) and reads
+  `latest.current` (not a render closure) so a later-queued save always sends the newest state;
+  `dirty` only clears if nothing changed while the save was in flight. Preview (page/blueprint)
+  flushes pending edits then mints a body-less token, and `[...slug].astro` overlays `page.draft`
+  for a token read — the same Postgres row on every replica. The open modal re-mints off
+  `savedTick` (right after each save), not its own timer. Designer overlays `page.draft` onto
+  `page` once at mount so every seed site reopens onto the draft; the header badge shows
+  `designer-draft-pending` and Update stays enabled while `hasDraft`. Revision restore clears the
+  draft. Header/footer (siteChrome) still uses the ephemeral path — no draft column of its own yet.
   **Device-preview modal: real dimensions, rotate, no in-frame scrollbar (2026-09-25)**: the
   mobile/tablet bezel used an arbitrary `aspect-[9/19.5]` ratio capped at a fairly small `max-h`, and
   had no rotate control at all — replaced with named real device viewports (`DEVICE_DIMS`: iPhone
