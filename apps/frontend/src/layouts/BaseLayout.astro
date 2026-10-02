@@ -607,10 +607,13 @@ const fontsHref = allFonts.length
           const commitSlide = (node, patch) => postSlide("designer:slideElDrag", node, { patch });
           const actSlide = (node, action, value) => postSlide("designer:slideElAction", node, { action, value });
 
-          // pointermove/pointerup on window for one gesture; done(moved).
-          function track(move, done) {
+          // pointermove/pointerup on window for the gesture `e` started;
+          // done(moved). Under 3px is a click's jitter, not a drag — counting it
+          // wrote a px-rounded position and reloaded the page on a plain click.
+          function track(e, move, done) {
             let moved = false;
             const onMove = (ev) => {
+              if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 3) return;
               moved = true;
               move(ev);
             };
@@ -658,6 +661,7 @@ const fontsHref = allFonts.length
             let x = 0;
             let y = 0;
             track(
+              e,
               (ev) => {
                 const rawCx = startLeft + (ev.clientX - startX) + halfW;
                 const rawCy = startTop + (ev.clientY - startY) + halfH;
@@ -708,6 +712,7 @@ const fontsHref = allFonts.length
             let out = null;
             let ratio = 1;
             track(
+              e,
               (ev) => {
                 let w = startW + (ev.clientX - startX) * dx;
                 let h = startH + (ev.clientY - startY) * dy;
@@ -755,6 +760,7 @@ const fontsHref = allFonts.length
             const startDeg = parseFloat(getComputedStyle(node).rotate) || 0;
             let deg = startDeg;
             track(
+              e,
               (ev) => {
                 let d = startDeg + ((Math.atan2(ev.clientY - cy, ev.clientX - cx) - a0) * 180) / Math.PI;
                 d = ((((d + 180) % 360) + 360) % 360) - 180;
