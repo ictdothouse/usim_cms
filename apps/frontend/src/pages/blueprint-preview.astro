@@ -39,7 +39,10 @@ const fonts = collectFonts(layout);
 // [...slug].astro, which guards designerEdit against URL tampering because
 // a public request there has no previewToken) — reaching this page with a
 // real `bp` already proves a valid preview token was presented.
-const designerEdit = Boolean(bp);
+// Same gate as [...slug].astro: only Live Edit asks for the edit bridge — the
+// Preview modal must render exactly what a visitor would get (no edit
+// outlines, Swiper swipe/autoplay intact).
+const designerEdit = Boolean(bp) && Astro.url.searchParams.get("designerEdit") === "1";
 ---
 <BaseLayout title="Blueprint preview" theme={theme} fonts={fonts} designerEdit={designerEdit} langSwitcher={null}>
   {!bp ? (

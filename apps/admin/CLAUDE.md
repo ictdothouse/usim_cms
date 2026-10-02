@@ -302,6 +302,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   hide `html`/`body`'s own scrollbar and add a small `pointerdown`/`pointermove`/`pointerup` script
   that drag-scrolls the page from mouse deltas, mirroring how a real touch device scrolls. Never
   reaches a real visitor — the param only ever appears on a URL this modal itself constructs.
+  **Live Edit = Preview, exact (2026-10-02)**: three separate defects made "Live" and Preview disagree.
+  (1) The aspect-ratio + 46rem cap + bezel padding above left the "mobile" iframe ~277–315px wide on
+  a normal laptop, not 393px. Both now render through `designer/DeviceViewport.tsx`, which keeps the
+  screen box at the device's TRUE size (`DEVICE_DIMS`, now including desktop = 1440×900, so desktop
+  never silently drops into the <1025px tablet tier) and only `transform: scale()`s it to fit. Never
+  size that iframe off the available space again. (2) The real-iframe Live Edit JSX had been deleted
+  in `bf025a2` (2026-07-25); since then the "Live" toggle only restyled the Blocks React canvas,
+  which is an approximation (vw-based clamp() font sizes and `@media` rules evaluate against the
+  admin window, no Swiper). `Designer.tsx` mounts the double-buffered iframes again inside the same
+  `DeviceViewport`. `useLiveEditBridge` now reloads the real page after EVERY edit; the old
+  `designer:style` shortcut posted BASE props at tablet/mobile. The one exception is typing inside the
+  iframe (`skipNextReload`), which re-renders once selection moves away. Iframe free-position drags
+  write `${bp}:x`-style overrides off desktop, and `designer:showSlides` keeps the edited slide
+  across reloads. (3) In the real render, a slider in a flex-mode row at ≤640px (column + wrap) fed
+  Swiper's px slide width back into its column's max-content, so the width doubled until
+  `2.68435e+07px` and the Preview showed an empty slide. Fixed in `SliderBlock.astro` with
+  `contain: inline-size`, plus a stacked slider column force-stretched (`data-fill`) in both
+  `SectionBlock.astro` and `DesignerCanvas.tsx`. Blocks mode stays the editing approximation.
   **Still admin-canvas-preview-only** (real scope reduction that remains):
   shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
   live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;

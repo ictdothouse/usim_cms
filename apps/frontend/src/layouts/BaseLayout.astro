@@ -329,7 +329,10 @@ const fontsHref = allFonts.length
         ))}
       </nav>
     )}
-    {deviceFrame && (
+    {/* Not under designerEdit: Live Edit frames this same page at the same
+        device size, but there a press-and-drag is an edit gesture (reorder,
+        free-position drag/resize) — the wheel still scrolls it. */}
+    {deviceFrame && !designerEdit && (
       <script is:inline>
         (() => {
           // Mouse has no touch to drag-scroll with, and the phone/tablet
@@ -488,7 +491,11 @@ const fontsHref = allFonts.length
             // level reorder drag instead).
             if (e.target.closest("[data-slide-free]")) return;
             const node = e.target.closest("[data-designer-path]");
-            if (!node || node.isContentEditable) return;
+            // e.target too: an element's data-designer-path node is its
+            // display:contents wrapper, whose editable CHILD is what's
+            // contentEditable — without this, drag-selecting text inside an
+            // editable heading started a reorder drag instead.
+            if (!node || node.isContentEditable || e.target.isContentEditable) return;
             dragState = { path: node.dataset.designerPath, node, startX: e.clientX, startY: e.clientY, moved: false };
           });
 
@@ -637,8 +644,11 @@ const fontsHref = allFonts.length
               // the next carousel slide.
               finalX = Math.round(xPct * 10) / 10;
               finalY = Math.round(yPct * 10) / 10;
-              node.style.left = finalX + "%";
-              node.style.top = finalY + "%";
+              // "important": a tablet/mobile override renders as an
+              // !important @media rule (SliderBlock.astro's bpStyleRules),
+              // which a plain inline style can't beat mid-gesture.
+              node.style.setProperty("left", finalX + "%", "important");
+              node.style.setProperty("top", finalY + "%", "important");
             }
             function up() {
               window.removeEventListener("pointermove", move);
@@ -714,11 +724,11 @@ const fontsHref = allFonts.length
               // ElPreview.tsx startFreeElResize clamp.
               w = Math.min(w, Math.max(20, Math.round(containerRect.width - fixedLeft)));
               h = Math.min(h, Math.max(20, Math.round(containerRect.height - fixedTop)));
-              node.style.width = w + "px";
-              node.style.height = h + "px";
+              node.style.setProperty("width", w + "px", "important");
+              node.style.setProperty("height", h + "px", "important");
               finalRatio = startDiag > 0 ? Math.hypot(w, h) / startDiag : 1;
               if (textTarget && startFontPx > 0) {
-                textTarget.style.fontSize = Math.max(8, Math.round(startFontPx * finalRatio)) + "px";
+                textTarget.style.setProperty("font-size", Math.max(8, Math.round(startFontPx * finalRatio)) + "px", "important");
               }
               finalW = w;
               finalH = h;
@@ -821,6 +831,17 @@ const fontsHref = allFonts.length
               window.scrollTo(0, e.data.y ?? 0);
               return;
             }
+            // Keeps each slider on the slide the author is editing across a
+            // Live Edit reload (Swiper would otherwise reset to slide 0) —
+            // map is { [slider element id]: slide index }, same keying as
+            // Designer.tsx's sliderSlideIdx.
+            if (e.data.type === "designer:showSlides") {
+              for (const [id, idx] of Object.entries(e.data.map || {})) {
+                const vp = document.querySelector(`[data-slider-id="${CSS.escape(id)}"] .ds-slider-viewport`);
+                if (vp && vp.swiper) vp.swiper.slideToLoop(Number(idx) || 0, 0);
+              }
+              return;
+            }
             if (e.data.type === "designer:selected") {
               if (selectedNode) visualTarget(selectedNode).style.outline = "";
               selectionResizeObserver.disconnect();
@@ -839,9 +860,7 @@ const fontsHref = allFonts.length
             }
             const node = findByPath(e.data.path);
             if (!node) return;
-            if (e.data.type === "designer:style") {
-              Object.assign(node.style, e.data.style);
-            } else if (e.data.type === "designer:text") {
+            if (e.data.type === "designer:text") {
               const target = visualTarget(node);
               target.contentEditable = String(Boolean(e.data.editable));
               if (e.data.editable && !target.dataset.designerBound) {

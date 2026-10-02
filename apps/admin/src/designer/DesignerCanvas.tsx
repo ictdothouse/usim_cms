@@ -39,6 +39,7 @@ import {
 } from "./style";
 import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./fields";
 import { ElPreview } from "./ElPreview";
+import { DEVICE_DIMS } from "./DeviceViewport";
 import type { Bp, Block, Col, Row, El, SectionProps, Drag } from "./types";
 import type { DesignerCtx } from "./context";
 import type { UndoRedoApi } from "./hooks/useUndoRedo";
@@ -403,13 +404,11 @@ export function DesignerCanvas({
       <div
         className="relative mx-auto"
         style={{
-          // 393px/820px mirror the device-preview modal's own DEVICE_DIMS
-          // (iPhone 14/15, iPad Air) — kept in sync by hand (no shared
-          // module-level constant for 2 numbers) so this bp simulation,
-          // that modal, and a real phone/tablet all agree on the same
-          // width a free-position element's fixed-px size gets judged
-          // against, instead of 3 independently-guessed approximations.
-          maxWidth: bp === "tablet" ? "820px" : bp === "mobile" ? "393px" : mode === "live" || !desktopBoxed ? undefined : "56rem",
+          // Same DEVICE_DIMS Preview and Live Edit frame the real page at
+          // (DeviceViewport) — this bp simulation, those two, and a real
+          // phone/tablet all agree on the width a free-position element's
+          // fixed-px size gets judged against.
+          maxWidth: bp !== "desktop" ? `${DEVICE_DIMS[bp].w}px` : mode === "live" || !desktopBoxed ? undefined : "56rem",
         }}
       >
         {isCanvasMode && (
@@ -778,7 +777,12 @@ export function DesignerCanvas({
                                   // override the old hardcoded-column CSS always applied,
                                   // now conditional on the resolved direction instead of
                                   // unconditional on any non-desktop bp.
-                                  { flex: "1 1 100%" }
+                                  // A slider column also force-stretches while
+                                  // stacked — mirrors SectionBlock.astro's
+                                  // data-fill rule (a slider has no intrinsic
+                                  // width there, so a non-stretch align-items
+                                  // would otherwise shrink it to 0px).
+                                  { flex: "1 1 100%", ...(col.elements.some((el) => el.type === "slider") ? { alignSelf: "stretch" } : {}) }
                                 : { flex: `${bpGetValue(String(col.span ?? 1), col.bp, "span")} 1 0%` }
                               : {}),
                             borderColor: mode === "live" ? undefined : colOverlay.line,

@@ -458,6 +458,15 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
             (p.flexDirection ?? "").startsWith("column") ? "flex:1 1 100%" : "",
           ),
         );
+        // A slider has no intrinsic width of its own (SliderBlock.astro's
+        // contain:inline-size), so a stacked row's non-stretch align-items
+        // would shrink its column to 0px — force-stretch just that column
+        // while stacked. Mirrored in apps/admin's DesignerCanvas.tsx.
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${rowVisId}"] > .ds-col[data-fill]`, rowFlexBp(row), rowFlexBase(row), (p) =>
+            `align-self:${(p.flexDirection ?? "").startsWith("column") ? "stretch" : "auto"}`,
+          ),
+        );
       }
       return (
       <div
@@ -466,10 +475,13 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
         style={rowStyle(row, r === 0)}
         data-vis={rowVisId}
       >
-        {(row.columns ?? []).map((col, c) => (
+        {(row.columns ?? []).map((col, c) => {
+          const fill = row.layoutMode === "flex" && (col.elements ?? []).some((el) => el.type === "slider");
+          return (
           <div
             class={cls("ds-col", col.props?.cssClass)}
-            style={`${colStyle(col.props) ?? ""}${row.layoutMode === "flex" ? `;flex:${col.span ?? 1} 1 0%;min-width:0` : ""}`}
+            data-fill={fill ? "" : undefined}
+            style={`${colStyle(col.props) ?? ""}${row.layoutMode === "flex" ? `;flex:${col.span ?? 1} 1 0%;min-width:0` : ""}${fill && (row.flexDirection ?? "row").startsWith("column") ? ";align-self:stretch" : ""}`}
             data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}` : undefined}
             data-vis={respId(`c${blockIndex}-${r}-${c}`, col.props ?? {}, col.bp, col.props ?? {}, (p) => colStyle(p) ?? "")}
           >
@@ -646,7 +658,8 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
       );
     })}

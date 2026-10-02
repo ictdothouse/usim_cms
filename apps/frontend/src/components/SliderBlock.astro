@@ -558,6 +558,8 @@ const p = el.props ?? {};
         data-auto-height={p.autoHeight === "true" ? "true" : undefined}
         data-grab-cursor={p.grabCursor === "false" ? "false" : undefined}
         data-slide-to-clicked={p.slideToClickedSlide === "true" ? "true" : undefined}
+        data-designer-edit={designerEdit ? "true" : undefined}
+        data-slider-id={designerEdit ? el.id : undefined}
       >
       <div class="ds-slider-viewport" style={`border-radius:${elRadius(p)}`}>
         <div class="ds-slider-track">
@@ -661,8 +663,22 @@ const p = el.props ?? {};
   /* .ds-h/.ds-text/.ds-img/.ds-btn* now live in global.css (single source,
      plain classes don't need per-component scoping) — see that file's own
      comment. Only genuinely slider-only classes stay here. */
+  /* contain:inline-size — this slider's intrinsic width must never depend on
+     its own slides. Swiper writes each slide's width as a fixed px value
+     measured off .ds-slider-viewport's clientWidth; inside any shrink-to-fit
+     ancestor (a flex-mode row at mobile is column + wrap, so its line's cross
+     size = the column's max-content) that fixed px width fed straight back
+     into the column's width, Swiper's ResizeObserver re-measured the now-
+     wider viewport, and the slide width doubled every frame until the
+     browser's layout limit (2.68435e+07px) — every slide's content landed
+     millions of px offscreen (the "empty pink Preview" report). Size
+     containment cuts that loop: the slider always takes its container's
+     width, never the other way round (its column is force-stretched in a
+     stacked flex row — see SectionBlock.astro's data-fill — so a
+     non-stretch align-items there can't shrink it to 0px either). */
   .ds-slider {
     position: relative;
+    contain: inline-size;
   }
   .ds-slider-box {
     position: relative;
@@ -872,7 +888,8 @@ const p = el.props ?? {};
     const viewport = slider.querySelector<HTMLElement>(".ds-slider-viewport");
     const dots = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slider-dot"));
     if (!box || !viewport) return;
-    const autoplayMs = Number(box.dataset.autoplay || "0");
+    const designerEdit = box.dataset.designerEdit === "true";
+    const autoplayMs = designerEdit ? 0 : Number(box.dataset.autoplay || "0");
     const transition = box.dataset.transition || "slide";
 
     // transition="fade": a real crossfade needs slides stacked absolutely
@@ -919,28 +936,15 @@ const p = el.props ?? {};
       spaceBetween,
       initialSlide: Math.max(0, Number(box.dataset.initialSlide) || 0),
       autoHeight: box.dataset.autoHeight === "true",
-      grabCursor: box.dataset.grabCursor !== "false",
+      grabCursor: !designerEdit && box.dataset.grabCursor !== "false",
       slideToClickedSlide: box.dataset.slideToClicked === "true",
-      autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
-      // Swiper sizes each slide off this element's OWN clientWidth at init
-      // time (updateSlides() in swiper-core — slideSize is literally that
-      // measured width, written straight back as the slide's inline
-      // width). The admin's device-preview bezel (DesignerDevicePreviewModal)
-      // sizes its iframe via CSS aspect-ratio, which can still be settling
-      // when this module script runs — a container measured mid-layout can
-      // report a bogus width, and that garbage number then becomes the
-      // slide's own fixed pixel width (visibly "frozen", no longer
-      // responsive — and since a free-positioned child's x/y is a % of
-      // THIS element, per computeFreePositionStyle, a corrupted slide
-      // width throws every free-positioned child's on-screen position off
-      // with it). observer/observeParents are Swiper's own documented fix
-      // for exactly this class of bug (re-measures via MutationObserver
-      // whenever this element or an ancestor's attributes/children
-      // change) — resizeObserver (default true) only re-measures on an
-      // actual size change of THIS element, which a same-size-but-still-
-      // wrong-content layout settle doesn't trigger.
-      observer: true,
-      observeParents: true,
+      // Live Edit (designerEdit): a pointer drag on a slide is an edit
+      // gesture (BaseLayout.astro's free-position drag/resize, reorder), not
+      // a swipe, and autoplay would rotate the slide being edited away
+      // mid-edit — arrows/dots still navigate. Layout is untouched either
+      // way, so Live Edit still renders pixel-identical to Preview.
+      allowTouchMove: !designerEdit,
+      autoplay: !designerEdit && autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
     });
     const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
     slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
@@ -948,11 +952,5 @@ const p = el.props ?? {};
     dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
     swiper.on("slideChange", updateDots);
     updateDots();
-    // Belt-and-suspenders beyond observer/observeParents above: a late-
-    // loading webfont can reflow text (and therefore this box's size)
-    // after `load` already fired once, with no DOM mutation for the
-    // MutationObserver to see.
-    window.addEventListener("load", () => swiper.update());
   });
 </script>
-</style>

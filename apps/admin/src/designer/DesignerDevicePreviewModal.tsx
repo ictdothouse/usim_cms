@@ -35,6 +35,7 @@ import type { DesignerCtx } from "./context";
 import type { usePersist } from "./hooks/usePersist";
 import type { useTemplateLibrary } from "./hooks/useTemplateLibrary";
 import type { useBlockOps } from "./hooks/useBlockOps";
+import { DeviceViewport } from "./DeviceViewport";
 
 type PreviewModalState = { src: string; device: "desktop" | "tablet" | "mobile"; orientation: "portrait" | "landscape" } | null;
 type CtxMenuState = { path: number[]; x: number; y: number } | null;
@@ -58,15 +59,6 @@ export interface DesignerDevicePreviewModalProps {
   deleteSection: ReturnType<typeof useBlockOps>["deleteSection"];
   duplicateColumn: ReturnType<typeof useBlockOps>["duplicateColumn"];
 }
-
-// Real device logical-pixel viewports (iPhone 14/15, iPad Air) instead of an
-// arbitrary ratio — width still shrinks to fit the modal (via the max-
-// height/max-width cap below), only the SHAPE now matches an actual
-// phone/tablet.
-const DEVICE_DIMS: Record<"mobile" | "tablet", { w: number; h: number }> = {
-  mobile: { w: 393, h: 852 },
-  tablet: { w: 820, h: 1180 },
-};
 
 export function DesignerDevicePreviewModal({
   t, previewModal, setPreviewModal, withDeviceFrame,
@@ -146,56 +138,18 @@ export function DesignerDevicePreviewModal({
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="flex flex-1 items-center justify-center overflow-auto bg-canvas/60 p-4">
-                  {previewModal.device === "desktop" ? (
+                {/* Exact device viewport, scaled to fit — the same
+                    DeviceViewport Live Edit frames the page in, so the two
+                    can never disagree on width (see its own comment). */}
+                <div className="min-h-0 flex-1 bg-canvas/60 p-4">
+                  <DeviceViewport device={previewModal.device} landscape={landscape}>
                     <iframe
                       key={previewModal.src}
                       src={previewModal.src}
-                      className="h-full w-full rounded-lg border border-line/30 bg-white shadow-sm"
+                      className="absolute inset-0 h-full w-full border-0 bg-white"
                       title={t("designer-preview")}
                     />
-                  ) : (
-                    // Device bezel so tablet/mobile preview reads as an actual
-                    // phone/tablet instead of a plain narrowed box — the
-                    // iframe itself is unchanged, just wrapped. Portrait is
-                    // height-driven (h-full, capped by max-height, width auto
-                    // from the aspect ratio); landscape mirrors that on the
-                    // other axis (w-full capped by max-width, height auto) —
-                    // same mechanism, just transposed, rather than the
-                    // trickier "both axes auto" approach.
-                    // The cross-axis also gets a hard cap at the device's own
-                    // true pixel size (dims.w) — without it, on a tall browser
-                    // window h-full can grow past 393px before the 46rem
-                    // height cap kicks in (measured ~440px wide instead of a
-                    // real iPhone's 393px), so a free-position element sized
-                    // here for "mobile" doesn't match a real phone.
-                    (() => {
-                      const dims = DEVICE_DIMS[previewModal.device];
-                      const ratio = landscape ? `${dims.h} / ${dims.w}` : `${dims.w} / ${dims.h}`;
-                      const cap = previewModal.device === "mobile" ? "46rem" : "56rem";
-                      const sizeStyle: React.CSSProperties = landscape
-                        ? { aspectRatio: ratio, maxWidth: cap, maxHeight: `${dims.w}px` }
-                        : { aspectRatio: ratio, maxHeight: cap, maxWidth: `${dims.w}px` };
-                      return (
-                        <div
-                          className={`flex shrink-0 flex-col gap-1.5 bg-ink shadow-xl ${
-                            previewModal.device === "mobile" ? "rounded-[2.5rem] p-3" : "rounded-[1.5rem] p-2.5"
-                          } ${landscape ? "h-auto w-full" : "h-full w-auto"}`}
-                          style={sizeStyle}
-                        >
-                          {previewModal.device === "mobile" && !landscape && (
-                            <div className="mx-auto h-1.5 w-16 shrink-0 rounded-full bg-white/25" />
-                          )}
-                          <iframe
-                            key={previewModal.src}
-                            src={previewModal.src}
-                            className={`w-full flex-1 bg-white ${previewModal.device === "mobile" ? "rounded-[1.75rem]" : "rounded-xl"}`}
-                            title={t("designer-preview")}
-                          />
-                        </div>
-                      );
-                    })()
-                  )}
+                  </DeviceViewport>
                 </div>
               </div>
             </div>
