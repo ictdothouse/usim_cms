@@ -281,7 +281,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   together and reload open Designer tabs. A corner resize sends `fontScale`,
   not a px size — admin scales the STORED value with `style.ts`'s `scaledFreeFont` (shared with
   ElPreview). `SliderBlock.astro` stamps `data-slide-sel/free/type/locked` on slide children under
-  designerEdit only (heading had been missing `data-slide-free`, so headings weren't draggable live),
+  designerEdit only; the iframe also checks computed position so tablet/mobile-only free-position
+  children receive the same chrome at the active device viewport),
   and text's per-bp `size` now gets a real `bpStyleRules` font-size rule. Toolbar labels arrive in
   `designer:selected.labels` (the iframe has no i18n).
   **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab

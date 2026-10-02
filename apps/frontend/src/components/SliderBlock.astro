@@ -357,7 +357,9 @@ const p = el.props ?? {};
     const ep = el.props ?? {};
     // Live Edit-only markers for BaseLayout.astro's Canva-style slide chrome:
     // the tree address, whether it's draggable, which handles/toolbar
-    // buttons apply (type), and whether it's locked.
+    // buttons apply (type), and whether it's locked. The bridge also checks
+    // computed position so responsive free-position overrides work at the
+    // active device width even when the desktop prop is still in normal flow.
     const editAttrs = designerEdit
       ? {
           "data-slide-sel": slideSel,
