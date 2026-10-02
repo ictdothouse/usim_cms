@@ -58,6 +58,16 @@ export interface Page {
   footerId: string | null;
   hideHeader: boolean;
   hideFooter: boolean;
+  // Designer's autosaved, not-yet-published edit (apps/api migration 0029) —
+  // only ever present on a preview-token/admin read (pagesAfterRead strips it
+  // for anonymous visitors); [...slug].astro overlays it for Preview.
+  draft?: {
+    layout?: PageLayout;
+    settings?: Page["settings"];
+    seo?: Seo;
+    translations?: Page["translations"];
+    language?: string | null;
+  } | null;
 }
 
 // Overlays a language's own sparse override bag onto a clone of the base

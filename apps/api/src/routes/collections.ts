@@ -8,6 +8,7 @@ import * as schema from "../db/schema.js";
 import { getTenantLanguageSelection } from "../db/tenant-pool.js";
 import { hasPermission } from "./permissions.js";
 import { validateThemeSettings, HEX_COLOR_RE } from "./portal-settings.js";
+import { isElevatedRequest } from "../plugins/generic-crud.js";
 
 // pages.settings.gap (and Row.gap inside pages.layout) is interpolated
 // directly into a raw CSS string by SectionBlock.astro
@@ -75,8 +76,22 @@ function validateSeo(seo: unknown): string | null {
   return null;
 }
 
-const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
-  const record = data as Record<string, unknown>;
+// The keys a pages.draft blob (migration 0029) may carry — exactly the live
+// columns Designer edits, nothing else (status/slug/publishedAt/etc never
+// live in a draft; publishing is a PATCH of the live columns themselves).
+const PAGE_DRAFT_KEYS = new Set(["layout", "settings", "seo", "translations", "language", "multilangEnabled"]);
+
+// Shared by the top-level PATCH/POST body AND a pages.draft blob — a draft
+// renders through the exact same SSR path as the live columns (via a preview
+// token), so it's exactly as much of an XSS/CSS-injection/locked-section
+// surface and gets every one of the same checks. `existingLayout` is lazy +
+// memoized by the caller so the locked-section lookup hits the DB at most
+// once per request even when both the body and its draft carry a layout.
+async function validatePageContent(
+  record: Record<string, unknown>,
+  req: FastifyRequest,
+  existingLayout: () => Promise<unknown[] | undefined>,
+) {
   if (record.seo !== undefined) {
     const err = validateSeo(record.seo);
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
@@ -90,13 +105,10 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
     // instead of the 500 an unannotated throw would produce.
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
     if (req.method === "PATCH" && req.user.role !== "superadmin") {
-      const { id } = req.params as { id?: string };
-      if (id) {
-        const [existing] = await req.db.select({ layout: schema.pages.layout }).from(schema.pages).where(eq(schema.pages.id, id));
-        if (existing) {
-          const lockErr = lockedSectionViolation(existing.layout as unknown[], record.layout as unknown[]);
-          if (lockErr) throw Object.assign(new Error(lockErr), { statusCode: 403 });
-        }
+      const existing = await existingLayout();
+      if (existing) {
+        const lockErr = lockedSectionViolation(existing, record.layout as unknown[]);
+        if (lockErr) throw Object.assign(new Error(lockErr), { statusCode: 403 });
       }
     }
   }
@@ -152,6 +164,29 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
       throw Object.assign(new Error("language must be one of this site's enabled languages"), { statusCode: 400 });
     }
   }
+}
+
+const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
+  const record = data as Record<string, unknown>;
+  let existingLayoutPromise: Promise<unknown[] | undefined> | undefined;
+  const existingLayout = () =>
+    (existingLayoutPromise ??= (async () => {
+      const { id } = req.params as { id?: string };
+      if (!id) return undefined;
+      const [existing] = await req.db.select({ layout: schema.pages.layout }).from(schema.pages).where(eq(schema.pages.id, id));
+      return existing?.layout as unknown[] | undefined;
+    })());
+  await validatePageContent(record, req, existingLayout);
+  if (record.draft !== undefined && record.draft !== null) {
+    if (typeof record.draft !== "object" || Array.isArray(record.draft)) {
+      throw Object.assign(new Error("draft must be an object or null"), { statusCode: 400 });
+    }
+    const draft = record.draft as Record<string, unknown>;
+    for (const key of Object.keys(draft)) {
+      if (!PAGE_DRAFT_KEYS.has(key)) throw Object.assign(new Error(`draft.${key} is not a draftable field`), { statusCode: 400 });
+    }
+    await validatePageContent(draft, req, existingLayout);
+  }
   if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
   record.updatedAt = new Date();
   return record;
@@ -164,8 +199,14 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
 // In-memory only, never written back — a page carrying one silently
 // upgrades for real the next time it's saved through Designer, same
 // non-destructive convention as this codebase's other schema evolutions.
-const pagesAfterRead = (items: unknown[]) =>
-  (items as Record<string, unknown>[]).map((item) => {
+const pagesAfterRead = (items: unknown[], req: FastifyRequest) => {
+  // pages.draft (migration 0029) is an unpublished edit to an already-
+  // published row — RLS can't hide it (the row itself is visible), so it's
+  // dropped here for every anonymous read; only the admin's own session or a
+  // Designer-minted preview token may see it.
+  const showDraft = isElevatedRequest(req);
+  return (items as Record<string, unknown>[]).map((raw) => {
+    const item = showDraft ? raw : (({ draft: _draft, ...rest }) => rest)(raw);
     const layout = item.layout;
     if (!Array.isArray(layout) || !layout.some((b) => (b as { type?: string })?.type === "hero")) return item;
     return {
@@ -185,6 +226,7 @@ const pagesAfterRead = (items: unknown[]) =>
       }),
     };
   });
+};
 
 export const pagesCollection: CollectionConfig = {
   slug: "pages",
@@ -267,6 +309,10 @@ export const pagesCollection: CollectionConfig = {
       settings: revision.settings,
       seo: revision.seo,
       bannerImageUrl: revision.bannerImageUrl,
+      // A pending unpublished draft was made against the version being
+      // replaced — keeping it would make Designer reopen onto that stale
+      // edit instead of the restored content.
+      draft: null,
     }),
   },
 };

@@ -35,12 +35,24 @@ const previewToken = Astro.url.searchParams.get("token") ?? undefined;
 const themeToken = Astro.url.searchParams.get("themeToken") ?? undefined;
 
 let page = await getPageBySlug(tenantHost, slug, previewToken);
-// Designer's Preview/Live Edit — no prior Save required (Elementor/Avada-
-// style): the SAME previewToken above may also carry a livePreviewId
-// pointing at not-yet-saved layout/settings/translations, overlaid onto the
-// real saved row for this render only. A missing/expired draft (or a plain
-// draft-visibility-only token with nothing stashed) silently keeps the
-// saved row as-is.
+// Designer's autosaved-but-unpublished edit (pages.draft, apps/api migration
+// 0029) — the durable source of truth Preview renders, same Postgres row
+// every api replica reads, so it can't miss the way the older ephemeral
+// per-process store (below) could. Only present on a preview-token read
+// (pagesAfterRead strips it for an anonymous visitor), so a real visitor
+// always renders the live columns.
+if (page && previewToken && page.draft) {
+  page = {
+    ...page,
+    layout: page.draft.layout ?? page.layout,
+    settings: page.draft.settings ?? page.settings,
+    seo: page.draft.seo ?? page.seo,
+    translations: page.draft.translations ?? page.translations,
+    language: page.draft.language !== undefined ? page.draft.language : page.language,
+  };
+}
+// Older ephemeral override (a livePreviewId carried on the token itself) —
+// still honored on top for any caller that sends one.
 if (page && previewToken) {
   const draft = await getLivePreviewOverride(tenantHost, previewToken);
   if (draft) {
