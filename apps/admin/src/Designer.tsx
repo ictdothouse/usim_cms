@@ -55,6 +55,20 @@ export default function Designer({
   // component has no route of its own to preview).
   kind?: "page" | "blueprint" | "siteChrome" | "symbol";
 }) {
+  // Reopen onto an autosaved-but-unpublished edit (pages.draft, apps/api
+  // migration 0029 — a published page's autosave target, see usePersist's
+  // saveDraft) instead of the live content: overlaid onto `page` itself,
+  // once, before ANY state below seeds from page.layout/settings/seo/
+  // translations/language/multilangEnabled, so every one of those seed sites
+  // picks the draft up with no per-site change (Canva-style: you come back
+  // to exactly where you left off, published or not). Mutates the same
+  // object the rest of this file already treats as a plain mutable record.
+  const draftMerged = useRef(false);
+  if (!draftMerged.current) {
+    draftMerged.current = true;
+    if (kind === "page" && page.draft && typeof page.draft === "object") Object.assign(page, page.draft);
+  }
+  const [hasDraft, setHasDraft] = useState(() => kind === "page" && !!page.draft);
   // Declared ahead of the useUndoRedo() call below, which needs it.
   const [dirty, setDirty] = useState(false);
   // Bumped by every structural (shape/order-changing) mutate() call reachable
@@ -241,37 +255,30 @@ export default function Designer({
 
   const {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
-    renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
+    renameSlug, save, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
     openDevicePreview, withDeviceFrame,
   } = usePersist({
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
-    setDirty, setBusy, setError, setSavedAny, setMsg,
+    dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny, setMsg,
     previewModal, setPreviewModal, t,
   });
 
-  // Autosave (2026-09-16): debounced silent save while dirty, restricted to
-  // draft-status content only — a page/siteChrome already published only
-  // saves on an explicit Update/Publish click, so autosave can never
-  // silently push an unreviewed edit onto the live site. Blueprints/symbols
-  // have no publish concept at all (every save just overwrites the same
-  // row, same as a draft page), so they're always autosave-eligible.
+  // Autosave: debounced silent save while dirty (usePersist's autosave()
+  // picks the target). A PUBLISHED page autosaves to its pages.draft only —
+  // the live columns visitors read stay untouched until an explicit Update,
+  // so autosave still can never push an unreviewed edit onto the live site,
+  // while Preview (which renders that draft) always matches the canvas.
+  // Draft pages/blueprints/symbols write their own row (nothing public to
+  // protect). A published header/footer still only saves on its explicit
+  // Publish click — it has no draft column of its own yet.
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const eligible =
-      kind === "blueprint" ||
-      kind === "symbol" ||
-      (kind === "page" && page.status !== "published") ||
-      (kind === "siteChrome" && chromeStatus !== "published");
+    const eligible = kind !== "siteChrome" || chromeStatus !== "published";
     if (!dirty || !eligible || busy) return;
-    autosaveTimerRef.current = setTimeout(() => {
-      if (kind === "blueprint") void saveBlueprint();
-      else if (kind === "symbol") void saveSymbol();
-      else if (kind === "siteChrome") void saveSiteChrome();
-      else void save();
-    }, 2000);
+    autosaveTimerRef.current = setTimeout(() => void autosave(), 1000);
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
@@ -417,7 +424,11 @@ export default function Designer({
     pageSlug: page.slug as string,
     kind,
     dirty,
-    save,
+    // autosave, not save(): Live Edit's reload flush used to call the real
+    // save(), which on a PUBLISHED page wrote the in-progress edit straight
+    // onto the live site without an Update click. autosave() routes a
+    // published page to its pages.draft instead (see usePersist).
+    save: autosave,
     saveBlueprint,
     setError,
     setReloading,
@@ -701,6 +712,7 @@ export default function Designer({
         renameSlug={renameSlug}
         busy={busy}
         dirty={dirty}
+        hasDraft={hasDraft}
         msg={msg}
         error={error}
         undo={undo}

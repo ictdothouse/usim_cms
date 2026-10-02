@@ -18,7 +18,7 @@ type PreviewModalState = { src: string; device: "desktop" | "tablet" | "mobile";
 export interface PersistDeps {
   tenantHost: string;
   token: string;
-  page: { id?: unknown; slug?: unknown; status?: unknown };
+  page: { id?: unknown; slug?: unknown; status?: unknown; draft?: unknown };
   kind: "page" | "blueprint" | "siteChrome" | "symbol";
   bp: "desktop" | "tablet" | "mobile";
   chromeKind: "header" | "footer" | undefined;
@@ -35,7 +35,9 @@ export interface PersistDeps {
   setSlugDraft: (v: string) => void;
   setEditingSlug: (v: boolean) => void;
   setSlugError: (v: string | null) => void;
+  dirty: boolean;
   setDirty: (v: boolean) => void;
+  setHasDraft: (v: boolean) => void;
   setBusy: (v: boolean) => void;
   setError: (msg: string | null) => void;
   setSavedAny: (v: boolean) => void;
@@ -51,9 +53,55 @@ export function usePersist(deps: PersistDeps) {
     rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
-    setDirty, setBusy, setError, setSavedAny, setMsg,
+    dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny, setMsg,
     previewModal, setPreviewModal, t,
   } = deps;
+
+  // Latest-render mirror of the editable state — a save captures what it
+  // SENT at its own start, and on completion only clears `dirty` if nothing
+  // has changed since (immer gives every edit a new rawBlocks identity). An
+  // edit made while a save was in flight would otherwise be marked clean and
+  // silently never autosaved.
+  const latest = useRef({ rawBlocks, pageSettings, pageSeo, langOverrides, pageLanguage, pageMultilangEnabled });
+  latest.current = { rawBlocks, pageSettings, pageSeo, langOverrides, pageLanguage, pageMultilangEnabled };
+  function unchangedSince(sent: typeof latest.current) {
+    const now = latest.current;
+    return (
+      now.rawBlocks === sent.rawBlocks &&
+      now.pageSettings === sent.pageSettings &&
+      now.pageSeo === sent.pageSeo &&
+      now.langOverrides === sent.langOverrides &&
+      now.pageLanguage === sent.pageLanguage &&
+      now.pageMultilangEnabled === sent.pageMultilangEnabled
+    );
+  }
+
+  // Every write goes through one chain, in call order — autosave, an
+  // explicit Update, and Preview's own pre-mint flush can all fire close
+  // together, and two overlapping PATCHes could otherwise land out of order
+  // (an older snapshot overwriting a newer one).
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  function queued<T>(fn: () => Promise<T>): Promise<T> {
+    const run = chain.current.then(fn, fn);
+    chain.current = run.catch(() => undefined);
+    return run;
+  }
+
+  // Bumped after every successful write — the open Preview modal re-mints
+  // off this (below), so it refreshes exactly when the DB it renders from
+  // actually changed, instead of on its own independent timer.
+  const [savedTick, setSavedTick] = useState(0);
+  // Same counter, readable synchronously — lets the refresh effect skip a
+  // re-mint the open Preview already reflects (e.g. the flush openDevice-
+  // Preview just did before its own first mint).
+  const savedTickRef = useRef(0);
+  const lastMintedTick = useRef(-1);
+  function markSaved() {
+    savedTickRef.current += 1;
+    setSavedTick(savedTickRef.current);
+  }
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   // Page revision history (kind === "page" only — see api.PageRevision).
   // Fetched lazily, only when the panel is actually opened, mirroring
@@ -87,38 +135,83 @@ export function usePersist(deps: PersistDeps) {
     }
   }
 
-  async function save(status?: "published") {
-    setBusy(true);
-    setError(null);
-    try {
-      // `rawBlocks` is always the shared base tree regardless of which
-      // language pill happens to be active — no "commit the active language
-      // back first" step needed the way the old full-tree-fork model
-      // required, since editing under a non-base pill never touched
-      // `rawBlocks` in the first place.
-      const translations: Record<string, { overrides: Record<string, Record<string, string>> }> = {};
-      for (const [code, overrides] of Object.entries(langOverrides)) {
-        if (code !== BASE_LANG) translations[code] = { overrides };
+  // The editable page fields, as one payload — the live columns on a real
+  // save, or the pages.draft blob (apps/api migration 0029) on a draft save.
+  // `rawBlocks` is always the shared base tree regardless of which language
+  // pill happens to be active, since editing under a non-base pill never
+  // touches `rawBlocks` in the first place.
+  // Reads `latest.current`, not this render's closure: a queued save runs
+  // after whatever was queued before it, by which point a newer render may
+  // exist — it must send the newest state, never the snapshot from whenever
+  // it happened to be queued (that's how an older draft could overwrite a
+  // newer one).
+  function pageContentPayload() {
+    const s = latest.current;
+    return {
+      layout: clone(s.rawBlocks),
+      translations: currentTranslationsPayload(),
+      settings: s.pageSettings,
+      seo: s.pageSeo,
+      language: s.pageLanguage || null,
+      multilangEnabled: s.pageMultilangEnabled,
+    };
+  }
+
+  // Writes the LIVE columns (what real visitors see) and clears any pending
+  // draft — this is Publish/Update, and also the plain autosave for a page
+  // that isn't published yet (nobody outside the admin can see it anyway).
+  function save(status?: "published") {
+    return queued(async () => {
+      const sent = latest.current;
+      setBusy(true);
+      setError(null);
+      try {
+        await api.updatePage(tenantHost, token, page.id as string, {
+          ...pageContentPayload(),
+          draft: null,
+          ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
+        });
+        if (status) page.status = status;
+        page.draft = null;
+        setHasDraft(false);
+        if (unchangedSince(sent)) setDirty(false);
+        setSavedAny(true);
+        markSaved();
+        setMsg(status ? t("designer-published") : t("designer-saved"));
+        setTimeout(() => setMsg(null), 2500);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusy(false);
       }
-      await api.updatePage(tenantHost, token, page.id as string, {
-        layout: clone(rawBlocks),
-        translations,
-        settings: pageSettings,
-        seo: pageSeo,
-        language: pageLanguage || null,
-        multilangEnabled: pageMultilangEnabled,
-        ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
-      });
-      if (status) page.status = status;
-      setDirty(false);
-      setSavedAny(true);
-      setMsg(status ? t("designer-published") : t("designer-saved"));
-      setTimeout(() => setMsg(null), 2500);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
+  }
+
+  // Canva-style autosave for an already-published page: persists the
+  // in-progress edit to pages.draft only — the live columns (what visitors
+  // see) stay untouched until an explicit Update. Preview renders this same
+  // row via a preview token, so it shows exactly what's on the canvas
+  // without anything going live first. No toast: the header badge already
+  // says "Draft saved — not published".
+  function saveDraft() {
+    return queued(async () => {
+      const sent = latest.current;
+      setBusy(true);
+      setError(null);
+      try {
+        const draft = pageContentPayload();
+        await api.updatePage(tenantHost, token, page.id as string, { draft });
+        page.draft = draft;
+        setHasDraft(true);
+        if (unchangedSince(sent)) setDirty(false);
+        setSavedAny(true);
+        markSaved();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    });
   }
 
   async function loadHistory() {
@@ -149,6 +242,10 @@ export function usePersist(deps: PersistDeps) {
       (page as { layout?: unknown }).layout = restored.layout;
       (page as { settings?: unknown }).settings = restored.settings;
       (page as { bannerImageUrl?: unknown }).bannerImageUrl = restored.bannerImageUrl;
+      // apps/api's restore also clears pages.draft (see pagesCollection's
+      // revisions.restore) — mirror it so the badge/Update state agrees.
+      page.draft = null;
+      setHasDraft(false);
       setDirty(false);
       setShowHistory(false);
       setMsg(t("designer-saved"));
@@ -163,20 +260,27 @@ export function usePersist(deps: PersistDeps) {
   // Blueprint's own save path — no slug/status/publish/translations concept,
   // just the layout + page-wide settings, PATCHed straight to the blueprint
   // row (apps/api's PATCH /api/blueprints/:id already accepts both).
-  async function saveBlueprint() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.updateBlueprint(tenantHost, token, page.id as string, { layout: clone(rawBlocks), settings: pageSettings });
-      setDirty(false);
-      setSavedAny(true);
-      setMsg(t("designer-saved"));
-      setTimeout(() => setMsg(null), 2500);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  function saveBlueprint() {
+    return queued(async () => {
+      const sent = latest.current;
+      setBusy(true);
+      setError(null);
+      try {
+        await api.updateBlueprint(tenantHost, token, page.id as string, {
+          layout: clone(latest.current.rawBlocks),
+          settings: latest.current.pageSettings,
+        });
+        if (unchangedSince(sent)) setDirty(false);
+        setSavedAny(true);
+        markSaved();
+        setMsg(t("designer-saved"));
+        setTimeout(() => setMsg(null), 2500);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    });
   }
 
   // Symbol master's own save path (kind === "symbol", see SymbolDesignerRoute
@@ -228,12 +332,10 @@ export function usePersist(deps: PersistDeps) {
     }
   }
 
-  // `translations` payload shape save() itself PATCHes — reused here so
-  // Preview's draft override matches exactly what a real Save would send,
-  // minus the DB write.
+  // `translations` payload shape save()/saveDraft() PATCH.
   function currentTranslationsPayload(): Record<string, { overrides: Record<string, Record<string, string>> }> {
     const translations: Record<string, { overrides: Record<string, Record<string, string>> }> = {};
-    for (const [code, overrides] of Object.entries(langOverrides)) {
+    for (const [code, overrides] of Object.entries(latest.current.langOverrides)) {
       if (code !== BASE_LANG) translations[code] = { overrides };
     }
     return translations;
@@ -254,55 +356,64 @@ export function usePersist(deps: PersistDeps) {
     return url.toString();
   }
 
-  // Modal iframe, not a new tab — no popup blocker to fight. No Save first
-  // (Elementor/Avada-style: Preview shows whatever's on screen, not whatever
-  // is persisted) — the canvas's current in-memory state goes straight into
-  // the token mint, which stashes it in an ephemeral server-side store (see
-  // apps/api's live-preview-store.ts); nothing is written to
-  // pages/blueprints/site_chrome. Used for every kind now (page included —
-  // this used to be a separate mintPreviewLink()+new-tab flow for pages, but
-  // that meant pages previewed differently from blueprint/siteChrome for no
-  // real reason, so it's one flow).
-  // Mints a fresh, un-framed preview URL from whatever's currently on the
-  // canvas — the shared core both openDevicePreview (first open, resets
-  // device/orientation to match the canvas's own bp) and the auto-refresh
-  // effect below (already-open modal, device/orientation left alone) build
-  // on, so there's exactly one place that knows how each `kind` mints its
-  // token instead of two copies drifting apart.
-  async function mintPreviewSrc(): Promise<string> {
-    if (kind === "siteChrome") {
-      const previewToken = await api.getSiteChromePreviewToken(tenantHost, token, page.id as string, {
-        layout: clone(rawBlocks),
-      });
-      return api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken });
-    }
-    const previewToken =
-      kind === "blueprint"
-        ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string, { layout: clone(rawBlocks), settings: pageSettings })
-        : await api.getPagePreviewToken(tenantHost, token, page.id as string, {
-            layout: clone(rawBlocks),
-            settings: pageSettings,
-            seo: pageSeo,
-            translations: currentTranslationsPayload(),
-          });
-    return kind === "blueprint"
-      ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
-      : api.previewUrl(tenantHost, page.slug as string, previewToken);
+  // The one autosave target per kind (Designer.tsx's debounced autosave
+  // effect, Live Edit's reload, and Preview's pre-mint flush all call this) —
+  // a published page autosaves to its pages.draft only (Canva-style: never
+  // live until Update), an unpublished page/blueprint/symbol/header-footer
+  // writes its own row as before.
+  function autosave() {
+    if (kind === "page") return page.status === "published" ? saveDraft() : save();
+    if (kind === "blueprint") return saveBlueprint();
+    if (kind === "symbol") return saveSymbol();
+    return saveSiteChrome();
   }
 
-  // Modal iframe, not a new tab — no popup blocker to fight. No Save first
-  // (Elementor/Avada-style: Preview shows whatever's on screen, not whatever
-  // is persisted) — the canvas's current in-memory state goes straight into
-  // the token mint, which stashes it in an ephemeral server-side store (see
-  // apps/api's live-preview-store.ts); nothing is written to
-  // pages/blueprints/site_chrome. Used for every kind now (page included —
-  // this used to be a separate mintPreviewLink()+new-tab flow for pages, but
-  // that meant pages previewed differently from blueprint/siteChrome for no
-  // real reason, so it's one flow).
+  // Mints a fresh, un-framed preview URL — the shared core both
+  // openDevicePreview (first open, resets device/orientation to match the
+  // canvas's own bp) and the refresh effect below (already-open modal,
+  // device/orientation left alone) build on.
+  //
+  // Page/blueprint: flush any pending edit to the DB FIRST, then mint a
+  // plain token — the preview renders the exact same row (pages.draft for a
+  // published page, the row itself otherwise) Live Edit's own autosave
+  // writes, so Preview can never show something the canvas doesn't. This
+  // replaced handing the in-memory state to an ephemeral per-process store
+  // (apps/api's live-preview-store.ts), which silently fell back to the
+  // last REAL save whenever the mint and the render's read-back landed on
+  // different api replicas — reported as "Preview only matches after
+  // Update". Header/footer keeps that ephemeral path: a published one has no
+  // draft column of its own yet (follow-up if asked).
+  async function mintPreviewSrc(): Promise<{ src: string; tick: number }> {
+    if (kind === "siteChrome") {
+      const previewToken = await api.getSiteChromePreviewToken(tenantHost, token, page.id as string, {
+        layout: clone(latest.current.rawBlocks),
+      });
+      return {
+        src: api.chromePreviewUrl(tenantHost, page.id as string, chromeKind as "header" | "footer", { previewToken }),
+        tick: savedTickRef.current,
+      };
+    }
+    if (dirtyRef.current) await autosave();
+    const tick = savedTickRef.current;
+    const previewToken =
+      kind === "blueprint"
+        ? await api.getBlueprintPreviewToken(tenantHost, token, page.id as string)
+        : await api.getPagePreviewToken(tenantHost, token, page.id as string);
+    return {
+      src:
+        kind === "blueprint"
+          ? api.blueprintPreviewUrl(tenantHost, page.id as string, previewToken)
+          : api.previewUrl(tenantHost, page.slug as string, previewToken),
+      tick,
+    };
+  }
+
+  // Modal iframe, not a new tab — no popup blocker to fight.
   async function openDevicePreview() {
     setError(null);
     try {
-      const src = await mintPreviewSrc();
+      const { src, tick } = await mintPreviewSrc();
+      lastMintedTick.current = tick;
       // Opens at whatever breakpoint the canvas itself is currently
       // previewing (bp) instead of always "desktop" — editing under
       // Mobile/Tablet and hitting Preview used to silently jump back to
@@ -313,43 +424,38 @@ export function usePersist(deps: PersistDeps) {
     }
   }
 
-  // Auto-refresh while the modal stays open (2026-09-26 — reported as
-  // "preview tak match live edit"): the modal used to mint its token ONCE
-  // on open, an ephemeral snapshot of rawBlocks/pageSettings/translations at
-  // that instant — editing the canvas afterward (with the modal left open,
-  // or just reopening a stale one without an intervening edit-then-click)
-  // kept showing that frozen snapshot forever, since nothing ever re-minted
-  // it. Debounced (900ms, shorter than autosave's 2000ms — this is a cheap
-  // ephemeral-store write, not a real save, and the whole point is feeling
-  // as live as the canvas itself) and only runs while a modal is actually
-  // open; device/orientation are left exactly as the viewer has them
-  // (unlike the initial open above, a background refresh must never yank
-  // the frame back to "desktop"/"portrait" out from under someone comparing
-  // breakpoints).
-  const previewRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Refresh while the modal stays open — page/blueprint re-mint right after
+  // each successful save (savedTick), i.e. exactly when the row Preview
+  // renders actually changed, never on an independent timer that could race
+  // the save. Skipped when the open frame already reflects that save (the
+  // flush openDevicePreview itself just did). Header/footer, still on the
+  // ephemeral path, re-mints off its in-memory canvas state instead.
+  // Device/orientation are left exactly as the viewer has them.
   useEffect(() => {
     if (!previewModal) return;
-    previewRefreshRef.current = setTimeout(() => {
-      void mintPreviewSrc()
-        .then((src) => {
-          setPreviewModal((m) => (m ? { ...m, src: withDeviceFrame(src, m.device) } : m));
-        })
-        .catch(() => {
-          // Best-effort — a failed background refresh just leaves the
-          // modal showing its last-good snapshot, same as before this
-          // feature existed, rather than surfacing an error over a
-          // still-open, still-usable preview.
-        });
-    }, 900);
-    return () => {
-      if (previewRefreshRef.current) clearTimeout(previewRefreshRef.current);
-    };
+    if (kind !== "siteChrome" && lastMintedTick.current === savedTickRef.current) return;
+    const timer = setTimeout(
+      () => {
+        void mintPreviewSrc()
+          .then(({ src, tick }) => {
+            lastMintedTick.current = tick;
+            setPreviewModal((m) => (m ? { ...m, src: withDeviceFrame(src, m.device) } : m));
+          })
+          .catch(() => {
+            // Best-effort — a failed background refresh just leaves the
+            // modal showing its last-good render rather than surfacing an
+            // error over a still-open, still-usable preview.
+          });
+      },
+      kind === "siteChrome" ? 900 : 0,
+    );
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawBlocks, pageSettings, langOverrides, pageLanguage, pageMultilangEnabled]);
+  }, [savedTick, kind === "siteChrome" ? rawBlocks : null]);
 
   return {
     showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
-    renameSlug, save, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
+    renameSlug, save, saveDraft, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
     currentTranslationsPayload, openDevicePreview, withDeviceFrame,
   };
 }

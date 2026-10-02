@@ -43,6 +43,10 @@ export const pages = pgTable("pages", {
   footerId: uuid("footer_id").references(() => siteChrome.id, { onDelete: "set null" }),
   hideHeader: boolean("hide_header").notNull().default(false),
   hideFooter: boolean("hide_footer").notNull().default(false),
+  // Pending unpublished edit for an already-published page (migration 0029) —
+  // Designer's autosave target, never what an anonymous visitor reads. See
+  // pagesBeforeChange/pagesAfterRead (routes/collections.ts).
+  draft: jsonb("draft"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

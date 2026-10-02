@@ -41,6 +41,9 @@ export interface DesignerTopBarProps {
   renameSlug: ReturnType<typeof usePersist>["renameSlug"];
   busy: boolean;
   dirty: boolean;
+  // A published page with an autosaved-but-unpublished edit (pages.draft) —
+  // nothing is "unsaved", but it isn't live yet either.
+  hasDraft: boolean;
   msg: string | null;
   error: string | null;
   undo: () => void;
@@ -65,7 +68,7 @@ export interface DesignerTopBarProps {
 export function DesignerTopBar({
   mobilePanel, setMobilePanel, t, page, kind,
   editingSlug, setEditingSlug, slugDraft, setSlugDraft, slugError, setSlugError, renameSlug,
-  busy, dirty, msg, error, undo, redo, openTemplates, setSel, loadHistory, setShowSaveBlueprint,
+  busy, dirty, hasDraft, msg, error, undo, redo, openTemplates, setSel, loadHistory, setShowSaveBlueprint,
   mode, toggleLive, bp, setBp, openDevicePreview,
   saveBlueprint, saveSymbol, saveSiteChrome, save, chromeStatus, close,
 }: DesignerTopBarProps) {
@@ -116,10 +119,18 @@ export function DesignerTopBar({
           {slugError && <span className="text-[11px] font-semibold text-red-600">{slugError}</span>}
           <span
             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-              busy ? "bg-accent/10 text-accent" : page.status === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
+              busy ? "bg-accent/10 text-accent" : page.status === "published" && !dirty && !hasDraft ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
             }`}
           >
-            {busy ? t("designer-saving") : dirty ? t("designer-dirty") : page.status === "published" ? t("pages-published") : t("pages-draft")}
+            {busy
+              ? t("designer-saving")
+              : dirty
+                ? t("designer-dirty")
+                : hasDraft
+                  ? t("designer-draft-pending")
+                  : page.status === "published"
+                    ? t("pages-published")
+                    : t("pages-draft")}
           </span>
         </>
       )}
@@ -259,7 +270,7 @@ export function DesignerTopBar({
       {kind === "page" && (
         <button
           onClick={() => void save("published")}
-          disabled={busy || (page.status === "published" && !dirty)}
+          disabled={busy || (page.status === "published" && !dirty && !hasDraft)}
           className="rounded-full bg-accent px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
         >
           {busy ? t("designer-saving") : page.status === "published" ? t("designer-update") : t("designer-publish")}

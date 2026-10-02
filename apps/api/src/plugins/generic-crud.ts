@@ -64,12 +64,21 @@ function elevatingCredential(req: FastifyRequest): string | undefined {
   return getSessionCookie(req);
 }
 
-async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
+// Same credential check elevateIfAuthenticated runs — exported so an
+// afterRead hook can decide what an anonymous visitor may see beyond RLS's
+// row-level gate (e.g. pagesAfterRead stripping a page's unpublished `draft`
+// column, which RLS can't hide since the row itself is published).
+export function isElevatedRequest(req: FastifyRequest): boolean {
   const credential = elevatingCredential(req);
-  if (!credential) return;
+  if (!credential) return false;
   const session = verifySession(credential);
-  if (!session || session.pendingMfa) return;
-  if (session.role === "webmaster" && session.tenantHost !== req.tenantHost) return;
+  if (!session || session.pendingMfa) return false;
+  if (session.role === "webmaster" && session.tenantHost !== req.tenantHost) return false;
+  return true;
+}
+
+async function elevateIfAuthenticated(req: FastifyRequest): Promise<void> {
+  if (!isElevatedRequest(req)) return;
   await req.db.execute(sql`SET SESSION app.authenticated = 'true'`);
 }
 
