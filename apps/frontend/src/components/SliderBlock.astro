@@ -922,6 +922,25 @@ const p = el.props ?? {};
       grabCursor: box.dataset.grabCursor !== "false",
       slideToClickedSlide: box.dataset.slideToClicked === "true",
       autoplay: autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
+      // Swiper sizes each slide off this element's OWN clientWidth at init
+      // time (updateSlides() in swiper-core — slideSize is literally that
+      // measured width, written straight back as the slide's inline
+      // width). The admin's device-preview bezel (DesignerDevicePreviewModal)
+      // sizes its iframe via CSS aspect-ratio, which can still be settling
+      // when this module script runs — a container measured mid-layout can
+      // report a bogus width, and that garbage number then becomes the
+      // slide's own fixed pixel width (visibly "frozen", no longer
+      // responsive — and since a free-positioned child's x/y is a % of
+      // THIS element, per computeFreePositionStyle, a corrupted slide
+      // width throws every free-positioned child's on-screen position off
+      // with it). observer/observeParents are Swiper's own documented fix
+      // for exactly this class of bug (re-measures via MutationObserver
+      // whenever this element or an ancestor's attributes/children
+      // change) — resizeObserver (default true) only re-measures on an
+      // actual size change of THIS element, which a same-size-but-still-
+      // wrong-content layout settle doesn't trigger.
+      observer: true,
+      observeParents: true,
     });
     const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
     slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
@@ -929,6 +948,11 @@ const p = el.props ?? {};
     dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
     swiper.on("slideChange", updateDots);
     updateDots();
+    // Belt-and-suspenders beyond observer/observeParents above: a late-
+    // loading webfont can reflow text (and therefore this box's size)
+    // after `load` already fired once, with no DOM mutation for the
+    // MutationObserver to see.
+    window.addEventListener("load", () => swiper.update());
   });
 </script>
 </style>
