@@ -212,6 +212,9 @@ export const LENGTH_KEYS = new Set([
   // "send to back" in Inspector.tsx) — a bare, possibly-negative integer,
   // same LENGTH_RE unit-less branch as x/y above.
   "zIndex",
+  // Free-positioned slide child's rotation in degrees (ElPreview.tsx's
+  // rotate handle) — bare number, same unit-less branch as x/y.
+  "rotate",
 ]);
 export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor"]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so

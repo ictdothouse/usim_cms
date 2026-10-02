@@ -254,6 +254,19 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `page` once at mount so every seed site reopens onto the draft; the header badge shows
   `designer-draft-pending` and Update stays enabled while `hasDraft`. Revision restore clears the
   draft. Header/footer (siteChrome) still uses the ephemeral path — no draft column of its own yet.
+  **Slider canvas Canva-style controls (2026-10-02)**: a selected free-positioned slide child
+  (ElPreview.tsx slider case) now gets 8 resize handles (`RESIZE_HANDLES` — corners scale
+  proportionally + scale font, sides change one dimension and edge-snap; heading/text get no
+  top/bottom pills; left/top handles also shift x/y), a Rotate + Move pair under the box
+  (`startFreeElRotate`, 45° snap; Move still drags while text is in edit mode), magenta guide lines
+  while a drag is center-snapped (`guideLine`, plain DOM in `.ds-slide-box` for the gesture only),
+  and a floating toolbar rendered as a SIBLING of the box (so rotation doesn't rotate it): Edit link
+  (button), Lock (`props.locked`, editor-only — disables drag/handles, renderer ignores it),
+  Duplicate (`duplicateSlideElement`, parsers.ts), Delete, and "…" → Align to slide (L/C/R/T/M/B,
+  measured off the DOM). Every gesture writes through one bp-aware `commitFree`. New prop `rotate`
+  (degrees) renders via `computeFreePositionStyle` as CSS `rotate:` (not `transform`, so it composes
+  with ds-entrance/ds-hover animations), registered in element-schema's LENGTH_KEYS, editable in the
+  Inspector's free-position grid. No "Comment" button — there's no comment system to back it.
   **Device-preview modal: real dimensions, rotate, no in-frame scrollbar (2026-09-25)**: the
   mobile/tablet bezel used an arbitrary `aspect-[9/19.5]` ratio capped at a fairly small `max-h`, and
   had no rotate control at all — replaced with named real device viewports (`DEVICE_DIMS`: iPhone

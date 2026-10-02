@@ -141,6 +141,7 @@ export interface FreePositionInput {
   posWidth?: string;
   posHeight?: string;
   zIndex?: string;
+  rotate?: string;
 }
 
 // Slide-nested free-positioned element (props.position === "custom") — factors out the identical
@@ -168,6 +169,11 @@ export function computeFreePositionStyle(input: FreePositionInput): Record<strin
   if (input.posHeight) s.height = input.posHeight;
   const z = Number(input.zIndex || "0");
   if (z) s.zIndex = String(z);
+  // CSS `rotate` (its own property, not `transform`) so it composes with a
+  // ds-entrance-*/ds-hover-* transform animation on the same node instead of
+  // being overwritten by it. Number() round-trip = only a bare number reaches CSS.
+  const r = Number(input.rotate || "0");
+  if (Number.isFinite(r) && r) s.rotate = `${r}deg`;
   return s;
 }
 

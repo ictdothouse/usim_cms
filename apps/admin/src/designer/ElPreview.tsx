@@ -15,8 +15,22 @@
 // that doc's parts (b)/(c) land), this only removes the structural blocker.
 import { Fragment, memo } from "react";
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignStartVertical,
   BarChart3,
   Bell,
+  CopyPlus,
+  Ellipsis,
+  Link2,
+  Lock,
+  LockOpen,
+  Move,
+  RotateCw,
+  Trash2,
   Building2,
   CalendarDays,
   Check,
@@ -36,13 +50,23 @@ import {
   Users,
   Video,
 } from "lucide-react";
-import type { El, Sel, SectionProps } from "./types";
+import type { El, Sel, SectionProps, SlideItem } from "./types";
 import type { DesignerCtx } from "./context";
 import { getNode } from "../designerTree";
 import { ELS } from "./elements";
 import { ICONS } from "./icons";
 import { bestTextColor } from "../lib/utils";
-import { parseCards, parsePairs, parseRepeaterItems, parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
+import {
+  deleteSlideElement,
+  duplicateSlideElement,
+  parseCards,
+  parsePairs,
+  parseRepeaterItems,
+  parseSlides,
+  stringifySlides,
+  updateSlideElementBp,
+  updateSlideElementProps,
+} from "./parsers";
 import { centerXCandidates, centerYCandidates, edgeXCandidates, edgeYCandidates, snapValue, type FreeRectPx } from "./snap";
 import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
@@ -86,7 +110,33 @@ interface FreeSiblingPct {
   heightPx: number;
 }
 
-function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], apply: (xPct: number, yPct: number) => void) {
+// Canva-style magenta guide line across the whole slide, shown while a drag
+// is snapped to that axis (slide center or a sibling's center). Plain DOM
+// appended into `.ds-slide-box` for the gesture's lifetime only — no React
+// state, same imperative approach as the rest of this drag code.
+function guideLine(container: HTMLElement, axis: "x" | "y") {
+  const line = document.createElement("div");
+  line.style.cssText = `position:absolute;pointer-events:none;z-index:60;background:#e100ff;display:none;${
+    axis === "x" ? "top:0;bottom:0;width:1px;" : "left:0;right:0;height:1px;"
+  }`;
+  container.appendChild(line);
+  return {
+    show(px: number | null) {
+      line.style.display = px === null ? "none" : "block";
+      if (px !== null) line.style[axis === "x" ? "left" : "top"] = `${px}px`;
+    },
+    remove: () => line.remove(),
+  };
+}
+
+// `target` is the free child's own wrapper — usually ev.currentTarget, but
+// the floating Move button (below the element) passes the wrapper explicitly.
+function startFreeElDrag(
+  ev: React.PointerEvent,
+  siblings: FreeSiblingPct[],
+  apply: (xPct: number, yPct: number) => void,
+  target = ev.currentTarget as HTMLElement,
+) {
   if ((ev.currentTarget as HTMLElement).dataset.editing === "true") return;
   ev.stopPropagation();
   // The slider element's own outer wrapper (Designer.tsx's column-elements
@@ -97,13 +147,15 @@ function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], app
   // dragging as one ghost image instead of just this one free-positioned
   // child moving).
   ev.preventDefault();
-  const container = (ev.currentTarget as HTMLElement).closest(".ds-slide-box") as HTMLElement | null;
+  const container = target.closest(".ds-slide-box") as HTMLElement | null;
   if (!container) return;
   const rect = container.getBoundingClientRect();
-  const target = ev.currentTarget as HTMLElement;
-  const targetRect = target.getBoundingClientRect();
-  const halfW = targetRect.width / 2;
-  const halfH = targetRect.height / 2;
+  // offsetWidth/Height, not getBoundingClientRect: CSS `rotate` grows the
+  // bounding box, but left/top (what we store) position the unrotated box.
+  const halfW = target.offsetWidth / 2;
+  const halfH = target.offsetHeight / 2;
+  const gx = guideLine(container, "x");
+  const gy = guideLine(container, "y");
   const startLeft = target.offsetLeft;
   const startTop = target.offsetTop;
   const startX = ev.clientX;
@@ -135,9 +187,92 @@ function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], app
     const rawTop = startTop + (e.clientY - startY);
     const snappedCenterX = snapValue(rawLeft + halfW, cxCandidates);
     const snappedCenterY = snapValue(rawTop + halfH, cyCandidates);
+    gx.show(snappedCenterX !== rawLeft + halfW ? snappedCenterX : null);
+    gy.show(snappedCenterY !== rawTop + halfH ? snappedCenterY : null);
     const xPct = ((snappedCenterX - halfW) / rect.width) * 100;
     const yPct = ((snappedCenterY - halfH) / rect.height) * 100;
     apply(Math.round(xPct * 10) / 10, Math.round(yPct * 10) / 10);
+  }
+  function up() {
+    gx.remove();
+    gy.remove();
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+// Canva-style 8-handle resize for a free-positioned slide child. `dir` is
+// which edge(s) the grabbed handle moves (-1 = left/top, 1 = right/bottom,
+// 0 = that axis untouched) — the OPPOSITE edge stays anchored, so a left/top
+// handle also shifts x/y. Corners scale proportionally (aspect locked) and
+// report `sizeRatio` so the caller can scale a text child's font with the
+// box ("drag the corner, the text grows with it"); side handles change one
+// dimension only (ratio 1, font untouched — text just rewraps) and snap the
+// moving edge to the safe-area margin / a sibling's edge. Starts from the
+// wrapper's real rendered size (offsetWidth/Height — unrotated, matching
+// what left/top/width/height store), not the stored posWidth/posHeight,
+// which are often ""/"auto". ponytail: deltas are screen-space, not
+// projected onto a rotated box's own axes — a rotated element resizes
+// slightly "off-axis"; project through the angle if that ever bothers anyone.
+type ResizeDir = { x: -1 | 0 | 1; y: -1 | 0 | 1 };
+interface FreeRectPct {
+  xPct: number;
+  yPct: number;
+  widthPx: number;
+  heightPx: number;
+}
+function startFreeElResize(
+  ev: React.PointerEvent,
+  dir: ResizeDir,
+  siblings: FreeSiblingPct[],
+  apply: (rect: FreeRectPct, sizeRatio: number) => void,
+) {
+  ev.stopPropagation();
+  ev.preventDefault();
+  const wrapper = (ev.currentTarget as HTMLElement).closest("[data-child-el]") as HTMLElement | null;
+  const container = wrapper?.closest(".ds-slide-box") as HTMLElement | null;
+  if (!wrapper || !container) return;
+  const box = container.getBoundingClientRect();
+  const startL = wrapper.offsetLeft;
+  const startT = wrapper.offsetTop;
+  const startW = wrapper.offsetWidth;
+  const startH = wrapper.offsetHeight;
+  const startX = ev.clientX;
+  const startY = ev.clientY;
+  const corner = dir.x !== 0 && dir.y !== 0;
+  const exCandidates = edgeXCandidates(
+    box.width,
+    siblings.map((s) => ({ left: (s.xPct / 100) * box.width, top: 0, width: s.widthPx, height: 0 })),
+  );
+  const eyCandidates = edgeYCandidates(
+    box.height,
+    siblings.map((s) => ({ left: 0, top: (s.yPct / 100) * box.height, width: 0, height: s.heightPx })),
+  );
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  function move(e: PointerEvent) {
+    let w = startW + (e.clientX - startX) * dir.x;
+    let h = startH + (e.clientY - startY) * dir.y;
+    let ratio = 1;
+    if (corner) {
+      ratio = Math.max(20 / startW, 20 / startH, (w / startW + h / startH) / 2);
+      w = startW * ratio;
+      h = startH * ratio;
+    } else {
+      if (dir.x === 1) w = snapValue(startL + w, exCandidates) - startL;
+      if (dir.x === -1) w = startL + startW - snapValue(startL + startW - w, exCandidates);
+      if (dir.y === 1) h = snapValue(startT + h, eyCandidates) - startT;
+      if (dir.y === -1) h = startT + startH - snapValue(startT + startH - h, eyCandidates);
+      w = Math.max(20, w);
+      h = Math.max(20, h);
+    }
+    const left = dir.x === -1 ? startL + startW - w : startL;
+    const top = dir.y === -1 ? startT + startH - h : startT;
+    apply(
+      { xPct: round1((left / box.width) * 100), yPct: round1((top / box.height) * 100), widthPx: Math.round(w), heightPx: Math.round(h) },
+      ratio,
+    );
   }
   function up() {
     window.removeEventListener("pointermove", move);
@@ -147,62 +282,23 @@ function startFreeElDrag(ev: React.PointerEvent, siblings: FreeSiblingPct[], app
   window.addEventListener("pointerup", up);
 }
 
-// Bottom-right-corner drag-resize for a free-positioned slide child — only
-// one corner, not all 4 (unlike the old heading/subtitle/button system this
-// replaced): resizing from any other corner would also need to shift x/y to
-// keep the opposite corner anchored, real complexity this narrow need
-// doesn't warrant. Reads the wrapper's actual rendered size as the drag's
-// starting point (not the stored posWidth/posHeight, which are often ""/
-// "auto") so a never-resized element starts from where it visibly is.
-// `sizeRatio` (new diagonal / diagonal at drag start — not just width) lets a
-// caller scale a proportional value (a text child's font size, see the
-// "slider" case's call site) alongside the box itself — Canva-style "drag
-// the corner, the text grows with it" instead of the box just enclosing more
-// whitespace around a fixed-size font. Diagonal, not plain width, so a drag
-// that's mostly vertical (box gets much taller, only slightly wider) still
-// scales the font — a width-only ratio barely moved for that drag, which
-// read as "I made it bigger but the text didn't follow."
-function startFreeElResize(
-  ev: React.PointerEvent,
-  siblings: FreeSiblingPct[],
-  apply: (widthPx: number, heightPx: number, sizeRatio: number) => void,
-) {
+// Rotate handle: angle of the pointer around the element's center, relative
+// to where the drag started, added to the stored rotation. Snaps to every
+// 45° within 4° (Canva's "click" at 0/45/90…), integer degrees otherwise.
+function startFreeElRotate(ev: React.PointerEvent, startDeg: number, apply: (deg: number) => void) {
   ev.stopPropagation();
   ev.preventDefault();
-  const wrapper = (ev.currentTarget as HTMLElement).parentElement as HTMLElement | null;
+  const wrapper = (ev.currentTarget as HTMLElement).closest("[data-child-el]") as HTMLElement | null;
   if (!wrapper) return;
-  const rect = wrapper.getBoundingClientRect();
-  const startW = rect.width;
-  const startH = rect.height;
-  const startDiag = Math.hypot(startW, startH);
-  const startX = ev.clientX;
-  const startY = ev.clientY;
-  // Snap the resized (right/bottom) edge to the safe-area margin or another
-  // free sibling's matching edge — left/top stay fixed during a resize, so
-  // unlike drag's center-snap, it's the far edge that benefits from a
-  // nearby-alignment nudge.
-  const container = wrapper.closest(".ds-slide-box") as HTMLElement | null;
-  const containerRect = container?.getBoundingClientRect();
-  const fixedLeft = containerRect ? rect.left - containerRect.left : null;
-  const fixedTop = containerRect ? rect.top - containerRect.top : null;
-  const exCandidates = containerRect
-    ? edgeXCandidates(
-        containerRect.width,
-        siblings.map((s) => ({ left: (s.xPct / 100) * containerRect.width, top: 0, width: s.widthPx, height: 0 })),
-      )
-    : [];
-  const eyCandidates = containerRect
-    ? edgeYCandidates(
-        containerRect.height,
-        siblings.map((s) => ({ left: 0, top: (s.yPct / 100) * containerRect.height, width: 0, height: s.heightPx })),
-      )
-    : [];
+  const r = wrapper.getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  const a0 = Math.atan2(ev.clientY - cy, ev.clientX - cx);
   function move(e: PointerEvent) {
-    let w = Math.max(20, Math.round(startW + (e.clientX - startX)));
-    let h = Math.max(20, Math.round(startH + (e.clientY - startY)));
-    if (fixedLeft !== null) w = Math.max(20, Math.round(snapValue(fixedLeft + w, exCandidates) - fixedLeft));
-    if (fixedTop !== null) h = Math.max(20, Math.round(snapValue(fixedTop + h, eyCandidates) - fixedTop));
-    apply(w, h, startDiag > 0 ? Math.hypot(w, h) / startDiag : 1);
+    let deg = startDeg + ((Math.atan2(e.clientY - cy, e.clientX - cx) - a0) * 180) / Math.PI;
+    deg = ((((deg + 180) % 360) + 360) % 360) - 180;
+    const snap = Math.round(deg / 45) * 45;
+    apply(Math.abs(deg - snap) < 4 ? snap : Math.round(deg));
   }
   function up() {
     window.removeEventListener("pointermove", move);
@@ -211,6 +307,20 @@ function startFreeElResize(
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
 }
+
+// The 8 resize handles: corners as white dots, sides as short pills
+// (Canva's look). Heading/text get no top/bottom pills — their height
+// follows the text, so only width/corner-scale is meaningful.
+const RESIZE_HANDLES: { dir: ResizeDir; cls: string; side?: "v" | "h" }[] = [
+  { dir: { x: -1, y: -1 }, cls: "-left-1.5 -top-1.5 cursor-nwse-resize" },
+  { dir: { x: 1, y: -1 }, cls: "-right-1.5 -top-1.5 cursor-nesw-resize" },
+  { dir: { x: -1, y: 1 }, cls: "-left-1.5 -bottom-1.5 cursor-nesw-resize" },
+  { dir: { x: 1, y: 1 }, cls: "-right-1.5 -bottom-1.5 cursor-nwse-resize" },
+  { dir: { x: -1, y: 0 }, cls: "-left-1 top-1/2 -translate-y-1/2 cursor-ew-resize", side: "v" },
+  { dir: { x: 1, y: 0 }, cls: "-right-1 top-1/2 -translate-y-1/2 cursor-ew-resize", side: "v" },
+  { dir: { x: 0, y: -1 }, cls: "-top-1 left-1/2 -translate-x-1/2 cursor-ns-resize", side: "h" },
+  { dir: { x: 0, y: 1 }, cls: "-bottom-1 left-1/2 -translate-x-1/2 cursor-ns-resize", side: "h" },
+];
 
 // Scales a free-form "length" field's numeric part by `ratio`, keeping
 // whatever unit (or lack of one) it already had — used by the slider
@@ -901,6 +1011,34 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                             ),
                           )
                         : [];
+                      const childLocked = childEl.props.locked === "true";
+                      // One write path for every canvas gesture/toolbar action
+                      // on this child: re-parse the slider's slides JSON,
+                      // transform this slide, write it back.
+                      const writeSlide = (fn: (s0: SlideItem) => SlideItem) => {
+                        if (!path) return;
+                        mutate((bs) => {
+                          const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
+                          const currentSlides = parseSlides(target.props.slides);
+                          const s0 = currentSlides[slideIdx];
+                          if (!s0) return;
+                          currentSlides[slideIdx] = fn(s0);
+                          target.props.slides = stringifySlides(currentSlides);
+                        });
+                      };
+                      // Free-position fields are per-breakpoint — on tablet/
+                      // mobile a gesture writes that tier's override, same as
+                      // the Inspector's own X/Y/Width/Height inputs.
+                      const commitFree = (patch: Record<string, string>) =>
+                        writeSlide((s0) =>
+                          bp === "desktop"
+                            ? updateSlideElementProps(s0, r, c, e, patch)
+                            : updateSlideElementBp(s0, r, c, e, {
+                                ...(childEl.bp ?? {}),
+                                ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [`${bp}:${k}`, v])),
+                              }),
+                        );
+                      const dragApply = (xPct: number, yPct: number) => commitFree({ x: String(xPct), y: String(yPct) });
                       return (
                         <Fragment key={childEl.id}>
                           {childIsFree && (
@@ -923,32 +1061,17 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                               : undefined
                           }
                           onPointerDown={
-                            childIsFree && path && !childEditing
-                              ? (ev) => {
-                                  startFreeElDrag(ev, siblingsPct, (xPct, yPct) => {
-                                    mutate((bs) => {
-                                      const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
-                                      const currentSlides = parseSlides(target.props.slides);
-                                      const s0 = currentSlides[slideIdx];
-                                      if (!s0) return;
-                                      const xv = String(xPct);
-                                      const yv = String(yPct);
-                                      currentSlides[slideIdx] =
-                                        bp === "desktop"
-                                          ? updateSlideElementProps(s0, r, c, e, { x: xv, y: yv })
-                                          : updateSlideElementBp(s0, r, c, e, { ...(childEl.bp ?? {}), [`${bp}:x`]: xv, [`${bp}:y`]: yv });
-                                      target.props.slides = stringifySlides(currentSlides);
-                                    });
-                                  });
-                                }
+                            childIsFree && path && !childEditing && !childLocked
+                              ? (ev) => startFreeElDrag(ev, siblingsPct, dragApply)
                               : undefined
                           }
                           className={`cursor-pointer rounded ${
                             selected ? "outline outline-2 outline-accent" : "hover:outline hover:outline-1 hover:outline-white/40"
-                          } ${childIsFree ? "cursor-move" : ""}`}
+                          } ${childIsFree && !childLocked ? "cursor-move" : ""}`}
                           style={
                             childIsFree
                               ? (computeFreePositionStyle({
+                                  rotate: bpGetValue(childEl.props.rotate, childEl.bp, "rotate"),
                                   x: bpGetValue(childEl.props.x, childEl.bp, "x"),
                                   y: bpGetValue(childEl.props.y, childEl.bp, "y"),
                                   posWidth: childPosWidth || undefined,
@@ -1020,56 +1143,201 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                           ) : (
                             <ElPreview ctx={ctx} el={childEl} />
                           )}
-                          {selected && childIsFree && path && (
-                            <div
-                              onPointerDown={(ev) => {
-                                startFreeElResize(ev, siblingsPct, (widthPx, heightPx, sizeRatio) => {
-                                  mutate((bs) => {
-                                    const target = (bs[path[0]].props as unknown as SectionProps).rows[path[1]].columns[path[2]].elements[path[3]];
-                                    const currentSlides = parseSlides(target.props.slides);
-                                    const s0 = currentSlides[slideIdx];
-                                    if (!s0) return;
-                                    const wv = `${widthPx}px`;
-                                    const hv = `${heightPx}px`;
-                                    // Canva-style: a text/button child's font size
-                                    // grows/shrinks with the box instead of just
-                                    // wrapping/floating inside a bigger, still-
-                                    // small-looking box. heading/button have no
-                                    // continuous "size" field to scale (heading's
-                                    // H_SIZE is a fixed preset per "level"; button's
-                                    // default is a fixed Tailwind text-sm) —
-                                    // posFontSize is a free-position-only override
-                                    // for both, same idea as posWidth/posHeight
-                                    // overriding the normal box.
-                                    const scalesFont = childTextType || childEl.type === "button";
-                                    const scaledSize = scalesFont
-                                      ? scaleLength(
+                          {selected && childIsFree && path && !childLocked && (
+                            <>
+                              {RESIZE_HANDLES.filter((h) => h.side !== "h" || !childTextType).map((h) => (
+                                <div
+                                  key={`${h.dir.x}:${h.dir.y}`}
+                                  onPointerDown={(ev) =>
+                                    startFreeElResize(ev, h.dir, siblingsPct, (box, sizeRatio) => {
+                                      const patch: Record<string, string> = {
+                                        x: String(box.xPct),
+                                        y: String(box.yPct),
+                                        posWidth: `${box.widthPx}px`,
+                                        posHeight: `${box.heightPx}px`,
+                                      };
+                                      // Corner = Canva-style "text grows with the
+                                      // box": heading/button have no continuous
+                                      // size field (heading's H_SIZE is a preset
+                                      // per level, button a fixed text-sm), so
+                                      // posFontSize is a free-position-only
+                                      // override for both; text scales its own
+                                      // "size". Side handles pass ratio 1 — the
+                                      // text rewraps, the font stays.
+                                      if (sizeRatio !== 1 && (childTextType || childEl.type === "button")) {
+                                        const scaled = scaleLength(
                                           childEl.type === "heading"
-                                            ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || H_SIZE[bpGetValue(childEl.props.level, childEl.bp, "level") || "2"]
+                                            ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") ||
+                                                H_SIZE[bpGetValue(childEl.props.level, childEl.bp, "level") || "2"]
                                             : childEl.type === "button"
                                               ? bpGetValue(childEl.props.posFontSize, childEl.bp, "posFontSize") || "0.875rem"
                                               : bpGetValue(childEl.props.size, childEl.bp, "size") || TEXT_SIZE.md,
                                           sizeRatio,
-                                        )
-                                      : null;
-                                    const patch: Record<string, string> = { posWidth: wv, posHeight: hv };
-                                    if (scaledSize) patch[childEl.type === "text" ? "size" : "posFontSize"] = scaledSize;
-                                    currentSlides[slideIdx] =
-                                      bp === "desktop"
-                                        ? updateSlideElementProps(s0, r, c, e, patch)
-                                        : updateSlideElementBp(s0, r, c, e, {
-                                            ...(childEl.bp ?? {}),
-                                            ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [`${bp}:${k}`, v])),
-                                          });
-                                    target.props.slides = stringifySlides(currentSlides);
-                                  });
-                                });
-                              }}
-                              title={t("designer-f-width")}
-                              className="absolute -bottom-1 -right-1 h-3 w-3 cursor-nwse-resize rounded-sm border border-white bg-accent shadow-sm"
-                            />
+                                        );
+                                        if (scaled) patch[childEl.type === "text" ? "size" : "posFontSize"] = scaled;
+                                      }
+                                      commitFree(patch);
+                                    })
+                                  }
+                                  className={`absolute z-[61] border border-accent bg-white shadow-sm ${h.cls} ${
+                                    h.side === "v" ? "h-4 w-2 rounded-full" : h.side === "h" ? "h-2 w-4 rounded-full" : "h-3 w-3 rounded-full"
+                                  }`}
+                                />
+                              ))}
+                              {/* Rotate + Move under the box (Canva's pair) —
+                                  Move still drags while a heading/text is in
+                                  double-click edit mode, where the box's own
+                                  pointerdown belongs to the text caret. */}
+                              <div className="absolute left-1/2 top-[calc(100%+10px)] z-[61] flex -translate-x-1/2 gap-1.5">
+                                <button
+                                  type="button"
+                                  title={t("designer-rotate")}
+                                  onPointerDown={(ev) =>
+                                    startFreeElRotate(ev, Number(bpGetValue(childEl.props.rotate, childEl.bp, "rotate") || "0"), (deg) =>
+                                      commitFree({ rotate: String(deg) }),
+                                    )
+                                  }
+                                  className="flex h-6 w-6 cursor-grab items-center justify-center rounded-full border border-line/40 bg-white text-body shadow"
+                                >
+                                  <RotateCw className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title={t("designer-move")}
+                                  onPointerDown={(ev) =>
+                                    startFreeElDrag(ev, siblingsPct, dragApply, ev.currentTarget.closest("[data-child-el]") as HTMLElement)
+                                  }
+                                  className="flex h-6 w-6 cursor-move items-center justify-center rounded-full bg-accent text-white shadow"
+                                >
+                                  <Move className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
+                          {selected && childIsFree && path && (() => {
+                            // Floating toolbar — a SIBLING of the box, not a
+                            // child, so a rotated element doesn't rotate its
+                            // toolbar too. Positioned off the same stored x/y
+                            // (+ half posWidth to center it); flips below the
+                            // box near the slide's top edge, where the slide's
+                            // own overflow:hidden would otherwise crop it.
+                            const tx = Number(bpGetValue(childEl.props.x, childEl.bp, "x") || "50");
+                            const ty = Number(bpGetValue(childEl.props.y, childEl.bp, "y") || "50");
+                            const wPx = parseFloat(childPosWidth || "") || 0;
+                            const hPx = parseFloat(childPosHeight || "") || 40;
+                            const below = ty < 18;
+                            const btn = "flex h-7 w-7 items-center justify-center rounded-full hover:bg-canvas";
+                            const menu = "absolute top-full z-10 mt-2 rounded-lg border border-line/30 bg-white p-1.5 text-[11px] text-body shadow-lg";
+                            const alignToSlide = (ev: React.MouseEvent<HTMLElement>, k: "left" | "center" | "right" | "top" | "middle" | "bottom") => {
+                              const boxEl = ev.currentTarget.closest(".ds-slide-box") as HTMLElement | null;
+                              const node = boxEl?.querySelector<HTMLElement>(`[data-child-el="${childEl.id}"]`);
+                              if (!boxEl || !node) return;
+                              const wPct = (node.offsetWidth / boxEl.clientWidth) * 100;
+                              const hPct = (node.offsetHeight / boxEl.clientHeight) * 100;
+                              const r1 = (n: number) => String(Math.round(n * 10) / 10);
+                              commitFree(
+                                k === "left" ? { x: "0" }
+                                : k === "center" ? { x: r1((100 - wPct) / 2) }
+                                : k === "right" ? { x: r1(100 - wPct) }
+                                : k === "top" ? { y: "0" }
+                                : k === "middle" ? { y: r1((100 - hPct) / 2) }
+                                : { y: r1(100 - hPct) },
+                              );
+                              ev.currentTarget.closest("details")?.removeAttribute("open");
+                            };
+                            const ALIGN = [
+                              ["left", AlignStartVertical, "designer-align-left"],
+                              ["center", AlignCenterVertical, "designer-align-center"],
+                              ["right", AlignEndVertical, "designer-align-right"],
+                              ["top", AlignStartHorizontal, "designer-align-top"],
+                              ["middle", AlignCenterHorizontal, "designer-align-middle"],
+                              ["bottom", AlignEndHorizontal, "designer-align-bottom"],
+                            ] as const;
+                            return (
+                              <div
+                                onPointerDown={(ev) => ev.stopPropagation()}
+                                onClick={(ev) => ev.stopPropagation()}
+                                className="absolute z-[62] flex items-center gap-0.5 whitespace-nowrap rounded-full border border-line/30 bg-white px-1 py-0.5 text-body shadow-lg"
+                                style={{
+                                  left: wPx ? `calc(${tx}% + ${wPx / 2}px)` : `${tx}%`,
+                                  top: below ? `calc(${ty}% + ${hPx + 44}px)` : `${ty}%`,
+                                  transform: `translate(${wPx ? "-50%" : "0"}, ${below ? "0" : "calc(-100% - 12px)"})`,
+                                }}
+                              >
+                                {childEl.type === "button" && (
+                                  <details className="relative">
+                                    <summary className="flex h-7 cursor-pointer list-none items-center gap-1 rounded-full px-2 text-[11px] font-semibold hover:bg-canvas">
+                                      <Link2 className="h-3.5 w-3.5" /> {t("designer-edit-link")}
+                                    </summary>
+                                    <div className={`${menu} left-0 w-60`}>
+                                      <input
+                                        defaultValue={childEl.props.href ?? ""}
+                                        placeholder="https://"
+                                        onKeyDown={(ev) => ev.key === "Enter" && ev.currentTarget.blur()}
+                                        onBlur={(ev) => {
+                                          const href = ev.currentTarget.value.trim();
+                                          writeSlide((s0) => updateSlideElementProps(s0, r, c, e, { href }));
+                                        }}
+                                        className="w-full rounded-md border border-line/30 px-2 py-1 text-[11px]"
+                                      />
+                                    </div>
+                                  </details>
+                                )}
+                                <button
+                                  type="button"
+                                  title={t(childLocked ? "designer-unlock" : "designer-lock")}
+                                  onClick={() => writeSlide((s0) => updateSlideElementProps(s0, r, c, e, { locked: childLocked ? "" : "true" }))}
+                                  className={`${btn} ${childLocked ? "text-accent" : ""}`}
+                                >
+                                  {childLocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  title={t("designer-duplicate")}
+                                  onClick={() => {
+                                    writeSlide((s0) => duplicateSlideElement(s0, r, c, e));
+                                    setSliderInnerSel((m) => ({ ...m, [el.id]: { r, c, e: e + 1 } }));
+                                  }}
+                                  className={btn}
+                                >
+                                  <CopyPlus className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title={t("designer-delete")}
+                                  onClick={() => {
+                                    writeSlide((s0) => deleteSlideElement(s0, r, c, e));
+                                    setSliderInnerSel((m) => ({ ...m, [el.id]: null }));
+                                  }}
+                                  className={btn}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                                <details className="relative">
+                                  <summary title={t("designer-align-to-slide")} className={`${btn} cursor-pointer list-none`}>
+                                    <Ellipsis className="h-3.5 w-3.5" />
+                                  </summary>
+                                  <div className={`${menu} right-0 w-44`}>
+                                    <p className="px-1.5 pb-1 font-semibold text-sub">{t("designer-align-to-slide")}</p>
+                                    {ALIGN.map(([k, Icon, label], i) => (
+                                      <button
+                                        key={k}
+                                        type="button"
+                                        disabled={childLocked}
+                                        onClick={(ev) => alignToSlide(ev, k)}
+                                        className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-canvas disabled:opacity-40 ${
+                                          i === 3 ? "mt-1 border-t border-line/20 pt-1.5" : ""
+                                        }`}
+                                      >
+                                        <Icon className="h-3.5 w-3.5" /> {t(label)}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </details>
+                              </div>
+                            );
+                          })()}
                         </Fragment>
                       );
                     })}

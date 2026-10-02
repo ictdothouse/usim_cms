@@ -39,6 +39,12 @@ test("computeFreePositionStyle treats zIndex 0 as unset", () => {
   assert.equal(s.zIndex, undefined);
 });
 
+test("computeFreePositionStyle emits rotate only for a real non-zero number", () => {
+  assert.equal(computeFreePositionStyle({ rotate: "-15" }).rotate, "-15deg");
+  assert.equal(computeFreePositionStyle({ rotate: "0" }).rotate, undefined);
+  assert.equal(computeFreePositionStyle({ rotate: "1;color:red" }).rotate, undefined);
+});
+
 test("toCssText kebab-cases keys and joins declarations", () => {
   assert.equal(toCssText({ top: "50%", zIndex: "3" }), "top:50%;z-index:3");
 });
