@@ -2,7 +2,7 @@
 // 2026-08-29-designer-layer2-hooks-design.md) — the highest-risk extraction
 // per that spec: the most stateful hook, with the most subtle preserved
 // behaviors (the transient cross-origin postMessage guard, the
-// lastNonTextSig dedup guard, the debounced-reload effect), and its message
+// skipNextReload text-typing guard, the debounced-reload effect), and its message
 // handler reaches into useBlockOps' territory (removeAt/insertAt/
 // moveColumn/moveSection — all plain pure imports from ../../designerTree,
 // not owned by any hook) and useUndoRedo's (undo/redo).
@@ -18,8 +18,7 @@ import { toast } from "sonner";
 import type { Key } from "@/i18n";
 import { moveSection, moveColumn, removeAt, insertAt } from "../../designerTree";
 import { section } from "../blockPath";
-import { PAD, RADIUS, BORDER, colStyle, shadowToCss, lengthValue, typoStyle } from "../style";
-import { parseSlides, stringifySlides, updateSlideElementProps } from "../parsers";
+import { parseSlides, stringifySlides, updateSlideElementProps, updateSlideElementBp } from "../parsers";
 import type { Block, Sel, SectionProps } from "../types";
 
 export interface LiveEditBridgeDeps {
@@ -49,19 +48,27 @@ export interface LiveEditBridgeDeps {
   // own residual UI state (see reloading's own comment there), set here.
   setReloading: (v: boolean) => void;
   setCtxMenu: (v: { path: number[]; x: number; y: number } | null) => void;
+  sliderSlideIdx: Record<string, number>;
   setSliderSlideIdx: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   setSliderInnerSel: React.Dispatch<React.SetStateAction<Record<string, { r: number; c: number; e: number } | null>>>;
+  // Live Edit frames the real page at this device's exact viewport (see
+  // DeviceViewport) — also decides which bp bag a free-position drag in the
+  // iframe writes to, same rule ElPreview.tsx's own drag commit follows.
+  bp: "desktop" | "tablet" | "mobile";
 }
 
 export interface LiveEditBridgeApi {
   mode: "blocks" | "live";
   liveSrc: string | null;
+  liveSrcA: string | null;
+  liveSrcB: string | null;
+  activeSlot: "a" | "b";
   frameARef: React.RefObject<HTMLIFrameElement>;
   frameBRef: React.RefObject<HTMLIFrameElement>;
   liveFrame: React.RefObject<HTMLIFrameElement>;
   selectedRect: { top: number; left: number; width: number; height: number } | null;
   enterLive: (cold?: boolean) => Promise<void>;
-  toggleLive: () => void;
+  toggleLive: () => Promise<void>;
   handleFrameLoad: (slot: "a" | "b") => void;
 }
 
@@ -69,8 +76,8 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
     tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
-    setError, setReloading, setCtxMenu, setSliderSlideIdx, setSliderInnerSel,
-    structuralTick, bumpStructural,
+    setError, setReloading, setCtxMenu, sliderSlideIdx, setSliderSlideIdx, setSliderInnerSel,
+    structuralTick, bumpStructural, bp,
   } = deps;
 
   const [mode, setMode] = useState<"blocks" | "live">("blocks");
@@ -101,7 +108,6 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
 
   const lastScrollY = useRef(0);
   const pendingScrollRestore = useRef<number | null>(null);
-  const lastNonTextSig = useRef<string | null>(null);
 
   // cold=true means the live iframes were just unmounted (switching in from
   // Blocks mode) or this is the very first load — nothing is on screen to
@@ -126,7 +132,14 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       kind === "blueprint"
         ? api.blueprintPreviewUrl(tenantHost, pageId, previewToken)
         : api.previewUrl(tenantHost, pageSlug, previewToken);
-    const src = `${base}${base.includes("?") ? "&" : "?"}designerEdit=1`;
+    const url = new URL(base, window.location.href);
+    url.searchParams.set("designerEdit", "1");
+    // Same deviceFrame param Preview's withDeviceFrame() sets (usePersist),
+    // so BaseLayout hides the scrollbar identically for tablet/mobile — a
+    // visible scrollbar here but not in Preview would make the page's real
+    // layout width ~15px narrower in Live Edit than in Preview.
+    if (bp !== "desktop") url.searchParams.set("deviceFrame", bp);
+    const src = url.toString();
     if (cold || (liveSrcA === null && liveSrcB === null)) {
       setReloading(true);
       swapPending.current = null;
@@ -162,12 +175,13 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   // slot flips it to active (the actual, blink-free "reveal"); a cold mount
   // just clears the skeleton once its own slot (already active) has painted.
   function handleFrameLoad(slot: "a" | "b") {
+    const frame = (slot === "a" ? frameARef : frameBRef).current;
+    const src = slot === "a" ? liveSrcA : liveSrcB;
     if (swapPending.current === slot) {
       swapPending.current = null;
       setActiveSlot(slot);
       setReloading(false);
-      const frame = (slot === "a" ? frameARef : frameBRef).current;
-      const src = slot === "a" ? liveSrcA : liveSrcB;
+      postShowSlides(frame, src);
       if (pendingScrollRestore.current != null && frame?.contentWindow && src) {
         const targetOrigin = new URL(src, window.location.href).origin;
         frame.contentWindow.postMessage({ type: "designer:restoreScroll", y: pendingScrollRestore.current }, targetOrigin);
@@ -175,12 +189,80 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       }
       return;
     }
-    if (slot === activeSlot) setReloading(false);
+    if (slot === activeSlot) {
+      setReloading(false);
+      postShowSlides(frame, src);
+    }
   }
 
-  function toggleLive() {
-    setMode(mode === "live" ? "blocks" : "live");
+  // Entering Live Edit mounts the REAL server-rendered page (cold load into
+  // slot "a") — it used to only restyle the in-app Blocks canvas, which is
+  // an approximation of the real render (vw-based font sizes and @media
+  // rules there evaluate against the admin window, not the device; no
+  // Swiper), so "Live" and Preview could visibly disagree.
+  async function toggleLive() {
+    if (mode === "live") {
+      setMode("blocks");
+      return;
+    }
+    try {
+      await enterLive(true);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
+
+  // Switching Desktop/Tablet/Mobile while live re-frames the page at the new
+  // device's viewport — a fresh URL (deviceFrame differs), hot-swapped so
+  // the visible frame never blanks. Scroll isn't carried across: the same y
+  // offset means a different spot on a differently-laid-out page.
+  const lastBp = useRef(bp);
+  useEffect(() => {
+    if (lastBp.current === bp) return;
+    lastBp.current = bp;
+    if (mode !== "live") return;
+    void enterLive().catch((err) => setError((err as Error).message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bp]);
+
+  // Every edit made while live (Inspector field, Layers, undo/redo, block
+  // ops) re-renders the real page — the only way what Live Edit shows can be
+  // guaranteed to be exactly what Preview/the published site render. The
+  // old shortcut (posting admin-computed inline styles into the iframe for
+  // text elements) used the BASE props even at tablet/mobile, so a per-
+  // breakpoint override was shown at its desktop value. Edits that
+  // originate INSIDE the iframe and are already visible there (typing into
+  // a contentEditable heading/text) skip the reload so the caret survives;
+  // that text is re-rendered once selection moves away (pendingTextReload).
+  const skipNextReload = useRef(false);
+  const pendingTextReload = useRef(false);
+  const lastBlocks = useRef(blocks);
+  useEffect(() => {
+    if (lastBlocks.current === blocks) return;
+    lastBlocks.current = blocks;
+    if (mode !== "live") return;
+    if (skipNextReload.current) {
+      skipNextReload.current = false;
+      return;
+    }
+    bumpStructural();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks]);
+
+  // Keeps every slider in the iframe on the slide being edited (Swiper
+  // resets to slide 0 on each reload).
+  function postShowSlides(frame: HTMLIFrameElement | null, src: string | null) {
+    if (!frame?.contentWindow || !src) return;
+    try {
+      frame.contentWindow.postMessage({ type: "designer:showSlides", map: sliderSlideIdx }, new URL(src, window.location.href).origin);
+    } catch {
+      /* transient cross-origin mismatch mid-navigation — next load re-sends */
+    }
+  }
+  useEffect(() => {
+    if (mode === "live") postShowSlides(liveFrame.current, liveSrc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sliderSlideIdx]);
 
   // Live-view bridge: the iframe's window posts these (see BaseLayout.astro's
   // inline script) — a click there selects exactly like a click in the block
@@ -223,8 +305,11 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         // right-click only works in Blocks mode.
         if (![1, 3, 4].includes(p.length) || !liveFrame.current) return;
         const rect = liveFrame.current.getBoundingClientRect();
+        // The iframe is drawn at its true device size then CSS-scaled to
+        // fit (DeviceViewport) — its own clientX/Y are in unscaled px.
+        const scale = liveFrame.current.offsetWidth ? rect.width / liveFrame.current.offsetWidth : 1;
         setSel(p);
-        setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0), y: rect.top + Number(e.data.y ?? 0) });
+        setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0) * scale, y: rect.top + Number(e.data.y ?? 0) * scale });
         return;
       }
       if (e.data?.type === "designer:selectSlideEl") {
@@ -273,7 +358,18 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
           const currentSlides = parseSlides(target.props.slides);
           const s0 = currentSlides[slideIdx];
           if (!s0) return;
-          currentSlides[slideIdx] = updateSlideElementProps(s0, sr, sc, se, patch);
+          // Tablet/mobile drags write that tier's own override ("mobile:x"),
+          // never the desktop base — same rule as ElPreview.tsx's commitFree.
+          // Writing base props here moved the element on DESKTOP too.
+          if (bp === "desktop") {
+            currentSlides[slideIdx] = updateSlideElementProps(s0, sr, sc, se, patch);
+          } else {
+            const child = s0.rows[sr]?.columns[sc]?.elements[se];
+            if (!child) return;
+            const nextBp = { ...(child.bp ?? {}) };
+            for (const [k, v] of Object.entries(patch)) nextBp[`${bp}:${k}`] = v;
+            currentSlides[slideIdx] = updateSlideElementBp(s0, sr, sc, se, nextBp);
+          }
           target.props.slides = stringifySlides(currentSlides);
         });
         return;
@@ -285,6 +381,10 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         setSel(path);
       } else if (e.data?.type === "designer:textInput" && path.length === 4) {
         const [b, r, c, el] = path;
+        // Already on screen (the author is typing into it) — see
+        // skipNextReload's own comment.
+        skipNextReload.current = true;
+        pendingTextReload.current = true;
         mutate((bs) => {
           section(bs, b).rows[r].columns[c].elements[el].props.text = e.data.value ?? "";
         });
@@ -339,10 +439,18 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
     return () => window.removeEventListener("message", onMessage);
   });
 
-  // Keeps the live iframe's selection highlight/editability/inline style in
-  // sync with the Inspector — reuses the exact same style helpers the block
-  // canvas preview uses (typoStyle/colStyle/lengthValue), so style logic
-  // isn't computed a third time.
+  // Keeps the live iframe's selection highlight + text editability in sync
+  // with `sel` (style changes reach it via a real reload — see
+  // skipNextReload's comment above). Moving selection off a text node the
+  // author typed into re-renders it once through the real renderer.
+  useEffect(() => {
+    if (mode !== "live") return;
+    if (pendingTextReload.current) {
+      pendingTextReload.current = false;
+      bumpStructural();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel]);
   useEffect(() => {
     if (mode !== "live" || !liveSrc || !liveFrame.current?.contentWindow) return;
     const win = liveFrame.current.contentWindow;
@@ -361,53 +469,14 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       }
     };
     post({ type: "designer:selected", path: sel?.join(".") ?? null });
-    if (!sel) return;
-    const path = sel.join(".");
-    if (sel.length === 4) {
-      const [b, r, c, e] = sel;
-      const el = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c]?.elements?.[e];
-      if (!el) return;
-      const textLike = el.type === "heading" || el.type === "text" || el.type === "list";
-      if (!textLike) {
-        // Non-text element types (button/image/icon/spacer/...) each render
-        // bespoke CSS in ElPreview/SectionBlock.astro — there's no single
-        // props-to-CSS mapping to reuse here, so a style change (paste
-        // style, or an Inspector field edit) falls back to the same
-        // debounced reload structural edits use instead of silently posting
-        // no visible change. Guarded by a signature so the reload this
-        // itself triggers (liveSrc changing re-runs this effect against the
-        // same still-selected element) doesn't bump again and loop forever.
-        const sig = `${path}:${JSON.stringify(el.props)}`;
-        if (lastNonTextSig.current !== sig) {
-          lastNonTextSig.current = sig;
-          bumpStructural();
-        }
-        return;
-      }
-      const style = typoStyle(el.props);
-      post({ type: "designer:style", path, style });
-      post({ type: "designer:text", path, editable: el.type === "heading" || el.type === "text" });
-    } else if (sel.length === 3) {
-      const [b, r, c] = sel;
-      const col = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c];
-      if (!col) return;
-      post({ type: "designer:style", path, style: colStyle(col.props) });
-    } else if (sel.length === 1) {
-      const sp = blocks[sel[0]]?.props as unknown as SectionProps;
-      if (!sp) return;
-      const style: React.CSSProperties = {
-        background: sp.bgImage ? undefined : sp.bg || undefined,
-        color: sp.textColor || undefined,
-        padding: `${lengthValue(sp.paddingY, PAD, PAD.md)} ${lengthValue(sp.paddingX, PAD, "1.5rem")}`,
-        margin: `${lengthValue(sp.marginY, PAD, "0")} 0`,
-        ...(sp.border ? { border: BORDER[sp.border] } : {}),
-        boxShadow: shadowToCss(sp.shadow),
-        ...(sp.radius ? { borderRadius: RADIUS[sp.radius] } : {}),
-      };
-      post({ type: "designer:style", path, style });
+    if (!sel || sel.length !== 4) return;
+    const [b, r, c, e] = sel;
+    const el = (blocks[b]?.props as unknown as SectionProps)?.rows?.[r]?.columns?.[c]?.elements?.[e];
+    if (el && (el.type === "heading" || el.type === "text")) {
+      post({ type: "designer:text", path: sel.join("."), editable: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sel, blocks, liveSrc]);
+  }, [mode, sel, liveSrc]);
 
-  return { mode, liveSrc, frameARef, frameBRef, liveFrame, selectedRect, enterLive, toggleLive, handleFrameLoad };
+  return { mode, liveSrc, liveSrcA, liveSrcB, activeSlot, frameARef, frameBRef, liveFrame, selectedRect, enterLive, toggleLive, handleFrameLoad };
 }

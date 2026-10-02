@@ -24,6 +24,7 @@ import { DesignerCanvas } from "./designer/DesignerCanvas";
 import { DesignerTemplatesModal } from "./designer/DesignerTemplatesModal";
 import { DesignerHistoryModal } from "./designer/DesignerHistoryModal";
 import { DesignerDevicePreviewModal } from "./designer/DesignerDevicePreviewModal";
+import { DeviceViewport } from "./designer/DeviceViewport";
 
 export default function Designer({
   page,
@@ -224,7 +225,7 @@ export default function Designer({
   // toggle back into Live, or a debounced structural/style reload) until
   // its onLoad fires — covers the skeleton overlay below so a reload never
   // shows the browser's own blank-frame flash, however brief.
-  const [, setReloading] = useState(true);
+  const [reloading, setReloading] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -407,7 +408,15 @@ export default function Designer({
   const {
     mode,
     toggleLive,
+    liveSrcA,
+    liveSrcB,
+    activeSlot,
+    frameARef,
+    frameBRef,
+    handleFrameLoad,
   } = useLiveEditBridge({
+    bp,
+    sliderSlideIdx,
     blocks,
     mutate,
     sel,
@@ -527,11 +536,11 @@ export default function Designer({
   }, [blocks]);
 
   // Opens straight into the Blocks canvas by default — same-document
-  // React state + native drag/drop, no iframe/postMessage bridge to break.
-  // The old iframe-based "Live Edit" (enterLive/toggleLive, the double-
-  // buffered iframe JSX, BaseLayout.astro's designerEdit bridge) is kept
-  // intact and still reachable via the mode toggle button below, not
-  // deleted — just no longer the default on open.
+  // React state + native drag/drop, an editing APPROXIMATION of the page.
+  // The Live toggle (DesignerTopBar) mounts the real server-rendered page
+  // (useLiveEditBridge's double-buffered iframes, BaseLayout.astro's
+  // designerEdit bridge) inside the same DeviceViewport Preview uses, so
+  // Live Edit and Preview are the same render at the same viewport.
 
   function close() {
     if (dirty && !confirm(t("designer-unsaved"))) return;
@@ -760,6 +769,38 @@ export default function Designer({
           patchChromeMeta={patchChromeMeta}
         />
 
+        {mode === "live" ? (
+          // Live Edit = the real page (same URL renderer as Preview) framed at
+          // the device's exact viewport. Double-buffered: a reload loads into
+          // the hidden slot and swaps in on load, so the visible frame never
+          // blinks (useLiveEditBridge's handleFrameLoad).
+          <main className="relative min-w-0 flex-1 bg-canvas p-4">
+            <DeviceViewport device={bp}>
+              <iframe
+                ref={frameARef}
+                src={liveSrcA ?? undefined}
+                onLoad={() => handleFrameLoad("a")}
+                className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "a" ? "" : "pointer-events-none opacity-0"}`}
+                title="live-view"
+              />
+              <iframe
+                ref={frameBRef}
+                src={liveSrcB ?? undefined}
+                onLoad={() => handleFrameLoad("b")}
+                className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "b" ? "" : "pointer-events-none opacity-0"}`}
+                title="live-view-buffer"
+              />
+              {reloading && (
+                <div className="absolute inset-0 z-10 animate-pulse space-y-4 bg-white p-6">
+                  <div className="h-8 w-2/3 rounded bg-canvas" />
+                  <div className="h-4 w-full rounded bg-canvas" />
+                  <div className="h-4 w-5/6 rounded bg-canvas" />
+                  <div className="h-40 w-full rounded bg-canvas" />
+                </div>
+              )}
+            </DeviceViewport>
+          </main>
+        ) : (
         <DesignerCanvas
           ctx={designerCtx}
           selEq={selEq}
@@ -789,6 +830,7 @@ export default function Designer({
           dropIntoColumn={dropIntoColumn}
           drag={drag}
         />
+        )}
       </div>
 
       {mediaPickerCallback && (
