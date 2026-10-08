@@ -105,17 +105,26 @@ test("Designer: Live Edit drag-to-add creates a new section with the dropped ele
 
   await page.goto(`/content/pages/${pageId}`);
 
-  // Live Edit is the default view (see Designer.tsx's own "opens by
-  // default" note) — no mode toggle needed. The palette item has no
-  // [draggable="true"] attribute in this mode (DesignerPalette.tsx sets
-  // draggable={mode !== "live"}), so it's located by its visible text
-  // instead, and dragged via a real pointer sequence (mousedown/move/up)
-  // rather than Playwright's HTML5-DnD-only dragTo() helper.
+  // Designer opens in Blocks mode by default (useLiveEditBridge.ts's own
+  // `useState<"blocks" | "live">("blocks")` — nothing auto-enters Live Edit
+  // on mount), so switch into it first. DesignerTopBar.tsx's toggle button
+  // shows "Live Edit" while in Blocks mode (its label swaps to "Blocks"
+  // once Live Edit is active).
+  await page.getByRole("button", { name: "Live Edit", exact: true }).click();
+
+  // The palette item has no [draggable="true"] attribute in Live Edit mode
+  // (DesignerPalette.tsx sets draggable={mode !== "live"}), so it's located
+  // by its visible text instead, and dragged via a real pointer sequence
+  // (mousedown/move/up) rather than Playwright's HTML5-DnD-only dragTo().
   const headingPaletteItem = page.getByText("Heading", { exact: true }).first();
   await expect(headingPaletteItem).toBeVisible();
 
+  // Live Edit mints a preview token and loads the real page asynchronously
+  // after the toggle click — wait for the iframe to actually have a src
+  // before computing a drop point against it, not just for the <iframe>
+  // element itself to exist in the DOM.
   const iframe = page.locator('iframe[title="live-view"]');
-  await expect(iframe).toBeVisible();
+  await expect(iframe).toHaveAttribute("src", /.+/, { timeout: 15000 });
   const box = await iframe.boundingBox();
   if (!box) throw new Error("live-view iframe has no bounding box");
 
@@ -130,7 +139,13 @@ test("Designer: Live Edit drag-to-add creates a new section with the dropped ele
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
   await page.mouse.up();
 
-  // The drop triggers mutate() -> autosave -> Live Edit reload; the new
-  // Heading renders for real inside the iframe once that reload completes.
-  await expect(page.frameLocator('iframe[title="live-view"]').getByText("Heading", { exact: true })).toBeVisible({ timeout: 10000 });
+  // The drop triggers mutate() -> autosave -> Live Edit reload, which swaps
+  // the double-buffered iframe pair — the content that was visible before
+  // the drop (slot A, "live-view") is NOT necessarily the one showing it
+  // afterward. data-live-active marks whichever slot is actually visible
+  // right now, so the assertion follows the swap instead of assuming slot A.
+  const activeFrame = page.locator('iframe[data-live-active="true"]');
+  await expect(activeFrame).toHaveCount(1, { timeout: 10000 });
+  const activeTitle = await activeFrame.getAttribute("title");
+  await expect(page.frameLocator(`iframe[title="${activeTitle}"]`).getByText("Heading", { exact: true })).toBeVisible({ timeout: 10000 });
 });

@@ -815,6 +815,7 @@ export default function Designer({
                 onLoad={() => handleFrameLoad("a")}
                 className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "a" ? "" : "pointer-events-none opacity-0"}`}
                 title="live-view"
+                data-live-active={activeSlot === "a"}
               />
               <iframe
                 ref={frameBRef}
@@ -822,6 +823,7 @@ export default function Designer({
                 onLoad={() => handleFrameLoad("b")}
                 className={`absolute inset-0 h-full w-full border-0 bg-white ${activeSlot === "b" ? "" : "pointer-events-none opacity-0"}`}
                 title="live-view-buffer"
+                data-live-active={activeSlot === "b"}
               />
               {reloading && (
                 <div className="absolute inset-0 z-10 animate-pulse space-y-4 bg-white p-6">
