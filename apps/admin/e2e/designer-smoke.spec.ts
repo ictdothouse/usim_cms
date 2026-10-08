@@ -78,3 +78,59 @@ test("Designer: add element, save, reload, layout persists", async ({ page, cont
 
   await expect(page.locator("main.p-6").getByText("Heading", { exact: true })).toBeVisible();
 });
+
+test("Designer: Live Edit drag-to-add creates a new section with the dropped element", async ({ page, context }) => {
+  const { pageId, tenantHost, cookieValue, csrfToken } = await seedDesignerPage();
+
+  await context.addCookies([
+    {
+      name: "ucms_session",
+      value: cookieValue,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: false,
+    },
+  ]);
+  const session = JSON.stringify({
+    token: csrfToken,
+    role: "superadmin",
+    tenantHost,
+    tenantHosts: [tenantHost],
+  });
+  await page.addInitScript((json) => {
+    window.localStorage.setItem("usim_cms_session", json);
+  }, session);
+
+  await page.goto(`/content/pages/${pageId}`);
+
+  // Live Edit is the default view (see Designer.tsx's own "opens by
+  // default" note) — no mode toggle needed. The palette item has no
+  // [draggable="true"] attribute in this mode (DesignerPalette.tsx sets
+  // draggable={mode !== "live"}), so it's located by its visible text
+  // instead, and dragged via a real pointer sequence (mousedown/move/up)
+  // rather than Playwright's HTML5-DnD-only dragTo() helper.
+  const headingPaletteItem = page.getByText("Heading", { exact: true }).first();
+  await expect(headingPaletteItem).toBeVisible();
+
+  const iframe = page.locator('iframe[title="live-view"]');
+  await expect(iframe).toBeVisible();
+  const box = await iframe.boundingBox();
+  if (!box) throw new Error("live-view iframe has no bounding box");
+
+  const start = await headingPaletteItem.boundingBox();
+  if (!start) throw new Error("Heading palette item has no bounding box");
+
+  // Drop near the middle of the live-rendered page — an empty page's only
+  // content is the "+ Add Section"-equivalent empty state, so any drop
+  // point resolves to "new-section".
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  // The drop triggers mutate() -> autosave -> Live Edit reload; the new
+  // Heading renders for real inside the iframe once that reload completes.
+  await expect(page.frameLocator('iframe[title="live-view"]').getByText("Heading", { exact: true })).toBeVisible({ timeout: 10000 });
+});
