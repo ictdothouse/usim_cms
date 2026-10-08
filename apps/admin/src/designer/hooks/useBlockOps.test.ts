@@ -176,6 +176,25 @@ test("dropIntoNewSection: an explicit afterBlockIndex inserts the new section ri
   assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
 });
 
+test("dropIntoNewSection: a stale afterBlockIndex far past the array end doesn't crash — the new section lands at the real end, not past it (regression test for the final review's splice/colPath mismatch finding)", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new", type: "heading" };
+  assert.doesNotThrow(() => ops.dropIntoNewSection(999));
+  assert.equal(state.blocks.length, 2);
+  const inserted = state.blocks[1] as unknown as { props: { rows: { columns: { elements: { type: string }[] }[] }[] } };
+  assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
+});
+
+test("dropIntoColumn: a colPath that doesn't resolve to a real column (e.g. a row deleted since the drop target was computed) no-ops instead of throwing", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new", type: "heading" };
+  const before = JSON.stringify(state.blocks);
+  assert.doesNotThrow(() => ops.dropIntoColumn([0, 5, 0], 0));
+  assert.equal(JSON.stringify(state.blocks), before);
+});
+
 test("dropIntoNewSection: a Layout 'new-section' preset inserts a fresh empty Block at afterBlockIndex+1", () => {
   const { deps, state } = makeDeps(twoSectionBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);

@@ -328,6 +328,19 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
       return;
     }
     mutate((bs) => {
+      // colPath can be stale by the time this actually commits — Live Edit
+      // resolves it from a postMessage-reported hover that may lag a
+      // concurrent reload/edit (e.g. the hovered row was deleted a moment
+      // earlier). childrenOf throws on a path that no longer addresses a
+      // real list; treat that as "the drop target disappeared", not a crash
+      // (this codebase has no top-level ErrorBoundary around Designer).
+      let children: unknown;
+      try {
+        children = childrenOf(bs, colPath);
+      } catch {
+        return;
+      }
+      if (!Array.isArray(children)) return;
       if (d.kind === "new") {
         insertAt(bs, colPath, newEl(d.type, d.propsOverride), index);
         return;
@@ -365,7 +378,13 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
       return;
     }
     mutate((bs) => {
-      const at = afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1;
+      // Clamped to where insertAt's own splice will ACTUALLY place the new
+      // section (splice silently clamps an out-of-range index to the
+      // array's end) — a stale afterBlockIndex (e.g. a section deleted
+      // since this target was resolved) would otherwise leave colPath
+      // pointing at an index past the real array, crashing on the very
+      // node this function itself just created.
+      const at = Math.min(afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1, bs.length);
       insertAt(bs, [], newSection(), at);
       const colPath = [at, 0, 0];
       if (d.kind === "new") {
