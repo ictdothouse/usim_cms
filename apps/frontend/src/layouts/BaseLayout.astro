@@ -1138,13 +1138,29 @@ const fontsHref = allFonts.length
             return pointerY < midpoint ? hoveredIndex : hoveredIndex + 1;
           }
 
-          function resolveDropTargetFromPathPlain(path, pointerY, rect, sectionCount) {
-            if (!path) return { kind: "new-section", afterBlockIndex: sectionCount - 1 };
+          // Kept narrow (a fixed px band, not the generous 1/3 the
+          // section's OWN box gets when hovered directly) so it doesn't
+          // swallow most of a tall, content-packed section's own
+          // drop-into-column area. See liveEditDropTarget.ts's own comment.
+          const SECTION_EDGE_BAND_PX = 12;
+
+          function resolveDropTargetFromPathPlain(path, pointerY, hoveredRect, sectionRect, sectionCount) {
+            if (!path || !hoveredRect) return { kind: "new-section", afterBlockIndex: sectionCount - 1 };
+            const sectionIndex = path[0];
             if (path.length === 1) {
-              const third = rect.height / 3;
-              if (pointerY <= rect.top + third) return { kind: "new-section", afterBlockIndex: path[0] - 1 };
-              if (pointerY >= rect.bottom - third) return { kind: "new-section", afterBlockIndex: path[0] };
-              return { kind: "into-column", colPath: [path[0], 0, 0] };
+              const third = hoveredRect.height / 3;
+              if (pointerY <= hoveredRect.top + third) return { kind: "new-section", afterBlockIndex: sectionIndex - 1 };
+              if (pointerY >= hoveredRect.bottom - third) return { kind: "new-section", afterBlockIndex: sectionIndex };
+              return { kind: "into-column", colPath: [sectionIndex, 0, 0] };
+            }
+            // A full-bleed/zero-padding section's own box is never
+            // directly reachable via elementFromPoint (its content fills
+            // the whole box) — without this fallback, "drop between
+            // sections" would have no reachable zone at all for such a
+            // section.
+            if (sectionRect) {
+              if (pointerY <= sectionRect.top + SECTION_EDGE_BAND_PX) return { kind: "new-section", afterBlockIndex: sectionIndex - 1 };
+              if (pointerY >= sectionRect.bottom - SECTION_EDGE_BAND_PX) return { kind: "new-section", afterBlockIndex: sectionIndex };
             }
             // Column-level node: the path itself IS the column to append
             // into — must NOT fall into the element branch below (that
@@ -1153,7 +1169,7 @@ const fontsHref = allFonts.length
             if (path.length === 3) return { kind: "into-column", colPath: path };
             const colPath = path.slice(0, -1);
             const hoveredIndex = path[path.length - 1];
-            const index = resolveInsertionIndexPlain(pointerY, rect.top, rect.height, hoveredIndex);
+            const index = resolveInsertionIndexPlain(pointerY, hoveredRect.top, hoveredRect.height, hoveredIndex);
             return { kind: "into-column", colPath, index };
           }
 
@@ -1163,7 +1179,7 @@ const fontsHref = allFonts.length
             const el = document.elementFromPoint(x, y);
             const node = el && el.closest("[data-designer-path]");
             const sectionCount = document.querySelectorAll('[data-designer-path]:not([data-designer-path*="."])').length;
-            if (!node) return resolveDropTargetFromPathPlain(null, y, null, sectionCount);
+            if (!node) return resolveDropTargetFromPathPlain(null, y, null, null, sectionCount);
             const path = node.dataset.designerPath.split(".").map(Number);
             // Element-level wrappers render as display:contents
             // (SectionBlock.astro) and have no box of their own —
@@ -1172,7 +1188,9 @@ const fontsHref = allFonts.length
             // already needs it (see this file's own reportSelectedRect).
             const measureNode = path.length >= 4 ? visualTarget(node) : node;
             const rect = measureNode.getBoundingClientRect();
-            return resolveDropTargetFromPathPlain(path, y, rect, sectionCount);
+            const sectionNode = path.length === 1 ? node : findByPath(String(path[0]));
+            const sectionRect = sectionNode ? sectionNode.getBoundingClientRect() : null;
+            return resolveDropTargetFromPathPlain(path, y, rect, sectionRect, sectionCount);
           }
 
           function drawDropIndicator(target) {
@@ -1189,9 +1207,14 @@ const fontsHref = allFonts.length
             }
             dropIndicatorEl.style.display = "block";
             if (target.kind === "new-section") {
-              const sections = document.querySelectorAll('[data-designer-path]:not([data-designer-path*="."])');
-              const after = sections[target.afterBlockIndex];
-              const before = sections[target.afterBlockIndex + 1];
+              // By exact path match (findByPath), not a NodeList index —
+              // an unstamped block type (e.g. GenericBlock) or a
+              // breakpoint-hidden section shifts a plain querySelectorAll
+              // NodeList out of alignment with the real block index,
+              // drawing the line at the wrong boundary (final review
+              // finding; visual-only, the commit itself was never wrong).
+              const after = findByPath(String(target.afterBlockIndex));
+              const before = findByPath(String(target.afterBlockIndex + 1));
               const y = after ? after.getBoundingClientRect().bottom : before ? before.getBoundingClientRect().top : 0;
               Object.assign(dropIndicatorEl.style, { left: "0", width: "100%", top: `${y - 2}px`, height: "4px", background: "#0f62fe", border: "none" });
             } else {
