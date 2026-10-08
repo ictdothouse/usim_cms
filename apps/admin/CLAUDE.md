@@ -1585,3 +1585,41 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `docs/superpowers/specs/2026-10-08-live-edit-drag-to-add-design.md` for the
   full design, including the Webflow/Wix same-origin-canvas alternative that
   was considered and rejected as a much larger, separate architecture change.
+  **A fresh final-branch review (same day) found 2 Critical + 7 Important bugs
+  in the first pass, all fixed before this landed**: a column-level hover
+  (`data-designer-path` length 3, e.g. an empty column) was resolved as its
+  PARENT row, splicing an element into `Row.columns` instead of
+  `Column.elements` — silent tree corruption that autosave would persist and
+  that white-screens Blocks mode/the Layers tree on reload (no
+  `ErrorBoundary` exists); `resolveDropTargetFromPath` (`liveEditDropTarget.ts`)
+  is now the single tested source of that decision. Element wrappers render
+  `display:contents` (no box of their own), so "insert before the hovered
+  element" always measured a zero-height rect and could never trigger — fixed
+  by measuring `visualTarget(node)` instead, same reason the existing
+  selection-outline code already needs it. `dropIntoColumn`/`dropIntoNewSection`
+  could throw on a target that went stale between resolution and commit (a
+  concurrent edit/reload deleting the hovered row, or a stale
+  `afterBlockIndex` landing past where `insertAt`'s own splice actually
+  clamped it) — both now guarded/clamped rather than crashing. A non-curated
+  element type could be dropped into a container's own children, bypassing
+  `ContainerChildrenPanel`'s curated list (`CONTAINER_CHILD_TYPES`, moved to
+  `elements.ts` so this hook can share it) — saved fine, rendered as nothing.
+  The gesture hook's `onMove`/`onUp` closures captured a single resolved
+  iframe/src pair at drag-start and never re-resolved it, so a mid-drag
+  reload (every drop triggers one) left the rest of that gesture targeting
+  the now-hidden buffer frame — now resolves the active frame fresh via
+  stable `frameARef`/`frameBRef`/`activeSlotRef` refs on every pointer event.
+  A pending `requestAnimationFrame` read coordinates closed over from
+  whichever `pointermove` scheduled it and was never cancelled, so a
+  browser's typical coalesced move right before `pointerup` could post after
+  the drag had already ended — now reads the latest position from a ref and
+  cancels on cleanup. `Designer.tsx`'s two Live Edit iframes also gained a
+  `data-live-active` attribute (which slot is actually visible right now) so
+  anything — tests included — can target the live one without assuming
+  slot A. Also: dropping onto a genuinely empty page (no sections yet)
+  previously had no resolvable drop target at all — fixed as part of the
+  same `resolveDropTargetFromPath` rewrite. See the plan's own ledger
+  (`.superpowers/sdd/2026-10-08-live-edit-drag-to-add/progress.md`, deleted
+  once this landed — see git history for its content) for the full review
+  report and the Minor findings deliberately deferred (ghost-render perf,
+  touch support, a few visual-only edge cases).
