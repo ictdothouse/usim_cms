@@ -459,7 +459,7 @@ export default function Designer({
     activeSlotRef.current = activeSlot;
   }, [activeSlot]);
 
-  const { ghost, startPaletteDrag } = useLiveEditPaletteDrag({
+  const { ghostLabel, ghostElRef, startPaletteDrag } = useLiveEditPaletteDrag({
     drag,
     frameARef,
     frameBRef,
@@ -793,12 +793,14 @@ export default function Designer({
           patchChromeMeta={patchChromeMeta}
         />
 
-        {ghost && (
-          <div
-            className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-accent bg-white px-2.5 py-1.5 text-xs font-medium text-ink shadow-lg"
-            style={{ left: ghost.x, top: ghost.y }}
-          >
-            {ghost.label}
+        {/* Position is written directly to this node's own style.transform
+            by useLiveEditPaletteDrag on every pointermove (a ref write, not
+            React state) so dragging the ghost around doesn't re-render
+            Designer's whole tree every frame — only mount/unmount (driven
+            by ghostLabel) goes through state. */}
+        {ghostLabel && (
+          <div ref={ghostElRef} className="pointer-events-none fixed left-0 top-0 z-50 rounded-lg border border-accent bg-white px-2.5 py-1.5 text-xs font-medium text-ink shadow-lg">
+            {ghostLabel}
           </div>
         )}
 

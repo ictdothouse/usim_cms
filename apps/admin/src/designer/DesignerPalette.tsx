@@ -199,7 +199,13 @@ export function DesignerPalette({
                     }
                     onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
                     onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, preset.drag, t(preset.labelKey)) : undefined}
-                    className="flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-[10px] font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+                    // touch-none: without it, a touch-drag on this item
+                    // scrolls the sidebar instead (the browser's own
+                    // default touch-scroll gesture wins before pointermove
+                    // ever fires), firing pointercancel immediately — the
+                    // gesture never gets a chance to start on a touch
+                    // device (final review finding).
+                    className="touch-none flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-[10px] font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
                   >
                     <Icon className="h-4 w-4 text-accent" /> {t(preset.labelKey)}
                   </div>
@@ -227,7 +233,7 @@ export function DesignerPalette({
                     }
                     onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
                     onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, { kind: "new", type }, t(ELS[type].labelKey)) : undefined}
-                    className="flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+                    className="touch-none flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
                   >
                     <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
                   </div>
