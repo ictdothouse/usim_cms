@@ -409,13 +409,11 @@ export default function Designer({
   const {
     mode,
     toggleLive,
-    liveSrc,
     liveSrcA,
     liveSrcB,
     activeSlot,
     frameARef,
     frameBRef,
-    liveFrame,
     handleFrameLoad,
   } = useLiveEditBridge({
     bp,
@@ -450,10 +448,22 @@ export default function Designer({
     setSliderInnerSel,
   });
 
+  // Mirrored into a ref (not read as a plain `activeSlot` value) so the
+  // drag gesture's event closures — created once at pointerdown and never
+  // recreated mid-drag — always see which iframe is CURRENTLY visible,
+  // including right after a drop's own reload swaps it (every drop
+  // triggers exactly this reload). See useLiveEditPaletteDrag.ts's own
+  // comment on its frameARef/frameBRef/activeSlotRef deps.
+  const activeSlotRef = useRef(activeSlot);
+  useEffect(() => {
+    activeSlotRef.current = activeSlot;
+  }, [activeSlot]);
+
   const { ghost, startPaletteDrag } = useLiveEditPaletteDrag({
     drag,
-    liveFrame,
-    liveSrc,
+    frameARef,
+    frameBRef,
+    activeSlotRef,
     dropIntoColumn,
     dropIntoNewSection,
   });
