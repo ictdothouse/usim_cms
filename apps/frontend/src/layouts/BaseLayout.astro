@@ -1124,8 +1124,103 @@ const fontsHref = allFonts.length
             true,
           );
 
+          let lastReportedTarget = null;
+          let dropIndicatorEl = null;
+
+          // Hand-ported from apps/admin/src/designer/liveEditDropTarget.ts's
+          // resolveInsertionIndex — this script is <script is:inline>
+          // (deliberately unbundled plain JS, no imports), so the two copies
+          // are kept in sync by hand. Keep the logic identical.
+          function resolveInsertionIndexPlain(pointerY, hoveredTop, hoveredHeight, hoveredIndex) {
+            const midpoint = hoveredTop + hoveredHeight / 2;
+            return pointerY < midpoint ? hoveredIndex : hoveredIndex + 1;
+          }
+
+          // x/y are iframe-local px (already translated by the admin parent
+          // via clientToIframeLocal before this message was sent).
+          function resolveDropTarget(x, y) {
+            const el = document.elementFromPoint(x, y);
+            const node = el && el.closest("[data-designer-path]");
+            if (!node) return null;
+            const path = node.dataset.designerPath.split(".").map(Number);
+            const rect = node.getBoundingClientRect();
+            // Section-level node (path length 1): top/bottom ~1/3 of its own
+            // box means "drop between sections", not "into this section's
+            // first column".
+            if (path.length === 1) {
+              const third = rect.height / 3;
+              if (y <= rect.top + third) return { kind: "new-section", afterBlockIndex: path[0] - 1 };
+              if (y >= rect.bottom - third) return { kind: "new-section", afterBlockIndex: path[0] };
+              return { kind: "into-column", colPath: [path[0], 0, 0] };
+            }
+            // Element-level node (any length >= 4, including a container's
+            // own nested children): resolve to its PARENT's children array
+            // (colPath = its own path minus the last index) and an
+            // insertion index relative to its own position there — generic
+            // over depth, matching insertAt/childrenOf's own depth-agnostic
+            // behavior (see designerTree.ts).
+            const colPath = path.slice(0, -1);
+            const hoveredIndex = path[path.length - 1];
+            const index = resolveInsertionIndexPlain(y, rect.top, rect.height, hoveredIndex);
+            return { kind: "into-column", colPath, index };
+          }
+
+          function drawDropIndicator(target) {
+            if (!target) {
+              if (dropIndicatorEl) dropIndicatorEl.style.display = "none";
+              return;
+            }
+            if (!dropIndicatorEl) {
+              dropIndicatorEl = document.createElement("div");
+              dropIndicatorEl.style.position = "fixed";
+              dropIndicatorEl.style.zIndex = "99999";
+              dropIndicatorEl.style.pointerEvents = "none";
+              document.body.appendChild(dropIndicatorEl);
+            }
+            dropIndicatorEl.style.display = "block";
+            if (target.kind === "new-section") {
+              const sections = document.querySelectorAll('[data-designer-path]:not([data-designer-path*="."])');
+              const after = sections[target.afterBlockIndex];
+              const before = sections[target.afterBlockIndex + 1];
+              const y = after ? after.getBoundingClientRect().bottom : before ? before.getBoundingClientRect().top : 0;
+              Object.assign(dropIndicatorEl.style, { left: "0", width: "100%", top: `${y - 2}px`, height: "4px", background: "#0f62fe", border: "none" });
+            } else {
+              const colNode = document.querySelector(`[data-designer-path="${target.colPath.join(".")}"]`);
+              if (!colNode) {
+                dropIndicatorEl.style.display = "none";
+                return;
+              }
+              const rect = colNode.getBoundingClientRect();
+              Object.assign(dropIndicatorEl.style, {
+                left: `${rect.left}px`,
+                width: `${rect.width}px`,
+                top: `${rect.top}px`,
+                height: `${rect.height}px`,
+                background: "rgba(15, 98, 254, 0.15)",
+                border: "2px dashed #0f62fe",
+              });
+            }
+          }
+
           window.addEventListener("message", (e) => {
             if (e.origin !== targetOrigin || !e.data) return;
+            // Live Edit drag-to-add (see
+            // docs/superpowers/specs/2026-10-08-live-edit-drag-to-add-design.md).
+            // dropIndicatorEl is a single reused <div>, created lazily on
+            // first use and repositioned on every move rather than recreated.
+            if (e.data.type === "designer:paletteDragMove") {
+              const target = resolveDropTarget(e.data.x, e.data.y);
+              const changed = JSON.stringify(target) !== JSON.stringify(lastReportedTarget);
+              lastReportedTarget = target;
+              drawDropIndicator(target);
+              if (changed) parent.postMessage({ type: "designer:dropTarget", target }, targetOrigin);
+              return;
+            }
+            if (e.data.type === "designer:paletteDragEnd") {
+              lastReportedTarget = null;
+              drawDropIndicator(null);
+              return;
+            }
             if (e.data.type === "designer:restoreScroll") {
               window.scrollTo(0, e.data.y ?? 0);
               return;
