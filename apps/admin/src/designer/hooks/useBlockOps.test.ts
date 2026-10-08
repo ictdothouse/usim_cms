@@ -147,3 +147,41 @@ test("dropIntoColumn: a Layout 'new-section' preset inserts a fresh Block right 
   assert.equal(state.blocks.length, 2);
   assert.equal(state.blocks[1].type, "section");
 });
+
+function twoSectionBlocks(): Block[] {
+  return [
+    { type: "section", props: { rows: [{ columns: [{ span: 1, elements: [] }] }] } } as unknown as Block,
+    { type: "section", props: { rows: [{ columns: [{ span: 1, elements: [] }] }], anchorId: "second" } } as unknown as Block,
+  ];
+}
+
+test("dropIntoNewSection: appends a fresh section with the dragged element at the very end by default", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new", type: "heading" };
+  ops.dropIntoNewSection();
+  assert.equal(state.blocks.length, 2);
+  const inserted = state.blocks[1] as unknown as { props: { rows: { columns: { elements: { type: string }[] }[] }[] } };
+  assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
+});
+
+test("dropIntoNewSection: an explicit afterBlockIndex inserts the new section right after that index, not at the end", () => {
+  const { deps, state } = makeDeps(twoSectionBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new", type: "heading" };
+  ops.dropIntoNewSection(0);
+  assert.equal(state.blocks.length, 3);
+  assert.equal((state.blocks[2].props as { anchorId?: string }).anchorId, "second", "original second section stays last");
+  const inserted = state.blocks[1] as unknown as { props: { rows: { columns: { elements: { type: string }[] }[] }[] } };
+  assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
+});
+
+test("dropIntoNewSection: a Layout 'new-section' preset inserts a fresh empty Block at afterBlockIndex+1", () => {
+  const { deps, state } = makeDeps(twoSectionBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-section" };
+  ops.dropIntoNewSection(0);
+  assert.equal(state.blocks.length, 3);
+  assert.equal(state.blocks[1].type, "section");
+  assert.equal((state.blocks[2].props as { anchorId?: string }).anchorId, "second");
+});
