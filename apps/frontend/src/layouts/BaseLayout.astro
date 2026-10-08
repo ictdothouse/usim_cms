@@ -1128,12 +1128,33 @@ const fontsHref = allFonts.length
           let dropIndicatorEl = null;
 
           // Hand-ported from apps/admin/src/designer/liveEditDropTarget.ts's
-          // resolveInsertionIndex — this script is <script is:inline>
-          // (deliberately unbundled plain JS, no imports), so the two copies
-          // are kept in sync by hand. Keep the logic identical.
+          // resolveInsertionIndex/resolveDropTargetFromPath — this script is
+          // <script is:inline> (deliberately unbundled plain JS, no
+          // imports), so the two copies are kept in sync by hand. Keep the
+          // logic identical — liveEditDropTarget.test.ts is this function's
+          // real test coverage, run there, not here.
           function resolveInsertionIndexPlain(pointerY, hoveredTop, hoveredHeight, hoveredIndex) {
             const midpoint = hoveredTop + hoveredHeight / 2;
             return pointerY < midpoint ? hoveredIndex : hoveredIndex + 1;
+          }
+
+          function resolveDropTargetFromPathPlain(path, pointerY, rect, sectionCount) {
+            if (!path) return { kind: "new-section", afterBlockIndex: sectionCount - 1 };
+            if (path.length === 1) {
+              const third = rect.height / 3;
+              if (pointerY <= rect.top + third) return { kind: "new-section", afterBlockIndex: path[0] - 1 };
+              if (pointerY >= rect.bottom - third) return { kind: "new-section", afterBlockIndex: path[0] };
+              return { kind: "into-column", colPath: [path[0], 0, 0] };
+            }
+            // Column-level node: the path itself IS the column to append
+            // into — must NOT fall into the element branch below (that
+            // would splice an element into the PARENT row's own columns
+            // array instead of this column's elements array).
+            if (path.length === 3) return { kind: "into-column", colPath: path };
+            const colPath = path.slice(0, -1);
+            const hoveredIndex = path[path.length - 1];
+            const index = resolveInsertionIndexPlain(pointerY, rect.top, rect.height, hoveredIndex);
+            return { kind: "into-column", colPath, index };
           }
 
           // x/y are iframe-local px (already translated by the admin parent
@@ -1141,28 +1162,17 @@ const fontsHref = allFonts.length
           function resolveDropTarget(x, y) {
             const el = document.elementFromPoint(x, y);
             const node = el && el.closest("[data-designer-path]");
-            if (!node) return null;
+            const sectionCount = document.querySelectorAll('[data-designer-path]:not([data-designer-path*="."])').length;
+            if (!node) return resolveDropTargetFromPathPlain(null, y, null, sectionCount);
             const path = node.dataset.designerPath.split(".").map(Number);
-            const rect = node.getBoundingClientRect();
-            // Section-level node (path length 1): top/bottom ~1/3 of its own
-            // box means "drop between sections", not "into this section's
-            // first column".
-            if (path.length === 1) {
-              const third = rect.height / 3;
-              if (y <= rect.top + third) return { kind: "new-section", afterBlockIndex: path[0] - 1 };
-              if (y >= rect.bottom - third) return { kind: "new-section", afterBlockIndex: path[0] };
-              return { kind: "into-column", colPath: [path[0], 0, 0] };
-            }
-            // Element-level node (any length >= 4, including a container's
-            // own nested children): resolve to its PARENT's children array
-            // (colPath = its own path minus the last index) and an
-            // insertion index relative to its own position there — generic
-            // over depth, matching insertAt/childrenOf's own depth-agnostic
-            // behavior (see designerTree.ts).
-            const colPath = path.slice(0, -1);
-            const hoveredIndex = path[path.length - 1];
-            const index = resolveInsertionIndexPlain(y, rect.top, rect.height, hoveredIndex);
-            return { kind: "into-column", colPath, index };
+            // Element-level wrappers render as display:contents
+            // (SectionBlock.astro) and have no box of their own —
+            // visualTarget (defined above) resolves to the real rendered
+            // child, the same reason the click/selection-outline code
+            // already needs it (see this file's own reportSelectedRect).
+            const measureNode = path.length >= 4 ? visualTarget(node) : node;
+            const rect = measureNode.getBoundingClientRect();
+            return resolveDropTargetFromPathPlain(path, y, rect, sectionCount);
           }
 
           function drawDropIndicator(target) {
