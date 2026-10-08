@@ -1618,8 +1618,22 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   anything — tests included — can target the live one without assuming
   slot A. Also: dropping onto a genuinely empty page (no sections yet)
   previously had no resolvable drop target at all — fixed as part of the
-  same `resolveDropTargetFromPath` rewrite. See the plan's own ledger
-  (`.superpowers/sdd/2026-10-08-live-edit-drag-to-add/progress.md`, deleted
-  once this landed — see git history for its content) for the full review
-  report and the Minor findings deliberately deferred (ghost-render perf,
-  touch support, a few visual-only edge cases).
+  same `resolveDropTargetFromPath` rewrite. Every Minor finding from that
+  same review was fixed in a follow-up pass too, at the user's own request
+  (none deferred in the end): a fixed-px edge band so a full-bleed/
+  zero-padding section has a reachable "drop between sections" zone at
+  all; the between-sections indicator LINE now looks its section up by
+  real path instead of a `querySelectorAll` NodeList index (visual-only,
+  the commit was always correct); `clientToIframeLocal` now guards both
+  sides of its scale ratio, not just `offsetWidth`; a "new-row" Layout
+  preset dropped onto a Live-Edit new-section target now actually creates
+  that row instead of silently no-oping; `dropIntoColumn`'s own pre-existing
+  `new-row` branch gained the lock check every other mutator here already
+  had; the ghost tooltip's position now writes straight to its own DOM
+  node's `style.transform` on every `pointermove` instead of round-tripping
+  through React state (was re-rendering Designer's whole tree per move);
+  the gesture hook gained unmount cleanup, a `lostpointercapture` handler,
+  a re-entry guard against a second concurrent gesture, `touch-none` on the
+  palette items, and throttled its `paletteDragEnd` message to the
+  inside-to-outside transition instead of every frame spent outside the
+  iframe.
