@@ -111,28 +111,38 @@ export function FieldGroups({
             </button>
             {isOpen && (
               <div className="space-y-3 pb-1">
-                {groupFields.map((f) => (
-                  <label key={f.key} className="block text-[11px] font-medium text-body">
-                    <span className="inline-flex items-center gap-1">
-                      {FieldLabel(f.labelKey, t)}
-                      {hasLangOverride && onToggleLangOverride && g.key !== "content" && f.kind !== "slides" && f.kind !== "image" && (
-                        <LangToggle active={hasLangOverride(f)} onToggle={() => onToggleLangOverride(f)} t={t} />
-                      )}
-                      {hasOverride && onToggleOverride && f.kind !== "slides" && f.kind !== "image" && (
-                        <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
-                      )}
-                    </span>
-                    <div className="mt-1">
-                      {FieldInput({
-                        field: f, value: getValue(f), onChange: (v) => setValue(f, v),
-                        iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
-                        sliderInnerSel, setSliderInnerSel,
-                        bp, t, uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
-                        availableMenus, availableCategories, availableSymbols, ICONS,
-                      })}
-                    </div>
-                  </label>
-                ))}
+                {groupFields.map((f) => {
+                  // A <label> with no `for` forwards a click anywhere inside it
+                  // (including bare text) to the first labelable descendant —
+                  // fine for a single input, but a multi-control repeater field
+                  // (several Remove/Upload/Add buttons per item) means clicking
+                  // near its title silently "clicks" slide/card/pair #1's own
+                  // first button. Plain `<div>` for these; `<label>` stays for
+                  // single-control fields where click-to-focus is the point.
+                  const Wrapper = f.kind === "slides" || f.kind === "cards" || f.kind === "pairs" || f.kind === "repeater" || f.kind === "gallery" ? "div" : "label";
+                  return (
+                    <Wrapper key={f.key} className="block text-[11px] font-medium text-body">
+                      <span className="inline-flex items-center gap-1">
+                        {FieldLabel(f.labelKey, t)}
+                        {hasLangOverride && onToggleLangOverride && g.key !== "content" && f.kind !== "slides" && f.kind !== "image" && (
+                          <LangToggle active={hasLangOverride(f)} onToggle={() => onToggleLangOverride(f)} t={t} />
+                        )}
+                        {hasOverride && onToggleOverride && f.kind !== "slides" && f.kind !== "image" && (
+                          <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
+                        )}
+                      </span>
+                      <div className="mt-1">
+                        {FieldInput({
+                          field: f, value: getValue(f), onChange: (v) => setValue(f, v),
+                          iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
+                          sliderInnerSel, setSliderInnerSel,
+                          bp, t, uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
+                          availableMenus, availableCategories, availableSymbols, ICONS,
+                        })}
+                      </div>
+                    </Wrapper>
+                  );
+                })}
               </div>
             )}
           </div>
