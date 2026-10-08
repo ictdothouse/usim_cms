@@ -1560,3 +1560,28 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   open. Mobile's off-canvas drawer mechanism collapsed from two toggle buttons/states
   (`mobilePanel: "palette" | "inspector" | null`) to one (`"palette" | null`) for the same reason — only
   one drawer exists now.
+
+  **Live Edit drag-to-add (2026-10-08)**: the postMessage bridge
+  (`useLiveEditBridge.ts`/`BaseLayout.astro`'s `designerEdit` script), previously
+  selection-only, now also supports dragging an element from the Elements
+  palette directly onto the real rendered page — dropping either between two
+  sections (auto-wrapped in a new section/row/column, same as Blocks mode's
+  `dropIntoNewSection`) or into an existing column (`dropIntoColumn`), with no
+  new mutation logic in either case. The gesture uses `Element.setPointerCapture`
+  (not native HTML5 Drag-and-Drop — `dataTransfer` access during `dragover` is
+  spec-restricted to `.types` only in every browser, and cross-origin iframe
+  drag has known extra browser restrictions) so the admin parent keeps
+  receiving `pointermove`/`pointerup` even while the cursor is visually over
+  the cross-origin Live Edit iframe; the iframe only ever reports where the
+  pointer resolved to (`designer:dropTarget`) and draws its own local
+  drop-indicator overlay, never mutating the block tree itself. New:
+  `designer/liveEditDropTarget.ts` (coordinate-mapping + insertion-index pure
+  math, hand-ported into `BaseLayout.astro`'s inline script since that script
+  is deliberately unbundled and can't import it) and
+  `designer/hooks/useLiveEditPaletteDrag.ts` (the gesture itself).
+  `dropIntoNewSection()` gained an optional `afterBlockIndex` parameter for
+  this (Blocks mode's own existing callers are unaffected — omitting it keeps
+  the original append-at-the-end behavior). See
+  `docs/superpowers/specs/2026-10-08-live-edit-drag-to-add-design.md` for the
+  full design, including the Webflow/Wix same-origin-canvas alternative that
+  was considered and rejected as a much larger, separate architecture change.
