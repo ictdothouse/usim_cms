@@ -37,16 +37,47 @@ export interface LiveEditPaletteDragDeps {
 }
 
 export interface LiveEditPaletteDragApi {
-  ghost: { label: string; x: number; y: number } | null;
+  // Only the label + visibility go through React state (2 renders per
+  // drag: start and end) — position updates write directly to ghostElRef's
+  // own style.transform on every pointermove instead of re-rendering
+  // Designer's whole tree per move (this was a real perf finding: ghost
+  // used to be one `{label,x,y}` state object replaced every move).
+  // Designer.tsx attaches ghostElRef to the actual ghost <div>.
+  ghostLabel: string | null;
+  ghostElRef: React.RefObject<HTMLDivElement>;
   startPaletteDrag: (e: React.PointerEvent<HTMLElement>, payload: Drag, label: string) => void;
 }
 
 export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditPaletteDragApi {
   const { drag, frameARef, frameBRef, activeSlotRef, dropIntoColumn, dropIntoNewSection } = deps;
-  const [ghost, setGhost] = useState<{ label: string; x: number; y: number } | null>(null);
+  const [ghostLabel, setGhostLabel] = useState<string | null>(null);
+  const ghostElRef = useRef<HTMLDivElement>(null);
   const lastTarget = useRef<DropTarget | null>(null);
   const rafId = useRef<number | null>(null);
   const latestPoint = useRef<{ x: number; y: number } | null>(null);
+  // True for the whole lifetime of one gesture — guards against a second
+  // pointerdown (e.g. a second finger, or a stray event) starting a
+  // concurrent gesture that would share this hook's single-slot
+  // drag/lastTarget/ghost state with the first (final review finding).
+  const activeDragRef = useRef(false);
+  // The current gesture's own teardown, callable from the unmount effect
+  // below without needing to know which gesture (if any) is in progress —
+  // there was previously no cleanup at all if the component unmounted
+  // mid-drag (final review finding).
+  const endGestureRef = useRef<(() => void) | null>(null);
+
+  // dropIntoColumn/dropIntoNewSection are recreated every render in
+  // Designer.tsx (useBlockOps returns new closures each time) — read
+  // through refs so startPaletteDrag's own identity stays stable across
+  // renders instead of churning its useCallback dependency array for no
+  // behavioral reason (final review finding; the churn itself was always
+  // harmless, this just makes memoization actually hold).
+  const dropIntoColumnRef = useRef(dropIntoColumn);
+  const dropIntoNewSectionRef = useRef(dropIntoNewSection);
+  useEffect(() => {
+    dropIntoColumnRef.current = dropIntoColumn;
+    dropIntoNewSectionRef.current = dropIntoNewSection;
+  });
 
   const getActiveFrame = useCallback((): HTMLIFrameElement | null => {
     return activeSlotRef.current === "a" ? frameARef.current : frameBRef.current;
@@ -87,8 +118,18 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
     [getActiveFrame],
   );
 
+  // Ends whichever gesture is currently running, if any — safe to call
+  // from the unmount effect, from a lostpointercapture event (the browser
+  // revoking capture for a reason other than releasePointerCapture()), or
+  // from the gesture's own normal onUp/onCancel paths.
+  useEffect(() => {
+    return () => endGestureRef.current?.();
+  }, []);
+
   const startPaletteDrag = useCallback(
     (e: React.PointerEvent<HTMLElement>, payload: Drag, label: string) => {
+      if (activeDragRef.current) return;
+      activeDragRef.current = true;
       e.preventDefault();
       const el = e.currentTarget;
       const pointerId = e.pointerId;
@@ -96,7 +137,11 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
       drag.current = payload;
       lastTarget.current = null;
       latestPoint.current = null;
-      setGhost({ label, x: e.clientX, y: e.clientY });
+      let wasInside = true;
+      setGhostLabel(label);
+      if (ghostElRef.current) {
+        ghostElRef.current.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`;
+      }
       // Resets the iframe's own dropTarget dedupe/overlay from any PRIOR
       // gesture that ended abnormally (e.g. its own final rAF tick landed
       // after that gesture's paletteDragEnd — see onMove's comment below) —
@@ -115,9 +160,16 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
           const inside = p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
           if (!inside) {
             lastTarget.current = null;
-            postToIframe({ type: "designer:paletteDragEnd" });
+            // Only post once on the inside->outside transition, not every
+            // frame the pointer stays outside — this used to spam the
+            // iframe with an identical message for the whole time the
+            // cursor sat over the admin's own chrome (final review
+            // finding).
+            if (wasInside) postToIframe({ type: "designer:paletteDragEnd" });
+            wasInside = false;
             return;
           }
+          wasInside = true;
           const { x, y } = clientToIframeLocal(p.x, p.y, rect, frame.offsetWidth);
           postToIframe({ type: "designer:paletteDragMove", x, y });
         });
@@ -132,19 +184,24 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
         // position win the race against the drag's own release (found by
         // the final branch review).
         latestPoint.current = { x: ev.clientX, y: ev.clientY };
-        setGhost({ label, x: ev.clientX, y: ev.clientY });
+        if (ghostElRef.current) {
+          ghostElRef.current.style.transform = `translate(${ev.clientX}px, ${ev.clientY}px) translate(-50%, -50%)`;
+        }
         scheduleMoveFrame();
       }
 
       function cleanup() {
+        el.removeEventListener("lostpointercapture", onLostCapture);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onCancel);
+        window.removeEventListener("pointercancel", onCancelEvent);
         if (rafId.current !== null) {
           cancelAnimationFrame(rafId.current);
           rafId.current = null;
         }
-        setGhost(null);
+        setGhostLabel(null);
+        activeDragRef.current = false;
+        endGestureRef.current = null;
       }
 
       function onUp(ev: PointerEvent) {
@@ -167,24 +224,39 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
           })();
         const target = stillInside ? lastTarget.current : null;
         lastTarget.current = null;
-        commitDropTarget(target, dropIntoColumn, dropIntoNewSection);
+        commitDropTarget(target, dropIntoColumnRef.current, dropIntoNewSectionRef.current);
         if (!target) drag.current = null;
       }
 
-      function onCancel(ev: PointerEvent) {
-        if (ev.pointerId !== pointerId) return;
+      function onCancel() {
         cleanup();
         drag.current = null;
         lastTarget.current = null;
         postToIframe({ type: "designer:paletteDragEnd" });
       }
 
+      // The browser can revoke pointer capture for reasons other than this
+      // gesture's own releasePointerCapture() call (final review finding;
+      // e.g. certain OS-level gesture interruptions) — treated identically
+      // to a cancel so the drag can never get stuck half-finished.
+      function onLostCapture(ev: PointerEvent) {
+        if (ev.pointerId !== pointerId) return;
+        onCancel();
+      }
+
+      function onCancelEvent(ev: PointerEvent) {
+        if (ev.pointerId !== pointerId) return;
+        onCancel();
+      }
+
+      endGestureRef.current = onCancel;
+      el.addEventListener("lostpointercapture", onLostCapture);
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onCancel);
+      window.addEventListener("pointercancel", onCancelEvent);
     },
-    [drag, getActiveFrame, dropIntoColumn, dropIntoNewSection, postToIframe],
+    [drag, getActiveFrame, postToIframe],
   );
 
-  return { ghost, startPaletteDrag };
+  return { ghostLabel, ghostElRef, startPaletteDrag };
 }
