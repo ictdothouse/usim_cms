@@ -25,7 +25,12 @@ export function clientToIframeLocal(
   iframeRect: IframeRectLike,
   iframeOffsetWidth: number,
 ): { x: number; y: number } {
-  const scale = iframeOffsetWidth ? iframeRect.width / iframeOffsetWidth : 1;
+  // Both sides of the ratio must be checked: offsetWidth is 0 before the
+  // iframe is ever laid out, but DeviceViewport's own transform:scale()
+  // being momentarily 0 (also "not yet laid out", a real state it passes
+  // through) makes rect.width 0 while offsetWidth is already non-zero —
+  // either alone produces Infinity/NaN, not caught by checking only one.
+  const scale = iframeOffsetWidth && iframeRect.width ? iframeRect.width / iframeOffsetWidth : 1;
   return {
     x: (clientX - iframeRect.left) / scale,
     y: (clientY - iframeRect.top) / scale,
@@ -41,18 +46,31 @@ export function resolveInsertionIndex(pointerY: number, hoveredRect: { top: numb
   return pointerY < midpoint ? hoveredIndex : hoveredIndex + 1;
 }
 
+// A full-bleed/zero-padding section's own box is never directly reachable
+// via elementFromPoint (its content fills the whole box), so without a
+// fallback band like this the "drop between sections" zone would not
+// exist at all for such a section — the final branch review's finding.
+// Kept narrow (a fixed px band, not the generous 1/3 the section's OWN box
+// gets when hovered directly below) so it doesn't swallow most of a tall,
+// content-packed section's own drop-into-column area.
+const SECTION_EDGE_BAND_PX = 12;
+
 // The canonical drop-target decision logic, hand-ported as plain JS into
 // apps/frontend/src/layouts/BaseLayout.astro's `designerEdit` script (that
 // script is <script is:inline>, deliberately unbundled, can't import this
 // module). `path` is the dotted data-designer-path of whatever DOM node is
 // under the pointer, already split into numbers (null when nothing with
-// that attribute is under the pointer at all); `rect` is that node's own
-// bounding box; `sectionCount` is how many top-level sections the page
-// currently has (needed for the "no node" fallback below).
+// that attribute is under the pointer at all); `hoveredRect` is that
+// node's own bounding box; `sectionRect` is the ANCESTOR section's own box
+// (null when it can't be resolved) — used for the edge-band fallback below
+// when the hovered node isn't the section itself; `sectionCount` is how
+// many top-level sections the page currently has (needed for the "no
+// node" fallback below).
 export function resolveDropTargetFromPath(
   path: number[] | null,
   pointerY: number,
-  rect: { top: number; bottom: number; height: number },
+  hoveredRect: { top: number; bottom: number; height: number } | null,
+  sectionRect: { top: number; bottom: number; height: number } | null,
   sectionCount: number,
 ): DropTarget {
   // Nothing with data-designer-path under the pointer at all: either the
@@ -60,14 +78,25 @@ export function resolveDropTargetFromPath(
   // the last one. Either way, append a new section at the very end —
   // without this, Live Edit has no way to place a page's very first
   // section (found by the final branch review).
-  if (!path) return { kind: "new-section", afterBlockIndex: sectionCount - 1 };
-  // Section-level node (path length 1): top/bottom ~1/3 of its own box
-  // means "drop between sections", not "into this section's first column".
+  if (!path || !hoveredRect) return { kind: "new-section", afterBlockIndex: sectionCount - 1 };
+  const sectionIndex = path[0];
+  // Section-level node (path length 1): the pointer is hovering the
+  // section's own box directly (its padding/background) — top/bottom ~1/3
+  // of it means "drop between sections", not "into this section's first
+  // column". The generous 1/3 only applies here, not to the edge-band
+  // fallback below, since this IS the section's real own box.
   if (path.length === 1) {
-    const third = rect.height / 3;
-    if (pointerY <= rect.top + third) return { kind: "new-section", afterBlockIndex: path[0] - 1 };
-    if (pointerY >= rect.bottom - third) return { kind: "new-section", afterBlockIndex: path[0] };
-    return { kind: "into-column", colPath: [path[0], 0, 0] };
+    const third = hoveredRect.height / 3;
+    if (pointerY <= hoveredRect.top + third) return { kind: "new-section", afterBlockIndex: sectionIndex - 1 };
+    if (pointerY >= hoveredRect.bottom - third) return { kind: "new-section", afterBlockIndex: sectionIndex };
+    return { kind: "into-column", colPath: [sectionIndex, 0, 0] };
+  }
+  // Hovering deeper content (column/element/nested child): check the
+  // ancestor SECTION's own edges with the narrower fixed-px band before
+  // falling through to the normal column/element resolution.
+  if (sectionRect) {
+    if (pointerY <= sectionRect.top + SECTION_EDGE_BAND_PX) return { kind: "new-section", afterBlockIndex: sectionIndex - 1 };
+    if (pointerY >= sectionRect.bottom - SECTION_EDGE_BAND_PX) return { kind: "new-section", afterBlockIndex: sectionIndex };
   }
   // Column-level node (path length 3: the pointer resolved directly to an
   // empty column, or to padding/a gap not covered by any element's own
@@ -85,7 +114,7 @@ export function resolveDropTargetFromPath(
   // own depth-agnostic behavior (see designerTree.ts).
   const colPath = path.slice(0, -1);
   const hoveredIndex = path[path.length - 1];
-  const index = resolveInsertionIndex(pointerY, rect, hoveredIndex);
+  const index = resolveInsertionIndex(pointerY, hoveredRect, hoveredIndex);
   return { kind: "into-column", colPath, index };
 }
 
