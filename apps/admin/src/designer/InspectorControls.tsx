@@ -25,7 +25,7 @@ import type { Key } from "@/i18n";
 import type { Bp, Block, El, ElType, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
 import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
-import { ELS } from "./elements";
+import { ELS, CONTAINER_CHILD_TYPES } from "./elements";
 import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
 
 // Duplicated from Designer.tsx's own module-level `uid`/`newEl` (designer/
@@ -35,15 +35,6 @@ import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
 // control.
 const uid = () => Math.random().toString(36).slice(2, 10);
 const newEl = (type: ElType): El => ({ id: uid(), type, props: { ...ELS[type].defaults } });
-// Container children are curated to types that make sense freely nested and
-// already render generically (no slider/menu/accordion-style special canvas
-// wiring) — a deliberate v1 scope line, not every ElType. Expand this list
-// once each additional type's container-child behavior has actually been
-// checked, rather than opening the picker to all ~30 types up front.
-const CONTAINER_CHILD_TYPES: ElType[] = [
-  "heading", "text", "image", "button", "badge", "spacer", "divider", "icon", "container",
-];
-
 // A recursive container's own "Add element" + children list, shared by the
 // top-level container panel (sel.length===4) and the nested-child panel
 // below (sel.length>4, any depth) — both address the container the same

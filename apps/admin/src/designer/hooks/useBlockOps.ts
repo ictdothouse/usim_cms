@@ -11,7 +11,7 @@ import { useRef } from "react";
 import { toast } from "sonner";
 import type { Key } from "@/i18n";
 import { getNode, childrenOf, insertAt, removeAt, moveWithin } from "../../designerTree";
-import { ELS } from "../elements";
+import { ELS, CONTAINER_CHILD_TYPES } from "../elements";
 import { section } from "../blockPath";
 import { newRow, newSection } from "../parsers";
 import type { Block, Col, Row, El, ElType, Sel, SectionProps, Drag } from "../types";
@@ -341,6 +341,20 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
         return;
       }
       if (!Array.isArray(children)) return;
+      // colPath.length > 3 means the target is a CONTAINER's own children
+      // array, not a top-level column — those only accept a curated type
+      // subset (ContainerChildrenPanel's own dropdown already enforces this
+      // in the Inspector). Without this check, Live Edit could drop any
+      // palette type into a container; a non-curated type renders as null
+      // on the published site (SectionBlock.astro's container-child switch
+      // has no case for it) — saved, but invisible after the reload.
+      if (colPath.length > 3) {
+        const droppedType = d.kind === "new" ? d.type : (getNode(bs, d.path) as El).type;
+        if (!CONTAINER_CHILD_TYPES.includes(droppedType)) {
+          toast.error(t("designer-container-child-type-unsupported"));
+          return;
+        }
+      }
       if (d.kind === "new") {
         insertAt(bs, colPath, newEl(d.type, d.propsOverride), index);
         return;
