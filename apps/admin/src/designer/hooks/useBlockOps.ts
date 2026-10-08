@@ -342,6 +342,42 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     setSel(null);
   }
 
+  // The canvas's "+ Add Section" drop zone used to only accept the Layout
+  // palette's "Section" preset (d.kind === "new-section") — dragging a plain
+  // element (or an existing element being moved) onto that empty-canvas area
+  // silently did nothing, since there was no column there yet to resolve a
+  // colPath against. Author had to click "+ Add Section" first, THEN drag the
+  // element into the section that appeared. This creates the section and
+  // drops the element into its first column in one mutate (one undo step),
+  // instead of two separate mutate() calls (which would also push two
+  // separate history entries for what should read as a single action).
+  function dropIntoNewSection(afterBlockIndex?: number) {
+    const d = drag.current;
+    drag.current = null;
+    setDropHint(null);
+    if (!d || d.kind === "tree-reorder" || d.kind === "new-row") return;
+    if (d.kind === "new-section") {
+      mutate((bs) => insertAt(bs, [], newSection(), afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1));
+      return;
+    }
+    if (d.kind !== "new" && isSectionLocked(d.path[0])) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
+    mutate((bs) => {
+      const at = afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1;
+      insertAt(bs, [], newSection(), at);
+      const colPath = [at, 0, 0];
+      if (d.kind === "new") {
+        insertAt(bs, colPath, newEl(d.type, d.propsOverride));
+        return;
+      }
+      const el = removeAt(bs, d.path);
+      insertAt(bs, colPath, el);
+    });
+    setSel(null);
+  }
+
   return {
     drag,
     isSectionLocked,
@@ -349,7 +385,7 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     duplicateColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, nudgeColumn,
     deleteRow, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, setRowGap,
     duplicateElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, deleteElement, moveElement,
-    dropIntoColumn,
+    dropIntoColumn, dropIntoNewSection,
   };
 }
 
