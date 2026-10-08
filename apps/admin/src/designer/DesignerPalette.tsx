@@ -130,6 +130,8 @@ export interface DesignerPaletteProps {
   activeLeftTab: "elements" | "layers" | "settings";
   setActiveLeftTab: (tab: "elements" | "layers" | "settings") => void;
   drag: MutableRefObject<Drag | null>;
+  mode: "blocks" | "live";
+  startPaletteDrag: (e: React.PointerEvent<HTMLElement>, payload: Drag, label: string) => void;
   blocks: Block[];
   treeDropHint: { key: string; pos: "before" | "after" } | null;
   rowDragProps: (kind: "section" | "column" | "element", path: number[], key: string) => Record<string, unknown>;
@@ -146,7 +148,7 @@ export interface DesignerPaletteProps {
 }
 
 export function DesignerPalette({
-  ctx, mobilePanel, activeLeftTab, setActiveLeftTab, drag,
+  ctx, mobilePanel, activeLeftTab, setActiveLeftTab, drag, mode, startPaletteDrag,
   blocks, treeDropHint, rowDragProps, expanded, selEq, pick, toggleExpand, t,
   kind, chromeKind, chromeIsDefault, chromeMobileNav, patchChromeMeta,
 }: DesignerPaletteProps) {
@@ -186,12 +188,17 @@ export function DesignerPalette({
                 return (
                   <div
                     key={preset.key}
-                    draggable
-                    onDragStart={(ev) => {
-                      drag.current = preset.drag;
-                      ev.dataTransfer.effectAllowed = "copy";
-                    }}
-                    onDragEnd={() => (drag.current = null)}
+                    draggable={mode !== "live"}
+                    onDragStart={
+                      mode === "live"
+                        ? undefined
+                        : (ev) => {
+                            drag.current = preset.drag;
+                            ev.dataTransfer.effectAllowed = "copy";
+                          }
+                    }
+                    onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
+                    onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, preset.drag, t(preset.labelKey)) : undefined}
                     className="flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-[10px] font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
                   >
                     <Icon className="h-4 w-4 text-accent" /> {t(preset.labelKey)}
@@ -209,12 +216,17 @@ export function DesignerPalette({
                 return (
                   <div
                     key={type}
-                    draggable
-                    onDragStart={(ev) => {
-                      drag.current = { kind: "new", type };
-                      ev.dataTransfer.effectAllowed = "copy";
-                    }}
-                    onDragEnd={() => (drag.current = null)}
+                    draggable={mode !== "live"}
+                    onDragStart={
+                      mode === "live"
+                        ? undefined
+                        : (ev) => {
+                            drag.current = { kind: "new", type };
+                            ev.dataTransfer.effectAllowed = "copy";
+                          }
+                    }
+                    onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
+                    onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, { kind: "new", type }, t(ELS[type].labelKey)) : undefined}
                     className="flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
                   >
                     <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}

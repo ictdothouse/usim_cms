@@ -12,6 +12,7 @@ import { useUndoRedo } from "./designer/hooks/useUndoRedo";
 import { useBpStyle } from "./designer/hooks/useBpStyle";
 import { useLiveEditBridge } from "./designer/hooks/useLiveEditBridge";
 import { useBlockOps } from "./designer/hooks/useBlockOps";
+import { useLiveEditPaletteDrag } from "./designer/hooks/useLiveEditPaletteDrag";
 import { useTemplateLibrary } from "./designer/hooks/useTemplateLibrary";
 import { usePageAndLanguage } from "./designer/hooks/usePageAndLanguage";
 import { useSiteChrome } from "./designer/hooks/useSiteChrome";
@@ -371,7 +372,7 @@ export default function Designer({
     duplicateColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, nudgeColumn,
     deleteRow, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, setRowGap,
     duplicateElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, deleteElement, moveElement,
-    dropIntoColumn,
+    dropIntoColumn, dropIntoNewSection,
   } = useBlockOps({
     blocks,
     mutate,
@@ -408,11 +409,13 @@ export default function Designer({
   const {
     mode,
     toggleLive,
+    liveSrc,
     liveSrcA,
     liveSrcB,
     activeSlot,
     frameARef,
     frameBRef,
+    liveFrame,
     handleFrameLoad,
   } = useLiveEditBridge({
     bp,
@@ -445,6 +448,14 @@ export default function Designer({
     setCtxMenu,
     setSliderSlideIdx,
     setSliderInnerSel,
+  });
+
+  const { ghost, startPaletteDrag } = useLiveEditPaletteDrag({
+    drag,
+    liveFrame,
+    liveSrc,
+    dropIntoColumn,
+    dropIntoNewSection,
   });
 
   // Desktop only gets a boxed reading-width canvas (and the backdrop that
@@ -755,6 +766,8 @@ export default function Designer({
           activeLeftTab={activeLeftTab}
           setActiveLeftTab={setActiveLeftTab}
           drag={drag}
+          mode={mode}
+          startPaletteDrag={startPaletteDrag}
           blocks={blocks}
           treeDropHint={treeDropHint}
           rowDragProps={rowDragProps}
@@ -769,6 +782,15 @@ export default function Designer({
           chromeMobileNav={chromeMobileNav}
           patchChromeMeta={patchChromeMeta}
         />
+
+        {ghost && (
+          <div
+            className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-accent bg-white px-2.5 py-1.5 text-xs font-medium text-ink shadow-lg"
+            style={{ left: ghost.x, top: ghost.y }}
+          >
+            {ghost.label}
+          </div>
+        )}
 
         {mode === "live" ? (
           // Live Edit = the real page (same URL renderer as Preview) framed at
@@ -829,6 +851,7 @@ export default function Designer({
           dropHint={dropHint}
           setDropHint={setDropHint}
           dropIntoColumn={dropIntoColumn}
+          dropIntoNewSection={dropIntoNewSection}
           drag={drag}
         />
         )}
