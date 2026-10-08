@@ -139,6 +139,17 @@ test("dropIntoColumn: a Layout 'new-row' preset pushes a whole Row onto that col
   assert.deepEqual(rows[1].columns.map((c) => c.span), [1, 2]);
 });
 
+test("dropIntoColumn: a Layout 'new-row' preset is rejected on a locked section instead of mutating its own content (pre-existing gap the final review found)", () => {
+  const blocks = sampleBlocks();
+  (blocks[0].props as Record<string, unknown>).locked = "true";
+  const { deps, state } = makeDeps(blocks);
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-row", spans: [1, 2] };
+  ops.dropIntoColumn([0, 0, 0]);
+  const rows = (state.blocks[0].props as { rows: unknown[] }).rows;
+  assert.equal(rows.length, 1, "the locked section's own rows must be untouched");
+});
+
 test("dropIntoColumn: a Layout 'new-section' preset inserts a fresh Block right after the hovered column's own section", () => {
   const { deps, state } = makeDeps(sampleBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);
@@ -163,6 +174,17 @@ test("dropIntoNewSection: appends a fresh section with the dragged element at th
   assert.equal(state.blocks.length, 2);
   const inserted = state.blocks[1] as unknown as { props: { rows: { columns: { elements: { type: string }[] }[] }[] } };
   assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
+});
+
+test("dropIntoNewSection: a Layout 'new-row' preset creates a fresh section with exactly that column layout, instead of silently no-oping (final review finding)", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-row", spans: [1, 2] };
+  ops.dropIntoNewSection();
+  assert.equal(state.blocks.length, 2);
+  const inserted = state.blocks[1] as unknown as { props: { rows: { columns: { span: number }[] }[] } };
+  assert.equal(inserted.props.rows.length, 1, "the requested row replaces newSection()'s own default row, not alongside it");
+  assert.deepEqual(inserted.props.rows[0].columns.map((c) => c.span), [1, 2]);
 });
 
 test("dropIntoNewSection: an explicit afterBlockIndex inserts the new section right after that index, not at the end", () => {
