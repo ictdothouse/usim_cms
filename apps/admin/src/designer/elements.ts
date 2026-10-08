@@ -853,3 +853,13 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
   { key: "row-1-2", labelKey: "designer-layout-1to2", icon: PanelLeft, drag: { kind: "new-row", spans: [1, 2] } },
   { key: "row-2-1", labelKey: "designer-layout-2to1", icon: PanelRight, drag: { kind: "new-row", spans: [2, 1] } },
 ];
+
+// Container children are curated to types that make sense freely nested and
+// already render generically (no slider/menu/accordion-style special canvas
+// wiring) — a deliberate v1 scope line, not every ElType. Expand this list
+// once each additional type's container-child behavior has actually been
+// checked, rather than opening the picker to all ~30 types up front.
+// Lives here (not in InspectorControls.tsx, its original home) since
+// useBlockOps.ts's Live Edit drop-commit guard needs it too, and a hooks
+// file importing from a component file would be the wrong direction.
+export const CONTAINER_CHILD_TYPES: ElType[] = ["heading", "text", "image", "button", "badge", "spacer", "divider", "icon", "container"];

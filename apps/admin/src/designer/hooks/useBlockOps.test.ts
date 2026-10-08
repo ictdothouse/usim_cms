@@ -186,6 +186,25 @@ test("dropIntoNewSection: a stale afterBlockIndex far past the array end doesn't
   assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
 });
 
+test("dropIntoColumn: dropping a non-curated element type into a container's own children (colPath length > 3) is rejected, not silently saved invisible", () => {
+  const blocks: Block[] = [
+    {
+      type: "section",
+      props: {
+        rows: [{ columns: [{ span: 1, elements: [{ id: "c1", type: "container", props: { flexDirection: "row" }, children: [] }] }] }],
+      },
+    } as unknown as Block,
+  ];
+  const { deps, state } = makeDeps(blocks);
+  const ops = __testOnly_blockOpsFns(deps as never);
+  // "slider" is a real ElType but NOT in CONTAINER_CHILD_TYPES — reproduces
+  // the final review's "renders as null after reload" finding.
+  ops.drag.current = { kind: "new", type: "slider" };
+  ops.dropIntoColumn([0, 0, 0, 0]);
+  const container = (state.blocks[0].props as { rows: { columns: { elements: { children: unknown[] }[] }[] }[] }).rows[0].columns[0].elements[0];
+  assert.equal(container.children.length, 0, "the unsupported type must not be inserted into the container");
+});
+
 test("dropIntoColumn: a colPath that doesn't resolve to a real column (e.g. a row deleted since the drop target was computed) no-ops instead of throwing", () => {
   const { deps, state } = makeDeps(sampleBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);
