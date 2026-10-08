@@ -128,6 +128,7 @@ export interface DesignerCanvasProps {
   dropHint: string | null;
   setDropHint: (v: string | null) => void;
   dropIntoColumn: ReturnType<typeof useBlockOps>["dropIntoColumn"];
+  dropIntoNewSection: ReturnType<typeof useBlockOps>["dropIntoNewSection"];
   drag: MutableRefObject<Drag | null>;
 }
 
@@ -138,7 +139,7 @@ export function DesignerCanvas({
   resolvedHeaderId, resolvedFooterId, headerFrameHeight, footerFrameHeight,
   startSpacingDrag, draggingBand, hoverBand, setHoverBand,
   duplicateSection, copySection, pasteSection, copyStyleSection, pasteStyleSection, deleteSection,
-  dropHint, setDropHint, dropIntoColumn, drag,
+  dropHint, setDropHint, dropIntoColumn, dropIntoNewSection, drag,
 }: DesignerCanvasProps) {
   const {
     t, bp, bpKey, bpGetValue, bpKeysOverridden, sideValue, fourSideValue, mode, blocks, setSel,
@@ -1224,18 +1225,18 @@ export function DesignerCanvas({
             ev.stopPropagation();
             mutate((bs) => bs.push(newSection()));
           }}
-          // Also a drop target for the Layout palette's "Section" preset
-          // (drag.current.kind === "new-section") — same append-to-end
-          // mutation as the click handler right above, just drag-triggered.
-          // Dropping that preset onto an EXISTING section's column instead
-          // inserts right after it (see useBlockOps.ts's dropIntoColumn).
+          // Also a drop target for ANY drag (Layout palette's "Section"
+          // preset, a regular element from the Content palette, or an
+          // existing element being moved) — dropIntoNewSection handles all
+          // 3, creating the section the drop needs instead of requiring a
+          // click on this same button first. Dropping a "Section" preset
+          // onto an EXISTING section's column instead inserts right after it
+          // (see useBlockOps.ts's dropIntoColumn).
           onDragOver={(ev) => ev.preventDefault()}
           onDrop={(ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            const d = drag.current;
-            drag.current = null;
-            if (d?.kind === "new-section") mutate((bs) => bs.push(newSection()));
+            dropIntoNewSection();
           }}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line/50 bg-white/60 py-4 text-xs font-semibold text-body hover:border-accent hover:text-accent"
         >
