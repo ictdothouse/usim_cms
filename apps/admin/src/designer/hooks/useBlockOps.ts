@@ -308,18 +308,24 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     // the "move" (element) branch below, which would destructure this payload's
     // section/column path as if it were an element's [b, r, c, e] path.
     if (!d || d.kind === "tree-reorder") return;
-    // Layout category's "Section"/row-count presets (elements.ts's
-    // LAYOUT_PRESETS) — neither produces an El, so both branch out before the
-    // El-insert/move logic below, matching the pre-existing "+add row"
-    // button/"+ Add Section" button's own lock-check-free behavior exactly
-    // (inserting a sibling row/section never mutates the hovered section's
-    // OWN locked content, same reasoning duplicateSection/pasteSection
-    // already rely on).
+    // Layout category's "Section" preset doesn't produce an El and only
+    // ever inserts a SIBLING section, so it branches out before the lock
+    // check below (never mutates the hovered section's own locked content,
+    // same reasoning duplicateSection/pasteSection already rely on).
     if (d.kind === "new-section") {
       mutate((bs) => insertAt(bs, [], newSection(), colPath[0] + 1));
       return;
     }
+    // Unlike "new-section", a "new-row" preset DOES mutate the hovered
+    // section's own content (pushes onto ITS rows) — a lock check was
+    // missing here (final branch review finding); the server-side
+    // validator already rejected the save either way, but the client
+    // should refuse it the same way every other mutator in this file does.
     if (d.kind === "new-row") {
+      if (isSectionLocked(colPath[0])) {
+        toast.error(t("designer-section-locked-toast"));
+        return;
+      }
       mutate((bs) => section(bs, colPath[0]).rows.push(newRow(d.spans)));
       return;
     }
@@ -382,9 +388,24 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     const d = drag.current;
     drag.current = null;
     setDropHint(null);
-    if (!d || d.kind === "tree-reorder" || d.kind === "new-row") return;
+    if (!d || d.kind === "tree-reorder") return;
     if (d.kind === "new-section") {
       mutate((bs) => insertAt(bs, [], newSection(), afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1));
+      return;
+    }
+    // A "new-row" preset has no existing section to push its row onto here
+    // (unlike dropIntoColumn's own new-row branch) — used to silently
+    // no-op, even though the drop indicator implied something would happen
+    // (final branch review finding). Creates the section AND replaces its
+    // default single-column row with the requested layout, rather than
+    // leaving both the default row and the requested one present.
+    if (d.kind === "new-row") {
+      mutate((bs) => {
+        const at = Math.min(afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1, bs.length);
+        const newBlock = newSection();
+        (newBlock.props as unknown as SectionProps).rows = [newRow(d.spans)];
+        insertAt(bs, [], newBlock, at);
+      });
       return;
     }
     if (d.kind !== "new" && isSectionLocked(d.path[0])) {
