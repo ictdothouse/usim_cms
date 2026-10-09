@@ -1873,11 +1873,13 @@ function versionCard(label, value, sub, check, checked, actions) {
 // only an Update button. Everything else gets a Test button that only ever
 // downloads/verifies, never touches the running container.
 function stackActions(key, label, testable) {
-  let html = "<div style=\\"margin-top:.5rem;display:flex;gap:.4rem\\">";
+  let html = "<div style=\\"margin-top:.5rem;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap\\">";
   if (testable) {
-    html += "<button class=\\"secondary\\" onclick=\\"stackTest('" + key + "')\\">Test</button>";
+    html += "<button class=\\"secondary\\" onclick=\\"stackTest('" + key + "', this)\\">Test</button>";
   }
-  html += "<button class=\\"secondary\\" onclick=\\"stackUpdate('" + key + "', '" + label.replace(/'/g, "") + "')\\">Update</button>";
+  const safeLabel = label.replace(/'/g, "");
+  html += "<button class=\\"secondary\\" onclick=\\"stackUpdate('" + key + "', '" + safeLabel + "', this)\\">Update</button>";
+  html += "<span class=\\"muted\\" id=\\"stackMsg-" + key + "\\"></span>";
   html += "</div>";
   return html;
 }
@@ -1914,26 +1916,81 @@ function renderStackTab(v, checks) {
   document.getElementById("versionGrid").innerHTML = html;
 }
 
-async function stackTest(key) {
+async function stackTest(key, btn) {
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Testing…";
+  const msg = document.getElementById("stackMsg-" + key);
+  if (msg) {
+    msg.style.color = "";
+    msg.textContent = "pulling image…";
+  }
   try {
     const r = await api("/api/stack/" + key + "/test", { method: "POST" });
-    alert(r.message || "Test passed.");
+    if (msg) {
+      msg.style.color = "#2e7d32";
+      msg.textContent = "✓ " + (r.message || "test passed");
+    }
   } catch (e) {
-    alert("Test failed: " + e.message);
+    if (msg) {
+      msg.style.color = "#d32f2f";
+      msg.textContent = "✗ " + e.message;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
-async function stackUpdate(key, label) {
+// Looks the status/message elements up fresh on every tick (not captured
+// once up front) because a finished update makes refreshVersions() re-render
+// the whole grid (see pollDeployLog) — the old button/span this click came
+// from is gone by then, but an element with the same id always exists in
+// whatever's currently on screen.
+async function pollStackMsg(key, label) {
+  const tick = async () => {
+    const msg = document.getElementById("stackMsg-" + key);
+    try {
+      const st = await api("/api/pull/status");
+      if (st.running) {
+        if (msg) msg.textContent = "updating " + label + "… (see Overview tab for the live log)";
+        setTimeout(tick, 2000);
+      } else if (msg) {
+        msg.style.color = st.exitCode === 0 ? "#2e7d32" : "#d32f2f";
+        msg.textContent = st.exitCode === 0 ? "✓ updated" : "✗ failed (exit " + st.exitCode + ") — see Overview tab log";
+      }
+    } catch (e) {
+      setTimeout(tick, 2000);
+    }
+  };
+  tick();
+}
+
+async function stackUpdate(key, label, btn) {
   if (!confirm(
     "Update " + label + " now?\\n\\nThis pulls the new version, recreates the service, health-checks it, " +
     "and automatically rolls back to what's running now if it doesn't come up healthy.",
   )) return;
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = "Updating…";
+  const msg = document.getElementById("stackMsg-" + key);
+  if (msg) {
+    msg.style.color = "";
+    msg.textContent = "starting…";
+  }
   try {
     await api("/api/stack/" + key + "/update", { method: "POST" });
     pollDeployLog();
     refresh();
+    pollStackMsg(key, label);
   } catch (e) {
-    alert(e.message);
+    if (msg) {
+      msg.style.color = "#d32f2f";
+      msg.textContent = "✗ " + e.message;
+    }
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
