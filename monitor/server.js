@@ -1459,9 +1459,14 @@ function handlePnpmUpdate(req, res) {
     // exactly what happened the first time this ran. Regenerate it with the
     // NEW pnpm (via corepack, same NODE_DIR trick scripts/update.sh already
     // uses) before committing, so the committed lockfile actually matches.
+    // Don't trust whatever PATH this process inherited (a systemd unit with
+    // no explicit Environment= can end up with a thin one) — hardcode the
+    // usual system bin dirs alongside NODE_DIR so a system-package pnpm
+    // (e.g. /usr/bin/pnpm) or a corepack-provisioned shim are both found
+    // regardless of how this box's service unit is configured.
     const preCommit = `
     NODE_DIR="$(dirname "${NODE_BIN}")"
-    export PATH="$NODE_DIR:$PATH"
+    export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
     "$NODE_DIR/corepack" enable >/dev/null 2>&1 || true
     echo "--- regenerating pnpm-lock.yaml for pnpm@${latest.pnpm} ---"
     pnpm install --lockfile-only
