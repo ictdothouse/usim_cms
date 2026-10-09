@@ -434,6 +434,150 @@ function handleUpdateCheck(req, res) {
   });
 }
 
+// Reads the pinned versions straight out of the same config files that actually set them
+// (docker-compose.yml's image: tags, apps/api/Dockerfile's base image, each app's own
+// package.json) rather than exec-ing into containers — what's pinned here is exactly what's
+// running, since compose pulls that tag verbatim. Static file reads only, so this is cheap
+// enough to call on every dashboard load.
+function getStackVersions(cb) {
+  const readJson = (p) => {
+    try {
+      return JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const root = readJson(path.join(REPO_DIR, "package.json"));
+  const apiPkg = readJson(path.join(REPO_DIR, "apps/api/package.json"));
+  const adminPkg = readJson(path.join(REPO_DIR, "apps/admin/package.json"));
+  const frontendPkg = readJson(path.join(REPO_DIR, "apps/frontend/package.json"));
+  let dockerImage = null;
+  try {
+    const dockerfile = fs.readFileSync(path.join(REPO_DIR, "apps/api/Dockerfile"), "utf8");
+    dockerImage = (dockerfile.match(/^FROM\s+(\S+)/m) || [])[1] || null;
+  } catch {}
+  const infra = {};
+  if (DEPLOY_MODE === "docker") {
+    try {
+      const compose = fs.readFileSync(path.join(REPO_DIR, "docker-compose.yml"), "utf8");
+      for (const m of compose.matchAll(/^\s*image:\s*(\S+)/gm)) {
+        const img = m[1];
+        if (/^postgres:/.test(img)) infra.db = img;
+        else if (/^redis:/.test(img)) infra.redis = img;
+        else if (/pgbouncer/.test(img)) infra.pgbouncer = img;
+        else if (/^caddy:/.test(img)) infra.proxy = img;
+      }
+    } catch {}
+  }
+  cb({
+    appVersion: root ? root.version : null,
+    pnpm: root && root.packageManager ? root.packageManager.replace(/^pnpm@/, "") : null,
+    node: { runtime: process.version, dockerImage },
+    packages: {
+      api: apiPkg ? apiPkg.version : null,
+      admin: adminPkg ? adminPkg.version : null,
+      frontend: frontendPkg ? frontendPkg.version : null,
+    },
+    infra,
+  });
+}
+
+function handleVersions(req, res) {
+  getStackVersions((v) => sendJson(res, 200, v));
+}
+
+// The actual safe-update machinery (test gate in each Dockerfile build, health-checked
+// blue-green promote, smoke test, one-click rollback — see scripts/deploy.sh /
+// CLAUDE.md's "Blue-green zero-downtime deploys") already exists and runs unconditionally
+// on every "Pull latest & deploy" click. What's missing is telling the operator BEFORE they
+// click whether this particular update is a routine zero-downtime flip or something that
+// needs a closer look — reusing the same signals getRemoteUpdateInfo/isTrialModeActive/
+// getHostStats/deployState already compute elsewhere in this file.
+function getPreflightCheck(cb) {
+  getRemoteUpdateInfo((updateInfo) => {
+    if (!updateInfo) return cb({ error: "git fetch failed — check network/GitHub reachability" });
+    if (updateInfo.commitsBehind === 0) {
+      return cb({ commitsBehind: 0, verdict: "up-to-date", reasons: ["Already on the latest commit."] });
+    }
+    execFile(
+      "git",
+      ["diff", "--name-only", "HEAD", "origin/main"],
+      { cwd: REPO_DIR, timeout: 10_000 },
+      (diffErr, diffOut) => {
+        const files = diffErr ? [] : diffOut.trim().split("\n").filter(Boolean);
+        // These are the two change classes the existing deploy pipeline does NOT fully cover
+        // on its own: docker-compose.yml/Caddyfile/pgbouncer config lives in the always-on
+        // base tier that "Pull latest & deploy" deliberately never touches (see
+        // handleApplyBaseTier's comment) — a tenant-facing symptom only shows up if someone
+        // assumes the Update button applied it. A new migration file is actually fine (every
+        // migration in this repo is additive, IF NOT EXISTS/idempotent — see CLAUDE.md), it's
+        // just worth calling out explicitly rather than silently applying on first request.
+        const baseTierChanged = files.some((f) => /^(docker-compose.*\.ya?ml|Caddyfile|pgbouncer\/)/.test(f));
+        const migrationAdded = files.some((f) => /^apps\/api\/src\/db\/migrations\//.test(f));
+        isTrialModeActive((trial) => {
+          getHostStats((host) => {
+            const diskPct = host && host.disk ? host.disk.pct : null;
+            const reasons = [];
+            let verdict = "safe";
+            const raise = (level) => {
+              if (verdict === "blocked") return;
+              if (level === "blocked" || verdict !== "caution") verdict = level;
+            };
+            if (deployState.running) {
+              raise("blocked");
+              reasons.push("A deploy is already running — wait for it to finish before starting another.");
+            }
+            const noZeroDowntime = DEPLOY_MODE !== "docker" || trial;
+            if (noZeroDowntime) {
+              raise("caution");
+              reasons.push(
+                DEPLOY_MODE === "docker"
+                  ? "Still in trial mode (no Caddy/blue-green promoted yet) — this rebuild briefly interrupts the site instead of a zero-downtime flip."
+                  : "This install runs in systemd/bare-metal mode (no blue-green here) — deploying briefly restarts ucms-api/ucms-frontend/ucms-admin.",
+              );
+            }
+            if (baseTierChanged) {
+              raise("caution");
+              reasons.push(
+                "Touches docker-compose/Caddyfile/pgbouncer config — \"Pull latest & deploy\" only redeploys api/frontend/admin, it won't apply this. Review the change, then run \"Apply base-tier config\" separately afterwards.",
+              );
+            }
+            if (migrationAdded) {
+              reasons.push(
+                "Includes a new DB migration — applied automatically on the next tenant request after deploy (every migration here is additive/idempotent, safe to run unattended).",
+              );
+            }
+            if (diskPct !== null && diskPct >= 85) {
+              raise("caution");
+              reasons.push(`Disk is at ${diskPct}% used — a fresh image build may not have enough room.`);
+            }
+            if (verdict === "safe") {
+              reasons.push(
+                "Routine update — zero-downtime blue-green deploy (new color is built, test-gated, health-checked, and smoke-tested before traffic switches; the old color stays up for instant rollback).",
+              );
+            }
+            cb({
+              commitsBehind: updateInfo.commitsBehind,
+              commits: updateInfo.commits,
+              verdict,
+              reasons,
+              trial,
+              diskPct,
+            });
+          });
+        });
+      },
+    );
+  });
+}
+
+function handlePreflight(req, res) {
+  getPreflightCheck((result) => {
+    if (result.error) return sendJson(res, 502, result);
+    sendJson(res, 200, result);
+  });
+}
+
 // Edge-triggered on remoteSha the same way service up/down and disk-threshold alerts are above —
 // fires once when a new HEAD first appears on origin/main, not on every single poll while it's
 // still there unpulled. Piggybacks the existing ALERT_WEBHOOK_URL wiring (sendAlert no-ops when
@@ -888,6 +1032,7 @@ const DASHBOARD_HTML = `<!doctype html>
 
 <div class="tabs" id="tabs">
   <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+  <button class="tab-btn" data-tab="stack" onclick="switchTab('stack')">Stack &amp; versions</button>
   <button class="tab-btn" data-tab="containers" onclick="switchTab('containers')">Containers</button>
   <button class="tab-btn" data-tab="data" onclick="switchTab('data')">Database &amp; Sites</button>
   <button class="tab-btn" data-tab="ssl" onclick="switchTab('ssl')">SSL</button>
@@ -910,6 +1055,12 @@ const DASHBOARD_HTML = `<!doctype html>
 
   <h3>Services</h3>
   <div class="services-grid" id="services"></div>
+</div>
+
+<div class="tab-panel" id="panel-stack">
+  <h3>Tech stack &amp; versions</h3>
+  <p class="muted" id="versionGitLine"></p>
+  <div class="grid" id="versionGrid"></div>
 </div>
 
 <div class="tab-panel" id="panel-containers">
@@ -1203,10 +1354,37 @@ async function init() {
   refreshDb();
   refreshSites();
   refreshUpdateCheck();
+  refreshVersions();
   setInterval(refresh, 5000);
   setInterval(refreshDb, 10000);
   setInterval(refreshSites, 30000);
   setInterval(refreshUpdateCheck, 5 * 60000);
+}
+
+function versionCard(label, value, sub) {
+  return "<div class=\\"card\\"><div class=\\"label\\">" + label + "</div>" +
+    "<div class=\\"value\\" style=\\"font-size:0.95rem\\">" + escapeHtml(value || "unknown") + "</div>" +
+    (sub ? "<div class=\\"muted\\">" + escapeHtml(sub) + "</div>" : "") + "</div>";
+}
+
+async function refreshVersions() {
+  try {
+    const v = await api("/api/versions");
+    let html = "";
+    html += versionCard("App (git is the real version)", v.appVersion);
+    html += versionCard("pnpm", v.pnpm);
+    html += versionCard("Node.js", v.node.runtime, v.node.dockerImage ? "container base: " + v.node.dockerImage : "");
+    html += versionCard("API package", v.packages.api);
+    html += versionCard("Admin package", v.packages.admin);
+    html += versionCard("Frontend package", v.packages.frontend);
+    if (v.infra.db) html += versionCard("PostgreSQL", v.infra.db);
+    if (v.infra.redis) html += versionCard("Redis", v.infra.redis);
+    if (v.infra.pgbouncer) html += versionCard("PgBouncer", v.infra.pgbouncer);
+    if (v.infra.proxy) html += versionCard("Caddy (proxy)", v.infra.proxy);
+    document.getElementById("versionGrid").innerHTML = html;
+  } catch (e) {
+    document.getElementById("versionGrid").innerHTML = "<p class=\\"muted\\">Error: " + escapeHtml(e.message) + "</p>";
+  }
 }
 
 async function refreshUpdateCheck() {
@@ -1233,6 +1411,7 @@ async function refresh() {
   try {
     const data = await api("/api/status");
     document.getElementById("git").textContent = "HEAD: " + (data.git || "unknown");
+    document.getElementById("versionGitLine").textContent = "Git HEAD: " + (data.git || "unknown");
     document.getElementById("uptime").textContent = data.host && data.host.uptime ? data.host.uptime : "";
     renderHost(data.host);
     const grid = document.getElementById("services");
@@ -1322,6 +1501,26 @@ async function restartAll() {
 }
 
 async function pull() {
+  let pre = null;
+  try {
+    pre = await api("/api/preflight");
+  } catch (e) {
+    if (!confirm("Could not run the pre-update safety check (" + e.message + "). Proceed anyway?")) return;
+  }
+  if (pre) {
+    if (pre.verdict === "up-to-date") {
+      if (!confirm("Already on the latest commit — redeploy anyway?")) return;
+    } else if (pre.verdict === "blocked") {
+      alert("Update blocked:\\n\\n" + pre.reasons.join("\\n"));
+      return;
+    } else {
+      const label = pre.verdict === "caution" ? "⚠ Needs attention" : "✓ Safe to update";
+      const msg =
+        label + " — " + pre.commitsBehind + " commit(s) behind origin/main:\\n\\n" +
+        pre.reasons.join("\\n\\n") + "\\n\\nProceed with \\"Pull latest & deploy\\"?";
+      if (!confirm(msg)) return;
+    }
+  }
   try {
     await api("/api/pull", { method: "POST" });
     pollDeployLog();
@@ -1370,6 +1569,7 @@ async function pollDeployLog() {
       } else {
         polling = false;
         refresh();
+        refreshVersions();
       }
     } catch (e) {
       // The pull step restarts the monitor's own process, so a request can
@@ -1438,6 +1638,10 @@ const server = http.createServer((req, res) => {
       handleSites(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/update-check") {
       handleUpdateCheck(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/versions") {
+      handleVersions(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/preflight") {
+      handlePreflight(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "service" && parts[3]) {
       handleServiceAction(req, res, parts[2], parts[3]);
     } else if (req.method === "GET" && parts[0] === "api" && parts[1] === "logs" && parts[2]) {
