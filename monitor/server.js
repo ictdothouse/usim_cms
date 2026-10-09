@@ -35,6 +35,11 @@ const DB_MANAGED = process.env.DB_MANAGED !== "false";
 // Only used in systemd mode's "pull latest & rebuild" — install.sh writes
 // these into the same env file this process already reads MONITOR_* from.
 const NODE_BIN = process.env.NODE_BIN || "node";
+// Pinned, not "@latest" — an unpinned global install embedded in an
+// automated script is itself a floating supply-chain dependency. Bump this
+// deliberately (same as any other dependency upgrade) when corepack cuts a
+// new release, rather than always trusting whatever npm resolves right now.
+const COREPACK_PIN_VERSION = "0.36.0";
 const API_PORT = process.env.API_PORT || "3000";
 const FRONTEND_PORT = process.env.FRONTEND_PORT || "4321";
 const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
@@ -1469,22 +1474,30 @@ function handlePnpmUpdate(req, res) {
     // registry metadata once npm rotates its keys ("Cannot find matching
     // keyid"), hit live on this box's Node 20.20.2. Real fix: update corepack
     // itself first (current keys) — `npm install -g corepack@latest` is a
-    // plain npm install, not subject to corepack's own broken check.
-    // COREPACK_INTEGRITY_KEYS=0 stays only as a last-resort fallback, scoped
-    // to this one command (not exported for the whole script), in case the
-    // self-update itself can't run. Neither touches the Docker build — each
+    // plain npm install, not subject to corepack's own broken check. If the
+    // regen still fails after that, this fails the whole bump hard rather
+    // than silently retrying with COREPACK_INTEGRITY_KEYS=0 — a supply-chain
+    // verification step should never auto-bypass itself on failure; an
+    // operator can still set that env var by hand after confirming why
+    // verification failed. Neither step touches the Docker build — each
     // Dockerfile's own `corepack enable` runs its own, separately current
     // corepack from that image's node:*-alpine base.
     const preCommit = `
     NODE_DIR="$(dirname "${NODE_BIN}")"
     export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
     echo "--- updating corepack (old bundled corepack can carry stale npm signing keys) ---"
-    npm install -g corepack@latest >/dev/null 2>&1 || echo "corepack self-update failed, continuing with bundled corepack"
+    npm install -g corepack@${COREPACK_PIN_VERSION} >/dev/null 2>&1 || echo "corepack self-update failed, continuing with bundled corepack"
     "$NODE_DIR/corepack" enable >/dev/null 2>&1 || true
     COREPACK_CACHE="\${COREPACK_HOME:-$HOME/.cache/node/corepack}"
-    rm -rf "$COREPACK_CACHE/v1/pnpm/${latest.pnpm}" 2>/dev/null || true
+    PINNED_PNPM="${latest.pnpm}"
+    if [ -n "$COREPACK_CACHE" ] && [ -n "$PINNED_PNPM" ]; then
+      rm -rf "$COREPACK_CACHE/v1/pnpm/$PINNED_PNPM" 2>/dev/null || true
+    fi
     echo "--- regenerating pnpm-lock.yaml for pnpm@${latest.pnpm} ---"
-    pnpm install --lockfile-only || COREPACK_INTEGRITY_KEYS=0 pnpm install --lockfile-only
+    if ! pnpm install --lockfile-only; then
+      echo "pnpm install failed — possible corepack signature verification failure even after updating corepack. Not auto-bypassing integrity checks: investigate (e.g. 'corepack enable' output above, registry reachability) before retrying, or re-run with COREPACK_INTEGRITY_KEYS=0 by hand once you've confirmed why verification failed." >&2
+      exit 1
+    fi
     `;
 
     startSourceBumpDeploy(
