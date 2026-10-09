@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isSafeUrl, isSafeCssUrl, validateElement, validateLayout, validateOverrides } from "./index.js";
+import { isSafeUrl, isSafeCssUrl, validateElement, validateLayout, validateOverrides, elementHasUnsafeHtml, layoutHasUnsafeHtml, overridesHaveUnsafeHtml } from "./index.js";
 
 test("isSafeUrl accepts http(s) and relative URLs", () => {
   assert.equal(isSafeUrl("https://example.com"), true);
@@ -79,4 +79,38 @@ test("validateOverrides strips the breakpoint prefix before validating the under
   assert.equal(validateOverrides({ "0.0": { "tablet:align": "center" } }), null);
   const err = validateOverrides({ "0.0": { "tablet:align": "nope" } });
   assert.match(err ?? "", /align has an unrecognized value/);
+});
+
+test("elementHasUnsafeHtml flags a html element with non-empty content, ignores other types and empty html", () => {
+  assert.equal(elementHasUnsafeHtml({ type: "html", props: { html: "<script>1</script>" } }), true);
+  assert.equal(elementHasUnsafeHtml({ type: "html", props: { html: "" } }), false);
+  assert.equal(elementHasUnsafeHtml({ type: "heading", props: { text: "hi" } }), false);
+});
+
+test("elementHasUnsafeHtml recurses into container children", () => {
+  const nested = { type: "container", children: [{ type: "html", props: { html: "<script>1</script>" } }] };
+  assert.equal(elementHasUnsafeHtml(nested), true);
+  const nestedSafe = { type: "container", children: [{ type: "heading", props: { text: "hi" } }] };
+  assert.equal(elementHasUnsafeHtml(nestedSafe), false);
+});
+
+test("layoutHasUnsafeHtml finds a html element anywhere in the section/row/column tree", () => {
+  const layout = [
+    {
+      type: "section",
+      props: {
+        rows: [{ columns: [{ elements: [{ type: "html", props: { html: "<script>1</script>" } }] }] }],
+      },
+    },
+  ];
+  assert.equal(layoutHasUnsafeHtml(layout), true);
+  assert.equal(layoutHasUnsafeHtml([{ type: "section", props: { rows: [] } }]), false);
+});
+
+test("overridesHaveUnsafeHtml flags an html key, with or without a breakpoint prefix, ignores other keys and empty html", () => {
+  assert.equal(overridesHaveUnsafeHtml({ "0.0": { html: "<script>1</script>" } }), true);
+  assert.equal(overridesHaveUnsafeHtml({ "0.0": { "tablet:html": "<script>1</script>" } }), true);
+  assert.equal(overridesHaveUnsafeHtml({ "0.0": { html: "" } }), false);
+  assert.equal(overridesHaveUnsafeHtml({ "0.0": { "tablet:align": "center" } }), false);
+  assert.equal(overridesHaveUnsafeHtml({}), false);
 });

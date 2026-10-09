@@ -134,6 +134,7 @@ export const PERMISSIONS = [
   "blueprints.write",
   "events.write",
   "headerFooter.write",
+  "layout.unsafeHtml",
 ] as const;
 export const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "pages.create": "perm-pages-create",
@@ -152,6 +153,7 @@ export const PERMISSION_LABEL_KEY: Record<(typeof PERMISSIONS)[number], Key> = {
   "blueprints.write": "perm-blueprints-write",
   "events.write": "perm-events-write",
   "headerFooter.write": "perm-header-footer-write",
+  "layout.unsafeHtml": "perm-layout-unsafe-html",
 };
 
 // ---------- Shell (sidebar + header, prototype layout) ----------

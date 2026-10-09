@@ -512,9 +512,10 @@ function validateValue(key: string, value: unknown): string | null {
   if (key === "anchorId") return ID_RE.test(value) ? null : `anchorId has invalid characters`;
   if (key === "fontFamily") return FONT_FAMILY_RE.test(value) ? null : `fontFamily has invalid characters`;
   if (key === "shadow") return isSafeShadow(value) ? null : `shadow has an invalid format`;
-  // menuId/categoryId are only ever used as parameterized DB lookup keys
-  // (getMenu/postlist's category filter), never interpolated into CSS/HTML.
-  if (key === "menuId" || key === "categoryId") return null;
+  // menuId/categoryId/symbolId are only ever used as parameterized DB lookup
+  // keys (getMenu/postlist's category filter/getSymbol), never interpolated
+  // into CSS/HTML.
+  if (key === "menuId" || key === "categoryId" || key === "symbolId") return null;
   // engine: legacy slider field (Embla-vs-Swiper picker), removed same day it
   // shipped once Swiper-only replaced it. Pages saved during that window still
   // carry the stale key in their persisted layout JSON; ignore it here rather
@@ -570,6 +571,45 @@ export function validateElement(el: unknown, path: string): string | null {
     if (childErr) return childErr;
   }
   return null;
+}
+
+// A "html" element's `props.html` renders raw via `set:html` on the public
+// site (ElementBlock.astro) with no sanitization by design — it's the
+// Custom-HTML/Embed-code element, meant for scripts/widgets a sanitizer
+// would strip. That makes it a standing stored-XSS surface for whichever
+// role can write it, so apps/api gates it behind its own permission
+// (layout.unsafeHtml) on top of the collection's normal write permission —
+// these walkers let that permission check find one anywhere in a tree
+// without duplicating the Section/Row/Column/Element shape apps/api has no
+// other reason to know. Exported (same precedent as validateElement) so a
+// symbol's bare `node` can be checked the same way a page's layout is.
+export function elementHasUnsafeHtml(el: unknown): boolean {
+  if (typeof el !== "object" || el === null) return false;
+  const e = el as Record<string, unknown>;
+  const props = e.props as Record<string, unknown> | undefined;
+  if (e.type === "html" && typeof props?.html === "string" && props.html.trim() !== "") return true;
+  return Array.isArray(e.children) && e.children.some(elementHasUnsafeHtml);
+}
+
+function columnHasUnsafeHtml(col: unknown): boolean {
+  if (typeof col !== "object" || col === null) return false;
+  const elements = (col as Record<string, unknown>).elements;
+  return Array.isArray(elements) && elements.some(elementHasUnsafeHtml);
+}
+
+function rowHasUnsafeHtml(row: unknown): boolean {
+  if (typeof row !== "object" || row === null) return false;
+  const columns = (row as Record<string, unknown>).columns;
+  return Array.isArray(columns) && columns.some(columnHasUnsafeHtml);
+}
+
+export function layoutHasUnsafeHtml(layout: unknown): boolean {
+  if (!Array.isArray(layout)) return false;
+  return layout.some((block) => {
+    if (typeof block !== "object" || block === null) return false;
+    const props = (block as Record<string, unknown>).props as Record<string, unknown> | undefined;
+    return Array.isArray(props?.rows) && props.rows.some(rowHasUnsafeHtml);
+  });
 }
 
 function validateColumn(col: unknown, path: string): string | null {
@@ -694,4 +734,23 @@ export function validateOverrides(overrides: unknown): string | null {
     }
   }
   return null;
+}
+
+// validateValue's SKIP_KEYS deliberately lets "html" through unvalidated (the
+// html element's raw-markup field, intentionally unsanitized — see
+// elementHasUnsafeHtml above), which means validateOverrides alone never
+// catches an overrides bag that sets `html`/`tablet:html`/`mobile:html` to
+// injected markup. Mirrors elementHasUnsafeHtml's permission-gate check but
+// over the overrides shape instead of a layout tree — callers must run this
+// alongside validateOverrides, same two-call pattern layoutHasUnsafeHtml uses
+// alongside validateLayout.
+export function overridesHaveUnsafeHtml(overrides: unknown): boolean {
+  if (typeof overrides !== "object" || overrides === null || Array.isArray(overrides)) return false;
+  return Object.values(overrides as Record<string, unknown>).some((bag) => {
+    if (typeof bag !== "object" || bag === null || Array.isArray(bag)) return false;
+    return Object.entries(bag as Record<string, unknown>).some(([rawKey, value]) => {
+      const key = rawKey.includes(":") ? rawKey.slice(rawKey.indexOf(":") + 1) : rawKey;
+      return key === "html" && typeof value === "string" && value.trim() !== "";
+    });
+  });
 }
