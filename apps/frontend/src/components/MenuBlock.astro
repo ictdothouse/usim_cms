@@ -1,5 +1,6 @@
 ---
 import { getMenu, resolveMenuTree, type ResolvedMenuItem } from "../lib/api";
+import { marginStyle, paddingStyle, elBorderShadowStyle } from "../lib/element-render";
 
 interface Props {
   menuId: string;
@@ -8,15 +9,42 @@ interface Props {
   megaMenuWidth?: "contained" | "full-width";
   tenantHost: string;
   lang: string | null;
+  // Margin/padding/border/shadow (base + per-breakpoint) were never applied
+  // to this block at all — not just a bp gap, the desktop value itself was
+  // silently dropped since this component never called marginStyle/
+  // paddingStyle/elBorderShadowStyle. `p`/`bp`/`elId` let the caller
+  // (SectionBlock.astro) hand over the same props/bp bag every other
+  // element type already gets real box-model styling from.
+  p?: Record<string, string>;
+  bp?: Record<string, string>;
+  elId?: string;
 }
-const { menuId, layout = "horizontal", dropdownTrigger = "hover", megaMenuWidth = "contained", tenantHost, lang } = Astro.props;
+const { menuId, layout = "horizontal", dropdownTrigger = "hover", megaMenuWidth = "contained", tenantHost, lang, p = {}, bp, elId } = Astro.props;
 
 const menu = await getMenu(tenantHost, menuId);
 const items: ResolvedMenuItem[] = menu ? await resolveMenuTree(menu.items, lang, tenantHost) : [];
+
+const boxStyle = [marginStyle(p), paddingStyle(p), elBorderShadowStyle(p)].filter(Boolean).join(";");
+const responsiveRules: string[] = [];
+if (bp && Object.keys(bp).length > 0 && elId) {
+  const prefix = (tier: "tablet" | "mobile") => `${tier}:`;
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(prefix(tier)))) continue;
+    const merged = { ...p };
+    for (const [k, v] of Object.entries(bp)) {
+      if (k.startsWith(prefix(tier))) merged[k.slice(prefix(tier).length)] = v;
+    }
+    const css = [marginStyle(merged), paddingStyle(merged), elBorderShadowStyle(merged)].filter(Boolean).join(";");
+    if (!css) continue;
+    const important = css.split(";").filter(Boolean).map((decl) => `${decl} !important`).join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    responsiveRules.push(`@media ${media}{[data-vis="${elId}"] .ds-menu{${important}}}`);
+  }
+}
 ---
 
 {items.length > 0 && (
-  <nav class={`ds-menu ds-menu-${layout}`} data-trigger={dropdownTrigger}>
+  <nav class={`ds-menu ds-menu-${layout}`} data-trigger={dropdownTrigger} style={boxStyle || undefined}>
     <button class="ds-menu-toggle" type="button" aria-label="Menu" aria-expanded="false">
       <span></span><span></span><span></span>
     </button>
@@ -55,6 +83,7 @@ const items: ResolvedMenuItem[] = menu ? await resolveMenuTree(menu.items, lang,
     </ul>
   </nav>
 )}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 
 <script>
   // One listener per rendered ds-menu, event-delegated — matches this

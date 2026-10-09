@@ -23,12 +23,10 @@ import {
   PAD,
   RADIUS,
   BORDER,
-  SLIDER_HEIGHT,
   shadowToCss,
   safeUrl,
   lengthValue,
   cls,
-  typoStyle,
 } from "../lib/element-render";
 
 interface El {
@@ -431,9 +429,35 @@ function rowFlexBp(row: Row): Record<string, string> {
 function rowFlexBase(row: Row): Record<string, string> {
   return { ...rowSpanBase(row), flexDirection: row.flexDirection ?? "row" };
 }
+// Row's own real per-breakpoint margin/padding/gap override — same bag as
+// rowFlexBp above (column-span + flexDirection), PLUS the row's raw `bp`
+// entries passed through untouched (rowFlexBp only ever adds its own
+// synthetic span/flexDirection keys, it never forwards row.bp's margin/
+// padding/gap keys on its own). Previously dropped entirely: a tablet/mobile
+// margin or padding set via the Inspector's BpToggle saved and canvas-
+// previewed correctly but never reached the published page.
+function rowStyleBp(row: Row): Record<string, string> {
+  return { ...(row.bp ?? {}), ...rowFlexBp(row) };
+}
+function rowStyleBase(row: Row, isFirst: boolean): Record<string, string> {
+  return {
+    ...rowFlexBase(row),
+    gap: row.gap ?? pageGap ?? "2rem",
+    marginTop: row.marginTop ?? (isFirst ? "0" : "2.5rem"),
+    marginBottom: row.marginBottom ?? "0",
+    paddingTop: row.paddingTop ?? "0",
+    paddingRight: row.paddingRight ?? "0",
+    paddingBottom: row.paddingBottom ?? "0",
+    paddingLeft: row.paddingLeft ?? "0",
+  };
+}
 function buildRowOverride(row: Row, p: Record<string, string>): string {
-  if (row.layoutMode === "flex") return `flex-direction:${p.flexDirection}`;
-  return buildRowSpans(row, p);
+  const layout = row.layoutMode === "flex" ? `flex-direction:${p.flexDirection}` : buildRowSpans(row, p);
+  const pad =
+    p.paddingTop !== "0" || p.paddingRight !== "0" || p.paddingBottom !== "0" || p.paddingLeft !== "0"
+      ? `padding:${p.paddingTop} ${p.paddingRight} ${p.paddingBottom} ${p.paddingLeft};`
+      : "";
+  return `${layout};gap:${p.gap};margin-top:${p.marginTop};margin-bottom:${p.marginBottom};${pad}`;
 }
 ---
 
@@ -446,7 +470,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
 >
   <div class={(width ?? pageContentWidth) === "full" ? "ds-inner ds-full" : "ds-inner"}>
     {rows.map((row, r) => {
-      const rowVisId = respId(`r${blockIndex}-${r}`, row, rowFlexBp(row), rowFlexBase(row), (p) => buildRowOverride(row, p));
+      const rowVisId = respId(`r${blockIndex}-${r}`, row, rowStyleBp(row), rowStyleBase(row, r === 0), (p) => buildRowOverride(row, p));
       // Flex mode's mobile/tablet stack needs each column's own flex-basis
       // reset too (same override the old hardcoded `.ds-row[data-layout=
       // "flex"] > .ds-col` media rule always applied) — a separate rule since
@@ -537,6 +561,9 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                       megaMenuWidth={p.megaMenuWidth as "contained" | "full-width" | undefined}
                       tenantHost={tenantHost}
                       lang={requestedLang}
+                      p={p}
+                      bp={el.bp}
+                      elId={elId}
                     />
                   );
                 case "symbol":
@@ -554,6 +581,9 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                       postLayout={p.postLayout as "grid" | "list" | undefined}
                       tenantHost={tenantHost}
                       lang={requestedLang}
+                      p={p}
+                      bp={el.bp}
+                      elId={elId}
                     />
                   );
                 case "eventlist":
@@ -563,6 +593,9 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                       columns={p.columns}
                       eventLayout={p.eventLayout as "grid" | "list" | undefined}
                       tenantHost={tenantHost}
+                      p={p}
+                      bp={el.bp}
+                      elId={elId}
                     />
                   );
                 // Batch of simple no-backend elements — extracted to
@@ -578,7 +611,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                 case "logocloud":
                 case "timeline":
                 case "documentdownload":
-                  return <RepeaterBlock el={el} />;
+                  return <RepeaterBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
                 // requireConsent gates the iframe behind a click-to-load
                 // placeholder (audit report 5.3: consent/cookie policy) — no
                 // cookie/localStorage, reappears on reload, same convention
@@ -587,7 +620,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                 case "googlemap":
                   return <MiscBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
                 case "announcementticker":
-                  return <RepeaterBlock el={el} />;
+                  return <RepeaterBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
                 // Recursive container render branch — extracted to
                 // ContainerBlock.astro (god-file breakup); see that file's
                 // own comment for why its SectionBlock-local buildSrcset
@@ -598,53 +631,23 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                   return null;
               }
               })();
-              // Image's own real per-breakpoint width override — same "tablet:
-              // imgWidth"/"mobile:imgWidth" bag every other bp override uses,
-              // but pushed with a custom "... img" selector (not the plain
-              // respId() below) since this wrapper renders `display:contents`
-              // and can't itself carry a width.
-              const hasWidthBp = el.type === "image" && !!el.bp && Object.keys(el.bp).some((k) => k.endsWith(":imgWidth"));
-              if (hasWidthBp) {
-                responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"] img`, el.bp!, p, (mp) => (mp.imgWidth ? `width:${mp.imgWidth}` : "")));
-              }
-              // Slider's own real per-breakpoint height override — same
-              // idea as imgWidth above: the actual `.ds-slider` node is a
-              // child of this `display:contents` wrapper, not the wrapper
-              // itself, so the override needs a nested selector rather than
-              // the plain respId() below (which only ever targets the
-              // wrapper). This is the first Element-level field made real
-              // (not just admin-canvas-preview) rather than generalizing
-              // Element's whole `bp` bag — see the design doc's Slider
-              // height section for why just this one key.
-              const hasHeightBp = el.type === "slider" && !!el.bp && Object.keys(el.bp).some((k) => k.endsWith(":height"));
-              if (hasHeightBp) {
-                responsiveRules.push(
-                  ...bpStyleRules(`[data-vis="${elId}"] .ds-slider`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`),
-                );
-              }
-              // Heading/text's own real per-breakpoint typography override
-              // (fontSize/lineHeight/letterSpacing/wordSpacing/fontWeight/
-              // fontFamily/textTransform/fontStyle/textDecoration) — same
-              // bpStyleRules mechanism as imgWidth/slider-height above,
-              // reusing typoStyle() itself as build() so every
-              // TYPOGRAPHY_FIELDS key gets real bp support at once instead of
-              // one-off per-field wiring. Previously admin-canvas-preview-only
-              // (see this file's CLAUDE.md note) — a tablet/mobile-only font
-              // size set in the Inspector saved and previewed correctly but
-              // never rendered on the real published/Live-Edit page, which
-              // silently stayed at the desktop value.
-              const hasTypoBp = (el.type === "heading" || el.type === "text") && !!el.bp && Object.keys(el.bp).length > 0;
-              if (hasTypoBp) {
-                const typoSelector = el.type === "heading" ? `[data-vis="${elId}"] .ds-h` : `[data-vis="${elId}"] .ds-text`;
-                responsiveRules.push(...bpStyleRules(typoSelector, el.bp!, p, typoStyle));
-              }
-              // Slider's wrapper always gets a data-vis id now (rather than
-              // only when a nested slide element actually has a bp override)
-              // — SliderBlock.astro is a separate render pass, so it can no
-              // longer report that signal back synchronously; a harmless
-              // always-present attribute on a `display:contents` wrapper,
-              // not a visible behavior change.
-              const elVisId = respId(elId, p) ?? (hasWidthBp || hasHeightBp || hasTypoBp || el.type === "slider" ? elId : undefined);
+              // Element-level real per-breakpoint style override (margin/
+              // padding/border/shadow/align/typography/radius/height, per
+              // type) is now built generically by whichever component
+              // renders this element's own node (ElementBlock.astro/
+              // MiscBlock.astro/RepeaterBlock.astro/ContainerBlock.astro/
+              // SliderBlock.astro each carry their own local bpStyleRules —
+              // see ElementBlock.astro's own top comment on why duplicated
+              // rather than centralized here). All this wrapper needs to
+              // know is WHETHER to render at all — any `el.bp` entry means
+              // some descendant component may have emitted a matching
+              // `[data-vis="${elId}"] ...` rule, so the id has to exist for
+              // that selector to ever match anything. hoverEffect/entrance/
+              // visibility stay the only concerns this file still computes
+              // itself (respId's own hideDesktop/hideTablet/hideMobile
+              // check above).
+              const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+              const elVisId = respId(elId, p) ?? (hasBp || el.type === "slider" ? elId : undefined);
               return designerEdit || elVisId ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}

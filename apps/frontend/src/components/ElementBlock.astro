@@ -49,6 +49,7 @@ function buildSrcset(url: string): { srcset: string; sizes: string } | null {
 interface El {
   type: string;
   props?: Record<string, string>;
+  bp?: Record<string, string>;
 }
 interface Props {
   el: El;
@@ -59,6 +60,141 @@ interface Props {
 }
 const { el, blockIndex, r, c, e } = Astro.props as Props;
 const p = el.props ?? {};
+
+// Real per-breakpoint margin/padding/border/shadow/align override — same
+// bpStyleRules mechanism SectionBlock.astro/ContainerBlock.astro/
+// SymbolBlock.astro use for theirs (duplicated here rather than shared, this
+// codebase's established convention — see SectionBlock.astro's own top
+// comment on why shared *logic* goes through lib/element-render.ts, never
+// another .astro file's frontmatter). `elId` matches the `data-vis` id
+// SectionBlock.astro's own wrapper div around this component's output
+// already carries (same `e${blockIndex}-${r}-${c}-${e}` formula) — a CSS
+// selector matches regardless of which component's <style> tag declares it,
+// so this works without that wrapper needing to know this file's per-type
+// selectors. hoverEffect/entrance/color stay admin-canvas-preview-only for
+// now — those are CSS classes / non-box-model fields, a different mechanism
+// than reusing bpStyleRules against a margin/padding/border/shadow build.
+const elId = `e${blockIndex}-${r}-${c}-${e}`;
+const responsiveRules: string[] = [];
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
+const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+if (hasBp) {
+  const sel = `[data-vis="${elId}"]`;
+  switch (el.type) {
+    case "heading":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-h`, el.bp!, p, (mp) =>
+          [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp), typoStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
+        ),
+      );
+      break;
+    case "text":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-text`, el.bp!, p, (mp) =>
+          [
+            `font-size:${fluidTextSize(lengthValue(mp.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+            mp.align ? `text-align:${mp.align}` : null,
+            marginStyle(mp),
+            paddingStyle(mp),
+            typoStyle(mp),
+            elBorderShadowStyle(mp),
+          ]
+            .filter(Boolean)
+            .join(";"),
+        ),
+      );
+      break;
+    case "image":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} img`, el.bp!, p, (mp) =>
+          [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+            .filter(Boolean)
+            .join(";"),
+        ),
+        ...bpStyleRules(`${sel} .ds-img-wrap`, el.bp!, p, (mp) => (mp.align ? `text-align:${mp.align}` : "")),
+      );
+      break;
+    case "video":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-video`, el.bp!, p, (mp) =>
+          [`border-radius:${elRadius(mp)}`, "max-width:100%", marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
+        ),
+      );
+      break;
+    case "button":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-btn-wrap`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        ...bpStyleRules(`${sel} .ds-btn`, el.bp!, p, (mp) => elBorderShadowStyle(mp) ?? ""),
+      );
+      break;
+    case "badge":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-badge-wrap`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+      );
+      break;
+    case "spacer":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-spacer`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SPACE, SPACE.md)}`));
+      break;
+    case "divider":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-divider`, el.bp!, p, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
+      break;
+    case "embed":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-embed`, el.bp!, p, (mp) =>
+          [
+            `border-radius:${elRadius(mp)}`,
+            shadowToCss(mp.shadow) ? `box-shadow:${shadowToCss(mp.shadow)}` : null,
+            marginStyle(mp),
+            paddingStyle(mp),
+          ]
+            .filter(Boolean)
+            .join(";"),
+        ),
+      );
+      break;
+    case "icon":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-icon-wrap`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+      );
+      break;
+    case "list":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-list`, el.bp!, p, (mp) => [marginStyle(mp), paddingStyle(mp), typoStyle(mp)].filter(Boolean).join(";")));
+      break;
+    case "html":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-html`, el.bp!, p, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
+      break;
+    case "gallery":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-gallery`, el.bp!, p, (mp) =>
+          [`grid-template-columns:repeat(${mp.columns ?? "3"},1fr)`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";"),
+        ),
+      );
+      break;
+  }
+}
 ---
 
 {(() => {
@@ -103,7 +239,7 @@ switch (el.type) {
     const imgSrc = safeUrl(p.src);
     const imgSrcset = imgSrc ? buildSrcset(imgSrc) : null;
     return imgSrc ? (
-      <div style={p.align ? `text-align:${p.align}` : null}>
+      <div class="ds-img-wrap" style={p.align ? `text-align:${p.align}` : null}>
         <img
           class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
           src={imgSrc}
@@ -128,7 +264,7 @@ switch (el.type) {
   case "video":
     return safeUrl(p.src) ? (
       <video
-        class={cls(p.cssClass)}
+        class={cls("ds-video", p.cssClass)}
         src={safeUrl(p.src)}
         controls
         style={[
@@ -145,6 +281,7 @@ switch (el.type) {
   case "button":
     return p.label ? (
       <div
+        class="ds-btn-wrap"
         style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
       >
         <a
@@ -161,7 +298,7 @@ switch (el.type) {
     const badgeIconSize = { sm: 10, md: 12, lg: 14 }[p.scale ?? "md"] ?? 12;
     const badgeIconPath = p.name ? ICON_PATHS[p.name] : undefined;
     return (
-      <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+      <div class="ds-badge-wrap" style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
         <span
           class={cls(`ds-badge ds-badge-${p.variant || "soft"} ds-badge-${p.scale || "md"}`, p.cssClass)}
           style={p.color ? `color:${p.color}` : undefined}
@@ -177,7 +314,7 @@ switch (el.type) {
     );
   }
   case "spacer":
-    return <div style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} aria-hidden="true" />;
+    return <div class="ds-spacer" style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} aria-hidden="true" />;
   case "divider":
     return (
       <hr
@@ -210,7 +347,7 @@ switch (el.type) {
     const size = lengthValue(p.size, ICON_SIZE, ICON_SIZE.md);
     return (
       <div
-        class={p.cssClass}
+        class={cls("ds-icon-wrap", p.cssClass)}
         style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
       >
         <svg
@@ -290,6 +427,7 @@ switch (el.type) {
     return null;
 }
 })()}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 
 <style>
   /* .ds-h/.ds-text/.ds-img/.ds-btn*/.ds-badge*/.ds-divider now live in

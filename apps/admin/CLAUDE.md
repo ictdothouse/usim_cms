@@ -340,13 +340,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `2.68435e+07px` and the Preview showed an empty slide. Fixed in `SliderBlock.astro` with
   `contain: inline-size`, plus a stacked slider column force-stretched (`data-fill`) in both
   `SectionBlock.astro` and `DesignerCanvas.tsx`. Blocks mode stays the editing approximation.
-  **Still admin-canvas-preview-only** (real scope reduction that remains):
-  shadow/border/color/typography on nested elements — editable per-bp in the Inspector and previewed
-  live via the same generic `mergeElBp`, but the published site only ever renders their desktop value;
-  only margin/padding/position get a real `bpStyleRules` CSS rule (`SectionBlock.astro`'s
-  `renderSlideEl`, scoped to `[data-vis="elId"] [data-slide-el="childId"]` — `elId` had to be hoisted
-  above the element switch's own IIFE so the slider case's closure could reach it before it was
-  otherwise computed).
+  **Was admin-canvas-preview-only, now real (2026-10-09 generalization)**: shadow/border/typography on
+  slide-nested heading/text/image/button now also get a real `bpStyleRules` CSS rule in
+  `SliderBlock.astro`'s `renderSlideEl` (previously only margin/padding/position did) — `color` and
+  `hoverEffect`/`entrance` are the only fields still desktop-value-only for slide children (CSS
+  classes/non-box-model fields, a different mechanism). This was the last piece of a much larger sweep
+  that made per-breakpoint margin/padding/border/shadow/align real for virtually every ElType across
+  every render file (`ElementBlock.astro`, `MiscBlock.astro`, `RepeaterBlock.astro`,
+  `ContainerBlock.astro`, `SymbolBlock.astro`), plus Row's own margin/padding/gap bp
+  (`SectionBlock.astro`'s `rowStyleBp`/`rowStyleBase`), plus a base-value gap closed for
+  `PostListBlock.astro`/`EventListBlock.astro`/`MenuBlock.astro`/`RepeaterBlock.astro`'s 8 types (margin/
+  padding/border/shadow were never applied even at the desktop value for those before — not just a bp
+  gap). Section/Column were already fully generalized before this (`buildSectionStyle`/`colStyle` reused
+  wholesale as the bp `build()` function); Element was the one level still built case-by-case with no
+  generic fallback. Each render file still duplicates its own local `bpMerge`/`bpStyleRules` rather than
+  importing a shared copy — same established "god-file breakup" convention as everything else in this
+  list. Out of scope, deliberately: `color`/`hoverEffect`/`entrance` per-breakpoint (CSS classes, not
+  CSS declarations — `bpStyleRules` only emits property:value pairs, so making these real needs a
+  different mechanism, not just more call sites).
   **Effects parity**: heading/text/button gained `shadow`+`borderWidth`/`borderColor`/`borderStyle`
   (button also gained `color`) — fields that already existed on image/embed or as a generic kind, just
   not previously offered on these 3 types; `style.ts`/`SectionBlock.astro`'s `elBorderShadowStyle()` is
@@ -362,8 +373,9 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   animation on every React re-render. `entrance` uses `animation-timeline: view()` for real scroll-
   triggered playback where supported (Chrome/Edge/Firefox), `@supports`-gated; elsewhere it silently
   degrades to a one-shot animation that finishes on page load, never a broken/stuck state. Both fields
-  are the same "admin-canvas-preview-only, no real per-bp" bucket as shadow/border/color/typography
-  above (see `SectionBlock.astro`'s `renderSlideEl` comment) for slide-nested elements.
+  are the same "admin-canvas-preview-only, no real per-bp" bucket `color` still is for slide-nested
+  elements (shadow/border/typography were closed in the 2026-10-09 generalization above — see that
+  entry and `SliderBlock.astro`'s `renderSlideEl` comment).
   **Slide overlay bug fix**: `SLIDE_DEFAULTS.overlayOpacity` used to default to `"35"`, so a freshly-
   added slide showed a darkening scrim the author never asked for; it now defaults to `"0"` (no overlay
   until the author sets one), fixed in both `parsers.ts` and `SectionBlock.astro`'s 2 legacy-shape

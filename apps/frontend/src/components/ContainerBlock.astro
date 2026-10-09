@@ -156,7 +156,17 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
     case "image": {
       const cpSrc = safeUrl(cp.src);
       const cpSrcset = cpSrc ? buildSrcset(cpSrc) : null;
-      return cpSrc ? (
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${childPath}"] img`, child.bp!, cp, (mp) =>
+            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
+      }
+      const imgNode = cpSrc ? (
         <img
           class={cls("ds-img", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
           data-designer-path={designerEdit ? childPath : undefined}
@@ -170,11 +180,26 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
             .join(";")}
         />
       ) : null;
+      return hasBp && imgNode ? (
+        <div data-vis={childPath} style="display:contents">
+          {imgNode}
+        </div>
+      ) : (
+        imgNode
+      );
     }
-    case "button":
+    case "button": {
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${childPath}"] .ds-btn`, child.bp!, cp, (mp) => elBorderShadowStyle(mp) ?? ""),
+        );
+      }
       return cp.label ? (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
+          data-vis={hasBp ? childPath : undefined}
           style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         >
           <a
@@ -186,12 +211,20 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
           </a>
         </div>
       ) : null;
+    }
     case "badge": {
       const badgeIconPath = cp.name ? ICON_PATHS[cp.name] : undefined;
       const badgeIconSize = { sm: "14", md: "16", lg: "20" }[cp.scale ?? "md"] ?? "16";
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        );
+      }
       return (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
+          data-vis={hasBp ? childPath : undefined}
           style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         >
           <span class={cls(`ds-badge ds-badge-${cp.variant || "soft"} ds-badge-${cp.scale || "md"}`, cp.cssClass)} style={cp.color ? `color:${cp.color}` : undefined}>
@@ -205,16 +238,40 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
         </div>
       );
     }
-    case "spacer":
-      return <div data-designer-path={designerEdit ? childPath : undefined} style={`height:${lengthValue(cp.height, SPACE, SPACE.md)}`} />;
-    case "divider":
-      return <hr data-designer-path={designerEdit ? childPath : undefined} class="ds-divider" style={[marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")} />;
+    case "spacer": {
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => `height:${lengthValue(mp.height, SPACE, SPACE.md)}`));
+      }
+      return <div data-designer-path={designerEdit ? childPath : undefined} data-vis={hasBp ? childPath : undefined} style={`height:${lengthValue(cp.height, SPACE, SPACE.md)}`} />;
+    }
+    case "divider": {
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
+      }
+      return (
+        <hr
+          data-designer-path={designerEdit ? childPath : undefined}
+          data-vis={hasBp ? childPath : undefined}
+          class="ds-divider"
+          style={[marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
+        />
+      );
+    }
     case "icon": {
       const iconPath = ICON_PATHS[cp.name ?? "check"] ?? ICON_PATHS.check;
       const iconSize = lengthValue(cp.size, ICON_SIZE, ICON_SIZE.md);
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        );
+      }
       return (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
+          data-vis={hasBp ? childPath : undefined}
           style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         >
           <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={cp.color || "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -225,9 +282,18 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
     }
     case "container": {
       const grandchildren = child.children ?? [];
+      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+      if (hasBp) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) =>
+            [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
+          ),
+        );
+      }
       return (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
+          data-vis={hasBp ? childPath : undefined}
           style={[
             "display:flex",
             `flex-direction:${cp.flexDirection || "row"}`,

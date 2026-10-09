@@ -5,6 +5,7 @@
 // MenuBlock.astro's menuId. categoryId is optional: empty means latest
 // posts across every category.
 import { listPosts, resolvePostContent, type Post } from "../lib/api";
+import { marginStyle, paddingStyle, elBorderShadowStyle } from "../lib/element-render";
 
 interface Props {
   categoryId?: string;
@@ -13,18 +14,45 @@ interface Props {
   postLayout?: "grid" | "list";
   tenantHost: string;
   lang: string | null;
+  // Margin/padding/border/shadow (base + per-breakpoint) were never applied
+  // to this block at all — not just a bp gap, the desktop value itself was
+  // silently dropped since this component never called marginStyle/
+  // paddingStyle/elBorderShadowStyle. `p`/`bp`/`elId` let the caller
+  // (SectionBlock.astro) hand over the same props/bp bag every other
+  // element type already gets real box-model styling from.
+  p?: Record<string, string>;
+  bp?: Record<string, string>;
+  elId?: string;
 }
-const { categoryId = "", count = "3", columns = "3", postLayout = "grid", tenantHost, lang } = Astro.props;
+const { categoryId = "", count = "3", columns = "3", postLayout = "grid", tenantHost, lang, p = {}, bp, elId } = Astro.props;
 
 const query: Record<string, string> = { limit: count };
 if (categoryId) query.categoryId = categoryId;
 const posts: Post[] = await listPosts(tenantHost, query);
+
+const boxStyle = [marginStyle(p), paddingStyle(p), elBorderShadowStyle(p)].filter(Boolean).join(";");
+const responsiveRules: string[] = [];
+if (bp && Object.keys(bp).length > 0 && elId) {
+  const prefix = (tier: "tablet" | "mobile") => `${tier}:`;
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(prefix(tier)))) continue;
+    const merged = { ...p };
+    for (const [k, v] of Object.entries(bp)) {
+      if (k.startsWith(prefix(tier))) merged[k.slice(prefix(tier).length)] = v;
+    }
+    const css = [marginStyle(merged), paddingStyle(merged), elBorderShadowStyle(merged)].filter(Boolean).join(";");
+    if (!css) continue;
+    const important = css.split(";").filter(Boolean).map((decl) => `${decl} !important`).join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    responsiveRules.push(`@media ${media}{[data-vis="${elId}"] .ds-postlist{${important}}}`);
+  }
+}
 ---
 
 {posts.length > 0 && (
   <div
     class={`ds-postlist ds-postlist-${postLayout}`}
-    style={postLayout === "grid" ? `grid-template-columns:repeat(${columns},1fr)` : undefined}
+    style={[postLayout === "grid" ? `grid-template-columns:repeat(${columns},1fr)` : null, boxStyle].filter(Boolean).join(";") || undefined}
   >
     {posts.map((post) => {
       const content = resolvePostContent(post, lang);
@@ -45,3 +73,4 @@ const posts: Post[] = await listPosts(tenantHost, query);
     })}
   </div>
 )}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}

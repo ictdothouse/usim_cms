@@ -304,6 +304,21 @@ const { el, designerEdit = false, elId } = Astro.props as Props;
 // (position/margin/padding/font) silently never reached the page.
 const responsiveRules: string[] = [];
 const p = el.props ?? {};
+// The slider element's OWN real per-breakpoint margin/padding/border/shadow/
+// height override (as opposed to a nested slide element's own, handled by
+// renderSlideEl below) — same bag/mechanism, just scoped to this element's
+// own wrapper (`[data-vis="elId"] .ds-slider`) instead of a slide child's
+// `data-slide-el` selector. Previously only `height` was real (every other
+// field here was admin-canvas-preview-only, see this file's CLAUDE.md note).
+if (el.bp && Object.keys(el.bp).length > 0) {
+  responsiveRules.push(
+    ...bpStyleRules(`[data-vis="${elId}"] .ds-slider`, el.bp, p, (mp) =>
+      [`height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+        .filter(Boolean)
+        .join(";"),
+    ),
+  );
+}
 ---
 
 {(() => {
@@ -328,19 +343,14 @@ const p = el.props ?? {};
   // Button/Image buttons; "Add Row" only nests more of the
   // same three). Mirrors the main element switch's own
   // heading/text/image/button cases above. Margin/padding/
-  // shadow/border/color/typography are real per-element
-  // props (same fields as any top-level element). Real
-  // per-breakpoint override is wired for margin/padding/
-  // free-position (the fields the Inspector's own FourSideControl/
-  // Position block let an author toggle a BpToggle on) —
-  // shadow/border/color/typography/hoverEffect/entrance stay
-  // admin-canvas-preview-only for now (a bp override toggle
-  // still shows for them in the Inspector, since FieldGroups
-  // renders every ELS field the same generic way, but it's
-  // inert here — only the base value ever reaches this
-  // render), the one remaining scope reduction (same
-  // "not every field, just the common layout ones" tradeoff
-  // imgWidth/slider-height made before this).
+  // shadow/border/typography/free-position are all real
+  // per-breakpoint overrides (the fields the Inspector's own
+  // FourSideControl/Typography/Position blocks let an author
+  // toggle a BpToggle on) — color/hoverEffect/entrance stay
+  // admin-canvas-preview-only for now (CSS classes / non-
+  // box-model fields, a different mechanism than reusing
+  // bpStyleRules against a margin/padding/border/shadow
+  // build), the one remaining scope reduction.
   // slideIdx/r/c/e address this element within the slider's
   // OWN slides[]/rows[]/columns[]/elements[] tree — separate
   // from the page's own [b,r,c,e] block-index path (which
@@ -369,36 +379,72 @@ const p = el.props ?? {};
         }
       : {};
     if (el.bp && Object.keys(el.bp).length > 0) {
-      responsiveRules.push(
-        ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"]`, el.bp, ep, (mp) =>
-          [
-            marginStyle(mp),
-            paddingStyle(mp),
-            posStyle(mp),
-            // Keep a free-positioned heading/subheading box at least as wide
-            // as its longest unbreakable word, so the rendered text stays
-            // inside the selection/resize outline on narrow viewports.
-            (el.type === "heading" || el.type === "text") && mp.position === "custom" ? "min-width:min-content" : null,
-            // heading-only: mirrors the admin canvas's posFontSize override
-            // (ElPreview.tsx) so a per-breakpoint drag-resize's scaled font
-            // size actually shows up here too, not just on desktop.
-            el.type === "heading" && mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null,
-            // text's own size (a tablet/mobile corner-resize scales it), same
-            // fluid clamp the base render uses below.
-            el.type === "text" && mp.size ? `font-size:${fluidTextSize(lengthValue(mp.size, TEXT_SIZE, TEXT_SIZE.md))}` : null,
-          ]
-            .filter(Boolean)
-            .join(";"),
-        ),
-      );
-      // Button's own posFontSize (same free-position drag-resize override as
-      // heading's, above) has to land on the inner <a> specifically, not
-      // this wrapper — .ds-btn sets its own font-size directly (global.css),
-      // so a value only set on an ancestor would never actually win over it.
-      if (el.type === "button") {
+      const outerSel = `[data-vis="${elId}"] [data-slide-el="${el.id}"]`;
+      // heading/text carry `data-slide-el` on the real styled tag itself, so
+      // everything lands on one selector. image/button instead wrap an
+      // inner <img>/<a> that carries margin/padding/border/shadow (and, for
+      // button, posFontSize) — mirrors renderSlideEl's own JSX below exactly,
+      // same split ElementBlock.astro's non-slide image/button cases use.
+      if (el.type === "heading") {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${elId}"] [data-slide-el="${el.id}"] a`, el.bp, ep, (mp) =>
-            mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : "",
+          ...bpStyleRules(outerSel, el.bp, ep, (mp) =>
+            [
+              mp.align ? `text-align:${mp.align}` : null,
+              marginStyle(mp),
+              paddingStyle(mp),
+              typoStyle(mp),
+              elBorderShadowStyle(mp),
+              posStyle(mp),
+              mp.position === "custom" ? "min-width:min-content" : null,
+              mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null,
+            ]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
+      } else if (el.type === "text") {
+        responsiveRules.push(
+          ...bpStyleRules(outerSel, el.bp, ep, (mp) =>
+            [
+              `font-size:${fluidTextSize(lengthValue(mp.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+              mp.align ? `text-align:${mp.align}` : null,
+              marginStyle(mp),
+              paddingStyle(mp),
+              typoStyle(mp),
+              elBorderShadowStyle(mp),
+              posStyle(mp),
+              mp.position === "custom" ? "min-width:min-content" : null,
+            ]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
+      } else if (el.type === "image") {
+        responsiveRules.push(
+          ...bpStyleRules(outerSel, el.bp, ep, (mp) => [mp.align ? `text-align:${mp.align}` : null, posStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`${outerSel} img`, el.bp, ep, (mp) =>
+            [
+              `border-radius:${elRadius(mp)}`,
+              mp.position === "custom" && mp.posWidth ? "width:100%" : mp.imgWidth ? `width:${mp.imgWidth}` : null,
+              mp.position === "custom" && mp.posHeight ? "height:100%;object-fit:cover" : null,
+              marginStyle(mp),
+              paddingStyle(mp),
+              elBorderShadowStyle(mp),
+            ]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
+      } else if (el.type === "button") {
+        responsiveRules.push(
+          ...bpStyleRules(outerSel, el.bp, ep, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp), posStyle(mp)].filter(Boolean).join(";")),
+          // .ds-btn sets its own font-size directly (global.css), so
+          // posFontSize has to land on the inner <a> specifically, not this
+          // wrapper, same as the removed posFontSize-only block used to.
+          ...bpStyleRules(`${outerSel} a`, el.bp, ep, (mp) =>
+            [mp.position === "custom" && mp.posWidth ? "width:100%" : null, mp.position === "custom" && mp.posHeight ? "height:100%" : null, mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null, elBorderShadowStyle(mp)]
+              .filter(Boolean)
+              .join(";"),
           ),
         );
       }
