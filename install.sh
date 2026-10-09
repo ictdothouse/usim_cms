@@ -1161,8 +1161,24 @@ install_baremetal_mode() {
   # other CLI; `corepack pnpm ...` is not itself a valid invocation.
   local node_dir="$(dirname "$node_bin")"
   export PATH="${node_dir}:${PATH}"
+  # A host's bundled Node can ship a corepack release whose embedded npm
+  # registry signing keys predate npm's own key rotation — any fresh fetch
+  # then fails signature verification outright ("Cannot find matching
+  # keyid"), which would otherwise hard-fail this entire install under
+  # `set -euo pipefail` with no retry. Update corepack first (a plain npm
+  # install, not subject to corepack's own check); if this script is being
+  # re-run after an earlier interrupted attempt, also clear out whatever
+  # partial download that attempt may have left behind, since corepack
+  # skips re-downloading a version whose cache dir already exists even if
+  # it's incomplete. COREPACK_INTEGRITY_KEYS=0 stays only as a last-resort
+  # fallback scoped to this one command.
+  npm install -g corepack@latest >/dev/null 2>&1 || echo "corepack self-update failed, continuing with bundled corepack"
   "${node_dir}/corepack" enable
-  pnpm install --frozen-lockfile
+  local pinned_pnpm corepack_cache
+  pinned_pnpm="$(node -p "require('./package.json').packageManager" | sed 's/^pnpm@//')"
+  corepack_cache="${COREPACK_HOME:-$HOME/.cache/node/corepack}"
+  rm -rf "${corepack_cache}/v1/pnpm/${pinned_pnpm}" 2>/dev/null || true
+  pnpm install --frozen-lockfile || COREPACK_INTEGRITY_KEYS=0 pnpm install --frozen-lockfile
 
   echo "Building api..."
   pnpm --filter @ucms/api build
