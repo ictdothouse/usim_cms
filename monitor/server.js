@@ -1324,6 +1324,14 @@ function handleStackUpdate(req, res, key) {
 // Docker mode only: on systemd/bare-metal, Node/pnpm are host-level tools
 // this box may share with other projects, same reasoning CLAUDE.md gives
 // for never restarting a reused Postgres.
+// deploy.sh builds straight from this box's own working tree (it never
+// does its own git pull/fetch), so reaching a git remote is NOT required
+// for the bump to actually take effect — only a local commit is, for an
+// audit trail/rollback-via-git-history. Pushing to origin is therefore
+// best-effort and runs AFTER the real deploy, never blocking it: installs
+// on other orgs' VPSes shouldn't need a GitHub credential wired up just to
+// click Update, and a missing/broken remote must never strand a bump that
+// otherwise succeeded (see the exit-128 "could not read Username" case).
 function startSourceBumpDeploy(label, files, commitMsg, res) {
   deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
   const logFd = fs.openSync(DEPLOY_LOG, "a");
@@ -1337,10 +1345,14 @@ function startSourceBumpDeploy(label, files, commitMsg, res) {
 ${commitMsg}
 COMMITMSG
 )"
-    echo "--- pushing ---"
-    git push origin main
     echo "--- deploying (blue-green, zero-downtime — builds+tests the new image before switching) ---"
     bash scripts/deploy.sh
+    echo "--- syncing to git remote (best effort, never blocks the deploy above) ---"
+    if git remote get-url origin >/dev/null 2>&1; then
+      git push origin main || echo "WARNING: push to origin failed — the bump is already deployed and committed locally, just not synced to the remote. Fix git credentials then run: git push origin main"
+    else
+      echo "no git remote configured — skipping push, commit stays local-only"
+    fi
     echo "--- done ---"
   `;
   const child = spawn("sh", ["-c", script], { cwd: REPO_DIR, stdio: ["ignore", logFd, logFd], detached: true });
