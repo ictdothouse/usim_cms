@@ -1481,6 +1481,8 @@ function handlePnpmUpdate(req, res) {
     echo "--- updating corepack (old bundled corepack can carry stale npm signing keys) ---"
     npm install -g corepack@latest >/dev/null 2>&1 || echo "corepack self-update failed, continuing with bundled corepack"
     "$NODE_DIR/corepack" enable >/dev/null 2>&1 || true
+    COREPACK_CACHE="\${COREPACK_HOME:-$HOME/.cache/node/corepack}"
+    rm -rf "$COREPACK_CACHE/v1/pnpm/${latest.pnpm}" 2>/dev/null || true
     echo "--- regenerating pnpm-lock.yaml for pnpm@${latest.pnpm} ---"
     pnpm install --lockfile-only || COREPACK_INTEGRITY_KEYS=0 pnpm install --lockfile-only
     `;
