@@ -60,6 +60,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_DIR="$(pwd)"
+# Pinned, not "@latest" — an unpinned global install embedded in an
+# automated script is itself a floating supply-chain dependency. Bump this
+# deliberately (same as any other dependency upgrade) when corepack cuts a
+# new release, rather than always trusting whatever npm resolves right now.
+COREPACK_PIN_VERSION="0.36.0"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this with sudo: sudo ./install.sh" >&2
@@ -1170,15 +1175,22 @@ install_baremetal_mode() {
   # re-run after an earlier interrupted attempt, also clear out whatever
   # partial download that attempt may have left behind, since corepack
   # skips re-downloading a version whose cache dir already exists even if
-  # it's incomplete. COREPACK_INTEGRITY_KEYS=0 stays only as a last-resort
-  # fallback scoped to this one command.
-  npm install -g corepack@latest >/dev/null 2>&1 || echo "corepack self-update failed, continuing with bundled corepack"
+  # it's incomplete. If pnpm install still fails after that, fail hard with
+  # a clear message rather than silently retrying with
+  # COREPACK_INTEGRITY_KEYS=0 — a supply-chain verification step should
+  # never auto-bypass itself on failure.
+  npm install -g "corepack@${COREPACK_PIN_VERSION}" >/dev/null 2>&1 || echo "corepack self-update failed, continuing with bundled corepack"
   "${node_dir}/corepack" enable
   local pinned_pnpm corepack_cache
   pinned_pnpm="$(node -p "require('./package.json').packageManager" | sed 's/^pnpm@//')"
   corepack_cache="${COREPACK_HOME:-$HOME/.cache/node/corepack}"
-  rm -rf "${corepack_cache}/v1/pnpm/${pinned_pnpm}" 2>/dev/null || true
-  pnpm install --frozen-lockfile || COREPACK_INTEGRITY_KEYS=0 pnpm install --frozen-lockfile
+  if [ -n "$corepack_cache" ] && [ -n "$pinned_pnpm" ]; then
+    rm -rf "${corepack_cache}/v1/pnpm/${pinned_pnpm}" 2>/dev/null || true
+  fi
+  if ! pnpm install --frozen-lockfile; then
+    echo "pnpm install failed — possible corepack signature verification failure even after updating corepack. Not auto-bypassing integrity checks: investigate (registry reachability, 'corepack enable' output above) before retrying, or re-run with COREPACK_INTEGRITY_KEYS=0 by hand once you've confirmed why verification failed." >&2
+    exit 1
+  fi
 
   echo "Building api..."
   pnpm --filter @ucms/api build
