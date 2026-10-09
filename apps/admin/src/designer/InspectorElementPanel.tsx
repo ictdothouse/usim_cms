@@ -391,7 +391,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                   onToggleOverride: () => childToggleOverride(Object.values(PADDING_SIDE_KEYS)),
                 }}
                 radius={
-                  childEl.type === "image" || childEl.type === "embed" || childEl.type === "gallery"
+                  childEl.type === "image" || childEl.type === "embed" || childEl.type === "gallery" || childEl.type === "video"
                     ? {
                         labelKey: "designer-f-radius",
                         linked: linkedRadius,
@@ -556,7 +556,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
               ...langOverrideProps(pathKey(b, r, c, e), Object.values(PADDING_SIDE_KEYS)),
             }}
             radius={
-              el.type === "image" || el.type === "embed" || el.type === "gallery" || el.type === "slider"
+              el.type === "image" || el.type === "embed" || el.type === "gallery" || el.type === "slider" || el.type === "video"
                 ? {
                     labelKey: "designer-f-radius",
                     linked: linkedRadius,
