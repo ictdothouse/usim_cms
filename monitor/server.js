@@ -1164,6 +1164,10 @@ function finishStackDeploy(label, logFd, code) {
 // taking the service down) only happens in /update, which always
 // health-checks and auto-rolls-back.
 function handleStackTest(req, res, key) {
+  // Dependency check is a read-only `pnpm outdated` — unlike everything else
+  // here it never touches docker/containers at all, so it works regardless
+  // of DEPLOY_MODE and must be checked before the docker-mode gate below.
+  if (key === "deps") return handleDepsCheck(req, res);
   if (key === "node" || key === "pnpm") {
     return sendJson(res, 400, {
       error: "no separate test step here — Update already builds and test-gates the new image before switching traffic",
@@ -1205,6 +1209,7 @@ function handleStackTest(req, res, key) {
 function handleStackUpdate(req, res, key) {
   if (key === "node") return handleNodeUpdate(req, res);
   if (key === "pnpm") return handlePnpmUpdate(req, res);
+  if (key === "deps") return handleDepsUpdate(req, res);
 
   if (DEPLOY_MODE !== "docker") {
     return sendJson(res, 501, { error: "stack version updates need docker mode — this box runs systemd mode" });
@@ -1508,6 +1513,65 @@ function handlePnpmUpdate(req, res) {
       preCommit,
     );
   });
+}
+
+// Read-only — `pnpm outdated` only reads the registry and compares against
+// what's already declared/locked, never writes anything. Works regardless
+// of DEPLOY_MODE, unlike everything else in this file. The full table goes
+// to DEPLOY_LOG (same viewer as every other deploy/update action) rather
+// than the small inline stackMsg span, since a workspace-wide outdated
+// report can be long.
+function handleDepsCheck(req, res) {
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+  const script = `NODE_DIR="$(dirname "${NODE_BIN}")"; export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"; pnpm -r outdated`;
+  execFile("sh", ["-c", script], { cwd: REPO_DIR, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    // `pnpm outdated` exits 1 when there ARE outdated packages — that's the
+    // normal "found something" case here, not a failure.
+    const output = (stdout || stderr || "").replace(/\x1b\[[0-9;]*m/g, "").trim();
+    fs.appendFileSync(
+      DEPLOY_LOG,
+      `\n\n=== dependency check ${new Date().toISOString()} ===\n${output || "(nothing outdated within declared ranges)"}\n`,
+    );
+    sendJson(res, 200, {
+      ok: true,
+      message: output ? "outdated packages found — see Overview tab log for the full list" : "all dependencies already match their declared ranges",
+    });
+  });
+}
+
+// Deliberately scoped to "update within each package.json's own declared
+// semver range" (`pnpm -r update`, no --latest) — the same safety posture as
+// the floating Docker tags: a caret/tilde range already states what the
+// project considers compatible, so resolving to the newest version inside
+// it is routine-risk, not a version a human needs to review first. Jumping
+// a dependency's major (or past its declared range) is a separate, far
+// riskier operation and isn't offered here — same reasoning as excluding
+// Postgres major upgrades from one-click automation.
+function handleDepsUpdate(req, res) {
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, { error: "dependency updates need docker mode — this box runs systemd mode" });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+  const lockPath = path.join(REPO_DIR, "pnpm-lock.yaml");
+  let oldLock;
+  try {
+    oldLock = fs.readFileSync(lockPath, "utf8");
+  } catch (e) {
+    return sendJson(res, 500, { error: `couldn't read pnpm-lock.yaml: ${e.message}` });
+  }
+  const preCommit = `
+  NODE_DIR="$(dirname "${NODE_BIN}")"
+  export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+  echo "--- updating dependencies within their declared package.json ranges (pnpm -r update) ---"
+  pnpm -r update
+  `;
+  startSourceBumpDeploy(
+    "dependency update",
+    { "pnpm-lock.yaml": oldLock },
+    `chore(deps): update dependencies within declared ranges\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
+    res,
+    preCommit,
+  );
 }
 
 // Auto-SSL for the nginx-fronted enterprise pattern (see CLAUDE.md's
@@ -1986,9 +2050,20 @@ function stackActions(key, label, testable) {
 
 let lastVersionsData = null;
 
+function sectionHeader(title) {
+  return "<div style=\\"grid-column:1/-1;margin-top:0.6rem;font-weight:600;color:#888;font-size:0.8rem;text-transform:uppercase;letter-spacing:.04em\\">" +
+    escapeHtml(title) + "</div>";
+}
+
 function renderStackTab(v, checks) {
   let html = "";
+  html += sectionHeader("Overview");
   html += versionCard("App (git is the real version)", v.appVersion);
+  html += versionCard("API package", v.packages.api);
+  html += versionCard("Admin package", v.packages.admin);
+  html += versionCard("Frontend package", v.packages.frontend);
+
+  html += sectionHeader("Runtime");
   html += versionCard("pnpm", v.pnpm, null, checks && checks.pnpm, true, stackActions("pnpm", "pnpm", false));
   html += versionCard(
     "Node.js",
@@ -1998,9 +2073,10 @@ function renderStackTab(v, checks) {
     !!v.node.dockerImage,
     v.node.dockerImage ? stackActions("node", "Node base image", false) : "",
   );
-  html += versionCard("API package", v.packages.api);
-  html += versionCard("Admin package", v.packages.admin);
-  html += versionCard("Frontend package", v.packages.frontend);
+
+  if (v.infra.db || v.infra.redis || v.infra.pgbouncer || v.infra.proxy) {
+    html += sectionHeader("Infrastructure");
+  }
   if (v.infra.db) {
     html += versionCard("PostgreSQL", v.infra.db, null, checks && checks.postgres, true, stackActions("postgres", "PostgreSQL patch refresh", true));
   }
@@ -2013,6 +2089,16 @@ function renderStackTab(v, checks) {
   if (v.infra.proxy) {
     html += versionCard("Caddy (proxy)", v.infra.proxy, null, checks && checks.caddy, true, stackActions("caddy", "Caddy patch refresh", true));
   }
+
+  html += sectionHeader("Dependencies");
+  html += versionCard(
+    "Project dependencies",
+    "check for patch/minor updates",
+    "Astro, Fastify, React, etc. — within each package's own declared range",
+    null,
+    false,
+    stackActions("deps", "Project dependencies", true),
+  );
   document.getElementById("versionGrid").innerHTML = html;
 }
 
@@ -2023,7 +2109,7 @@ async function stackTest(key, btn) {
   const msg = document.getElementById("stackMsg-" + key);
   if (msg) {
     msg.style.color = "";
-    msg.textContent = "pulling image…";
+    msg.textContent = key === "deps" ? "checking for outdated packages…" : "pulling image…";
   }
   try {
     const r = await api("/api/stack/" + key + "/test", { method: "POST" });
