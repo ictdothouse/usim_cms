@@ -397,6 +397,14 @@ ensure_private_node() {
     echo "Resolved Node version '${node_version}' doesn't look like a real x.y.z version — refusing to use it (check network/DNS, or nodejs.org may be returning something unexpected)." >&2
     exit 1
   fi
+  if ! command -v gpgv >/dev/null 2>&1; then
+    if [ "$PKG_MGR" = "apt" ]; then
+      pkg_install gpgv || true
+    else
+      pkg_install gnupg2 || true
+    fi
+  fi
+  command -v gpgv >/dev/null 2>&1 || { echo "gpgv not available and couldn't be installed — refusing to install Node without signature verification." >&2; exit 1; }
   {
     echo "Downloading a private Node.js v${node_version} (${arch}) to ${NODE_ROOT}..." >&2
     mkdir -p "$NODE_ROOT"
@@ -404,10 +412,22 @@ ensure_private_node() {
     local tmp_dir expected_sha actual_sha
     tmp_dir="$(mktemp -d)"
     curl -fsSL "https://nodejs.org/dist/v${node_version}/${tarball}" -o "${tmp_dir}/${tarball}"
-    curl -fsSL "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" -o "${tmp_dir}/SHASUMS256.txt"
+    # SHASUMS256.txt alone is fetched from the same host/CDN as the binary,
+    # so it only catches transit corruption, not a compromised nodejs.org —
+    # verify its GPG signature against the Node.js release keyring (a
+    # separate trust root, from the nodejs/release-keys GitHub repo) before
+    # trusting any checksum out of it. See node's own README.md "Verifying
+    # binaries" section.
+    curl -fsSL "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt.asc" -o "${tmp_dir}/SHASUMS256.txt.asc"
+    curl -fsSL "https://github.com/nodejs/release-keys/raw/HEAD/gpg/pubring.kbx" -o "${tmp_dir}/nodejs-keyring.kbx"
+    if ! gpgv --keyring="${tmp_dir}/nodejs-keyring.kbx" --output "${tmp_dir}/SHASUMS256.txt" < "${tmp_dir}/SHASUMS256.txt.asc"; then
+      echo "GPG signature verification of SHASUMS256.txt.asc failed — refusing to install (possible tampered download or compromised mirror)." >&2
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
     expected_sha="$(grep -E "  ${tarball}\$" "${tmp_dir}/SHASUMS256.txt" | awk '{print $1}')"
     if [ -z "$expected_sha" ]; then
-      echo "Couldn't find a checksum for ${tarball} in nodejs.org's SHASUMS256.txt — refusing to install an unverified binary." >&2
+      echo "Couldn't find a checksum for ${tarball} in nodejs.org's signed SHASUMS256.txt — refusing to install an unverified binary." >&2
       rm -rf "$tmp_dir"
       exit 1
     fi
