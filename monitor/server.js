@@ -486,6 +486,179 @@ function handleVersions(req, res) {
   getStackVersions((v) => sendJson(res, 200, v));
 }
 
+// Checks installed versions against upstream for the pieces that actually HAVE an upstream to
+// compare to — app packages (api/admin/frontend) are this repo's own semver, already covered by
+// the git-commits-behind check in the Update tab, not re-checked here. Split out of
+// getStackVersions/handleVersions on purpose: those stay a fast local-file read (dashboard loads
+// every time); this one leaves the box (Docker Hub/npm/nodejs.org), so it's its own endpoint,
+// cached, and the frontend fetches it after the static cards are already on screen.
+const UPSTREAM_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+let upstreamCache = { data: null, fetchedAt: 0 };
+
+function httpsGetJson(urlStr, cb) {
+  let target;
+  try {
+    target = new URL(urlStr);
+  } catch {
+    return cb(new Error("invalid URL"));
+  }
+  const req = https.request(
+    {
+      hostname: target.hostname,
+      path: target.pathname + target.search,
+      method: "GET",
+      headers: { "User-Agent": "usim-cms-monitor", Accept: "application/json" },
+      timeout: 8_000,
+    },
+    (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => {
+        try {
+          cb(null, JSON.parse(body));
+        } catch (e) {
+          cb(e);
+        }
+      });
+    },
+  );
+  req.on("error", cb);
+  req.on("timeout", () => req.destroy(new Error("request timed out")));
+  req.end();
+}
+
+function parseVer(str) {
+  const m = String(str || "").match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)];
+}
+
+function cmpVer(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+// floatingMajor: true means the compose/Dockerfile only pins a major (e.g. "16-alpine") and
+// always gets the newest patch/minor in that major on the next pull — so "behind" only ever
+// means a newer MAJOR exists, never a missed patch (there's no separate patch pin to miss).
+function verdict(currentStr, latestStr, floatingMajor) {
+  const cur = parseVer(currentStr);
+  const lat = parseVer(latestStr);
+  if (!cur || !lat) return { status: "unknown", note: "couldn't reach upstream to check" };
+  if (floatingMajor) {
+    if (cur[0] >= lat[0]) return { status: "latest", note: "newest major — patches apply automatically on next pull" };
+    return {
+      status: lat[0] - cur[0] >= 2 ? "outdated" : "behind",
+      note: `v${lat[0]} available upstream — bumping the major tag isn't automatic, review release notes first`,
+    };
+  }
+  const diff = cmpVer(lat, cur);
+  if (diff <= 0) return { status: "latest", note: "up to date" };
+  if (lat[0] > cur[0]) return { status: "behind", note: `${latestStr} available — review breaking changes before upgrading` };
+  return { status: "behind", note: `${latestStr} available — routine patch/minor bump, low risk` };
+}
+
+function maxTagMajor(tags) {
+  let best = null;
+  for (const t of tags) {
+    const m = String(t).match(/^(\d+)$/);
+    if (m && (best === null || Number(m[1]) > best)) best = Number(m[1]);
+  }
+  return best;
+}
+
+function maxSemverTag(tags, re) {
+  let best = null;
+  let bestParsed = null;
+  for (const t of tags) {
+    const m = String(t).match(re);
+    if (!m) continue;
+    const parsed = [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)];
+    if (!bestParsed || cmpVer(parsed, bestParsed) > 0) {
+      bestParsed = parsed;
+      best = t;
+    }
+  }
+  return best;
+}
+
+function dockerHubTags(repo, cb) {
+  httpsGetJson(`https://hub.docker.com/v2/repositories/${repo}/tags?page_size=100`, (err, json) => {
+    if (err || !json || !Array.isArray(json.results)) return cb(null);
+    cb(json.results.map((r) => r.name));
+  });
+}
+
+function getUpstreamLatest(cb) {
+  if (upstreamCache.data && Date.now() - upstreamCache.fetchedAt < UPSTREAM_CACHE_TTL_MS) {
+    return cb(upstreamCache.data);
+  }
+  const result = {};
+  let pending = 6;
+  const done = () => {
+    if (--pending > 0) return;
+    upstreamCache = { data: result, fetchedAt: Date.now() };
+    cb(result);
+  };
+  httpsGetJson("https://nodejs.org/dist/index.json", (err, releases) => {
+    if (!err && Array.isArray(releases)) {
+      const ltsMajors = releases.filter((r) => r.lts).map((r) => Number(String(r.version).replace(/^v/, "").split(".")[0]));
+      result.node = ltsMajors.length ? String(Math.max(...ltsMajors)) : null;
+    }
+    done();
+  });
+  httpsGetJson("https://registry.npmjs.org/pnpm/latest", (err, json) => {
+    result.pnpm = !err && json ? json.version : null;
+    done();
+  });
+  dockerHubTags("library/postgres", (tags) => {
+    result.postgres = tags ? maxTagMajor(tags) : null;
+    done();
+  });
+  dockerHubTags("library/redis", (tags) => {
+    result.redis = tags ? maxTagMajor(tags) : null;
+    done();
+  });
+  dockerHubTags("library/caddy", (tags) => {
+    result.caddy = tags ? maxTagMajor(tags) : null;
+    done();
+  });
+  dockerHubTags("edoburu/pgbouncer", (tags) => {
+    result.pgbouncer = tags ? maxSemverTag(tags, /^v?(\d+)\.(\d+)\.(\d+)/) : null;
+    done();
+  });
+}
+
+function handleVersionChecks(req, res) {
+  getStackVersions((v) => {
+    getUpstreamLatest((latest) => {
+      const checks = {};
+      if (v.node.dockerImage) {
+        const cur = (v.node.dockerImage.match(/^node:(\d+)/) || [])[1];
+        checks.node = { current: cur, latest: latest.node, ...verdict(cur, latest.node, true) };
+      }
+      if (v.pnpm) checks.pnpm = { current: v.pnpm, latest: latest.pnpm, ...verdict(v.pnpm, latest.pnpm, false) };
+      if (v.infra.db) {
+        const cur = (v.infra.db.match(/^postgres:(\d+)/) || [])[1];
+        checks.postgres = { current: cur, latest: latest.postgres ? String(latest.postgres) : null, ...verdict(cur, latest.postgres, true) };
+      }
+      if (v.infra.redis) {
+        const cur = (v.infra.redis.match(/^redis:(\d+)/) || [])[1];
+        checks.redis = { current: cur, latest: latest.redis ? String(latest.redis) : null, ...verdict(cur, latest.redis, true) };
+      }
+      if (v.infra.proxy) {
+        const cur = (v.infra.proxy.match(/^caddy:(\d+)/) || [])[1];
+        checks.caddy = { current: cur, latest: latest.caddy ? String(latest.caddy) : null, ...verdict(cur, latest.caddy, true) };
+      }
+      if (v.infra.pgbouncer) {
+        const cur = (v.infra.pgbouncer.match(/^edoburu\/pgbouncer:(\S+)/) || [])[1];
+        checks.pgbouncer = { current: cur, latest: latest.pgbouncer, ...verdict(cur, latest.pgbouncer, false) };
+      }
+      sendJson(res, 200, { checks });
+    });
+  });
+}
+
 // The actual safe-update machinery (test gate in each Dockerfile build, health-checked
 // blue-green promote, smoke test, one-click rollback — see scripts/deploy.sh /
 // CLAUDE.md's "Blue-green zero-downtime deploys") already exists and runs unconditionally
@@ -1361,29 +1534,55 @@ async function init() {
   setInterval(refreshUpdateCheck, 5 * 60000);
 }
 
-function versionCard(label, value, sub) {
+function checkLine(check) {
+  if (!check) return "<div class=\\"muted\\">checking upstream…</div>";
+  const color =
+    check.status === "latest" ? "#2e7d32" : check.status === "outdated" ? "#d32f2f" : check.status === "behind" ? "#f9a825" : "#8888";
+  return "<div class=\\"muted\\" style=\\"color:" + color + "\\">" + escapeHtml(check.note) + "</div>";
+}
+
+function versionCard(label, value, sub, check, checked) {
   return "<div class=\\"card\\"><div class=\\"label\\">" + label + "</div>" +
     "<div class=\\"value\\" style=\\"font-size:0.95rem\\">" + escapeHtml(value || "unknown") + "</div>" +
-    (sub ? "<div class=\\"muted\\">" + escapeHtml(sub) + "</div>" : "") + "</div>";
+    (sub ? "<div class=\\"muted\\">" + escapeHtml(sub) + "</div>" : "") +
+    (checked ? checkLine(check) : "") + "</div>";
+}
+
+let lastVersionsData = null;
+
+function renderStackTab(v, checks) {
+  let html = "";
+  html += versionCard("App (git is the real version)", v.appVersion);
+  html += versionCard("pnpm", v.pnpm, null, checks && checks.pnpm, true);
+  html += versionCard("Node.js", v.node.runtime, v.node.dockerImage ? "container base: " + v.node.dockerImage : "", checks && checks.node, !!v.node.dockerImage);
+  html += versionCard("API package", v.packages.api);
+  html += versionCard("Admin package", v.packages.admin);
+  html += versionCard("Frontend package", v.packages.frontend);
+  if (v.infra.db) html += versionCard("PostgreSQL", v.infra.db, null, checks && checks.postgres, true);
+  if (v.infra.redis) html += versionCard("Redis", v.infra.redis, null, checks && checks.redis, true);
+  if (v.infra.pgbouncer) html += versionCard("PgBouncer", v.infra.pgbouncer, null, checks && checks.pgbouncer, true);
+  if (v.infra.proxy) html += versionCard("Caddy (proxy)", v.infra.proxy, null, checks && checks.caddy, true);
+  document.getElementById("versionGrid").innerHTML = html;
 }
 
 async function refreshVersions() {
   try {
     const v = await api("/api/versions");
-    let html = "";
-    html += versionCard("App (git is the real version)", v.appVersion);
-    html += versionCard("pnpm", v.pnpm);
-    html += versionCard("Node.js", v.node.runtime, v.node.dockerImage ? "container base: " + v.node.dockerImage : "");
-    html += versionCard("API package", v.packages.api);
-    html += versionCard("Admin package", v.packages.admin);
-    html += versionCard("Frontend package", v.packages.frontend);
-    if (v.infra.db) html += versionCard("PostgreSQL", v.infra.db);
-    if (v.infra.redis) html += versionCard("Redis", v.infra.redis);
-    if (v.infra.pgbouncer) html += versionCard("PgBouncer", v.infra.pgbouncer);
-    if (v.infra.proxy) html += versionCard("Caddy (proxy)", v.infra.proxy);
-    document.getElementById("versionGrid").innerHTML = html;
+    lastVersionsData = v;
+    renderStackTab(v, null);
+    refreshVersionChecks();
   } catch (e) {
     document.getElementById("versionGrid").innerHTML = "<p class=\\"muted\\">Error: " + escapeHtml(e.message) + "</p>";
+  }
+}
+
+async function refreshVersionChecks() {
+  if (!lastVersionsData) return;
+  try {
+    const r = await api("/api/version-checks");
+    renderStackTab(lastVersionsData, r.checks);
+  } catch (e) {
+    // best-effort — static version cards are already shown, upstream check just stays "checking…"
   }
 }
 
@@ -1640,6 +1839,8 @@ const server = http.createServer((req, res) => {
       handleUpdateCheck(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/versions") {
       handleVersions(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/version-checks") {
+      handleVersionChecks(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/preflight") {
       handlePreflight(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "service" && parts[3]) {
