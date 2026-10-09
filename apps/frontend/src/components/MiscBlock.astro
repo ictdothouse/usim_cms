@@ -79,6 +79,7 @@ function bgVariantUrl(url: string): string {
 interface El {
   type: string;
   props?: Record<string, string>;
+  bp?: Record<string, string>;
 }
 interface Props {
   el: El;
@@ -89,6 +90,63 @@ interface Props {
 }
 const { el, blockIndex, r, c, e } = Astro.props as Props;
 const p = el.props ?? {};
+
+// Real per-breakpoint margin/padding override — same bpStyleRules mechanism
+// ElementBlock.astro/ContainerBlock.astro/SymbolBlock.astro use for theirs
+// (duplicated here rather than shared, this codebase's established
+// convention). `elId` matches the `data-vis` id SectionBlock.astro's own
+// wrapper div around this component's output already carries. announcementbar/
+// googlemap have no margin/padding field of their own (not in scope — nothing
+// to override).
+const elId = `e${blockIndex}-${r}-${c}-${e}`;
+const responsiveRules: string[] = [];
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
+if (el.bp && Object.keys(el.bp).length > 0) {
+  const sel = `[data-vis="${elId}"]`;
+  const marginPad = (mp: Record<string, string>) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";");
+  switch (el.type) {
+    case "accordion":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-accordion`, el.bp, p, marginPad));
+      break;
+    case "infobox":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-infobox`, el.bp, p, marginPad));
+      break;
+    case "tabs":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-tabs`, el.bp, p, marginPad));
+      break;
+    case "cardgrid":
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-cardgrid`, el.bp, p, (mp) => [`grid-template-columns:repeat(${mp.columns ?? "3"},1fr)`, marginPad(mp)].filter(Boolean).join(";")),
+      );
+      break;
+    case "ctabanner":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-ctabanner`, el.bp, p, marginPad));
+      break;
+  }
+}
 ---
 
 {(() => {
@@ -273,6 +331,7 @@ switch (el.type) {
     return null;
 }
 })()}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 
 <style>
   /* Byte-for-byte copies of the matching rules in SectionBlock.astro's own

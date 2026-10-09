@@ -5,7 +5,7 @@
 // through lib/element-render.ts, never another .astro file's frontmatter).
 // None of these element types read blockIndex/r/c/e/designerEdit — unlike
 // ContainerBlock/SliderBlock, this one only ever needs `el` itself.
-import { ICON_PATHS, safeUrl, cls } from "../lib/element-render";
+import { ICON_PATHS, safeUrl, cls, marginStyle, paddingStyle, elBorderShadowStyle } from "../lib/element-render";
 
 // Local, not imported from SectionBlock.astro's frontmatter — see that
 // file's top comment on the outage caused by sharing frontmatter bindings
@@ -45,12 +45,65 @@ function parseRepeaterItems(raw: string | undefined): Record<string, string>[] {
 interface El {
   type: string;
   props?: Record<string, string>;
+  bp?: Record<string, string>;
 }
 interface Props {
   el: El;
+  blockIndex: number;
+  r: number;
+  c: number;
+  e: number;
 }
-const { el } = Astro.props as Props;
+const { el, blockIndex, r, c, e } = Astro.props as Props;
 const p = el.props ?? {};
+
+// Real base margin/padding/border/shadow (never applied at all for these 8
+// repeater-shaped types before — not just a bp gap, the desktop value itself
+// was silently dropped since none of these cases called marginStyle/
+// paddingStyle/elBorderShadowStyle) plus the matching per-breakpoint
+// override — same bpStyleRules mechanism ElementBlock.astro/ContainerBlock.
+// astro/SymbolBlock.astro use for theirs (duplicated here rather than
+// shared, this codebase's established convention).
+const elId = `e${blockIndex}-${r}-${c}-${e}`;
+const boxStyle = (mp: Record<string, string>) => [marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";");
+const responsiveRules: string[] = [];
+function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
+  const prefix = `${tier}:`;
+  const merged = { ...base };
+  for (const [k, v] of Object.entries(bp)) {
+    if (k.startsWith(prefix)) merged[k.slice(prefix.length)] = v;
+  }
+  return merged;
+}
+function bpStyleRules(selector: string, bp: Record<string, string>, base: Record<string, string>, build: (p: Record<string, string>) => string): string[] {
+  const out: string[] = [];
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(`${tier}:`))) continue;
+    const css = build(bpMerge(base, bp, tier));
+    if (!css) continue;
+    const important = css
+      .split(";")
+      .filter(Boolean)
+      .map((decl) => `${decl} !important`)
+      .join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    out.push(`@media ${media}{${selector}{${important}}}`);
+  }
+  return out;
+}
+const REPEATER_SELECTOR: Record<string, string> = {
+  testimonial: ".ds-testimonial-grid",
+  statscounter: ".ds-statscounter",
+  peoplegrid: ".ds-peoplegrid",
+  socialicons: ".ds-socialicons",
+  logocloud: ".ds-logocloud",
+  timeline: ".ds-timeline",
+  documentdownload: ".ds-docdownload",
+  announcementticker: ".ds-ticker",
+};
+if (el.bp && Object.keys(el.bp).length > 0 && REPEATER_SELECTOR[el.type]) {
+  responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"] ${REPEATER_SELECTOR[el.type]}`, el.bp, p, boxStyle));
+}
 ---
 
 {(() => {
@@ -59,7 +112,7 @@ switch (el.type) {
     const items = parseRepeaterItems(p.testimonials);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-testimonial-grid", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "2"},1fr)`}>
+      <div class={cls("ds-testimonial-grid", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "2"},1fr);${boxStyle(p)}`}>
         {items.map((it) => {
           const avatarSrc = it.avatar ? safeUrl(it.avatar) : undefined;
           const avatarSrcset = avatarSrc ? buildSrcset(avatarSrc) : null;
@@ -85,7 +138,7 @@ switch (el.type) {
     const items = parseRepeaterItems(p.stats);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-statscounter", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`}>
+      <div class={cls("ds-statscounter", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr);${boxStyle(p)}`}>
         {items.map((it) => {
           const path = ICON_PATHS[it.icon ?? ""] ?? ICON_PATHS["bar-chart"];
           return (
@@ -105,7 +158,7 @@ switch (el.type) {
     const items = parseRepeaterItems(p.people);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-peoplegrid", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr)`}>
+      <div class={cls("ds-peoplegrid", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "3"},1fr);${boxStyle(p)}`}>
         {items.map((it) => {
           const photoSrc = it.photo ? safeUrl(it.photo) : undefined;
           const photoSrcset = photoSrc ? buildSrcset(photoSrc) : null;
@@ -136,7 +189,10 @@ switch (el.type) {
     const items = parseRepeaterItems(p.socials);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-socialicons", p.cssClass)} style={p.align ? `justify-content:${p.align === "center" ? "center" : p.align === "right" ? "flex-end" : "flex-start"}` : undefined}>
+      <div
+        class={cls("ds-socialicons", p.cssClass)}
+        style={[p.align ? `justify-content:${p.align === "center" ? "center" : p.align === "right" ? "flex-end" : "flex-start"}` : null, boxStyle(p)].filter(Boolean).join(";")}
+      >
         {items.map((it) => {
           const href = safeUrl(it.url) ?? "#";
           const path = ICON_PATHS[it.platform ?? ""] ?? ICON_PATHS.globe;
@@ -155,7 +211,7 @@ switch (el.type) {
     const items = parseRepeaterItems(p.logos);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-logocloud", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "4"},1fr)`}>
+      <div class={cls("ds-logocloud", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "4"},1fr);${boxStyle(p)}`}>
         {items.map((it) => {
           const src = it.image ? safeUrl(it.image) : undefined;
           if (!src) return null;
@@ -170,7 +226,7 @@ switch (el.type) {
     const items = parseRepeaterItems(p.timelineItems);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-timeline", p.cssClass)}>
+      <div class={cls("ds-timeline", p.cssClass)} style={boxStyle(p) || undefined}>
         {items.map((it) => (
           <div class="ds-timeline-item">
             {it.date && <p class="ds-timeline-date">{it.date}</p>}
@@ -185,7 +241,7 @@ switch (el.type) {
     const items = parseRepeaterItems(p.documents);
     if (items.length === 0) return null;
     return (
-      <div class={cls("ds-docdownload", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "2"},1fr)`}>
+      <div class={cls("ds-docdownload", p.cssClass)} style={`grid-template-columns:repeat(${p.columns ?? "2"},1fr);${boxStyle(p)}`}>
         {items.map((it) => {
           const href = it.fileUrl ? safeUrl(it.fileUrl) : undefined;
           if (!href) return null;
@@ -213,7 +269,7 @@ switch (el.type) {
     return (
       <div
         class={cls("ds-ticker", p.cssClass)}
-        style={[`background:${p.bgColor || "#111827"}`, `color:${p.textColor || "#ffffff"}`].join(";")}
+        style={[`background:${p.bgColor || "#111827"}`, `color:${p.textColor || "#ffffff"}`, boxStyle(p)].filter(Boolean).join(";")}
       >
         <div class="ds-ticker-track" style={`animation-duration:${speedS}s`}>
           {[...items, ...items].map((it) =>
@@ -231,6 +287,7 @@ switch (el.type) {
     return null;
 }
 })()}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
 
 <style>
   /* Byte-for-byte copies of the matching rules in SectionBlock.astro's own

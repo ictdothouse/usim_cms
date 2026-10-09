@@ -7,14 +7,24 @@
 // tenant that a second API param wasn't worth adding (see generic-crud.ts's
 // buildListFilters, which only knows publishedAt ranges, not startDate).
 import { listEvents } from "../lib/api";
+import { marginStyle, paddingStyle, elBorderShadowStyle, safeUrl } from "../lib/element-render";
 
 interface Props {
   count?: string;
   columns?: string;
   eventLayout?: "grid" | "list";
   tenantHost: string;
+  // Margin/padding/border/shadow (base + per-breakpoint) were never applied
+  // to this block at all — not just a bp gap, the desktop value itself was
+  // silently dropped since this component never called marginStyle/
+  // paddingStyle/elBorderShadowStyle. `p`/`bp`/`elId` let the caller
+  // (SectionBlock.astro) hand over the same props/bp bag every other
+  // element type already gets real box-model styling from.
+  p?: Record<string, string>;
+  bp?: Record<string, string>;
+  elId?: string;
 }
-const { count = "3", columns = "3", eventLayout = "grid", tenantHost } = Astro.props;
+const { count = "3", columns = "3", eventLayout = "grid", tenantHost, p = {}, bp, elId } = Astro.props;
 
 const all = await listEvents(tenantHost);
 const now = Date.now();
@@ -22,12 +32,30 @@ const events = all
   .filter((e) => new Date(e.startDate).getTime() >= now)
   .sort((a, b) => a.startDate.localeCompare(b.startDate))
   .slice(0, parseInt(count, 10) || 3);
+
+const boxStyle = [marginStyle(p), paddingStyle(p), elBorderShadowStyle(p)].filter(Boolean).join(";");
+const responsiveRules: string[] = [];
+if (bp && Object.keys(bp).length > 0 && elId) {
+  const prefix = (tier: "tablet" | "mobile") => `${tier}:`;
+  for (const tier of ["tablet", "mobile"] as const) {
+    if (!Object.keys(bp).some((k) => k.startsWith(prefix(tier)))) continue;
+    const merged = { ...p };
+    for (const [k, v] of Object.entries(bp)) {
+      if (k.startsWith(prefix(tier))) merged[k.slice(prefix(tier).length)] = v;
+    }
+    const css = [marginStyle(merged), paddingStyle(merged), elBorderShadowStyle(merged)].filter(Boolean).join(";");
+    if (!css) continue;
+    const important = css.split(";").filter(Boolean).map((decl) => `${decl} !important`).join(";");
+    const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
+    responsiveRules.push(`@media ${media}{[data-vis="${elId}"] .ds-eventlist{${important}}}`);
+  }
+}
 ---
 
 {events.length > 0 && (
   <div
     class={`ds-eventlist ds-eventlist-${eventLayout}`}
-    style={eventLayout === "grid" ? `grid-template-columns:repeat(${columns},1fr)` : undefined}
+    style={[eventLayout === "grid" ? `grid-template-columns:repeat(${columns},1fr)` : null, boxStyle].filter(Boolean).join(";") || undefined}
   >
     {events.map((ev) => (
       <div class="ds-eventlist-card">
@@ -39,11 +67,12 @@ const events = all
           <h3 class="ds-eventlist-title">{ev.title}</h3>
           {ev.location && <p class="ds-eventlist-location">{ev.location}</p>}
           {ev.description && <p class="ds-eventlist-excerpt">{ev.description}</p>}
-          {ev.registrationUrl && (
-            <a class="ds-eventlist-register" href={ev.registrationUrl}>Register</a>
+          {ev.registrationUrl && safeUrl(ev.registrationUrl) && (
+            <a class="ds-eventlist-register" href={safeUrl(ev.registrationUrl)}>Register</a>
           )}
         </div>
       </div>
     ))}
   </div>
 )}
+{responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}

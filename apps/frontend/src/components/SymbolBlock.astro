@@ -143,7 +143,18 @@ const renderNode = (el: El): unknown => {
     }
     case "image": {
       const src = safeUrl(p.src);
-      return src ? (
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"] img`, el.bp!, p, (mp) =>
+            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
+      }
+      const imgNode = src ? (
         <img
           class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
           src={src}
@@ -154,10 +165,25 @@ const renderNode = (el: El): unknown => {
             .join(";")}
         />
       ) : null;
+      return visId && imgNode ? (
+        <div data-vis={visId} style="display:contents">
+          {imgNode}
+        </div>
+      ) : (
+        imgNode
+      );
     }
-    case "button":
+    case "button": {
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-btn`, el.bp!, p, (mp) => elBorderShadowStyle(mp) ?? ""),
+        );
+      }
       return p.label ? (
-        <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+        <div data-vis={visId} style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
           <a
             class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p), elEntranceClass(p))}
             href={safeUrl(p.href) ?? "#"}
@@ -167,11 +193,19 @@ const renderNode = (el: El): unknown => {
           </a>
         </div>
       ) : null;
+    }
     case "badge": {
       const iconPath = p.name ? ICON_PATHS[p.name] : undefined;
       const iconSize = { sm: "14", md: "16", lg: "20" }[p.scale ?? "md"] ?? "16";
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        );
+      }
       return (
-        <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+        <div data-vis={visId} style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
           <span class={cls(`ds-badge ds-badge-${p.variant || "soft"} ds-badge-${p.scale || "md"}`, p.cssClass)} style={p.color ? `color:${p.color}` : undefined}>
             {iconPath && (
               <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -183,15 +217,30 @@ const renderNode = (el: El): unknown => {
         </div>
       );
     }
-    case "spacer":
-      return <div style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} />;
-    case "divider":
-      return <hr class="ds-divider" style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")} />;
+    case "spacer": {
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SPACE, SPACE.md)}`));
+      return <div data-vis={visId} style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} />;
+    }
+    case "divider": {
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
+      return <hr data-vis={visId} class="ds-divider" style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")} />;
+    }
     case "icon": {
       const iconPath = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
       const iconSize = lengthValue(p.size, { sm: "1rem", md: "1.5rem", lg: "2rem" }, "1.5rem");
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        );
+      }
       return (
-        <div style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
+        <div data-vis={visId} style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
           <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={p.color || "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d={iconPath} />
           </svg>
@@ -200,8 +249,16 @@ const renderNode = (el: El): unknown => {
     }
     case "container": {
       const children = el.children ?? [];
+      const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
+      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      if (visId) {
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";")),
+        );
+      }
       return (
         <div
+          data-vis={visId}
           style={[
             "display:flex",
             `flex-direction:${p.flexDirection || "row"}`,
