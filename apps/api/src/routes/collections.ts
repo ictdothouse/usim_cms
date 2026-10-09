@@ -2,7 +2,7 @@ import type { FastifyRequest } from "fastify";
 import sanitizeHtml from "sanitize-html";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
-import { validateLayout, validateOverrides, validateElement, isSafeUrl } from "../collections/validate-layout.js";
+import { validateLayout, validateOverrides, validateElement, isSafeUrl, layoutHasUnsafeHtml, elementHasUnsafeHtml, overridesHaveUnsafeHtml } from "../collections/validate-layout.js";
 import { validateMenuItems } from "../collections/validate-menu.js";
 import * as schema from "../db/schema.js";
 import { getTenantLanguageSelection } from "../db/tenant-pool.js";
@@ -89,6 +89,7 @@ const PAGE_DRAFT_KEYS = new Set(["layout", "settings", "seo", "translations", "l
 // once per request even when both the body and its draft carry a layout.
 async function validatePageContent(
   record: Record<string, unknown>,
+  args: AccessArgs,
   req: FastifyRequest,
   existingLayout: () => Promise<unknown[] | undefined>,
 ) {
@@ -104,6 +105,9 @@ async function validatePageContent(
     // handler honors `.statusCode` on a thrown Error, giving a clean 400
     // instead of the 500 an unannotated throw would produce.
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+    if (layoutHasUnsafeHtml(record.layout) && !hasPermission(args, "layout.unsafeHtml")) {
+      throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+    }
     if (req.method === "PATCH" && req.user.role !== "superadmin") {
       const existing = await existingLayout();
       if (existing) {
@@ -126,10 +130,16 @@ async function validatePageContent(
       if (e?.layout !== undefined) {
         const err = validateLayout(e.layout);
         if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+        if (layoutHasUnsafeHtml(e.layout) && !hasPermission(args, "layout.unsafeHtml")) {
+          throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+        }
       }
       if (e?.overrides !== undefined) {
         const err = validateOverrides(e.overrides);
         if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+        if (overridesHaveUnsafeHtml(e.overrides) && !hasPermission(args, "layout.unsafeHtml")) {
+          throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+        }
       }
     }
   }
@@ -166,7 +176,7 @@ async function validatePageContent(
   }
 }
 
-const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
+const pagesBeforeChange = async (data: unknown, args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
   let existingLayoutPromise: Promise<unknown[] | undefined> | undefined;
   const existingLayout = () =>
@@ -176,7 +186,7 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
       const [existing] = await req.db.select({ layout: schema.pages.layout }).from(schema.pages).where(eq(schema.pages.id, id));
       return existing?.layout as unknown[] | undefined;
     })());
-  await validatePageContent(record, req, existingLayout);
+  await validatePageContent(record, args, req, existingLayout);
   if (record.draft !== undefined && record.draft !== null) {
     if (typeof record.draft !== "object" || Array.isArray(record.draft)) {
       throw Object.assign(new Error("draft must be an object or null"), { statusCode: 400 });
@@ -185,7 +195,7 @@ const pagesBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyR
     for (const key of Object.keys(draft)) {
       if (!PAGE_DRAFT_KEYS.has(key)) throw Object.assign(new Error(`draft.${key} is not a draftable field`), { statusCode: 400 });
     }
-    await validatePageContent(draft, req, existingLayout);
+    await validatePageContent(draft, args, req, existingLayout);
   }
   if (typeof record.publishedAt === "string") record.publishedAt = new Date(record.publishedAt);
   record.updatedAt = new Date();
@@ -677,7 +687,7 @@ export const eventsCollection: CollectionConfig = {
 // equivalent of tenant_languages' guardLastEnabled "can't go below zero" (a
 // tenant is allowed to have zero defaults, e.g. before the first header is
 // ever published).
-const siteChromeBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
+const siteChromeBeforeChange = async (data: unknown, args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
   if (record.kind !== undefined && record.kind !== "header" && record.kind !== "footer") {
     throw Object.assign(new Error('kind must be "header" or "footer"'), { statusCode: 400 });
@@ -685,6 +695,9 @@ const siteChromeBeforeChange = async (data: unknown, _args: AccessArgs, req: Fas
   if (record.layout !== undefined) {
     const err = validateLayout(record.layout);
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+    if (layoutHasUnsafeHtml(record.layout) && !hasPermission(args, "layout.unsafeHtml")) {
+      throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+    }
   }
   if (record.translations && typeof record.translations === "object") {
     for (const entry of Object.values(record.translations as Record<string, unknown>)) {
@@ -692,10 +705,16 @@ const siteChromeBeforeChange = async (data: unknown, _args: AccessArgs, req: Fas
       if (e?.layout !== undefined) {
         const err = validateLayout(e.layout);
         if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+        if (layoutHasUnsafeHtml(e.layout) && !hasPermission(args, "layout.unsafeHtml")) {
+          throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+        }
       }
       if (e?.overrides !== undefined) {
         const err = validateOverrides(e.overrides);
         if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+        if (overridesHaveUnsafeHtml(e.overrides) && !hasPermission(args, "layout.unsafeHtml")) {
+          throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+        }
       }
     }
   }
@@ -780,10 +799,13 @@ export const templatesCollection: CollectionConfig = {
 // same reasoning as menus), and "Edit Master" PATCHes `node` in place rather
 // than delete-and-recreate. Reuses pages.* permissions, same precedent as
 // templates above (no new symbols.* permission category).
-const symbolsBeforeChange = (data: unknown) => {
+const symbolsBeforeChange = (data: unknown, args: AccessArgs) => {
   const record = data as Record<string, unknown>;
   const err = validateElement(record.node, "node");
   if (err) throw Object.assign(new Error(err), { statusCode: 400 });
+  if (elementHasUnsafeHtml(record.node) && !hasPermission(args, "layout.unsafeHtml")) {
+    throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
+  }
   record.updatedAt = new Date();
   return record;
 };

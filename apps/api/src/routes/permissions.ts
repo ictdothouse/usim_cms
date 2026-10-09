@@ -23,6 +23,14 @@ export const PERMISSIONS = new Set([
   "blueprints.write",
   "events.write",
   "headerFooter.write",
+  // Separate from pages.update/headerFooter.write (siteChrome)/pages.update
+  // (symbols, reuses pages.*): the "html" ElType renders its content raw
+  // (`set:html`, no sanitizer — see ElementBlock.astro) by design, since
+  // it's the Custom-HTML/embed-code element and a sanitizer would strip the
+  // scripts it exists for. A role can have ordinary layout-write access
+  // without this and still edit every other element type; only setting
+  // non-empty content on an actual "html" element additionally requires this.
+  "layout.unsafeHtml",
 ]);
 
 // Superadmin bypasses every permission check — a role's permissions are only
