@@ -1332,13 +1332,24 @@ function handleStackUpdate(req, res, key) {
 // on other orgs' VPSes shouldn't need a GitHub credential wired up just to
 // click Update, and a missing/broken remote must never strand a bump that
 // otherwise succeeded (see the exit-128 "could not read Username" case).
-function startSourceBumpDeploy(label, files, commitMsg, res) {
+// oldContents: { "relative/path": originalFileContent } — every file this
+// bump touched, captured BEFORE the edit, so a failure anywhere in the
+// pipeline (lockfile regen, commit, build/test gate, deploy) can put the
+// working tree back exactly how it was. Mirrors the pgbouncer update's
+// own restore-on-failure pattern. A failure after the commit already
+// landed leaves that commit in git history (harmless — just not what's
+// deployed) but still reverts the files on disk, since getStackVersions
+// reads "current" straight off disk, not off git HEAD — without this, a
+// failed bump would look "already latest" forever and silently block retries.
+function startSourceBumpDeploy(label, oldContents, commitMsg, res, preCommitScript) {
+  const files = Object.keys(oldContents);
   deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
   const logFd = fs.openSync(DEPLOY_LOG, "a");
   fs.writeSync(logFd, `\n\n=== ${label} started ${deployState.startedAt} ===\n`);
   const quotedFiles = files.map((f) => `"${f}"`).join(" ");
   const script = `
     set -e
+    ${preCommitScript || ""}
     echo "--- committing ${quotedFiles} ---"
     git add ${quotedFiles}
     git commit -m "$(cat <<'COMMITMSG'
@@ -1360,6 +1371,17 @@ COMMITMSG
   child.on("exit", (code) => {
     deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
     fs.appendFileSync(DEPLOY_LOG, `=== ${label} finished, exit ${code} ===\n`);
+    if (code !== 0) {
+      for (const [rel, oldContent] of Object.entries(oldContents)) {
+        try {
+          fs.writeFileSync(path.join(REPO_DIR, rel), oldContent, "utf8");
+        } catch {}
+      }
+      fs.appendFileSync(
+        DEPLOY_LOG,
+        `restored ${files.join(", ")} on disk to their pre-bump content (any partial local commit stays in git history, just isn't what's deployed)\n`,
+      );
+    }
     fs.closeSync(logFd);
   });
   sendJson(res, 202, { ok: true, started: true });
@@ -1378,7 +1400,7 @@ function handleNodeUpdate(req, res) {
         return sendJson(res, 400, { error: `already on node:${curMajor} — nothing to bump` });
       }
       const dockerfiles = ["apps/api/Dockerfile", "apps/admin/Dockerfile", "apps/frontend/Dockerfile"];
-      const changed = [];
+      const oldContents = {};
       for (const rel of dockerfiles) {
         const full = path.join(REPO_DIR, rel);
         let content;
@@ -1390,13 +1412,13 @@ function handleNodeUpdate(req, res) {
         const updated = content.replace(/^FROM node:\d+(-\S+)?/m, (m) => m.replace(/\d+/, latest.node));
         if (updated !== content) {
           fs.writeFileSync(full, updated, "utf8");
-          changed.push(rel);
+          oldContents[rel] = content;
         }
       }
-      if (!changed.length) return sendJson(res, 400, { error: 'no "FROM node:" line found to bump' });
+      if (!Object.keys(oldContents).length) return sendJson(res, 400, { error: 'no "FROM node:" line found to bump' });
       startSourceBumpDeploy(
         "Node base image bump",
-        changed,
+        oldContents,
         `chore(deps): bump Node base image to node:${latest.node}-alpine\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
         res,
       );
@@ -1423,11 +1445,34 @@ function handlePnpmUpdate(req, res) {
     }
     const updated = content.replace(re, `"packageManager": "pnpm@${latest.pnpm}"`);
     fs.writeFileSync(full, updated, "utf8");
+
+    const lockPath = path.join(REPO_DIR, "pnpm-lock.yaml");
+    const oldContents = { "package.json": content };
+    try {
+      oldContents["pnpm-lock.yaml"] = fs.readFileSync(lockPath, "utf8");
+    } catch {}
+
+    // The lockfile pins package-manager-version-specific metadata, not just
+    // dependency versions — a bumped packageManager field with a stale
+    // lockfile fails Dockerfile's `pnpm install --frozen-lockfile` build gate
+    // outright (ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE), which is
+    // exactly what happened the first time this ran. Regenerate it with the
+    // NEW pnpm (via corepack, same NODE_DIR trick scripts/update.sh already
+    // uses) before committing, so the committed lockfile actually matches.
+    const preCommit = `
+    NODE_DIR="$(dirname "${NODE_BIN}")"
+    export PATH="$NODE_DIR:$PATH"
+    "$NODE_DIR/corepack" enable >/dev/null 2>&1 || true
+    echo "--- regenerating pnpm-lock.yaml for pnpm@${latest.pnpm} ---"
+    pnpm install --lockfile-only
+    `;
+
     startSourceBumpDeploy(
       "pnpm bump",
-      ["package.json"],
+      oldContents,
       `chore(deps): bump pnpm to ${latest.pnpm}\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
       res,
+      preCommit,
     );
   });
 }
