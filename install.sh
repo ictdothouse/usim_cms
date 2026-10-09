@@ -361,25 +361,37 @@ configure_optional_integrations() {
 # repo, no global npm/pnpm), so it can never conflict with whatever Node
 # version any other project on this VPS already relies on. Referenced only
 # by the absolute path this prints, from systemd units and this script.
-NODE_VERSION="20.18.1"
+# Version is resolved from nodejs.org's own LTS feed at install time (same
+# source monitor/server.js's getUpstreamLatest uses), not hardcoded — so a
+# fresh install always lands on the current LTS instead of drifting stale
+# against the Docker path's own node:NN-alpine, which bumps independently.
 NODE_ROOT="/opt/ucms/node"
+resolve_latest_node_lts() {
+  curl -fsSL https://nodejs.org/dist/index.json \
+    | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const r=JSON.parse(d).find(x=>x.lts);if(!r){process.exit(1)}process.stdout.write(r.version.replace(/^v/,""))})'
+}
 ensure_private_node() {
-  local arch node_bin
+  local arch node_bin node_version
   case "$(uname -m)" in
     x86_64) arch="x64" ;;
     aarch64|arm64) arch="arm64" ;;
     *) echo "Unsupported CPU arch: $(uname -m)" >&2; exit 1 ;;
   esac
   node_bin="${NODE_ROOT}/bin/node"
-  if [ -x "$node_bin" ] && "$node_bin" --version 2>/dev/null | grep -q "v${NODE_VERSION}"; then
+  if [ -x "$node_bin" ]; then
     echo "$node_bin"
     return
   fi
+  node_version="$(resolve_latest_node_lts)"
+  if [ -z "$node_version" ]; then
+    echo "Couldn't resolve the latest Node LTS version from nodejs.org — check network/DNS and retry." >&2
+    exit 1
+  fi
   {
-    echo "Downloading a private Node.js v${NODE_VERSION} (${arch}) to ${NODE_ROOT}..." >&2
+    echo "Downloading a private Node.js v${node_version} (${arch}) to ${NODE_ROOT}..." >&2
     mkdir -p "$NODE_ROOT"
-    local tarball="node-v${NODE_VERSION}-linux-${arch}.tar.gz"
-    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${tarball}" -o "/tmp/${tarball}"
+    local tarball="node-v${node_version}-linux-${arch}.tar.gz"
+    curl -fsSL "https://nodejs.org/dist/v${node_version}/${tarball}" -o "/tmp/${tarball}"
     tar -xzf "/tmp/${tarball}" -C "$NODE_ROOT" --strip-components=1
     rm -f "/tmp/${tarball}"
   } >&2
