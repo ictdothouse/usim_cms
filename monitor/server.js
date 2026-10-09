@@ -1090,6 +1090,326 @@ function handlePullLog(req, res) {
   });
 }
 
+// --- Stack version updates: a "test" (download/verify only, never touches the
+// running container) then an "update" (apply, health-check, auto-rollback on
+// failure) for the Stack tab items that have a safe, scriptable path.
+// Deliberately NOT offered here: Postgres MAJOR version jumps (16->18 etc) —
+// that changes the on-disk data format and needs a real dump/restore or
+// pg_upgrade, never a plain image-tag swap. postgres:16-alpine only ever
+// floats within the 16.x series, so nothing below can cause one by accident.
+// App packages (api/admin/frontend) aren't included either — those are this
+// repo's own semver, not an upstream dependency to bump.
+
+// docker-compose.yml only pins the MAJOR for these three (e.g. "16-alpine"),
+// so re-pulling the same tag always gets the newest patch/minor already in
+// that major — there's no separate patch pin to bump.
+const STACK_FLOATING_TARGETS = { postgres: "db", redis: "redis", caddy: "proxy" };
+
+function stackImageRef(v, key) {
+  if (key === "postgres") return v.infra.db;
+  if (key === "redis") return v.infra.redis;
+  if (key === "caddy") return v.infra.proxy;
+  if (key === "pgbouncer") return v.infra.pgbouncer;
+  return null;
+}
+
+// Polls the same getComposeStatus/isServiceUp the dashboard already renders
+// with, same one-shot-not-a-retry-loop shape as selfHealRestart. If the
+// freshly recreated container isn't healthy within the timeout, tags the
+// previously-running image back onto the target name and recreates again —
+// the container ends up back on exactly what it was running before this
+// update started. `oldImageId` null (pgbouncer's case, see below) means
+// there's nothing to re-tag; the caller handles that by restoring the
+// compose file text instead.
+function pollHealthThenMaybeRollback(service, imageRef, oldImageId, logLine, done) {
+  const deadline = Date.now() + 90_000;
+  const tick = () => {
+    getComposeStatus((err, services) => {
+      const entry = !err && services ? services.find((s) => s.Service === service) : null;
+      logLine(`health check (${service}): ${entry ? entry.State : "(not found)"}`);
+      if (entry && isServiceUp(entry.State)) return done(true);
+      if (Date.now() >= deadline) {
+        if (!oldImageId) {
+          logLine(`timed out waiting for ${service} to become healthy`);
+          return done(false);
+        }
+        logLine(`timed out waiting for ${service} to become healthy — rolling back to previous image (${oldImageId})`);
+        execFile("docker", ["tag", oldImageId, imageRef], { timeout: 10_000 }, () => {
+          runCompose(["up", "-d", "--force-recreate", service], (rbErr, rbOut, rbErrText) => {
+            logLine(rbOut || rbErrText || (rbErr ? rbErr.message : "rollback recreate issued"));
+            done(false);
+          });
+        });
+        return;
+      }
+      setTimeout(tick, 3000);
+    });
+  };
+  tick();
+}
+
+function finishStackDeploy(label, logFd, code) {
+  deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+  fs.appendFileSync(DEPLOY_LOG, `=== ${label} finished, exit ${code} ===\n`);
+  fs.closeSync(logFd);
+}
+
+// POST /api/stack/:key/test — pulls the candidate image only, never touches
+// the running container. Safe to call any time; the real risk (a bad image
+// taking the service down) only happens in /update, which always
+// health-checks and auto-rolls-back.
+function handleStackTest(req, res, key) {
+  if (key === "node" || key === "pnpm") {
+    return sendJson(res, 400, {
+      error: "no separate test step here — Update already builds and test-gates the new image before switching traffic",
+    });
+  }
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, { error: "stack version checks need docker mode — this box runs systemd mode" });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+  getStackVersions((v) => {
+    if (STACK_FLOATING_TARGETS[key]) {
+      const imageRef = stackImageRef(v, key);
+      if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
+      execFile("docker", ["pull", imageRef], { timeout: 120_000 }, (err, stdout, stderr) => {
+        if (err) return sendJson(res, 502, { ok: false, error: stderr || err.message });
+        sendJson(res, 200, { ok: true, message: `pulled ${imageRef} — nothing restarted yet` });
+      });
+      return;
+    }
+    if (key === "pgbouncer") {
+      getUpstreamLatest((latest) => {
+        if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
+        const newRef = `edoburu/pgbouncer:${latest.pgbouncer}`;
+        execFile("docker", ["pull", newRef], { timeout: 120_000 }, (err, stdout, stderr) => {
+          if (err) return sendJson(res, 502, { ok: false, error: stderr || err.message });
+          sendJson(res, 200, { ok: true, message: `pulled ${newRef} — nothing restarted yet` });
+        });
+      });
+      return;
+    }
+    sendJson(res, 404, { error: "unknown stack item" });
+  });
+}
+
+// POST /api/stack/:key/update — applies the version, health-checks, and
+// auto-rolls-back on failure. Runs through the same deployState/DEPLOY_LOG
+// single-flight gate as "Pull latest & deploy" (handlePull), so it can never
+// race with that or with another stack update.
+function handleStackUpdate(req, res, key) {
+  if (key === "node") return handleNodeUpdate(req, res);
+  if (key === "pnpm") return handlePnpmUpdate(req, res);
+
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, { error: "stack version updates need docker mode — this box runs systemd mode" });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+
+  getStackVersions((v) => {
+    if (STACK_FLOATING_TARGETS[key]) {
+      const service = STACK_FLOATING_TARGETS[key];
+      const imageRef = stackImageRef(v, key);
+      if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
+
+      deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+      const logFd = fs.openSync(DEPLOY_LOG, "a");
+      const logLine = (s) => fs.appendFileSync(DEPLOY_LOG, s + "\n");
+      logLine(`\n\n=== ${key} patch refresh started ${deployState.startedAt} ===`);
+      sendJson(res, 202, { ok: true, started: true });
+
+      runCompose(["ps", "-q", service], (psErr, psOut) => {
+        const cid = (psOut || "").trim().split("\n")[0];
+        execFile("docker", ["inspect", "--format", "{{.Image}}", cid], { timeout: 10_000 }, (inspectErr, oldImageId) => {
+          const oldImage = inspectErr ? null : oldImageId.trim();
+          logLine(`previous image id: ${oldImage || "(unknown)"}`);
+          logLine(`--- pulling ${imageRef} ---`);
+          runCompose(["pull", service], (pullErr, pullOut, pullErrText) => {
+            logLine(pullOut || pullErrText || "");
+            if (pullErr) {
+              logLine(`pull failed: ${pullErr.message}`);
+              return finishStackDeploy(`${key} patch refresh`, logFd, 1);
+            }
+            logLine(`--- recreating ${service} ---`);
+            runCompose(["up", "-d", service], (upErr, upOut, upErrText) => {
+              logLine(upOut || upErrText || "");
+              if (upErr) {
+                logLine(`recreate failed: ${upErr.message}`);
+                return finishStackDeploy(`${key} patch refresh`, logFd, 1);
+              }
+              pollHealthThenMaybeRollback(service, imageRef, oldImage, logLine, (ok) =>
+                finishStackDeploy(`${key} patch refresh`, logFd, ok ? 0 : 1),
+              );
+            });
+          });
+        });
+      });
+      return;
+    }
+
+    if (key === "pgbouncer") {
+      if (!v.infra.pgbouncer) {
+        return sendJson(res, 400, { error: "pgbouncer isn't running under docker-compose.yml on this box" });
+      }
+      getUpstreamLatest((latest) => {
+        if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
+        const newRef = `edoburu/pgbouncer:${latest.pgbouncer}`;
+        if (newRef === v.infra.pgbouncer) return sendJson(res, 400, { error: "already on the latest PgBouncer tag" });
+
+        const composePath = path.join(REPO_DIR, "docker-compose.yml");
+        let oldContent;
+        try {
+          oldContent = fs.readFileSync(composePath, "utf8");
+        } catch (e) {
+          return sendJson(res, 500, { error: `couldn't read docker-compose.yml: ${e.message}` });
+        }
+        const re = /^(\s*image:\s*)edoburu\/pgbouncer:\S+/m;
+        if (!re.test(oldContent)) {
+          return sendJson(res, 500, { error: "pgbouncer image: line not found in docker-compose.yml" });
+        }
+        const newContent = oldContent.replace(re, `$1${newRef}`);
+
+        deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+        const logFd = fs.openSync(DEPLOY_LOG, "a");
+        const logLine = (s) => fs.appendFileSync(DEPLOY_LOG, s + "\n");
+        logLine(`\n\n=== pgbouncer update started ${deployState.startedAt} (${v.infra.pgbouncer} -> ${newRef}) ===`);
+        sendJson(res, 202, { ok: true, started: true });
+
+        const restore = (cb) => fs.writeFile(composePath, oldContent, "utf8", cb);
+        fs.writeFile(composePath, newContent, "utf8", (writeErr) => {
+          if (writeErr) {
+            logLine(`couldn't write docker-compose.yml: ${writeErr.message}`);
+            return finishStackDeploy("pgbouncer update", logFd, 1);
+          }
+          logLine(`--- pulling ${newRef} ---`);
+          runCompose(["pull", "pgbouncer"], (pullErr, pullOut, pullErrText) => {
+            logLine(pullOut || pullErrText || "");
+            if (pullErr) {
+              logLine(`pull failed: ${pullErr.message} — reverting docker-compose.yml`);
+              return restore(() => finishStackDeploy("pgbouncer update", logFd, 1));
+            }
+            logLine(`--- recreating pgbouncer ---`);
+            runCompose(["up", "-d", "pgbouncer"], (upErr, upOut, upErrText) => {
+              logLine(upOut || upErrText || "");
+              if (upErr) {
+                logLine(`recreate failed: ${upErr.message} — reverting docker-compose.yml`);
+                return restore(() =>
+                  runCompose(["up", "-d", "pgbouncer"], () => finishStackDeploy("pgbouncer update", logFd, 1)),
+                );
+              }
+              pollHealthThenMaybeRollback("pgbouncer", newRef, null, logLine, (ok) => {
+                if (ok) return finishStackDeploy("pgbouncer update", logFd, 0);
+                logLine(`rolling back docker-compose.yml to ${v.infra.pgbouncer}`);
+                restore(() =>
+                  runCompose(["up", "-d", "pgbouncer"], () => finishStackDeploy("pgbouncer update", logFd, 1)),
+                );
+              });
+            });
+          });
+        });
+      });
+      return;
+    }
+
+    sendJson(res, 404, { error: "unknown stack item" });
+  });
+}
+
+// Node/pnpm live in source files (Dockerfiles, package.json), not
+// docker-compose.yml — bumping them means editing tracked files and
+// redeploying through scripts/deploy.sh's existing blue-green pipeline,
+// which already builds+tests+typechecks the new image before ever
+// switching traffic to it (see apps/api/Dockerfile's build-stage RUN pnpm
+// test/typecheck) — that IS the test step here, not a separate dry run.
+// Docker mode only: on systemd/bare-metal, Node/pnpm are host-level tools
+// this box may share with other projects, same reasoning CLAUDE.md gives
+// for never restarting a reused Postgres.
+function startSourceBumpDeploy(label, files, commitMsg, res) {
+  deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+  const logFd = fs.openSync(DEPLOY_LOG, "a");
+  fs.writeSync(logFd, `\n\n=== ${label} started ${deployState.startedAt} ===\n`);
+  const quotedFiles = files.map((f) => `"${f}"`).join(" ");
+  const script = `
+    set -e
+    echo "--- committing ${quotedFiles} ---"
+    git add ${quotedFiles}
+    git commit -m "$(cat <<'COMMITMSG'
+${commitMsg}
+COMMITMSG
+)"
+    echo "--- pushing ---"
+    git push origin main
+    echo "--- deploying (blue-green, zero-downtime — builds+tests the new image before switching) ---"
+    bash scripts/deploy.sh
+    echo "--- done ---"
+  `;
+  const child = spawn("sh", ["-c", script], { cwd: REPO_DIR, stdio: ["ignore", logFd, logFd], detached: true });
+  child.unref();
+  child.on("exit", (code) => {
+    deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+    fs.appendFileSync(DEPLOY_LOG, `=== ${label} finished, exit ${code} ===\n`);
+    fs.closeSync(logFd);
+  });
+  sendJson(res, 202, { ok: true, started: true });
+}
+
+function handleNodeUpdate(req, res) {
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, { error: "Node base-image updates need docker mode — this box runs systemd mode" });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+  getUpstreamLatest((latest) => {
+    if (!latest.node) return sendJson(res, 502, { error: "couldn't resolve latest Node LTS major" });
+    const dockerfiles = ["apps/api/Dockerfile", "apps/admin/Dockerfile", "apps/frontend/Dockerfile"];
+    const changed = [];
+    for (const rel of dockerfiles) {
+      const full = path.join(REPO_DIR, rel);
+      let content;
+      try {
+        content = fs.readFileSync(full, "utf8");
+      } catch {
+        continue;
+      }
+      const updated = content.replace(/^FROM node:\d+(-\S+)?/m, (m) => m.replace(/\d+/, latest.node));
+      if (updated !== content) {
+        fs.writeFileSync(full, updated, "utf8");
+        changed.push(rel);
+      }
+    }
+    if (!changed.length) return sendJson(res, 400, { error: 'no "FROM node:" line found to bump' });
+    startSourceBumpDeploy(
+      "Node base image bump",
+      changed,
+      `chore(deps): bump Node base image to node:${latest.node}-alpine\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
+      res,
+    );
+  });
+}
+
+function handlePnpmUpdate(req, res) {
+  if (DEPLOY_MODE !== "docker") {
+    return sendJson(res, 501, { error: "pnpm updates need docker mode — this box runs systemd mode" });
+  }
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+  getUpstreamLatest((latest) => {
+    if (!latest.pnpm) return sendJson(res, 502, { error: "couldn't resolve latest pnpm version" });
+    const full = path.join(REPO_DIR, "package.json");
+    const content = fs.readFileSync(full, "utf8");
+    const re = /"packageManager":\s*"pnpm@[^"]+"/;
+    if (!re.test(content)) {
+      return sendJson(res, 400, { error: 'no "packageManager": "pnpm@..." field found in package.json' });
+    }
+    const updated = content.replace(re, `"packageManager": "pnpm@${latest.pnpm}"`);
+    fs.writeFileSync(full, updated, "utf8");
+    startSourceBumpDeploy(
+      "pnpm bump",
+      ["package.json"],
+      `chore(deps): bump pnpm to ${latest.pnpm}\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
+      res,
+    );
+  });
+}
+
 // Auto-SSL for the nginx-fronted enterprise pattern (see CLAUDE.md's
 // "Going live" section): Caddy's own auto-cert only applies when Caddy owns
 // port 80/443 directly, which an org running its own IT-managed edge won't
@@ -1541,11 +1861,25 @@ function checkLine(check) {
   return "<div class=\\"muted\\" style=\\"color:" + color + "\\">" + escapeHtml(check.note) + "</div>";
 }
 
-function versionCard(label, value, sub, check, checked) {
+function versionCard(label, value, sub, check, checked, actions) {
   return "<div class=\\"card\\"><div class=\\"label\\">" + label + "</div>" +
     "<div class=\\"value\\" style=\\"font-size:0.95rem\\">" + escapeHtml(value || "unknown") + "</div>" +
     (sub ? "<div class=\\"muted\\">" + escapeHtml(sub) + "</div>" : "") +
-    (checked ? checkLine(check) : "") + "</div>";
+    (checked ? checkLine(check) : "") + (actions || "") + "</div>";
+}
+
+// testable=false (Node/pnpm): the blue-green deploy itself builds+tests the
+// new image before switching traffic, so there's no separate dry-run step —
+// only an Update button. Everything else gets a Test button that only ever
+// downloads/verifies, never touches the running container.
+function stackActions(key, label, testable) {
+  let html = "<div style=\\"margin-top:.5rem;display:flex;gap:.4rem\\">";
+  if (testable) {
+    html += "<button class=\\"secondary\\" onclick=\\"stackTest('" + key + "')\\">Test</button>";
+  }
+  html += "<button class=\\"secondary\\" onclick=\\"stackUpdate('" + key + "', '" + label.replace(/'/g, "") + "')\\">Update</button>";
+  html += "</div>";
+  return html;
 }
 
 let lastVersionsData = null;
@@ -1553,16 +1887,54 @@ let lastVersionsData = null;
 function renderStackTab(v, checks) {
   let html = "";
   html += versionCard("App (git is the real version)", v.appVersion);
-  html += versionCard("pnpm", v.pnpm, null, checks && checks.pnpm, true);
-  html += versionCard("Node.js", v.node.runtime, v.node.dockerImage ? "container base: " + v.node.dockerImage : "", checks && checks.node, !!v.node.dockerImage);
+  html += versionCard("pnpm", v.pnpm, null, checks && checks.pnpm, true, stackActions("pnpm", "pnpm", false));
+  html += versionCard(
+    "Node.js",
+    v.node.runtime,
+    v.node.dockerImage ? "container base: " + v.node.dockerImage : "",
+    checks && checks.node,
+    !!v.node.dockerImage,
+    v.node.dockerImage ? stackActions("node", "Node base image", false) : "",
+  );
   html += versionCard("API package", v.packages.api);
   html += versionCard("Admin package", v.packages.admin);
   html += versionCard("Frontend package", v.packages.frontend);
-  if (v.infra.db) html += versionCard("PostgreSQL", v.infra.db, null, checks && checks.postgres, true);
-  if (v.infra.redis) html += versionCard("Redis", v.infra.redis, null, checks && checks.redis, true);
-  if (v.infra.pgbouncer) html += versionCard("PgBouncer", v.infra.pgbouncer, null, checks && checks.pgbouncer, true);
-  if (v.infra.proxy) html += versionCard("Caddy (proxy)", v.infra.proxy, null, checks && checks.caddy, true);
+  if (v.infra.db) {
+    html += versionCard("PostgreSQL", v.infra.db, null, checks && checks.postgres, true, stackActions("postgres", "PostgreSQL patch refresh", true));
+  }
+  if (v.infra.redis) {
+    html += versionCard("Redis", v.infra.redis, null, checks && checks.redis, true, stackActions("redis", "Redis patch refresh", true));
+  }
+  if (v.infra.pgbouncer) {
+    html += versionCard("PgBouncer", v.infra.pgbouncer, null, checks && checks.pgbouncer, true, stackActions("pgbouncer", "PgBouncer", true));
+  }
+  if (v.infra.proxy) {
+    html += versionCard("Caddy (proxy)", v.infra.proxy, null, checks && checks.caddy, true, stackActions("caddy", "Caddy patch refresh", true));
+  }
   document.getElementById("versionGrid").innerHTML = html;
+}
+
+async function stackTest(key) {
+  try {
+    const r = await api("/api/stack/" + key + "/test", { method: "POST" });
+    alert(r.message || "Test passed.");
+  } catch (e) {
+    alert("Test failed: " + e.message);
+  }
+}
+
+async function stackUpdate(key, label) {
+  if (!confirm(
+    "Update " + label + " now?\\n\\nThis pulls the new version, recreates the service, health-checks it, " +
+    "and automatically rolls back to what's running now if it doesn't come up healthy.",
+  )) return;
+  try {
+    await api("/api/stack/" + key + "/update", { method: "POST" });
+    pollDeployLog();
+    refresh();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 async function refreshVersions() {
@@ -1857,6 +2229,10 @@ const server = http.createServer((req, res) => {
       handleRollback(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/base/apply") {
       handleApplyBaseTier(req, res);
+    } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "test") {
+      handleStackTest(req, res, parts[2]);
+    } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "update") {
+      handleStackUpdate(req, res, parts[2]);
     } else if (req.method === "GET" && url.pathname === "/api/pull/status") {
       handlePullStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/log") {
