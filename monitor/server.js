@@ -1464,9 +1464,19 @@ function handlePnpmUpdate(req, res) {
     // usual system bin dirs alongside NODE_DIR so a system-package pnpm
     // (e.g. /usr/bin/pnpm) or a corepack-provisioned shim are both found
     // regardless of how this box's service unit is configured.
+    // COREPACK_INTEGRITY_KEYS=0 is corepack's own documented escape hatch for
+    // a host whose bundled corepack ships signing keys from whenever that
+    // Node release was cut — npm has rotated its registry signing keys since,
+    // so an old corepack's signature check on fresh metadata fails outright
+    // ("Cannot find matching keyid"), hit live on this box's Node 20.20.2.
+    // This only loosens corepack's OWN self-fetch verification, not anything
+    // inside the Docker build (each Dockerfile's `corepack enable` runs
+    // against whatever corepack ships in that image's own node:*-alpine base,
+    // unaffected by this host-side env var).
     const preCommit = `
     NODE_DIR="$(dirname "${NODE_BIN}")"
     export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+    export COREPACK_INTEGRITY_KEYS=0
     "$NODE_DIR/corepack" enable >/dev/null 2>&1 || true
     echo "--- regenerating pnpm-lock.yaml for pnpm@${latest.pnpm} ---"
     pnpm install --lockfile-only
