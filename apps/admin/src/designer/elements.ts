@@ -698,7 +698,12 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
         labelKey: "designer-f-docdownload-items",
         kind: "repeater",
         itemFields: [
-          { key: "fileUrl", labelKey: "designer-f-docdownload-fileurl", type: "text" },
+          // "file" uploads through /api/media (fix #5 — was a plain text
+          // paste-only field) and auto-fills fileType/fileSize from the
+          // picked File object; both stay editable afterwards for manual
+          // override (e.g. a differently-hosted URL, or a nicer label than
+          // the raw extension).
+          { key: "fileUrl", labelKey: "designer-f-docdownload-fileurl", type: "file" },
           { key: "label", labelKey: "designer-f-label", type: "text" },
           { key: "fileType", labelKey: "designer-f-docdownload-filetype", type: "text" },
           { key: "fileSize", labelKey: "designer-f-docdownload-filesize", type: "text" },

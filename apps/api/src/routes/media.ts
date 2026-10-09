@@ -31,6 +31,18 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
     "image/webp": ".webp",
     "video/mp4": ".mp4",
     "video/webm": ".webm",
+    // documentdownload element's own upload control (fix #5) — same
+    // server-controlled-extension safety property as the types above, no
+    // .html-smuggling risk since the extension still comes from this map,
+    // never the client's filename.
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/zip": ".zip",
   };
   const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
@@ -59,7 +71,7 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
     const ext = MEDIA_EXT_BY_MIME[file.mimetype];
     if (!ext) {
       reply.code(415);
-      return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp/mp4/webm only)` };
+      return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp/mp4/webm/pdf/doc(x)/xls(x)/ppt(x)/zip only)` };
     }
     const safeTenant = tenantFolder(req.tenantHost);
     const stem = randomUUID();

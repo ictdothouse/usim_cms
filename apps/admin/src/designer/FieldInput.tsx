@@ -622,6 +622,51 @@ export function FieldInput({
                   </div>
                 );
               }
+              if (f.type === "file") {
+                // documentdownload's fileUrl — upload any file (PDF/Office/
+                // zip, see apps/api's widened MEDIA_EXT_BY_MIME) and
+                // auto-fill sibling fileType/fileSize from the picked File
+                // object itself (no round-trip needed, the browser already
+                // has name/size). Only touches those siblings when this
+                // item actually has them, so "file" stays safe to reuse on
+                // a future repeater that doesn't.
+                const hasFileType = itemFields.some((x) => x.key === "fileType");
+                const hasFileSize = itemFields.some((x) => x.key === "fileSize");
+                return (
+                  <div key={f.key} className="flex items-center gap-2">
+                    <BufferedInput className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />
+                    <label className="shrink-0 cursor-pointer text-[10px] font-semibold text-accent">
+                      {uploading ? t("designer-uploading") : t("designer-upload")}
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const dot = file.name.lastIndexOf(".");
+                          const ext = dot === -1 ? "" : file.name.slice(dot + 1).toUpperCase();
+                          const sizeLabel = `${Math.max(1, Math.round(file.size / 1024))} KB`;
+                          void uploadImage(file, (url) =>
+                            setItems(
+                              items.map((x, j) =>
+                                j === i
+                                  ? {
+                                      ...x,
+                                      [f.key]: url,
+                                      ...(hasFileType && ext ? { fileType: ext } : {}),
+                                      ...(hasFileSize ? { fileSize: sizeLabel } : {}),
+                                    }
+                                  : x,
+                              ),
+                            ),
+                          );
+                        }}
+                      />
+                    </label>
+                  </div>
+                );
+              }
               if (f.type === "icon") {
                 return (
                   <div key={f.key} className="space-y-0.5">

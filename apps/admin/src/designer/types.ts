@@ -60,17 +60,20 @@ export type FieldKind =
 
 // One sub-field of a "repeater" kind item — deliberately a small fixed set
 // (not every FieldKind): a generic add/remove-cards editor only needs a
-// plain text row, a multi-line text row, an image picker, or an icon
-// picker per item, covering every repeater element added so far
+// plain text row, a multi-line text row, an image picker, a file picker, or
+// an icon picker per item, covering every repeater element added so far
 // (testimonial/statscounter/peoplegrid/socialicons/logocloud/timeline/
 // documentdownload) without a bespoke hand-written UI per element the way
 // "cards" (cardgrid's own repeater) is. `type` also tells
 // packages/element-schema which check to run on that key at write time
 // (see REPEATER_SCHEMAS there) — keep both in sync when adding a field.
+// "file" is UI-only (upload affordance + auto-filled sibling fileType/
+// fileSize, see FieldInput.tsx) — the schema side still validates fileUrl as
+// a plain "url", same as before.
 export interface RepeaterItemField {
   key: string;
   labelKey: Key;
-  type: "text" | "textarea" | "image" | "icon";
+  type: "text" | "textarea" | "image" | "icon" | "file";
 }
 
 export interface Field {

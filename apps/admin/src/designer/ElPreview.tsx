@@ -76,6 +76,13 @@ import { computeFreePositionStyle } from "@ucms/element-render";
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
+// Matches apps/frontend/src/components/ElementBlock.astro's own RATIO map —
+// not shared (that file duplicates it too, per the Astro frontmatter rule),
+// kept here so the canvas preview's embed aspect ratio stops being a
+// hardcoded aspect-video and actually reflects the "ratio" field like the
+// real render does.
+const EMBED_RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
+
 // One-render-stale cache of each slide box's own rendered pixel size, keyed
 // `${sliderElId}:${slideIdx}` — written by a plain ref callback on the
 // `.ds-slide-box` div (below, no hook needed, same as this file's other
@@ -689,8 +696,8 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
     case "embed":
       return (
         <div
-          className="flex aspect-video items-center justify-center bg-black/70 text-white"
-          style={{ borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow) }}
+          className="flex items-center justify-center bg-black/70 text-white"
+          style={{ aspectRatio: EMBED_RATIO[p.ratio ?? "16:9"] ?? EMBED_RATIO["16:9"], borderRadius: elRadius(p), boxShadow: shadowToCss(p.shadow) }}
         >
           <Video className="mr-2 h-5 w-5" />
           <span className="max-w-[80%] truncate text-xs">{p.url || t("designer-f-url")}</span>
@@ -1405,13 +1412,21 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
     case "cardgrid": {
       const cards = parseCards(p.cards);
       if (cards.length === 0) return <span className="text-xs opacity-40">{t("designer-f-cardgrid-items")}…</span>;
+      const equal = p.equalHeight !== "false";
       return (
         <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${p.columns ?? "3"}, 1fr)` }}>
           {cards.map((c, i) => (
-            <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2 text-xs">
+            <div key={i} className={`space-y-1.5 rounded-lg border border-line/30 p-2 text-xs${equal ? " flex h-full flex-col" : ""}`}>
               {c.image && <img src={c.image} alt="" className="aspect-video w-full rounded object-cover" />}
               <div className="font-semibold">{c.title || `Card ${i + 1}`}</div>
               {c.description && <div className="text-sub">{c.description}</div>}
+              {c.buttonLabel && c.href && (
+                <div className={equal ? "mt-auto pt-1" : "pt-1"}>
+                  <span className="inline-block rounded bg-primary/90 px-2 py-1 text-[10px] font-medium text-primary-content">
+                    {c.buttonLabel}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
         </div>
