@@ -18,7 +18,7 @@ import https from "node:https";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import process from "node:process";
 import console from "node:console";
 import { Buffer } from "node:buffer";
@@ -1552,12 +1552,28 @@ function handleDepsUpdate(req, res) {
     return sendJson(res, 501, { error: "dependency updates need docker mode — this box runs systemd mode" });
   }
   if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
-  const lockPath = path.join(REPO_DIR, "pnpm-lock.yaml");
-  let oldLock;
+  // `pnpm -r update` can rewrite the specifier in ANY workspace's
+  // package.json (not just the lockfile) when it resolves to a newer
+  // version within the declared range — every tracked package.json must be
+  // captured (for revert-on-failure) and committed alongside the lockfile,
+  // or a later `git reset --hard` discards the uncommitted package.json
+  // change while the lockfile (committed) keeps referencing it, leaving the
+  // two permanently out of sync.
+  let pkgPaths;
   try {
-    oldLock = fs.readFileSync(lockPath, "utf8");
+    pkgPaths = execFileSync("git", ["ls-files", "--", "*package.json"], { cwd: REPO_DIR, encoding: "utf8" })
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
   } catch (e) {
-    return sendJson(res, 500, { error: `couldn't read pnpm-lock.yaml: ${e.message}` });
+    return sendJson(res, 500, { error: `couldn't list workspace package.json files: ${e.message}` });
+  }
+  const oldContents = {};
+  try {
+    for (const rel of pkgPaths) oldContents[rel] = fs.readFileSync(path.join(REPO_DIR, rel), "utf8");
+    oldContents["pnpm-lock.yaml"] = fs.readFileSync(path.join(REPO_DIR, "pnpm-lock.yaml"), "utf8");
+  } catch (e) {
+    return sendJson(res, 500, { error: `couldn't read workspace files: ${e.message}` });
   }
   const preCommit = `
   NODE_DIR="$(dirname "${NODE_BIN}")"
@@ -1567,7 +1583,7 @@ function handleDepsUpdate(req, res) {
   `;
   startSourceBumpDeploy(
     "dependency update",
-    { "pnpm-lock.yaml": oldLock },
+    oldContents,
     `chore(deps): update dependencies within declared ranges\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
     res,
     preCommit,
