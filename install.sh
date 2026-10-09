@@ -366,34 +366,60 @@ configure_optional_integrations() {
 # fresh install always lands on the current LTS instead of drifting stale
 # against the Docker path's own node:NN-alpine, which bumps independently.
 NODE_ROOT="/opt/ucms/node"
+NODE_VERSION_FILE="${NODE_ROOT}/.node-version"
 resolve_latest_node_lts() {
   curl -fsSL https://nodejs.org/dist/index.json \
     | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const r=JSON.parse(d).find(x=>x.lts);if(!r){process.exit(1)}process.stdout.write(r.version.replace(/^v/,""))})'
 }
 ensure_private_node() {
-  local arch node_bin node_version
+  local arch node_bin node_version pinned_version
   case "$(uname -m)" in
     x86_64) arch="x64" ;;
     aarch64|arm64) arch="arm64" ;;
     *) echo "Unsupported CPU arch: $(uname -m)" >&2; exit 1 ;;
   esac
   node_bin="${NODE_ROOT}/bin/node"
-  if [ -x "$node_bin" ]; then
-    echo "$node_bin"
-    return
+  # Trust-on-first-use only against a version WE recorded on a verified
+  # install, not just "a binary happens to exist here" — otherwise a box
+  # could end up running whatever bytes sit at that path with no record of
+  # what they are.
+  if [ -x "$node_bin" ] && [ -f "$NODE_VERSION_FILE" ]; then
+    pinned_version="$(cat "$NODE_VERSION_FILE")"
+    if "$node_bin" --version 2>/dev/null | grep -qF "v${pinned_version}"; then
+      echo "$node_bin"
+      return
+    fi
   fi
   node_version="$(resolve_latest_node_lts)"
-  if [ -z "$node_version" ]; then
-    echo "Couldn't resolve the latest Node LTS version from nodejs.org — check network/DNS and retry." >&2
+  # nodejs.org's index.json is untrusted input over the network — validate
+  # strictly before it ever reaches a file path or a download URL below.
+  if ! printf '%s' "$node_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Resolved Node version '${node_version}' doesn't look like a real x.y.z version — refusing to use it (check network/DNS, or nodejs.org may be returning something unexpected)." >&2
     exit 1
   fi
   {
     echo "Downloading a private Node.js v${node_version} (${arch}) to ${NODE_ROOT}..." >&2
     mkdir -p "$NODE_ROOT"
     local tarball="node-v${node_version}-linux-${arch}.tar.gz"
-    curl -fsSL "https://nodejs.org/dist/v${node_version}/${tarball}" -o "/tmp/${tarball}"
-    tar -xzf "/tmp/${tarball}" -C "$NODE_ROOT" --strip-components=1
-    rm -f "/tmp/${tarball}"
+    local tmp_dir expected_sha actual_sha
+    tmp_dir="$(mktemp -d)"
+    curl -fsSL "https://nodejs.org/dist/v${node_version}/${tarball}" -o "${tmp_dir}/${tarball}"
+    curl -fsSL "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" -o "${tmp_dir}/SHASUMS256.txt"
+    expected_sha="$(grep -E "  ${tarball}\$" "${tmp_dir}/SHASUMS256.txt" | awk '{print $1}')"
+    if [ -z "$expected_sha" ]; then
+      echo "Couldn't find a checksum for ${tarball} in nodejs.org's SHASUMS256.txt — refusing to install an unverified binary." >&2
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
+    actual_sha="$(sha256sum "${tmp_dir}/${tarball}" | awk '{print $1}')"
+    if [ "$expected_sha" != "$actual_sha" ]; then
+      echo "Checksum mismatch for ${tarball}: expected ${expected_sha}, got ${actual_sha} — refusing to install a corrupted or tampered download." >&2
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
+    tar -xzf "${tmp_dir}/${tarball}" -C "$NODE_ROOT" --strip-components=1
+    rm -rf "$tmp_dir"
+    echo "$node_version" > "$NODE_VERSION_FILE"
   } >&2
   echo "$node_bin"
 }
