@@ -1360,29 +1360,35 @@ function handleNodeUpdate(req, res) {
   if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
   getUpstreamLatest((latest) => {
     if (!latest.node) return sendJson(res, 502, { error: "couldn't resolve latest Node LTS major" });
-    const dockerfiles = ["apps/api/Dockerfile", "apps/admin/Dockerfile", "apps/frontend/Dockerfile"];
-    const changed = [];
-    for (const rel of dockerfiles) {
-      const full = path.join(REPO_DIR, rel);
-      let content;
-      try {
-        content = fs.readFileSync(full, "utf8");
-      } catch {
-        continue;
+    getStackVersions((v) => {
+      const curMajor = v.node.dockerImage ? (v.node.dockerImage.match(/^node:(\d+)/) || [])[1] : null;
+      if (curMajor && Number(curMajor) >= Number(latest.node)) {
+        return sendJson(res, 400, { error: `already on node:${curMajor} — nothing to bump` });
       }
-      const updated = content.replace(/^FROM node:\d+(-\S+)?/m, (m) => m.replace(/\d+/, latest.node));
-      if (updated !== content) {
-        fs.writeFileSync(full, updated, "utf8");
-        changed.push(rel);
+      const dockerfiles = ["apps/api/Dockerfile", "apps/admin/Dockerfile", "apps/frontend/Dockerfile"];
+      const changed = [];
+      for (const rel of dockerfiles) {
+        const full = path.join(REPO_DIR, rel);
+        let content;
+        try {
+          content = fs.readFileSync(full, "utf8");
+        } catch {
+          continue;
+        }
+        const updated = content.replace(/^FROM node:\d+(-\S+)?/m, (m) => m.replace(/\d+/, latest.node));
+        if (updated !== content) {
+          fs.writeFileSync(full, updated, "utf8");
+          changed.push(rel);
+        }
       }
-    }
-    if (!changed.length) return sendJson(res, 400, { error: 'no "FROM node:" line found to bump' });
-    startSourceBumpDeploy(
-      "Node base image bump",
-      changed,
-      `chore(deps): bump Node base image to node:${latest.node}-alpine\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
-      res,
-    );
+      if (!changed.length) return sendJson(res, 400, { error: 'no "FROM node:" line found to bump' });
+      startSourceBumpDeploy(
+        "Node base image bump",
+        changed,
+        `chore(deps): bump Node base image to node:${latest.node}-alpine\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
+        res,
+      );
+    });
   });
 }
 
@@ -1398,6 +1404,10 @@ function handlePnpmUpdate(req, res) {
     const re = /"packageManager":\s*"pnpm@[^"]+"/;
     if (!re.test(content)) {
       return sendJson(res, 400, { error: 'no "packageManager": "pnpm@..." field found in package.json' });
+    }
+    const curPnpm = (content.match(re) || [])[0];
+    if (curPnpm && curPnpm.includes(`pnpm@${latest.pnpm}"`)) {
+      return sendJson(res, 400, { error: `already on pnpm@${latest.pnpm} — nothing to bump` });
     }
     const updated = content.replace(re, `"packageManager": "pnpm@${latest.pnpm}"`);
     fs.writeFileSync(full, updated, "utf8");
