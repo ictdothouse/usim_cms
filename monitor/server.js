@@ -56,6 +56,11 @@ const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) ||
 // network call to GitHub and update freshness doesn't need 60s granularity. GET /api/update-check
 // (the dashboard's own on-demand refresh) always fetches fresh regardless of this interval.
 const UPDATE_CHECK_INTERVAL_MS = Number(process.env.UPDATE_CHECK_INTERVAL_MS) || 30 * 60_000;
+// Same idea as UPDATE_CHECK_INTERVAL_MS but for upstream stack versions
+// (Node/pnpm/Postgres/Redis/Caddy/PgBouncer, see getUpstreamLatest) — those
+// move on their own release cadence, not this repo's commits, so they get
+// their own interval rather than piggybacking on either of the above.
+const VERSION_ALERT_INTERVAL_MS = Number(process.env.VERSION_ALERT_INTERVAL_MS) || 24 * 60 * 60_000;
 // Per-tenant uploads live in the named `ucms-uploads` docker volume (docker mode) or a
 // plain apps/api/uploads directory (bare-metal) — same resolution rule as
 // apps/api/scripts/backup-media.sh's UPLOADS_DIR, reused here so an operator who already
@@ -634,7 +639,10 @@ function getUpstreamLatest(cb) {
   });
 }
 
-function handleVersionChecks(req, res) {
+// Shared by the dashboard's GET /api/version-checks (handleVersionChecks)
+// and the background alert poll (maybeAlertOnVersionChecks) — one place
+// computing "current vs upstream" so both read the exact same verdicts.
+function computeVersionChecks(cb) {
   getStackVersions((v) => {
     getUpstreamLatest((latest) => {
       const checks = {};
@@ -659,8 +667,43 @@ function handleVersionChecks(req, res) {
         const cur = (v.infra.pgbouncer.match(/^edoburu\/pgbouncer:(\S+)/) || [])[1];
         checks.pgbouncer = { current: cur, latest: latest.pgbouncer, ...verdict(cur, latest.pgbouncer, false) };
       }
-      sendJson(res, 200, { checks });
+      cb(checks);
     });
+  });
+}
+
+function handleVersionChecks(req, res) {
+  computeVersionChecks((checks) => sendJson(res, 200, { checks }));
+}
+
+let lastVersionAlertCheck = 0;
+const lastAlertedStackVersion = {};
+
+// Edge-triggered per component per version, same one-notice-per-change shape
+// as the service up/down and disk-threshold alerts below: fires once when a
+// new upstream version first shows up as "behind"/"outdated", never again
+// for that SAME version, so a daily check doesn't repeat the same notice
+// forever. Gated to run at most once every VERSION_ALERT_INTERVAL_MS
+// regardless of pollForAlerts' own tick rate (ALERT_POLL_INTERVAL_MS,
+// default 60s) — nodejs.org/npm/Docker Hub don't need checking that often.
+// Deliberately read-only/informational: this never triggers an update by
+// itself, just tells the operator there's something worth reviewing in the
+// Stack & Versions tab (Test button there now actually boot-tests the
+// candidate image in isolation — see stagingBootTest — before anyone decides
+// to click Update).
+function maybeAlertOnVersionChecks() {
+  if (Date.now() - lastVersionAlertCheck < VERSION_ALERT_INTERVAL_MS) return;
+  lastVersionAlertCheck = Date.now();
+  computeVersionChecks((checks) => {
+    for (const [key, c] of Object.entries(checks)) {
+      if (!c || !c.latest || c.status === "latest" || c.status === "unknown") continue;
+      if (lastAlertedStackVersion[key] === c.latest) continue;
+      lastAlertedStackVersion[key] = c.latest;
+      sendAlert(
+        `[usim_cms/${PUBLIC_HOST}] ${key} update available: ${c.current || "?"} -> ${c.latest} — ${c.note}. ` +
+          `Review + staging-test in the Stack & Versions tab before updating.`,
+      );
+    }
   });
 }
 
@@ -772,6 +815,7 @@ function pollForUpdateAlert() {
   });
 }
 function pollForAlerts() {
+  maybeAlertOnVersionChecks();
   getStatus((err, services) => {
     if (err) return; // transient poll failure — not itself alert-worthy
     for (const name of SERVICES) {
@@ -1159,10 +1203,111 @@ function finishStackDeploy(label, logFd, code) {
   fs.closeSync(logFd);
 }
 
-// POST /api/stack/:key/test — pulls the candidate image only, never touches
-// the running container. Safe to call any time; the real risk (a bad image
-// taking the service down) only happens in /update, which always
-// health-checks and auto-rolls-back.
+// Boots the candidate image in complete isolation — its own throwaway,
+// never-published container (or, for Caddy, no running container at all) —
+// and reports whether it actually works, before anyone decides to click
+// Update. This is the real "would this be OK" signal: /update's own
+// health-check-with-rollback only runs AFTER the real service has already
+// been swapped, so it protects against a bad update but can't warn ahead of
+// time the way this can.
+function stagingBootTest(key, imageRef, cb) {
+  const name = `ucms-staging-test-${key}-${Date.now()}`;
+  if (key === "caddy") {
+    const caddyfile = path.join(REPO_DIR, "Caddyfile");
+    execFile(
+      "docker",
+      ["run", "--rm", "-v", `${caddyfile}:/etc/caddy/Caddyfile:ro`, imageRef, "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"],
+      { timeout: 30_000 },
+      (err, stdout, stderr) => {
+        if (err) return cb(false, `Caddyfile failed to validate against the new version: ${(stderr || err.message).trim().slice(-400)}`);
+        cb(true, "Caddyfile validates against the new version (no traffic/ports involved)");
+      },
+    );
+    return;
+  }
+  if (key === "redis") {
+    execFile("docker", ["run", "-d", "--rm", "--name", name, imageRef], { timeout: 30_000 }, (startErr, _o, startStderr) => {
+      if (startErr) return cb(false, `container failed to start: ${(startStderr || startErr.message).trim()}`);
+      setTimeout(() => {
+        execFile("docker", ["exec", name, "redis-cli", "ping"], { timeout: 10_000 }, (pingErr, pingOut) => {
+          const ok = !pingErr && String(pingOut).trim() === "PONG";
+          execFile("docker", ["stop", "-t", "2", name], { timeout: 15_000 }, () => {
+            cb(ok, ok ? "booted in isolation and responded to PING" : `didn't respond to PING: ${(pingErr ? pingErr.message : pingOut || "").trim()}`);
+          });
+        });
+      }, 1500);
+    });
+    return;
+  }
+  if (key === "postgres") {
+    execFile(
+      "docker",
+      ["run", "-d", "--rm", "--name", name, "-e", "POSTGRES_PASSWORD=staging-test-only", imageRef],
+      { timeout: 30_000 },
+      (startErr, _o, startStderr) => {
+        if (startErr) return cb(false, `container failed to start: ${(startStderr || startErr.message).trim()}`);
+        const deadline = Date.now() + 30_000;
+        const poll = () => {
+          execFile("docker", ["exec", name, "pg_isready", "-U", "postgres"], { timeout: 5_000 }, (readyErr) => {
+            if (!readyErr) {
+              return execFile("docker", ["stop", "-t", "2", name], { timeout: 15_000 }, () =>
+                cb(
+                  true,
+                  "new image boots and accepts connections on this host — note: this only proves the image itself runs here, " +
+                    "NOT that a MAJOR version upgrade of a live database can read its existing data; that needs its own dump/restore test (apps/api/scripts/backup.sh)",
+                ),
+              );
+            }
+            if (Date.now() >= deadline) {
+              return execFile("docker", ["stop", "-t", "2", name], { timeout: 15_000 }, () => cb(false, "timed out waiting for the new image to accept connections"));
+            }
+            setTimeout(poll, 2000);
+          });
+        };
+        setTimeout(poll, 1500);
+      },
+    );
+    return;
+  }
+  if (key === "pgbouncer") {
+    const ini = path.join(REPO_DIR, "pgbouncer", "pgbouncer.ini");
+    const userlist = path.join(REPO_DIR, "pgbouncer", "userlist.txt");
+    execFile(
+      "docker",
+      [
+        "run", "-d", "--rm", "--name", name,
+        "-v", `${ini}:/etc/pgbouncer/pgbouncer.ini:ro`,
+        "-v", `${userlist}:/etc/pgbouncer/userlist.txt:ro`,
+        imageRef,
+      ],
+      { timeout: 30_000 },
+      (startErr, _o, startStderr) => {
+        if (startErr) return cb(false, `container failed to start: ${(startStderr || startErr.message).trim()}`);
+        setTimeout(() => {
+          execFile("docker", ["inspect", "-f", "{{.State.Running}}", name], { timeout: 10_000 }, (inspErr, out) => {
+            const running = !inspErr && String(out).trim() === "true";
+            if (running) {
+              return execFile("docker", ["stop", "-t", "2", name], { timeout: 15_000 }, () =>
+                cb(true, "booted with the real pgbouncer.ini/userlist.txt (read-only copies) and stayed up"),
+              );
+            }
+            execFile("docker", ["logs", name], { timeout: 10_000 }, (_e, logOut, logErr) => {
+              cb(false, `crashed on boot: ${(logOut || logErr || "").toString().trim().slice(-400)}`);
+            });
+          });
+        }, 2500);
+      },
+    );
+    return;
+  }
+  cb(false, "no staging test defined for this component");
+}
+
+// POST /api/stack/:key/test — pulls the candidate image, then boot-tests it
+// in isolation (stagingBootTest). Never touches the running container; the
+// separate risk /update guards against (a bad image breaking the live
+// service) still gets its own health-check-with-rollback there regardless of
+// what this test reported.
 function handleStackTest(req, res, key) {
   // Dependency check is a read-only `pnpm outdated` — unlike everything else
   // here it never touches docker/containers at all, so it works regardless
@@ -1183,7 +1328,10 @@ function handleStackTest(req, res, key) {
       if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
       execFile("docker", ["pull", imageRef], { timeout: 120_000 }, (err, stdout, stderr) => {
         if (err) return sendJson(res, 502, { ok: false, error: stderr || err.message });
-        sendJson(res, 200, { ok: true, message: `pulled ${imageRef} — nothing restarted yet` });
+        stagingBootTest(key, imageRef, (ok, note) => {
+          if (!ok) return sendJson(res, 502, { ok: false, error: `pulled ${imageRef} but staging test failed: ${note}` });
+          sendJson(res, 200, { ok: true, message: `${imageRef}: ${note}. Nothing in production touched.` });
+        });
       });
       return;
     }
@@ -1193,7 +1341,10 @@ function handleStackTest(req, res, key) {
         const newRef = `edoburu/pgbouncer:${latest.pgbouncer}`;
         execFile("docker", ["pull", newRef], { timeout: 120_000 }, (err, stdout, stderr) => {
           if (err) return sendJson(res, 502, { ok: false, error: stderr || err.message });
-          sendJson(res, 200, { ok: true, message: `pulled ${newRef} — nothing restarted yet` });
+          stagingBootTest("pgbouncer", newRef, (ok, note) => {
+            if (!ok) return sendJson(res, 502, { ok: false, error: `pulled ${newRef} but staging test failed: ${note}` });
+            sendJson(res, 200, { ok: true, message: `${newRef}: ${note}. Nothing in production touched.` });
+          });
         });
       });
       return;
@@ -2050,8 +2201,9 @@ function versionCard(label, value, sub, check, checked, actions) {
 
 // testable=false (Node/pnpm): the blue-green deploy itself builds+tests the
 // new image before switching traffic, so there's no separate dry-run step —
-// only an Update button. Everything else gets a Test button that only ever
-// downloads/verifies, never touches the running container.
+// only an Update button. Everything else gets a Test button that pulls the
+// candidate image and boot-tests it in an isolated throwaway container
+// (stagingBootTest, server-side) — it never touches the running container.
 function stackActions(key, label, testable) {
   let html = "<div style=\\"margin-top:.5rem;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap\\">";
   if (testable) {
@@ -2125,7 +2277,7 @@ async function stackTest(key, btn) {
   const msg = document.getElementById("stackMsg-" + key);
   if (msg) {
     msg.style.color = "";
-    msg.textContent = key === "deps" ? "checking for outdated packages…" : "pulling image…";
+    msg.textContent = key === "deps" ? "checking for outdated packages…" : "pulling image + staging boot-test…";
   }
   try {
     const r = await api("/api/stack/" + key + "/test", { method: "POST" });
