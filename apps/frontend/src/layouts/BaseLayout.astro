@@ -1130,9 +1130,13 @@ const fontsHref = allFonts.length
             } else if (edge === "bottom") {
               Object.assign(handle.style, isMargin ? { right: "32px", bottom: "-8px" } : { left: "50%", bottom: "0", transform: "translate(-50%,50%)" });
             } else if (edge === "left") {
-              Object.assign(handle.style, isMargin ? { top: "32px", left: "-8px" } : { top: "50%", left: "0", transform: "translate(-50%,-50%)" });
+              // Inset instead of straddling the edge like Blocks mode does —
+              // a full-bleed Section/Column's left/right edge here is the
+              // viewport's own edge (Blocks' canvas has a gutter), so an
+              // overhanging badge clips half off-screen.
+              Object.assign(handle.style, isMargin ? { top: "32px", left: "4px" } : { top: "50%", left: "16px", transform: "translateY(-50%)" });
             } else {
-              Object.assign(handle.style, isMargin ? { top: "32px", right: "-8px" } : { top: "50%", right: "0", transform: "translate(50%,-50%)" });
+              Object.assign(handle.style, isMargin ? { top: "32px", right: "4px" } : { top: "50%", right: "16px", transform: "translateY(-50%)" });
             }
           }
 
@@ -1174,10 +1178,12 @@ const fontsHref = allFonts.length
               function currentPx() {
                 return Math.round(parseFloat(getComputedStyle(box).getPropertyValue(prop)) || 0);
               }
-              function render(px) {
+              // Band only while hovering/dragging this edge (Blocks mode's
+              // hoverBand rule) — showing all 8 on select buries the content.
+              function render(px, showBand = true) {
                 handle.textContent = `${px}px`;
-                band.style.display = px ? "block" : "none";
-                if (!px) return;
+                band.style.display = px && showBand ? "block" : "none";
+                if (!px || !showBand) return;
                 const offset = isMargin ? -px : 0;
                 if (edge === "top") Object.assign(band.style, { left: "0", right: "0", top: `${offset}px`, bottom: "", height: `${px}px`, width: "" });
                 else if (edge === "bottom")
@@ -1186,11 +1192,11 @@ const fontsHref = allFonts.length
                   Object.assign(band.style, { top: "0", bottom: "0", left: `${offset}px`, right: "", width: `${px}px`, height: "" });
                 else Object.assign(band.style, { top: "0", bottom: "0", right: `${offset}px`, left: "", width: `${px}px`, height: "" });
               }
-              render(currentPx());
+              render(currentPx(), false);
 
               handle.addEventListener("pointerenter", () => render(currentPx()));
               handle.addEventListener("pointerleave", () => {
-                if (handle.dataset.dragging !== "1") render(0);
+                if (handle.dataset.dragging !== "1") render(currentPx(), false);
               });
 
               handle.addEventListener("pointerdown", (e) => {
@@ -1211,7 +1217,7 @@ const fontsHref = allFonts.length
                   (moved) => {
                     delete handle.dataset.dragging;
                     if (!moved) {
-                      render(0);
+                      render(currentPx(), false);
                       return;
                     }
                     parent.postMessage({ type: "designer:spacingDrag", path: path.join("."), fields: touched, px: lastPx }, targetOrigin);
