@@ -1985,13 +1985,13 @@ function sqlStringLiteral(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-// Leading char must be alnum — not just "no weird charset" but specifically
-// no leading `-`: rsync parses ANY argv token starting with `-` as an
-// option regardless of quoting, so a target like `--rsync-path=...` would
-// run as root once a day via run.sh's `rsync -a --delete -- "$src"
-// "$target"` (that trailing `--` is belt-and-suspenders on top of this, not
-// a substitute for it — caught by an automated security review).
-const BACKUP_SSH_TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9_.@:/-]*$/;
+// Requires an actual [user@]host:path shape, not just "no leading dash" —
+// see the matching SSH_TARGET_RE comment in apps/api/src/routes/
+// portal-settings.ts for the full reasoning (a charset-only check still let
+// a `..`-riddled, colon-less value through, which combined with rsync
+// --delete could point root's nightly cron at an arbitrary directory).
+// Duplicated there, not shared — two separate deployables, no shared module.
+const BACKUP_SSH_TARGET_RE = /^(?:[A-Za-z0-9][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_./-]*$/;
 const BACKUP_GDRIVE_FOLDER_RE = /^[A-Za-z0-9_-]+$/;
 
 // Same masking apps/api/src/db/tenant-pool/backup-destination.ts does
@@ -2025,7 +2025,7 @@ function validateBackupDestinationPatch(body, existing) {
   if (type === "local") return { merged: { type } };
   if (type === "ssh") {
     const target = String((body.ssh && body.ssh.target) || "").trim();
-    if (!target || !BACKUP_SSH_TARGET_RE.test(target)) return { error: "ssh.target must look like user@host:/path" };
+    if (!target || !BACKUP_SSH_TARGET_RE.test(target) || target.includes("..")) return { error: "ssh.target must look like user@host:/path" };
     return { merged: { type, ssh: { target } } };
   }
   if (type === "s3") {

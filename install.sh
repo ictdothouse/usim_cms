@@ -444,13 +444,20 @@ install_backup_cron() {
   # This ends up inside a JSON value a later step inserts into the database
   # AND (every night after) an argument run.sh hands rsync — a stray quote or
   # shell metacharacter here would be a real injection either way, not just a
-  # typo. A LEADING dash is rejected too (not just an odd charset): rsync
-  # parses any argv token starting with `-` as an option regardless of
-  # quoting, so e.g. `--rsync-path=...` here would run as root once a day —
-  # caught by an automated security review, not by hand-testing a normal
-  # user@host:/path value.
-  if [ -n "$BACKUP_OFFSITE_TARGET" ] && ! [[ "$BACKUP_OFFSITE_TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9_.@:/-]*$ ]]; then
-    echo "  Contains characters other than letters/digits/._@:/- (or starts with a dash) — skipping off-site rsync." >&2
+  # typo. Requires an actual [user@]host:path shape (a bare charset check
+  # still let a colon-less, `..`-riddled value through — combined with
+  # rsync --delete that could point root's nightly cron at an arbitrary
+  # directory, not just a leading-dash option-injection risk). Bash's regex
+  # engine has no lookahead to express "no .. segment" inline, so that's a
+  # separate plain substring check — same two-part shape as the matching
+  # validators in apps/api/src/routes/portal-settings.ts and
+  # monitor/server.js. Caught by an automated security review as an
+  # incomplete fix on the first pass (that pass only caught the leading-dash
+  # case), not by hand-testing a normal user@host:/path value.
+  if [ -n "$BACKUP_OFFSITE_TARGET" ] \
+    && { ! [[ "$BACKUP_OFFSITE_TARGET" =~ ^(([A-Za-z0-9][A-Za-z0-9_.-]*)@)?[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_./-]*$ ]] \
+      || [[ "$BACKUP_OFFSITE_TARGET" == *".."* ]]; }; then
+    echo "  Doesn't look like [user@]host:/path (or contains '..') — skipping off-site rsync." >&2
     BACKUP_OFFSITE_TARGET=""
   fi
 
@@ -599,10 +606,18 @@ dest_type="$(pg "SELECT backup_destination->>'type' FROM platform_settings WHERE
 case "$dest_type" in
   ssh)
     target="$(pg "SELECT backup_destination->'ssh'->>'target' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
-    # `--` stops rsync from ever parsing a leading-dash target as an option
-    # (argument injection) — belt-and-suspenders on top of the stored
-    # value's own validation (apps/api/src/routes/portal-settings.ts /
-    # monitor/server.js both reject a leading dash before this is saved).
+    # Last line of defense, independent of whatever validation the value
+    # passed before it ever reached this row: refuse anything without a
+    # `:` (so this never silently falls back to a LOCAL rsync destination —
+    # see apps/api/src/routes/portal-settings.ts's SSH_TARGET_RE comment for
+    # why that matters) or containing `..` (path traversal). `--` then stops
+    # rsync from parsing a leading-dash target as an option (argument
+    # injection) on top of that.
+    case "$target" in
+      *..*|*[!A-Za-z0-9_./@:-]*) target="" ;;
+      *:*) ;;
+      *) target="" ;;
+    esac
     [ -n "$target" ] && rsync -a --delete -- "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
     ;;
   s3|gdrive)
@@ -692,10 +707,18 @@ dest_type="$(pg "SELECT backup_destination->>'type' FROM platform_settings WHERE
 case "$dest_type" in
   ssh)
     target="$(pg "SELECT backup_destination->'ssh'->>'target' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
-    # `--` stops rsync from ever parsing a leading-dash target as an option
-    # (argument injection) — belt-and-suspenders on top of the stored
-    # value's own validation (apps/api/src/routes/portal-settings.ts /
-    # monitor/server.js both reject a leading dash before this is saved).
+    # Last line of defense, independent of whatever validation the value
+    # passed before it ever reached this row: refuse anything without a
+    # `:` (so this never silently falls back to a LOCAL rsync destination —
+    # see apps/api/src/routes/portal-settings.ts's SSH_TARGET_RE comment for
+    # why that matters) or containing `..` (path traversal). `--` then stops
+    # rsync from parsing a leading-dash target as an option (argument
+    # injection) on top of that.
+    case "$target" in
+      *..*|*[!A-Za-z0-9_./@:-]*) target="" ;;
+      *:*) ;;
+      *) target="" ;;
+    esac
     [ -n "$target" ] && rsync -a --delete -- "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
     ;;
   s3|gdrive)

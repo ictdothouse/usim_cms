@@ -173,13 +173,24 @@ function validateStorageLimits(body: unknown): string | null {
   return null;
 }
 
-// Leading char must be alnum — not just "no weird charset" but specifically
-// no leading `-`: rsync parses ANY argv token starting with `-` as an
-// option regardless of quoting, so a target like `--rsync-path=...` would
-// run as root once a day via run.sh's `rsync -a --delete -- "$src" "$target"`
-// (that trailing `--` is belt-and-suspenders on top of this, not a
-// substitute for it — caught by an automated security review).
-const SSH_TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9_.@:/-]*$/;
+// Requires an actual [user@]host:path shape — not just "no leading dash,
+// otherwise anything goes". A charset-only check (even one that already
+// rejects a leading `-`) still accepts a bare local-looking path with no
+// colon, or a path riddled with `..` segments; rsync treats a target with
+// no `:` as a LOCAL destination, and combined with `--delete` and `..`
+// traversal (e.g. "a/../../../etc/cron.d"), a stored value could point the
+// nightly root cron job at an arbitrary directory on the box, mirroring
+// (and deleting) into it as root. The required `:` forces this to always be
+// parsed as a remote spec; `..` is rejected as a separate substring check
+// (both here and, as a last line of defense, inside run.sh itself right
+// before it ever calls rsync) since bash's own regex engine has no
+// lookahead to express "no .. segment" inline the way this one can —
+// keeping both checks in the same simple shape across every validator
+// (this file, monitor/server.js, install.sh's own prompt) was simpler and
+// safer than three different in-house traversal regexes. Found by an
+// automated security review as an incomplete fix on the first pass (that
+// pass only caught the leading-dash case).
+const SSH_TARGET_RE = /^(?:[A-Za-z0-9][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9_./-]*$/;
 const GDRIVE_FOLDER_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 // Where the nightly backup cron pushes a copy after its local dump — see
@@ -198,7 +209,10 @@ function validateBackupDestination(body: unknown, existing: BackupDestinationCon
     const target = String(ssh.target || "").trim();
     // Same shape install.sh's own off-site prompt validates — this still
     // ends up driving a root cron job's rsync target, not just a UI string.
-    if (!target || !SSH_TARGET_RE.test(target)) return "ssh.target must look like user@host:/path";
+    // ".." rejected as a plain substring (see SSH_TARGET_RE's own comment on
+    // why this isn't folded into that regex) — a path-traversal segment here
+    // could point root's nightly rsync --delete at an arbitrary directory.
+    if (!target || !SSH_TARGET_RE.test(target) || target.includes("..")) return "ssh.target must look like user@host:/path";
     return { type, ssh: { target } };
   }
   if (type === "s3") {
