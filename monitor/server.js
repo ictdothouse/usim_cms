@@ -50,7 +50,11 @@ const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
 // whole point is staying dependency-free (see the header comment).
 const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || "";
 const ALERT_POLL_INTERVAL_MS = Number(process.env.ALERT_POLL_INTERVAL_MS) || 60_000;
-const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) || 85;
+// Lowered from 85 to 75 (2026-10-10, same disk-hygiene pass as the build-cache
+// prune/logging caps) — on a small 40G disk, 85% only left ~6G of runway
+// between "alert fires" and "actually out of space"; 75% buys more lead time
+// to act. Still overridable per-install via the env var.
+const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) || 75;
 // How often to `git fetch origin main` in the background looking for new commits (Dependabot
 // bumps included, once merged) — separate from ALERT_POLL_INTERVAL_MS since a git fetch is a
 // network call to GitHub and update freshness doesn't need 60s granularity. GET /api/update-check
@@ -374,6 +378,52 @@ function getDockerDiskUsageVerbose(cb) {
   execFile("docker", ["system", "df", "-v"], { timeout: 20_000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
     cb(err ? null : stdout);
   });
+}
+
+// Per-database size (control-plane `usim_cms` plus every tenant's own
+// `tenant_<host>` database — see apps/api/CLAUDE.md's multi-tenancy section:
+// each tenant is a real separate database on this same Postgres instance, not
+// a schema). The disk-usage panel above only ever shows OS/Docker-level
+// noise (images, logs, build cache); this answers a different question —
+// "is one tenant's actual DATA growing" — which `docker system df` can't see
+// at all, since to Docker the whole Postgres data directory is just one
+// opaque volume. `-U postgres` with no password needed: a `docker compose
+// exec` connection goes over the container's local unix socket, which this
+// image's default pg_hba.conf trusts regardless of POSTGRES_HOST_AUTH_METHOD
+// (that only governs TCP "host" entries — see docker-compose.yml's own
+// comment on the `db` service). Bare-metal (DEPLOY_MODE=systemd) has no
+// equivalent credential wired into this process yet, so it's docker-only for
+// now, same scope line the disk-usage panel above already draws.
+function getDbSizes(cb) {
+  if (DEPLOY_MODE !== "docker") return cb([]);
+  execFile(
+    "docker",
+    [
+      "compose",
+      "exec",
+      "-T",
+      "db",
+      "psql",
+      "-U",
+      "postgres",
+      "-t",
+      "-A",
+      "-c",
+      "SELECT datname, pg_database_size(datname) FROM pg_database WHERE NOT datistemplate ORDER BY pg_database_size(datname) DESC;",
+    ],
+    { cwd: REPO_DIR, timeout: 15_000 },
+    (err, stdout) => {
+      if (err) return cb([]);
+      const rows = [];
+      for (const line of String(stdout || "").split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const [name, bytes] = line.split("|");
+        if (!name || bytes === undefined) continue;
+        rows.push({ name, bytes: Number(bytes) || 0 });
+      }
+      cb(rows);
+    },
+  );
 }
 
 // Posts a plain JSON body to an operator-configured webhook. `content` is
@@ -929,6 +979,10 @@ function handleDiskUsageVerbose(req, res) {
     if (text == null) return sendJson(res, 502, { error: "docker system df -v failed (docker mode only)" });
     sendJson(res, 200, { text });
   });
+}
+
+function handleDbSizes(req, res) {
+  getDbSizes((rows) => sendJson(res, 200, { rows }));
 }
 
 function handleStatus(req, res) {
@@ -2008,6 +2062,13 @@ const DASHBOARD_HTML = `<!doctype html>
     <button class="secondary" onclick="showDiskUsageDetail()">Full breakdown (per image/volume)</button>
   </div>
   <pre class="term" id="diskUsageLog" style="display:none"></pre>
+
+  <h3>Postgres database sizes</h3>
+  <p class="muted">Real data size per database (control-plane + every tenant's own <code>tenant_&lt;host&gt;</code> database) — separate from the disk usage above, which only sees Docker/OS-level noise and can't tell you if a specific tenant's actual content is what's growing.</p>
+  <table id="dbSizesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+  <div class="row">
+    <button class="secondary" onclick="refreshDbSizes()">Refresh</button>
+  </div>
 </div>
 
 <div class="tab-panel" id="panel-ssl">
@@ -2135,6 +2196,32 @@ async function showDiskUsageDetail() {
     pre.textContent = data.text || "(empty)";
   } catch (e) {
     pre.textContent = "Error: " + e.message;
+  }
+}
+
+async function refreshDbSizes() {
+  const tbody = document.querySelector("#dbSizesTable tbody");
+  tbody.innerHTML = "<tr><td class=\\"muted\\">Loading…</td></tr>";
+  try {
+    const data = await api("/api/db-sizes");
+    const rows = data.rows || [];
+    if (!rows.length) {
+      tbody.innerHTML = "<tr><td class=\\"muted\\">Not available (docker mode only, or docker unreachable).</td></tr>";
+      return;
+    }
+    const max = Math.max(...rows.map((r) => r.bytes), 1);
+    tbody.innerHTML = "";
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      const pct = Math.round((r.bytes / max) * 100);
+      tr.innerHTML =
+        "<td style=\\"padding:0.25rem 0.5rem 0.25rem 0; white-space:nowrap;\\">" + escapeHtml(r.name) + "</td>" +
+        "<td style=\\"padding:0.25rem 0.5rem; width:100%;\\"><div class=\\"meter ok\\"><span style=\\"width:" + pct + "%\\"></span></div></td>" +
+        "<td style=\\"padding:0.25rem 0 0.25rem 0.5rem; white-space:nowrap; text-align:right;\\" class=\\"muted\\">" + formatBytes(r.bytes) + "</td>";
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    tbody.innerHTML = "<tr><td class=\\"muted\\">Error: " + escapeHtml(e.message) + "</td></tr>";
   }
 }
 
@@ -2307,6 +2394,7 @@ async function init() {
   refreshDb();
   refreshSites();
   refreshDiskUsage();
+  refreshDbSizes();
   refreshUpdateCheck();
   refreshVersions();
   setInterval(refresh, 5000);
@@ -2757,6 +2845,8 @@ const server = http.createServer((req, res) => {
       handleDiskUsage(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/disk-usage/verbose") {
       handleDiskUsageVerbose(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/db-sizes") {
+      handleDbSizes(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/update-check") {
       handleUpdateCheck(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/versions") {
