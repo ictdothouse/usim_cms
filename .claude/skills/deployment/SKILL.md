@@ -268,21 +268,53 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   (`# >>> usim_cms backup (install.sh) >>>` / `# <<< ... <<<`) into root's crontab —
   `sed`-deleted and re-appended on every run, so re-running the installer replaces its own
   prior entry instead of duplicating it, same idempotent-rerun convention as everything else
-  here; anything else already in root's crontab is left alone. The cron line itself calls a
-  mode-specific wrapper, never `backup.sh`/`backup-media.sh` directly: **`scripts/
-  docker-backup.sh`** (docker + production mode) runs `backup.sh` inside a one-off
+  here; anything else already in root's crontab is left alone. `retention`/`offsite` are
+  validated before being embedded in that crontab line (`offsite` against a plain
+  `user@host:/path` character set) — this text lands verbatim in a file root's cron hands to
+  a shell, so free-form input there would be a root-level command-injection vector, not just
+  a cosmetic concern. `crontab -l`'s own exit code (1, with no output, the first time root
+  has never had a crontab — the normal case on a fresh VPS) is deliberately swallowed with
+  `|| true` before piping into `sed`: under this script's own `set -euo pipefail`, leaving
+  that unguarded made `install_backup_cron` abort the ENTIRE installer the moment someone
+  said yes to the prompt, on exactly the most common case — caught by an automated push-time
+  security review, not by hand-testing, since a from-scratch Debian/RHEL image genuinely has
+  no prior root crontab either.
+  **Nothing root's cron ends up pointing at lives inside the git checkout.** `REPO_DIR` is
+  typically owned by whoever ran `sudo ./install.sh` (a plain `git clone` is already
+  non-root-owned before this script ever runs, and `install_production_mode` explicitly
+  `chown -R`s it back to `$ORIG_OWNER` once its own root-only setup is done) — a root cron
+  job referencing a file inside that checkout, or `source`-ing its `.env` directly, would let
+  anyone who can write to the repo (a compromised deploy credential, a second admin with
+  repo access but no root) get root code execution once a day. Caught by the same review
+  pass. Instead, `install_backup_cron` copies `backup.sh`/`backup-media.sh` into
+  `/opt/ucms/backup` (root:root, `700`, mirroring `/opt/ucms/node`'s own "root-provisioned
+  fixed path outside the repo" convention) and writes a mode-specific `run.sh` there via
+  heredoc — the same technique `install_baremetal_mode` already uses for its systemd units —
+  rather than shipping it as a tracked file in `scripts/`. Credentials are snapshotted into a
+  sibling `backup.env` (root:root, `600`) at install time instead of the cron job sourcing
+  the repo's own `.env`/`apps/api/.env`: for docker mode this also closes a credential-
+  exposure finding from the same review — the first draft passed `POSTGRES_APP_PASSWORD`
+  to `docker run` as a literal `-e VAR=value` argument, which sits in plain text in `ps aux`
+  output for ANY local user to read, not just root; the generated `run.sh` uses `--env-file
+  backup.env` instead. Docker mode's `run.sh` runs `backup.sh` inside a one-off
   `postgres:16-alpine` container attached to `ucms-net`, talking to `db:5432` directly
   (bypassing pgbouncer — a long-running dump shouldn't sit on one of its few pooled backend
   connections for no benefit) because `db`'s port is deliberately never published to the
   host (see its own compose comment), so a plain host cron job has no way to reach it at
-  all; then runs `backup-media.sh` directly on the host (no network boundary there — it
-  only needs the docker CLI to resolve the `ucms-uploads` volume's path). **`scripts/
-  baremetal-backup.sh`** needs none of that — bare-metal's Postgres is directly reachable,
-  so it just sources `apps/api/.env` and calls both scripts as-is. Both wrappers are plain
-  cron entry points, not something to run by hand with different arguments than cron itself
-  would use. Off-site rsync (when configured) still needs passwordless SSH key auth to that
-  host set up by hand first (`ssh-copy-id`) — same prerequisite `SOURCE_HOST` pull-mode
-  above already documents, install.sh doesn't automate key exchange.
+  all; then runs `backup-media.sh` directly on the host (no network boundary there — it only
+  needs the docker CLI to resolve the `ucms-uploads` volume's path). Bare-metal's `run.sh`
+  needs none of that — its Postgres is directly reachable, so it just sources the generated
+  `backup.env` and calls both scripts as-is. Either way, a credential rotation
+  (`POSTGRES_APP_PASSWORD`/`DATABASE_URL`) needs this installer re-run to regenerate
+  `backup.env` — a point-in-time snapshot, not a live reference — same already-documented
+  caveat as PgBouncer's own live-password-rotation steps above. `$backup_dir` and
+  `/var/log/ucms-backup.log` are both locked to owner-only (`700`/`600`) rather than
+  whatever `mkdir`'s/the first `>>`'s default mode would give — a pg_dump contains every
+  tenant's password hashes and full content, and the log lists tenant hostnames, neither of
+  which any other local account on the box should be able to read by default. Off-site rsync
+  (when configured) still needs passwordless SSH key auth to that host set up by hand first
+  (`ssh-copy-id`) — same prerequisite `SOURCE_HOST` pull-mode above already documents,
+  install.sh doesn't automate key exchange.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
