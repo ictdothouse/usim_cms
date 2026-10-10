@@ -728,6 +728,24 @@ ensure_docker_live_restore() {
   systemctl restart docker
 }
 
+# systemd-journald's own on-disk log (/var/log/journal — host/SSH/kernel
+# logs, separate from each container's own json-file log capped above) has
+# no size limit by default on many distros and was observed growing past 1.8G
+# on one live VPS. A drop-in file (not editing journald.conf directly) so a
+# re-run or an operator's own journald.conf edits never conflict; idempotent,
+# same pattern as ensure_docker_live_restore above.
+ensure_journald_cap() {
+  local dropin_dir="/etc/systemd/journald.conf.d"
+  local dropin="$dropin_dir/00-usim-cms-size-cap.conf"
+  if [ -f "$dropin" ]; then
+    return 0
+  fi
+  echo "Capping systemd-journald's on-disk log size (SystemMaxUse=200M)..."
+  mkdir -p "$dropin_dir"
+  printf '[Journal]\nSystemMaxUse=200M\n' > "$dropin"
+  systemctl restart systemd-journald
+}
+
 # ---------------------------------------------------------------------------
 # Docker mode
 # ---------------------------------------------------------------------------
@@ -740,6 +758,7 @@ install_docker_mode() {
     echo "Docker already installed: $(docker --version)"
   fi
   ensure_docker_live_restore
+  ensure_journald_cap
   if ! docker compose version >/dev/null 2>&1; then
     echo "Docker is installed but the 'compose' plugin is missing." >&2
     echo "Install it: https://docs.docker.com/compose/install/" >&2
@@ -1007,6 +1026,7 @@ install_production_mode() {
     echo "Docker already installed: $(docker --version)"
   fi
   ensure_docker_live_restore
+  ensure_journald_cap
   if ! docker compose version >/dev/null 2>&1; then
     echo "Docker is installed but the 'compose' plugin is missing." >&2
     echo "Install it: https://docs.docker.com/compose/install/" >&2
