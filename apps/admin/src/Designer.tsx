@@ -855,9 +855,6 @@ export default function Designer({
           headerFrameHeight={headerFrameHeight}
           footerFrameHeight={footerFrameHeight}
           startSpacingDrag={startSpacingDrag}
-          draggingBand={draggingBand}
-          hoverBand={hoverBand}
-          setHoverBand={setHoverBand}
           duplicateSection={duplicateSection}
           copySection={copySection}
           pasteSection={pasteSection}

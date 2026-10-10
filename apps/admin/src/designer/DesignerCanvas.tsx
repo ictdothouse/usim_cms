@@ -27,7 +27,7 @@ import {
   Tablet,
   Trash2,
 } from "lucide-react";
-import type { Dispatch, SetStateAction, MutableRefObject } from "react";
+import type { MutableRefObject } from "react";
 import * as api from "@/lib/api";
 import { bestTextColor } from "@/lib/utils";
 import type { Key } from "@/i18n";
@@ -38,7 +38,6 @@ import {
   SPACE, lengthValue, colStyle, overlayColors, shadowToCss, RADIUS, BORDER, RADIUS_CORNER_KEYS,
 } from "./style";
 import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./fields";
-import { writeDragSideKeys, applySectionSpacingWrite } from "./spacingDrag";
 import { ElPreview } from "./ElPreview";
 import { DEVICE_DIMS } from "./DeviceViewport";
 import type { Bp, Block, Col, Row, El, SectionProps, Drag } from "./types";
@@ -47,46 +46,8 @@ import type { UndoRedoApi } from "./hooks/useUndoRedo";
 import type { useBlockOps } from "./hooks/useBlockOps";
 import type { useSiteChrome } from "./hooks/useSiteChrome";
 
-// Figma-style spacing overlay: turns a resolved CSS length ("3rem", "24px",
-// "0") into the rounded px number shown on the badge. rem assumed at the
-// browser default 16px root — this editor doesn't let authors change that.
-function pxLabel(len: string): string {
-  if (len === "0" || len === "0px") return "0";
-  const rem = /^(-?[\d.]+)rem$/.exec(len);
-  if (rem) return `${Math.round(parseFloat(rem[1]) * 16)}`;
-  const px = /^(-?[\d.]+)px$/.exec(len);
-  if (px) return `${Math.round(parseFloat(px[1]))}`;
-  return len;
-}
-
 // Row presets offered by "add row": each entry is the column span list.
 const ROW_PRESETS: number[][] = [[1], [1, 1], [1, 1, 1], [1, 1, 1, 1], [1, 2], [2, 1]];
-
-// Hatched spacing-overlay band: shown while a padding/margin drag handle is
-// selected so the actual area being resized is visible, not just its number.
-// `outward` distinguishes margin (space outside the box) from padding (space
-// inside it) — same idea as the browser devtools box model, which is also
-// why the two get different stripe colors (blue padding, orange margin):
-// same color on both made it hard to tell which one was being dragged.
-const SPACING_STRIPE =
-  "repeating-linear-gradient(45deg, rgba(0,113,227,0.35) 0px, rgba(0,113,227,0.35) 6px, rgba(0,113,227,0.12) 6px, rgba(0,113,227,0.12) 12px)";
-const MARGIN_STRIPE =
-  "repeating-linear-gradient(45deg, rgba(245,158,11,0.35) 0px, rgba(245,158,11,0.35) 6px, rgba(245,158,11,0.12) 6px, rgba(245,158,11,0.12) 12px)";
-function spacingBand(edge: "top" | "bottom" | "left" | "right", px: number, outward = false) {
-  if (!px) return null;
-  const offset = outward ? -px : 0;
-  const style: React.CSSProperties =
-    edge === "top"
-      ? { left: 0, right: 0, height: px, top: offset }
-      : edge === "bottom"
-        ? { left: 0, right: 0, height: px, bottom: offset }
-        : edge === "left"
-          ? { top: 0, bottom: 0, width: px, left: offset }
-          : { top: 0, bottom: 0, width: px, right: offset };
-  return (
-    <div className="pointer-events-none absolute z-10" style={{ ...style, backgroundImage: outward ? MARGIN_STRIPE : SPACING_STRIPE }} />
-  );
-}
 
 // Hoisted to module scope so these keep a stable component identity across
 // Designer renders — declared as nested functions inside Designer() before,
@@ -117,9 +78,6 @@ export interface DesignerCanvasProps {
   headerFrameHeight: ReturnType<typeof useSiteChrome>["headerFrameHeight"];
   footerFrameHeight: ReturnType<typeof useSiteChrome>["footerFrameHeight"];
   startSpacingDrag: UndoRedoApi["startSpacingDrag"];
-  draggingBand: UndoRedoApi["draggingBand"];
-  hoverBand: string | null;
-  setHoverBand: Dispatch<SetStateAction<string | null>>;
   duplicateSection: ReturnType<typeof useBlockOps>["duplicateSection"];
   copySection: ReturnType<typeof useBlockOps>["copySection"];
   pasteSection: ReturnType<typeof useBlockOps>["pasteSection"];
@@ -138,28 +96,15 @@ export function DesignerCanvas({
   selEq, selCls, pick, setCtxMenu,
   effectiveTheme, desktopBoxed, isCanvasMode, tenantHost,
   resolvedHeaderId, resolvedFooterId, headerFrameHeight, footerFrameHeight,
-  startSpacingDrag, draggingBand, hoverBand, setHoverBand,
+  startSpacingDrag,
   duplicateSection, copySection, pasteSection, copyStyleSection, pasteStyleSection, deleteSection,
   dropHint, setDropHint, dropIntoColumn, dropIntoNewSection, drag,
 }: DesignerCanvasProps) {
   const {
     t, bp, bpKey, bpGetValue, bpKeysOverridden, sideValue, fourSideValue, mode, blocks, setSel,
-    isSectionLocked, mutate, linkedPadding, linkedMargin, pageSettings, saveAsTemplate, clipHas, styleHas,
+    isSectionLocked, mutate, pageSettings, saveAsTemplate, clipHas, styleHas,
     deleteRow, deleteColumn, deleteElement,
   } = ctx;
-
-  // When the four/two sides are linked (dragging one moves them all), a
-  // single shared key for the whole group means hovering/dragging any one
-  // handle shows every linked side's band together, not just the one edge
-  // under the cursor — since they're all the same value anyway. Unlinked
-  // sides keep their own distinct key, so only that one edge's band shows.
-  const bandKey = (prefix: string, edge: string, linked: boolean) => (linked ? `${prefix}.*` : `${prefix}.${edge}`);
-  const bandHoverProps = (key: string) => ({
-    onMouseEnter: () => setHoverBand(key),
-    onMouseLeave: () => {
-      if (!draggingBand.current) setHoverBand((k) => (k === key ? null : k));
-    },
-  });
 
   // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
   // — this is real (SectionBlock.astro renders the matching @media rule on
@@ -473,192 +418,12 @@ export function DesignerCanvas({
               <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
                 {t("designer-section")} {BlockControls({ b })}
               </div>
-              {selEq([b]) &&
-                (() => {
-                  // Reads/writes go through the same per-side keys (PADDING_SIDE_KEYS,
-                  // fallback PADDING_SIDE_FALLBACK) as this section's own FourSideControl
-                  // in the Inspector — dragging here now agrees with what's actually
-                  // rendered instead of a separate paddingY/paddingX axis value that the
-                  // per-side override (once set) would silently ignore.
-                  const sidePx = (side: keyof typeof PADDING_SIDE_KEYS) =>
-                    Number(
-                      pxLabel(
-                        lengthValue(
-                          fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]),
-                          PAD,
-                          side === "top" || side === "bottom" ? PAD.md : "1.5rem",
-                        ),
-                      ),
-                    ) || 0;
-                  const topPx = sidePx("top");
-                  const rightPx = sidePx("right");
-                  const bottomPx = sidePx("bottom");
-                  const leftPx = sidePx("left");
-                  // Block's `bp` bag lives inside `props` (SectionProps.bp), not as a
-                  // sibling of it like Col/El — writeDragSideKeys' shape doesn't fit, so
-                  // this section writes directly instead.
-                  const applyDrag = (key: string, px: number) => (next: Block[]) => {
-                    const props = next[b].props as unknown as SectionProps;
-                    applySectionSpacingWrite(props, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding, bp, bpKey);
-                  };
-                  return (
-                    <>
-                      {(["top", "bottom"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          onMouseDown={(ev) => {
-                            const startPx = edge === "top" ? topPx : bottomPx;
-                            const key = PADDING_SIDE_KEYS[edge];
-                            startSpacingDrag(
-                              ev,
-                              startPx,
-                              "y",
-                              edge === "top" ? 1 : -1,
-                              (next, px) => applyDrag(key, px)(next),
-                              bandKey(`sec.${b}.padding`, edge, linkedPadding),
-                            );
-                          }}
-                          {...bandHoverProps(bandKey(`sec.${b}.padding`, edge, linkedPadding))}
-                          className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                            edge === "top" ? "-translate-y-1/2" : "translate-y-1/2"
-                          }`}
-                          // -1px, not 0, to land on the backdrop's own 1px
-                          // border/outline instead of just inside it —
-                          // the badge otherwise visibly floats off the
-                          // selection line (user feedback).
-                          style={{ top: edge === "top" ? "-2px" : undefined, bottom: edge === "bottom" ? "-2px" : undefined }}
-                        >
-                          {edge === "top" ? topPx : bottomPx}px
-                        </span>
-                      ))}
-                      {(["left", "right"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          onMouseDown={(ev) => {
-                            const startPx = edge === "left" ? leftPx : rightPx;
-                            const key = PADDING_SIDE_KEYS[edge];
-                            startSpacingDrag(
-                              ev,
-                              startPx,
-                              "x",
-                              edge === "left" ? 1 : -1,
-                              (next, px) => applyDrag(key, px)(next),
-                              bandKey(`sec.${b}.padding`, edge, linkedPadding),
-                            );
-                          }}
-                          {...bandHoverProps(bandKey(`sec.${b}.padding`, edge, linkedPadding))}
-                          className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                            edge === "left" ? "-translate-x-1/2" : "translate-x-1/2"
-                          }`}
-                          style={{ left: edge === "left" ? "-2px" : undefined, right: edge === "right" ? "-2px" : undefined }}
-                        >
-                          {edge === "left" ? leftPx : rightPx}px
-                        </span>
-                      ))}
-                    </>
-                  );
-                })()}
-              {selEq([b]) &&
-                (() => {
-                  // Margin lives outside the box (outward bands), unlike padding — no
-                  // canvas drag handle existed for section margin before this at all
-                  // (Inspector-text-only). Top/bottom right-aligned so they don't collide
-                  // with the centered padding badges or the -top-3 "Section" hover tag;
-                  // left/right offset down from the top edge so they don't collide with
-                  // top/bottom's own badges.
-                  const sidePx = (side: keyof typeof MARGIN_SIDE_KEYS) =>
-                    Number(pxLabel(lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0"))) || 0;
-                  const topPx = sidePx("top");
-                  const rightPx = sidePx("right");
-                  const bottomPx = sidePx("bottom");
-                  const leftPx = sidePx("left");
-                  const applyDrag = (key: string, px: number) => (next: Block[]) => {
-                    const props = next[b].props as unknown as SectionProps;
-                    applySectionSpacingWrite(props, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin, bp, bpKey);
-                  };
-                  const k = (edge: string) => bandKey(`sec.${b}.margin`, edge, linkedMargin);
-                  const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
-                  return (
-                    <>
-                      {hoverBand === k("top") && spacingBand("top", topPx, true)}
-                      {hoverBand === k("bottom") && spacingBand("bottom", bottomPx, true)}
-                      {hoverBand === k("left") && spacingBand("left", leftPx, true)}
-                      {hoverBand === k("right") && spacingBand("right", rightPx, true)}
-                      {(["top", "bottom"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          onMouseDown={(ev) => {
-                            startSpacingDrag(ev, pxOf[edge], "y", edge === "top" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), k(edge));
-                          }}
-                          {...bandHoverProps(k(edge))}
-                          className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                            edge === "top" ? "-top-2" : "-bottom-2"
-                          }`}
-                        >
-                          {pxOf[edge]}px
-                        </span>
-                      ))}
-                      {(["left", "right"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          onMouseDown={(ev) => {
-                            startSpacingDrag(ev, pxOf[edge], "x", edge === "left" ? 1 : -1, (next, px) => applyDrag(MARGIN_SIDE_KEYS[edge], px)(next), k(edge));
-                          }}
-                          {...bandHoverProps(k(edge))}
-                          className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                            edge === "left" ? "-left-2" : "-right-2"
-                          }`}
-                        >
-                          {pxOf[edge]}px
-                        </span>
-                      ))}
-                    </>
-                  );
-                })()}
               <div className="relative" style={{ margin: sectionMargin, color: sectionColor }}>
                 <div
                   className={`pointer-events-none absolute inset-0 overflow-hidden ${mode === "live" ? "" : "rounded-xl border"}`}
                   style={{ ...sectionBgStyle, borderColor: mode === "live" || hasRealBorder ? undefined : sectionOverlay.line }}
                 />
                 <div className="relative" style={{ padding: sectionPadding }}>
-                {selEq([b]) && (
-                  <>
-                    {hoverBand === bandKey(`sec.${b}.padding`, "top", linkedPadding) &&
-                      spacingBand(
-                        "top",
-                        Number(
-                          pxLabel(lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.top, PADDING_SIDE_FALLBACK.top), PAD, PAD.md)),
-                        ) || 0,
-                      )}
-                    {hoverBand === bandKey(`sec.${b}.padding`, "bottom", linkedPadding) &&
-                      spacingBand(
-                        "bottom",
-                        Number(
-                          pxLabel(
-                            lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.bottom, PADDING_SIDE_FALLBACK.bottom), PAD, PAD.md),
-                          ),
-                        ) || 0,
-                      )}
-                    {hoverBand === bandKey(`sec.${b}.padding`, "left", linkedPadding) &&
-                      spacingBand(
-                        "left",
-                        Number(
-                          pxLabel(
-                            lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.left, PADDING_SIDE_FALLBACK.left), PAD, "1.5rem"),
-                          ),
-                        ) || 0,
-                      )}
-                    {hoverBand === bandKey(`sec.${b}.padding`, "right", linkedPadding) &&
-                      spacingBand(
-                        "right",
-                        Number(
-                          pxLabel(
-                            lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS.right, PADDING_SIDE_FALLBACK.right), PAD, "1.5rem"),
-                          ),
-                        ) || 0,
-                      )}
-                  </>
-                )}
                 <div className={mode === "live" ? (contained ? "mx-auto max-w-[68rem]" : "") : contained ? "mx-auto max-w-3xl" : ""}>
                   {(sp.rows ?? []).map((row, r) => {
                     const rowHiddenAtBp = hiddenAtBp(row as unknown as Record<string, string>);
@@ -784,162 +549,6 @@ export function DesignerCanvas({
                               <Trash2 className="h-3 w-3" />
                             </button>
                           )}
-                          {selEq([b, r, c]) &&
-                            (() => {
-                              // Per-side padding (top/right/bottom/left), each falling back to the
-                              // shared `padding` value when its own override isn't set — same
-                              // fallback chain as the FourSideControl in the Inspector, so unlinked
-                              // per-side edits there are draggable here too, not just the uniform case.
-                              const sidePx = (key: string) =>
-                                Number(pxLabel(lengthValue(sideValue(col.props, col.bp, key, "padding"), PAD, "0"))) || 0;
-                              const topPx = sidePx(PADDING_SIDE_KEYS.top);
-                              const rightPx = sidePx(PADDING_SIDE_KEYS.right);
-                              const bottomPx = sidePx(PADDING_SIDE_KEYS.bottom);
-                              const leftPx = sidePx(PADDING_SIDE_KEYS.left);
-                              const k = (edge: string) => bandKey(`col.${b}.${r}.${c}.padding`, edge, linkedPadding);
-                              return (
-                                <>
-                                  {hoverBand === k("top") && spacingBand("top", topPx)}
-                                  {hoverBand === k("bottom") && spacingBand("bottom", bottomPx)}
-                                  {hoverBand === k("left") && spacingBand("left", leftPx)}
-                                  {hoverBand === k("right") && spacingBand("right", rightPx)}
-                                  {(["top", "bottom"] as const).map((edge) => (
-                                    <span
-                                      key={edge}
-                                      onMouseDown={(ev) => {
-                                        const startPx = edge === "top" ? topPx : bottomPx;
-                                        const key = PADDING_SIDE_KEYS[edge];
-                                        startSpacingDrag(
-                                          ev,
-                                          startPx,
-                                          "y",
-                                          edge === "top" ? 1 : -1,
-                                          (next, px) => {
-                                            const target = section(next, b).rows[r].columns[c];
-                                            writeDragSideKeys(
-                                              target,
-                                              Object.values(PADDING_SIDE_KEYS),
-                                              key,
-                                              px,
-                                              linkedPadding,
-                                              bp,
-                                              bpKey,
-                                            );
-                                          },
-                                          k(edge),
-                                        );
-                                      }}
-                                      {...bandHoverProps(k(edge))}
-                                      className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                        edge === "top" ? "-translate-y-1/2" : "translate-y-1/2"
-                                      }`}
-                                      // Same -2px both edges — this column has its own 1px
-                                      // border-dashed, same reasoning as Section's badges above.
-                                      style={{ top: edge === "top" ? "-2px" : undefined, bottom: edge === "bottom" ? "-2px" : undefined }}
-                                    >
-                                      {edge === "top" ? topPx : bottomPx}px
-                                    </span>
-                                  ))}
-                                  {(["left", "right"] as const).map((edge) => (
-                                    <span
-                                      key={edge}
-                                      onMouseDown={(ev) => {
-                                        const startPx = edge === "left" ? leftPx : rightPx;
-                                        const key = PADDING_SIDE_KEYS[edge];
-                                        startSpacingDrag(
-                                          ev,
-                                          startPx,
-                                          "x",
-                                          edge === "left" ? 1 : -1,
-                                          (next, px) => {
-                                            const target = section(next, b).rows[r].columns[c];
-                                            writeDragSideKeys(
-                                              target,
-                                              Object.values(PADDING_SIDE_KEYS),
-                                              key,
-                                              px,
-                                              linkedPadding,
-                                              bp,
-                                              bpKey,
-                                            );
-                                          },
-                                          k(edge),
-                                        );
-                                      }}
-                                      {...bandHoverProps(k(edge))}
-                                      className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                        edge === "left" ? "-translate-x-1/2" : "translate-x-1/2"
-                                      }`}
-                                      style={{ left: edge === "left" ? "-2px" : undefined, right: edge === "right" ? "-2px" : undefined }}
-                                    >
-                                      {edge === "left" ? leftPx : rightPx}px
-                                    </span>
-                                  ))}
-                                </>
-                              );
-                            })()}
-                          {selEq([b, r, c]) &&
-                            (() => {
-                              // Column margin — same outward-band pattern as Section's, no
-                              // canvas drag existed for it before (Inspector-text-only).
-                              const sidePx = (side: keyof typeof MARGIN_SIDE_KEYS) =>
-                                Number(pxLabel(lengthValue(sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0"))) ||
-                                0;
-                              const topPx = sidePx("top");
-                              const rightPx = sidePx("right");
-                              const bottomPx = sidePx("bottom");
-                              const leftPx = sidePx("left");
-                              const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
-                              const k = (edge: string) => bandKey(`col.${b}.${r}.${c}.margin`, edge, linkedMargin);
-                              const drag = (edge: "top" | "right" | "bottom" | "left") => (ev: React.MouseEvent) => {
-                                const axis = edge === "top" || edge === "bottom" ? "y" : "x";
-                                const dir = edge === "top" || edge === "left" ? 1 : -1;
-                                const key = MARGIN_SIDE_KEYS[edge];
-                                startSpacingDrag(
-                                  ev,
-                                  pxOf[edge],
-                                  axis,
-                                  dir,
-                                  (next, px) => {
-                                    const target = section(next, b).rows[r].columns[c];
-                                    writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin, bp, bpKey);
-                                  },
-                                  k(edge),
-                                );
-                              };
-                              return (
-                                <>
-                                  {hoverBand === k("top") && spacingBand("top", topPx, true)}
-                                  {hoverBand === k("bottom") && spacingBand("bottom", bottomPx, true)}
-                                  {hoverBand === k("left") && spacingBand("left", leftPx, true)}
-                                  {hoverBand === k("right") && spacingBand("right", rightPx, true)}
-                                  {(["top", "bottom"] as const).map((edge) => (
-                                    <span
-                                      key={edge}
-                                      onMouseDown={drag(edge)}
-                                      {...bandHoverProps(k(edge))}
-                                      className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                        edge === "top" ? "-top-2" : "-bottom-2"
-                                      }`}
-                                    >
-                                      {pxOf[edge]}px
-                                    </span>
-                                  ))}
-                                  {(["left", "right"] as const).map((edge) => (
-                                    <span
-                                      key={edge}
-                                      onMouseDown={drag(edge)}
-                                      {...bandHoverProps(k(edge))}
-                                      className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                        edge === "left" ? "-left-2" : "-right-2"
-                                      }`}
-                                    >
-                                      {pxOf[edge]}px
-                                    </span>
-                                  ))}
-                                </>
-                              );
-                            })()}
                           {/* space-y-* lives here, not on the outer column div — that div also
                               holds the absolutely-positioned padding/margin badges as direct
                               children, and space-y's sibling-selector margin-top doesn't know
@@ -998,146 +607,6 @@ export function DesignerCanvas({
                                   <Trash2 className="h-3 w-3" />
                                 </button>
                               )}
-                              {selEq([b, r, c, e]) &&
-                                (() => {
-                                  const sidePx = (side: keyof typeof MARGIN_SIDE_KEYS) =>
-                                    Number(pxLabel(lengthValue(sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), SPACE, "0"))) || 0;
-                                  const topPx = sidePx("top");
-                                  const rightPx = sidePx("right");
-                                  const bottomPx = sidePx("bottom");
-                                  const leftPx = sidePx("left");
-                                  const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
-                                  const k = (edge: string) => bandKey(`el.${b}.${r}.${c}.${e}.margin`, edge, linkedMargin);
-                                  const drag = (edge: "top" | "right" | "bottom" | "left") => (ev: React.MouseEvent) => {
-                                    const axis = edge === "top" || edge === "bottom" ? "y" : "x";
-                                    const dir = edge === "top" || edge === "left" ? 1 : -1;
-                                    const key = MARGIN_SIDE_KEYS[edge];
-                                    startSpacingDrag(
-                                      ev,
-                                      pxOf[edge],
-                                      axis,
-                                      dir,
-                                      (next, px) => {
-                                        const target = section(next, b).rows[r].columns[c].elements[e];
-                                        writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin, bp, bpKey);
-                                      },
-                                      k(edge),
-                                    );
-                                  };
-                                  return (
-                                    <>
-                                      {hoverBand === k("top") && spacingBand("top", topPx, true)}
-                                      {hoverBand === k("bottom") && spacingBand("bottom", bottomPx, true)}
-                                      {hoverBand === k("left") && spacingBand("left", leftPx, true)}
-                                      {hoverBand === k("right") && spacingBand("right", rightPx, true)}
-                                      {(["top", "bottom"] as const).map((edge) => (
-                                        <span
-                                          key={edge}
-                                          onMouseDown={drag(edge)}
-                                          {...bandHoverProps(k(edge))}
-                                          className={`absolute right-8 z-20 cursor-ns-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                            edge === "top" ? "-top-2" : "-bottom-2"
-                                          }`}
-                                        >
-                                          {pxOf[edge]}px
-                                        </span>
-                                      ))}
-                                      {(["left", "right"] as const).map((edge) => (
-                                        <span
-                                          key={edge}
-                                          onMouseDown={drag(edge)}
-                                          {...bandHoverProps(k(edge))}
-                                          className={`absolute top-8 z-20 cursor-ew-resize select-none rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                            edge === "left" ? "-left-2" : "-right-2"
-                                          }`}
-                                        >
-                                          {pxOf[edge]}px
-                                        </span>
-                                      ))}
-                                    </>
-                                  );
-                                })()}
-                              {selEq([b, r, c, e]) &&
-                                (() => {
-                                  // Universal element padding — inward bands/handles, same edge
-                                  // positions as Column's (top/bottom centered, left/right
-                                  // vertically centered), so it never collides with the grip,
-                                  // delete, or margin badges, which all live at the corners/edges
-                                  // outside the box.
-                                  const sidePx = (side: keyof typeof PADDING_SIDE_KEYS) =>
-                                    Number(pxLabel(lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[side], "padding"), PAD, "0"))) ||
-                                    0;
-                                  const topPx = sidePx("top");
-                                  const rightPx = sidePx("right");
-                                  const bottomPx = sidePx("bottom");
-                                  const leftPx = sidePx("left");
-                                  const k = (edge: string) => bandKey(`el.${b}.${r}.${c}.${e}.padding`, edge, linkedPadding);
-                                  return (
-                                    <>
-                                      {hoverBand === k("top") && spacingBand("top", topPx)}
-                                      {hoverBand === k("bottom") && spacingBand("bottom", bottomPx)}
-                                      {hoverBand === k("left") && spacingBand("left", leftPx)}
-                                      {hoverBand === k("right") && spacingBand("right", rightPx)}
-                                      {(["top", "bottom"] as const).map((edge) => (
-                                        <span
-                                          key={edge}
-                                          onMouseDown={(ev) => {
-                                            const startPx = edge === "top" ? topPx : bottomPx;
-                                            const key = PADDING_SIDE_KEYS[edge];
-                                            startSpacingDrag(
-                                              ev,
-                                              startPx,
-                                              "y",
-                                              edge === "top" ? 1 : -1,
-                                              (next, px) => {
-                                                const target = section(next, b).rows[r].columns[c].elements[e];
-                                                writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding, bp, bpKey);
-                                              },
-                                              k(edge),
-                                            );
-                                          }}
-                                          {...bandHoverProps(k(edge))}
-                                          className={`absolute left-1/2 z-20 -translate-x-1/2 cursor-ns-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                            edge === "top" ? "-translate-y-1/2" : "translate-y-1/2"
-                                          }`}
-                                          // -1px (no border on this wrapper, unlike Section/Column's
-                                          // -2px) so the badge centers on the 2px selection outline's
-                                          // own centerline instead of the plain padding edge.
-                                          style={{ top: edge === "top" ? "-1px" : undefined, bottom: edge === "bottom" ? "-1px" : undefined }}
-                                        >
-                                          {edge === "top" ? topPx : bottomPx}px
-                                        </span>
-                                      ))}
-                                      {(["left", "right"] as const).map((edge) => (
-                                        <span
-                                          key={edge}
-                                          onMouseDown={(ev) => {
-                                            const startPx = edge === "left" ? leftPx : rightPx;
-                                            const key = PADDING_SIDE_KEYS[edge];
-                                            startSpacingDrag(
-                                              ev,
-                                              startPx,
-                                              "x",
-                                              edge === "left" ? 1 : -1,
-                                              (next, px) => {
-                                                const target = section(next, b).rows[r].columns[c].elements[e];
-                                                writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding, bp, bpKey);
-                                              },
-                                              k(edge),
-                                            );
-                                          }}
-                                          {...bandHoverProps(k(edge))}
-                                          className={`absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize select-none rounded bg-accent px-1 py-0.5 text-[9px] font-bold leading-none text-white ${
-                                            edge === "left" ? "-translate-x-1/2" : "translate-x-1/2"
-                                          }`}
-                                          style={{ left: edge === "left" ? "-1px" : undefined, right: edge === "right" ? "-1px" : undefined }}
-                                        >
-                                          {edge === "left" ? leftPx : rightPx}px
-                                        </span>
-                                      ))}
-                                    </>
-                                  );
-                                })()}
                               {selEq([b, r, c, e]) && mode !== "live" && el.type === "image" && (
                                 <span
                                   onMouseDown={(ev) => {
