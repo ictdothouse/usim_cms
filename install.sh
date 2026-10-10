@@ -1700,10 +1700,16 @@ install_production_mode() {
   # scripts/deploy.sh's own smoke_test() reads this — a real tenant domain
   # to fetch through Caddy before promoting, so a broken deploy never goes
   # live just because the api container's own /health happened to pass.
-  # The first TENANT_DOMAINS entry is always a real one already collected
-  # above, so this needs no separate prompt — unset before this fix meant
-  # every fresh production install silently fell back to health-check-only.
-  set_env_kv .env SMOKE_TEST_HOST "${TENANT_DOMAINS%% *}"
+  # Deliberately does NOT auto-populate this from TENANT_DOMAINS' first entry
+  # (a past version of this line did) — a brand new tenant has no published
+  # page yet at install time (superadmin isn't even created until AFTER this
+  # function's first deploy succeeds), so every fresh production install
+  # failed this gate on its very first deploy, unconditionally. Left unset
+  # (smoke_test()'s own documented opt-in: unset skips it, health-check-only)
+  # until the admin points it at a domain that actually has a real published
+  # page — never clobbers a value already set, same convention as
+  # API_REPLICAS/etc below.
+  grep -qE '^SMOKE_TEST_HOST=.+' .env || echo "SMOKE_TEST_HOST left unset — once a tenant has a real published page, set SMOKE_TEST_HOST=<that domain> in .env to turn on deploy.sh's real-page smoke test." >&2
   # Default to 1 replica each, but never clobber a value from a previous
   # install/re-run — unlike the secrets above, this isn't meant to reset.
   grep -qE '^API_REPLICAS=.+' .env || set_env_kv .env API_REPLICAS "1"
