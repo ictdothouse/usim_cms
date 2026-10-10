@@ -19,7 +19,7 @@
     "astro": "^7.3.8",
     "daisyui": "^5.7.47",
     "ioredis": "^5.11.1",
-    "swiper": "^11.2.10",
+    "swiper": "^14.3.0",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
