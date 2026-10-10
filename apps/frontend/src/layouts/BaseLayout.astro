@@ -221,6 +221,20 @@ const fontsHref = allFonts.length
         }
       </style>
     )}
+    {designerEdit && (
+      <style>
+        /* A freshly dropped column/row has no elements yet — .ds-col has no
+           min-height of its own (by design, so a real published page never
+           shows empty space), which collapses it to 0px and makes it
+           impossible to see or drop into. Editor-only outline, never ships
+           to a real visitor (designerEdit never true outside Live Edit). */
+        .ds-col:empty {
+          min-height: 3rem;
+          outline: 1px dashed rgba(15, 98, 254, 0.4);
+          outline-offset: -1px;
+        }
+      </style>
+    )}
   </head>
   <body
     style={`font-family:var(--font-family, system-ui, sans-serif);background:var(--color-bg, inherit);color:var(--color-text, inherit)`}
