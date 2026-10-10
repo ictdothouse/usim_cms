@@ -57,6 +57,13 @@
 #                        already-running stack. Use this first any time
 #                        "admin can't reach the API" gets reported, instead
 #                        of manually reaching for curl/ss/iptables.
+#      [--reapply-backup-cron]  Skip the install entirely — just regenerate
+#                        /opt/ucms/backup's scripts/run.sh/crontab from the
+#                        current checkout (no prompts, reuses the existing
+#                        BACKUP_DIR/RETENTION_DAYS). Needs an existing backup
+#                        cron already set up once interactively, and an
+#                        explicit --mode=. This is what the ops monitor
+#                        dashboard's "Apply backup-cron update" button runs.
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO_DIR="$(pwd)"
@@ -65,6 +72,15 @@ REPO_DIR="$(pwd)"
 # deliberately (same as any other dependency upgrade) when corepack cuts a
 # new release, rather than always trusting whatever npm resolves right now.
 COREPACK_PIN_VERSION="0.36.0"
+
+# Bump this whenever _apply_backup_cron_files's generated backup.env/run.sh
+# shape changes meaningfully (a new destination type, a credential-handling
+# fix, etc.) — written into /opt/ucms/backup/backup.env on every apply, and
+# compared against THIS line (monitor/server.js reads it straight out of
+# this file, no separate place to keep in sync) to decide whether the ops
+# monitor dashboard's "Backup destination" card should show an "Apply
+# update" recommendation. Not a semver, just an increasing integer.
+BACKUP_CRON_VERSION="1"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this with sudo: sudo ./install.sh" >&2
@@ -83,6 +99,7 @@ ORIG_OWNER="$(stat -c '%U:%G' "$REPO_DIR" 2>/dev/null || echo "")"
 MODE="${INSTALL_MODE:-}"
 ADMIN_ONLY="false"
 DIAGNOSE_ONLY="false"
+REAPPLY_BACKUP_CRON="false"
 SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-}"
 SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-}"
 for arg in "$@"; do
@@ -92,11 +109,22 @@ for arg in "$@"; do
     --mode=bare-metal|--mode=baremetal) MODE="bare-metal" ;;
     --admin-only) ADMIN_ONLY="true" ;;
     --diagnose) DIAGNOSE_ONLY="true" ;;
+    # Non-interactive re-run of just the backup-cron file/cron generation —
+    # see reapply_backup_cron()'s own comment for why this exists and what
+    # it deliberately does NOT touch. Requires an explicit --mode= alongside
+    # it (docker or bare-metal — "production" also uses the "docker" backup-
+    # cron code path, same as install_backup_cron's own call sites), since
+    # there's no TTY here to ask interactively.
+    --reapply-backup-cron) REAPPLY_BACKUP_CRON="true" ;;
     --admin-email=*) SUPERADMIN_EMAIL="${arg#--admin-email=}" ;;
     --admin-password=*) SUPERADMIN_PASSWORD="${arg#--admin-password=}" ;;
   esac
 done
 if [ -z "$MODE" ]; then
+  if [ "$REAPPLY_BACKUP_CRON" = "true" ]; then
+    echo "--reapply-backup-cron needs an explicit --mode=docker|bare-metal — no TTY here to ask interactively." >&2
+    exit 1
+  fi
   if [ -t 0 ]; then
     echo "How should this be installed?"
     echo "  1) Docker trial — quick test, containers, host-published ports, no Caddy"
@@ -115,6 +143,14 @@ if [ -z "$MODE" ]; then
     echo " --mode=bare-metal for the native path instead)" >&2
   fi
 fi
+# reapply_backup_cron's own code path only distinguishes docker vs
+# bare-metal — "production" mode uses the exact same "docker" backup-cron
+# path install_docker_mode/install_production_mode's own install_backup_cron
+# calls already share — so collapse it here rather than making every caller
+# (the monitor dashboard's "Apply backup-cron update" button) know that.
+if [ "$REAPPLY_BACKUP_CRON" = "true" ] && [ "$MODE" = "production" ]; then
+  MODE="docker"
+fi
 echo "== usim_cms installer — mode: $MODE =="
 echo "Repo: $REPO_DIR"
 echo ""
@@ -125,8 +161,9 @@ echo ""
 # (flags or SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD env vars) and it's not an
 # interactive terminal — a non-interactive run with neither is a hard error,
 # same as an unset SESSION_SECRET would be further down. --diagnose creates
-# no account at all, so it never asks.
-if [ "$DIAGNOSE_ONLY" != "true" ]; then
+# no account at all, so it never asks — same for --reapply-backup-cron,
+# which touches none of the app/superadmin setup at all.
+if [ "$DIAGNOSE_ONLY" != "true" ] && [ "$REAPPLY_BACKUP_CRON" != "true" ]; then
   if [ -z "$SUPERADMIN_EMAIL" ] && [ -t 0 ]; then
     read -r -p "Superadmin email: " SUPERADMIN_EMAIL
   fi
@@ -461,6 +498,18 @@ install_backup_cron() {
     BACKUP_OFFSITE_TARGET=""
   fi
 
+  _apply_backup_cron_files "$mode" "$backup_dir" "$retention"
+}
+
+# The actual file/cron generation — split out of install_backup_cron() above
+# so reapply_backup_cron() below (a non-interactive re-run, triggered by the
+# ops monitor dashboard's "Apply backup-cron update" button once it detects
+# an outdated /opt/ucms/backup/run.sh) can regenerate these from a freshly
+# pulled checkout without needing a TTY to re-answer prompts that would just
+# repeat whatever's already configured. $1=mode, $2=backup_dir, $3=retention.
+_apply_backup_cron_files() {
+  local mode="$1" backup_dir="$2" retention="$3"
+
   # Backup dumps contain password hashes, audit-log rows, every tenant's full
   # content — not something any other local account on this box should be
   # able to read just because mkdir's default mode allowed it.
@@ -535,6 +584,10 @@ install_backup_cron() {
       printf 'PGUSER=usim_cms_app\n'
       printf 'PGPASSWORD=%s\n' "$pg_app_password"
       printf 'PGDATABASE=usim_cms\n'
+      # Read by monitor/server.js's getBackupCronStatus() to decide whether
+      # the dashboard's "Apply update" recommendation shows — see
+      # BACKUP_CRON_VERSION's own top-of-file comment.
+      printf 'BACKUP_CRON_VERSION=%s\n' "$BACKUP_CRON_VERSION"
     } > "$env_file"
   else
     local db_url
@@ -548,6 +601,7 @@ install_backup_cron() {
       printf 'PGPASSWORD=%s\n' "$PG_URL_PASSWORD"
       printf 'PGDATABASE=%s\n' "$PG_URL_DATABASE"
       printf 'UPLOADS_DIR=%s\n' "${REPO_DIR}/apps/api/uploads"
+      printf 'BACKUP_CRON_VERSION=%s\n' "$BACKUP_CRON_VERSION"
     } > "$env_file"
   fi
   chown root:root "$env_file"
@@ -799,6 +853,38 @@ ${marker_end}"
     echo "  (SSH/rsync, S3/R2, or Google Drive) any time afterward in the admin"
     echo "  panel's Settings tab or the ops monitor dashboard — no re-install needed."
   fi
+}
+
+# Re-generates /opt/ucms/backup/{backup.sh,backup-media.sh,backup.env,run.sh}
+# and the crontab entry from the CURRENT checked-out code, reusing whatever
+# BACKUP_DIR/RETENTION_DAYS this box's crontab already has — no prompts, so
+# this is safe to call from a non-interactive context. Entry point for
+# `install.sh --reapply-backup-cron --mode=<docker|bare-metal>`, which the
+# ops monitor dashboard's own "Apply backup-cron update" button shells out to
+# (see monitor/server.js's handleApplyBackupCronUpdate) once it notices the
+# installed run.sh predates a feature it needs (the off-site-push block
+# missing, or no PGHOST in /etc/ucms-monitor.env yet). Deliberately does NOT
+# touch platform_settings.backup_destination — that's a live, superadmin-
+# owned setting now (Settings tab / monitor dashboard), never something a
+# code update should silently overwrite. Requires an existing backup cron
+# (set up via the interactive prompt at least once already) — refuses to
+# invent one from nothing non-interactively, same "don't guess at a human
+# decision" principle install_backup_cron's own [Y/n] prompt embodies.
+reapply_backup_cron() {
+  local mode="$1"
+  if ! crontab -l 2>/dev/null | grep -qF '# >>> usim_cms backup (install.sh) >>>'; then
+    echo "No existing backup cron found on this box — run 'sudo ./install.sh --mode=${mode}' interactively first to set one up." >&2
+    exit 1
+  fi
+  local backup_dir retention
+  backup_dir="$(crontab -l 2>/dev/null | grep -m1 '^BACKUP_DIR=' | cut -d= -f2-)"
+  retention="$(crontab -l 2>/dev/null | grep -m1 '^RETENTION_DAYS=' | cut -d= -f2-)"
+  backup_dir="${backup_dir:-/var/backups/usim_cms}"
+  retention="${retention:-14}"
+  BACKUP_OFFSITE_TARGET=""
+  _apply_backup_cron_files "$mode" "$backup_dir" "$retention"
+  finish_backup_destination_setup "$mode"
+  echo "Backup-cron scripts regenerated from the current checkout (dir=${backup_dir}, retention=${retention}d)."
 }
 
 # Finishes what install_backup_cron() started: gives the ops monitor (a
@@ -1948,6 +2034,12 @@ if [ "$DIAGNOSE_ONLY" = "true" ]; then
   fi
   diagnose_reachability "$API_PORT_VAL"
   exit 1
+fi
+
+if [ "$REAPPLY_BACKUP_CRON" = "true" ]; then
+  detect_os_family
+  reapply_backup_cron "$MODE"
+  exit 0
 fi
 
 if [ "$ADMIN_ONLY" = "true" ]; then

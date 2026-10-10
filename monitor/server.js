@@ -2105,6 +2105,74 @@ function handleSetBackupDestination(req, res) {
   });
 }
 
+// Whether /opt/ucms/backup's generated scripts predate a feature the
+// currently checked-out install.sh already knows about — e.g. this VPS was
+// set up before off-site-push/PG* support existed, so this card can't
+// actually do anything useful yet. installedVersion comes straight out of
+// backup.env (BACKUP_CRON_VERSION, written by install.sh's own
+// _apply_backup_cron_files); expectedVersion is read directly out of
+// install.sh itself (BACKUP_CRON_VERSION="N" near the top) rather than
+// duplicated as a second constant here — one source of truth, nothing to
+// forget to bump in two places. A plain file read, not a network/DB call,
+// so this is cheap enough to run on every dashboard load (see this
+// feature's own "only run when needed" requirement — the actual re-run of
+// install.sh only ever happens when the recommendation button is clicked,
+// never automatically).
+function getBackupCronStatus() {
+  let expectedVersion = "";
+  try {
+    const installSh = fs.readFileSync(path.join(REPO_DIR, "install.sh"), "utf8");
+    const m = installSh.match(/^BACKUP_CRON_VERSION="([^"]*)"/m);
+    expectedVersion = m ? m[1] : "";
+  } catch {}
+  let cronExists = false;
+  let installedVersion = "";
+  try {
+    const envContent = fs.readFileSync("/opt/ucms/backup/backup.env", "utf8");
+    cronExists = true;
+    const m = envContent.match(/^BACKUP_CRON_VERSION=(.*)$/m);
+    installedVersion = m ? m[1].trim() : "";
+  } catch {}
+  const pgConfigured = Boolean(PG_HOST);
+  const needsUpdate = cronExists && (!pgConfigured || installedVersion !== expectedVersion);
+  return { cronExists, pgConfigured, installedVersion, expectedVersion, needsUpdate };
+}
+
+function handleBackupCronStatus(req, res) {
+  sendJson(res, 200, getBackupCronStatus());
+}
+
+// Runs `install.sh --reapply-backup-cron` — a non-interactive re-run of just
+// the backup-cron file/cron generation (see that flag's own comment in
+// install.sh), never the full installer, and never from a timer — only ever
+// in direct response to this POST, i.e. an operator clicking "Apply update"
+// after the recommendation banner above told them to. This process already
+// runs as root (same as every other privileged action this dashboard
+// already performs — docker compose, systemctl, certbot), so no sudo needed.
+function handleApplyBackupCronUpdate(req, res) {
+  const mode = DEPLOY_MODE === "docker" ? "docker" : "bare-metal";
+  execFile(
+    "bash",
+    [path.join(REPO_DIR, "install.sh"), "--reapply-backup-cron", `--mode=${mode}`],
+    { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 },
+    (err, stdout, stderr) => {
+      if (err) {
+        sendJson(res, 500, { error: String(stderr || err.message).trim(), stdout });
+        return;
+      }
+      sendJson(res, 200, { ok: true, stdout, restarting: true });
+      // The reapply just wrote fresh PGHOST/etc into /etc/ucms-monitor.env —
+      // this process already loaded the OLD values once at module start
+      // (PG_HOST/PG_PORT/... above), so it has to restart to pick up the
+      // new ones. Delayed slightly so the response above actually reaches
+      // the browser before systemd kills this process.
+      setTimeout(() => {
+        execFile("systemctl", ["restart", "ucms-monitor"], () => {});
+      }, 500);
+    },
+  );
+}
+
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -2269,6 +2337,7 @@ const DASHBOARD_HTML = `<!doctype html>
 
   <h3>Backup destination</h3>
   <p class="muted">Where the nightly backup cron (<code>/opt/ucms/backup/run.sh</code>) pushes a copy after the local dump finishes. Same setting as the admin panel's Settings tab — editing it here or there updates the same row.</p>
+  <div id="backupCronBanner" style="display:none; margin: 0 0 0.6rem; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;"></div>
   <div class="row">
     <select id="backupDestType" onchange="onBackupDestTypeChange()" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;">
       <option value="local">Local only (no off-site copy)</option>
@@ -2524,6 +2593,39 @@ async function saveBackupDestination() {
   }
 }
 
+async function refreshBackupCronStatus() {
+  const el = document.getElementById("backupCronBanner");
+  try {
+    const info = await api("/api/backup-cron-status");
+    if (info.cronExists && info.needsUpdate) {
+      el.style.display = "block";
+      el.innerHTML =
+        "🔔 <b>Backup-cron scripts are outdated</b> (installed v" + escapeHtml(info.installedVersion || "none") +
+        ", current v" + escapeHtml(info.expectedVersion || "?") + ")" +
+        (info.pgConfigured ? "" : " — this card can't connect to the database yet") +
+        ". Off-site push may not work correctly until updated. " +
+        "<button class=\\"secondary\\" onclick=\\"applyBackupCronUpdate()\\" style=\\"margin-left:0.4rem;\\">Apply update</button>";
+    } else {
+      el.style.display = "none";
+    }
+  } catch (e) {
+    el.style.display = "none";
+  }
+}
+
+async function applyBackupCronUpdate() {
+  const el = document.getElementById("backupCronBanner");
+  el.style.display = "block";
+  el.textContent = "Applying update…";
+  try {
+    await api("/api/backup-cron/apply-update", { method: "POST" });
+    el.textContent = "Update applied — monitor is restarting to pick up the new connection details. Reloading in a few seconds…";
+    setTimeout(() => location.reload(), 4000);
+  } catch (e) {
+    el.innerHTML = "Error applying update: " + escapeHtml(e.message) + " <button class=\\"secondary\\" onclick=\\"applyBackupCronUpdate()\\">Retry</button>";
+  }
+}
+
 // What each container role actually does — plain-language, for whoever's
 // reading this tab without the rest of this codebase's own context. Matched
 // by substring against name+image (order matters: first match wins), not an
@@ -2695,6 +2797,7 @@ async function init() {
   refreshDiskUsage();
   refreshDbSizes();
   refreshBackupDestination();
+  refreshBackupCronStatus();
   refreshUpdateCheck();
   refreshVersions();
   setInterval(refresh, 5000);
@@ -3185,6 +3288,10 @@ const server = http.createServer((req, res) => {
       handleGetBackupDestination(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/backup-destination") {
       handleSetBackupDestination(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/backup-cron-status") {
+      handleBackupCronStatus(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/backup-cron/apply-update") {
+      handleApplyBackupCronUpdate(req, res);
     } else {
       sendJson(res, 404, { error: "not found" });
     }

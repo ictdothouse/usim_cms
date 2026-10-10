@@ -412,6 +412,29 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `install_backup_cron` (best-effort — a failure only blocks S3/R2/Google Drive, not the
   local/SSH paths or the rest of the installer) since the destination can be switched to
   S3/R2/Google Drive later without re-running the installer.
+  **Self-updating from the monitor dashboard, without exposing all of install.sh**
+  (2026-10-10): an already-installed VPS's `/opt/ucms/backup/run.sh` doesn't retroactively
+  pick up a later code change to this feature — normally that needs an operator to SSH in and
+  re-run `install.sh` interactively. Rather than exposing the whole installer (OS package
+  installs, docker rebuilds, SSL, DB role creation — too broad a blast radius for a web
+  button), `install_backup_cron()` was split into prompt-gathering and
+  `_apply_backup_cron_files(mode, backup_dir, retention)` (the actual file/cron generation), so
+  a new `reapply_backup_cron()` can call the latter non-interactively — entry point
+  `install.sh --reapply-backup-cron --mode=docker|bare-metal`, reusing whatever
+  `BACKUP_DIR`/`RETENTION_DAYS` the box's crontab already has (refuses to run if no backup cron
+  exists yet; never touches `platform_settings.backup_destination`, a live superadmin-owned
+  setting). A `BACKUP_CRON_VERSION="N"` constant near the top of `install.sh` gets written into
+  `backup.env` on every apply; `monitor/server.js`'s `getBackupCronStatus()` reads that constant
+  straight out of `install.sh` itself (one source of truth, nothing to keep in sync by hand) and
+  compares it against whatever's in the installed `backup.env`, showing an "Apply update"
+  banner on the Backup destination card when they differ (or `PGHOST` is missing entirely).
+  Clicking it POSTs `/api/backup-cron/apply-update`, which shells `bash install.sh
+  --reapply-backup-cron` (monitor already runs as root, same as its other privileged actions)
+  then restarts `ucms-monitor` itself via `systemctl` — required because `PGHOST`/etc. were only
+  ever read from `/etc/ucms-monitor.env` once at process start, so the running process can't see
+  values the reapply just wrote without a restart. The re-run itself only ever happens on that
+  explicit click — there's no polling/auto-apply, only a (free, file-read-only) drift check on
+  dashboard load.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
