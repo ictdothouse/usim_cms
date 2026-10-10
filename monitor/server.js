@@ -1303,6 +1303,14 @@ function stagingBootTest(key, imageRef, cb) {
   cb(false, "no staging test defined for this component");
 }
 
+// Every staging test result goes to DEPLOY_LOG too (same viewer as every
+// other deploy/update action, see handleDepsCheck's own comment above) — the
+// inline stackMsg span only ever shows a one-line summary, and without this
+// an admin who gets told "outdated"/"test failed" has nowhere to see WHY.
+function logStackTestResult(key, imageRef, ok, note) {
+  fs.appendFileSync(DEPLOY_LOG, `\n\n=== staging test: ${key} (${imageRef}) ${new Date().toISOString()} ===\n${ok ? "PASS" : "FAIL"}: ${note}\n`);
+}
+
 // POST /api/stack/:key/test — pulls the candidate image, then boot-tests it
 // in isolation (stagingBootTest). Never touches the running container; the
 // separate risk /update guards against (a bad image breaking the live
@@ -1327,8 +1335,12 @@ function handleStackTest(req, res, key) {
       const imageRef = stackImageRef(v, key);
       if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
       execFile("docker", ["pull", imageRef], { timeout: 120_000 }, (err, stdout, stderr) => {
-        if (err) return sendJson(res, 502, { ok: false, error: stderr || err.message });
+        if (err) {
+          logStackTestResult(key, imageRef, false, stderr || err.message);
+          return sendJson(res, 502, { ok: false, error: stderr || err.message });
+        }
         stagingBootTest(key, imageRef, (ok, note) => {
+          logStackTestResult(key, imageRef, ok, note);
           if (!ok) return sendJson(res, 502, { ok: false, error: `pulled ${imageRef} but staging test failed: ${note}` });
           sendJson(res, 200, { ok: true, message: `${imageRef}: ${note}. Nothing in production touched.` });
         });
@@ -1340,8 +1352,12 @@ function handleStackTest(req, res, key) {
         if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
         const newRef = `edoburu/pgbouncer:${latest.pgbouncer}`;
         execFile("docker", ["pull", newRef], { timeout: 120_000 }, (err, stdout, stderr) => {
-          if (err) return sendJson(res, 502, { ok: false, error: stderr || err.message });
+          if (err) {
+            logStackTestResult("pgbouncer", newRef, false, stderr || err.message);
+            return sendJson(res, 502, { ok: false, error: stderr || err.message });
+          }
           stagingBootTest("pgbouncer", newRef, (ok, note) => {
+            logStackTestResult("pgbouncer", newRef, ok, note);
             if (!ok) return sendJson(res, 502, { ok: false, error: `pulled ${newRef} but staging test failed: ${note}` });
             sendJson(res, 200, { ok: true, message: `${newRef}: ${note}. Nothing in production touched.` });
           });
@@ -2293,6 +2309,11 @@ async function stackTest(key, btn) {
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
+    // The full detail (outdated-package table, boot-test pass/fail reason)
+    // only ever goes to DEPLOY_LOG, never the one-line stackMsg span above —
+    // reveal/refresh the same log viewer Update uses so it's actually
+    // visible, instead of silently sitting in a file nobody's looking at.
+    pollDeployLog();
   }
 }
 
