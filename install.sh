@@ -361,12 +361,21 @@ configure_optional_integrations() {
 # Scheduled backups — apps/api/scripts/backup.sh (pg_dump) + backup-media.sh
 # (uploads rsync) exist but have no automatic schedule of their own (meant to
 # be cron'd per the comment in each — see .claude/skills/deployment/SKILL.md).
-# Wires them into root's crontab via a mode-specific wrapper
-# (scripts/docker-backup.sh or scripts/baremetal-backup.sh — see their own
-# headers for why docker mode needs one and bare-metal doesn't). Skippable,
-# same interactive-only/off-on-Enter convention as configure_optional_
-# integrations — a non-interactive run gets no cron job, same as today.
+# Skippable, same interactive-only/off-on-Enter convention as
+# configure_optional_integrations — a non-interactive run gets no cron job.
 # $1 = "docker" | "baremetal"
+#
+# Everything root's crontab actually points at lives under /opt/ucms/backup
+# (root:root, 700), NEVER inside $REPO_DIR — REPO_DIR is typically owned by
+# whoever ran `sudo ./install.sh` (install_production_mode explicitly chowns
+# it back to them once root-only setup is done, and a plain `git clone` is
+# already non-root-owned before this script ever runs). A root cron job
+# pointing at a file inside that checkout — or `source`-ing its .env directly
+# — would let anyone who can write to the repo (a compromised deploy
+# credential, a second admin with repo access but no root) get root code
+# execution once a day. Copying the dump scripts out and writing a fresh
+# credentials file here, instead of referencing the repo at cron-run time,
+# closes that off.
 # ---------------------------------------------------------------------------
 install_backup_cron() {
   local mode="$1"
@@ -388,10 +397,33 @@ install_backup_cron() {
   backup_dir="${backup_dir:-/var/backups/usim_cms}"
   read -r -p "  Retention in days [14]: " retention
   retention="${retention:-14}"
+  if ! [[ "$retention" =~ ^[0-9]+$ ]]; then
+    echo "  Not a plain number — defaulting retention to 14." >&2
+    retention=14
+  fi
   echo "  A backup sitting on this same VPS doesn't survive the VPS itself dying."
   read -r -p "  Off-site target to rsync a copy to after each run (user@host:/path, blank = skip): " offsite
+  # This lands verbatim in a line root's cron hands to a shell — a stray ';'
+  # or similar here would be a root-level command injection, not just a typo.
+  # Reject anything outside a plain user@host:/path shape instead of trusting
+  # free-form input into that file.
+  if [ -n "$offsite" ] && ! [[ "$offsite" =~ ^[A-Za-z0-9_.@:/-]+$ ]]; then
+    echo "  Contains characters other than letters/digits/._@:/- — skipping off-site rsync." >&2
+    offsite=""
+  fi
 
+  # Backup dumps contain password hashes, audit-log rows, every tenant's full
+  # content — not something any other local account on this box should be
+  # able to read just because mkdir's default mode allowed it.
   mkdir -p "$backup_dir"
+  chmod 700 "$backup_dir"
+  # Likewise for the cron log: tenant hostnames and dump errors land in it,
+  # and the first `>>` from cron would otherwise create it world-readable
+  # under the default umask. Pre-creating it root-only beats fixing it after
+  # the fact.
+  touch /var/log/ucms-backup.log
+  chown root:root /var/log/ucms-backup.log
+  chmod 600 /var/log/ucms-backup.log
 
   # cron/cronie isn't on every minimal distro image — same PKG_MGR dispatch
   # detect_os_family already set up for everything else in this script.
@@ -404,12 +436,92 @@ install_backup_cron() {
     fi
   fi
 
-  local script_path
+  local cron_dir="/opt/ucms/backup"
+  mkdir -p "$cron_dir"
+  chown root:root "$cron_dir"
+  chmod 700 "$cron_dir"
+  cp "${REPO_DIR}/apps/api/scripts/backup.sh" "${cron_dir}/backup.sh"
+  cp "${REPO_DIR}/apps/api/scripts/backup-media.sh" "${cron_dir}/backup-media.sh"
+  chown root:root "${cron_dir}/backup.sh" "${cron_dir}/backup-media.sh"
+  chmod 700 "${cron_dir}/backup.sh" "${cron_dir}/backup-media.sh"
+
+  # Credentials the dump needs, snapshotted into their OWN root-only file
+  # instead of having the cron job `source` the repo's .env/apps/api/.env
+  # directly (that file is just as writable as everything else above, so
+  # sourcing it at every cron run would reopen the exact hole the copy above
+  # closes — `source` executes whatever shell syntax is in it, not just reads
+  # values). This is a point-in-time snapshot: rotating POSTGRES_APP_PASSWORD
+  # or DATABASE_URL later needs this file regenerated too (re-run this
+  # installer) — same already-documented caveat as PgBouncer's own
+  # live-password-rotation steps in .claude/skills/deployment/SKILL.md.
+  local env_file="${cron_dir}/backup.env"
   if [ "$mode" = "docker" ]; then
-    script_path="${REPO_DIR}/scripts/docker-backup.sh"
+    local pg_app_password
+    pg_app_password="$(grep -m1 '^POSTGRES_APP_PASSWORD=' "${REPO_DIR}/.env" | cut -d= -f2-)"
+    printf 'DATABASE_URL=postgres://usim_cms_app:%s@db:5432/usim_cms\n' "$pg_app_password" > "$env_file"
   else
-    script_path="${REPO_DIR}/scripts/baremetal-backup.sh"
+    local db_url
+    db_url="$(grep -m1 '^DATABASE_URL=' "${REPO_DIR}/apps/api/.env" | cut -d= -f2-)"
+    {
+      printf 'DATABASE_URL=%s\n' "$db_url"
+      printf 'UPLOADS_DIR=%s\n' "${REPO_DIR}/apps/api/uploads"
+    } > "$env_file"
   fi
+  chown root:root "$env_file"
+  chmod 600 "$env_file"
+
+  local run_script="${cron_dir}/run.sh"
+  if [ "$mode" = "docker" ]; then
+    # DATABASE_URL reaches the dump container via `--env-file`, never `-e
+    # VAR=value` — a `docker run -e` value is a literal command-line
+    # argument, so the password would otherwise sit in plain text in `ps
+    # aux` output for ANY local user to read, not just root. db's port is
+    # deliberately never published to the host (see docker-compose.yml's own
+    # comment on the db service) — only a container on ucms-net can reach it,
+    # hence the one-off postgres:16-alpine container (same image `db` itself
+    # uses, so pg_dump/psql versions always match) talking to `db:5432`
+    # directly rather than through pgbouncer, so a long dump doesn't sit on
+    # one of its few pooled backend connections for no benefit.
+    cat > "$run_script" <<'EOF'
+#!/usr/bin/env bash
+# Generated by install.sh's install_backup_cron() — root-owned, deliberately
+# NOT part of the git checkout (see that function's own comment for why). A
+# future credential rotation or logic change needs this regenerated by
+# re-running install.sh, not hand-edited here.
+set -euo pipefail
+cd "$(dirname "$0")"
+docker run --rm \
+  --network ucms-net \
+  --env-file backup.env \
+  -e "BACKUP_DIR=/backup" \
+  -e "RETENTION_DAYS=${RETENTION_DAYS:-14}" \
+  -v "${BACKUP_DIR:-/var/backups/usim_cms}:/backup" \
+  -v "$(pwd)/backup.sh:/backup.sh:ro" \
+  postgres:16-alpine bash /backup.sh "$@"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
+RETENTION_DAYS="${RETENTION_DAYS:-14}" \
+  bash backup-media.sh "$@"
+EOF
+  else
+    cat > "$run_script" <<'EOF'
+#!/usr/bin/env bash
+# Generated by install.sh's install_backup_cron() — root-owned, deliberately
+# NOT part of the git checkout (see that function's own comment for why). A
+# future credential rotation or logic change needs this regenerated by
+# re-running install.sh, not hand-edited here.
+set -euo pipefail
+cd "$(dirname "$0")"
+set -a
+source backup.env
+set +a
+bash backup.sh "$@"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
+RETENTION_DAYS="${RETENTION_DAYS:-14}" \
+  bash backup-media.sh "$@"
+EOF
+  fi
+  chown root:root "$run_script"
+  chmod 700 "$run_script"
 
   # Marker-delimited block, so re-running this installer replaces its own
   # prior entry instead of appending a duplicate every time (same idempotent-
@@ -420,7 +532,7 @@ install_backup_cron() {
   local new_block="${marker_start}
 BACKUP_DIR=${backup_dir}
 RETENTION_DAYS=${retention}
-0 2 * * * ${script_path} >> /var/log/ucms-backup.log 2>&1"
+0 2 * * * ${run_script} >> /var/log/ucms-backup.log 2>&1"
   if [ -n "$offsite" ]; then
     new_block="${new_block}
 30 2 * * * rsync -a --delete ${backup_dir}/ ${offsite}/ >> /var/log/ucms-backup.log 2>&1"
@@ -428,7 +540,14 @@ RETENTION_DAYS=${retention}
   new_block="${new_block}
 ${marker_end}"
 
-  { crontab -l 2>/dev/null | sed "/${marker_start}/,/${marker_end}/d"; echo "$new_block"; } | crontab -
+  # `crontab -l` exits 1 (no output) when root has never had a crontab before
+  # — the normal case on a fresh VPS. Under this script's own `set -euo
+  # pipefail`, an unguarded `crontab -l | sed ...` would make THAT exit code
+  # propagate as the whole pipeline's status and abort the entire installer
+  # right here, on the single most common case. `|| true` neutralizes it;
+  # real unexpected crontab errors still surface via `set -e` on the final
+  # `| crontab -` write below.
+  { (crontab -l 2>/dev/null || true) | sed "/${marker_start}/,/${marker_end}/d"; echo "$new_block"; } | crontab -
 
   echo "  Backup cron installed: daily 02:00, ${retention}-day retention -> ${backup_dir}"
   if [ -n "$offsite" ]; then
