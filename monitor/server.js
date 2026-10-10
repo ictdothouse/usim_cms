@@ -332,6 +332,50 @@ function getSitesUsage(cb) {
   });
 }
 
+// Parses `docker system df`'s own table by column position (derived from the
+// header line itself, not a fixed offset) rather than splitting on
+// whitespace — "Local Volumes"/"Build Cache" are multi-word TYPE values, so a
+// naive split would misalign every column after it. Stable since Docker
+// 1.13; this is the exact command run by hand to diagnose the 2026-10-10
+// disk-full incident (see .claude/skills/deployment/SKILL.md's disk-hygiene
+// note) — this just surfaces the same numbers on the dashboard instead of
+// needing SSH + `docker system df` every time disk pressure comes up.
+function parseDockerSystemDf(text) {
+  const lines = String(text || "").split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return [];
+  const header = lines[0];
+  const cols = ["TYPE", "TOTAL", "ACTIVE", "SIZE", "RECLAIMABLE"];
+  const starts = cols.map((c) => header.indexOf(c));
+  if (starts.some((i) => i < 0)) return [];
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    const vals = starts.map((start, idx) => line.slice(start, idx + 1 < starts.length ? starts[idx + 1] : line.length).trim());
+    rows.push({ type: vals[0], total: vals[1], active: vals[2], size: vals[3], reclaimable: vals[4] });
+  }
+  return rows;
+}
+
+function getDockerDiskUsage(cb) {
+  if (DEPLOY_MODE !== "docker") return cb([]);
+  execFile("docker", ["system", "df"], { timeout: 15_000 }, (err, stdout) => {
+    if (err) return cb([]);
+    cb(parseDockerSystemDf(stdout));
+  });
+}
+
+// The verbose per-image/per-volume/per-cache-entry breakdown — same command
+// used over SSH to find the actual 2026-10-10 culprits (stale build cache +
+// leftover images from a prior non-usim_cms setup on that box). Returned
+// as-is rather than parsed: it's read-only diagnostic text for a human to
+// scan, not data the dashboard needs to act on.
+function getDockerDiskUsageVerbose(cb) {
+  if (DEPLOY_MODE !== "docker") return cb(null);
+  execFile("docker", ["system", "df", "-v"], { timeout: 20_000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+    cb(err ? null : stdout);
+  });
+}
+
 // Posts a plain JSON body to an operator-configured webhook. `content` is
 // included alongside `text` so a Discord webhook (which reads `content`)
 // and a Slack/Teams-style one (which reads `text`) both work unconfigured.
@@ -874,6 +918,17 @@ function handleConfig(req, res) {
 
 function handleSites(req, res) {
   getSitesUsage((sites) => sendJson(res, 200, { sites }));
+}
+
+function handleDiskUsage(req, res) {
+  getDockerDiskUsage((rows) => sendJson(res, 200, { rows }));
+}
+
+function handleDiskUsageVerbose(req, res) {
+  getDockerDiskUsageVerbose((text) => {
+    if (text == null) return sendJson(res, 502, { error: "docker system df -v failed (docker mode only)" });
+    sendJson(res, 200, { text });
+  });
 }
 
 function handleStatus(req, res) {
@@ -1933,6 +1988,26 @@ const DASHBOARD_HTML = `<!doctype html>
   <h3>Sites (uploads folder size per tenant)</h3>
   <p class="muted">Folder name is the tenant's slug (lowercase, non-alphanumeric replaced with <code>_</code>), not its full hostname — this dashboard has no database access to translate it back.</p>
   <table id="sitesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+
+  <h3>Docker disk usage</h3>
+  <p class="muted">What's actually using disk under Docker — images, stopped containers, volumes, and build cache. Build cache + dangling images now auto-prune on every deploy (see the deployment skill's disk-hygiene note); this is for checking in between, or diagnosing a spike.</p>
+  <table id="diskUsageTable" style="width:100%; border-collapse: collapse;">
+    <thead>
+      <tr class="muted" style="text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid #8884;">
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Type</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Total</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0;">Active</th>
+        <th style="padding:0.35rem 0.6rem 0.35rem 0; text-align:right;">Size</th>
+        <th style="padding:0.35rem 0 0.35rem 0.6rem; text-align:right;">Reclaimable</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div class="row">
+    <button class="secondary" onclick="refreshDiskUsage()">Refresh</button>
+    <button class="secondary" onclick="showDiskUsageDetail()">Full breakdown (per image/volume)</button>
+  </div>
+  <pre class="term" id="diskUsageLog" style="display:none"></pre>
 </div>
 
 <div class="tab-panel" id="panel-ssl">
@@ -2022,6 +2097,44 @@ async function refreshSites() {
     }
   } catch (e) {
     document.querySelector("#sitesTable tbody").innerHTML = "<tr><td class=\\"muted\\">Error: " + escapeHtml(e.message) + "</td></tr>";
+  }
+}
+
+async function refreshDiskUsage() {
+  const tbody = document.querySelector("#diskUsageTable tbody");
+  tbody.innerHTML = "<tr><td class=\\"muted\\">Loading…</td></tr>";
+  try {
+    const data = await api("/api/disk-usage");
+    const rows = data.rows || [];
+    if (!rows.length) {
+      tbody.innerHTML = "<tr><td class=\\"muted\\">Not available (docker mode only, or docker unreachable).</td></tr>";
+      return;
+    }
+    tbody.innerHTML = "";
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td style=\\"padding:0.3rem 0.6rem 0.3rem 0;\\">" + escapeHtml(r.type) + "</td>" +
+        "<td class=\\"muted\\" style=\\"padding:0.3rem 0.6rem;\\">" + escapeHtml(r.total) + "</td>" +
+        "<td class=\\"muted\\" style=\\"padding:0.3rem 0.6rem;\\">" + escapeHtml(r.active) + "</td>" +
+        "<td style=\\"padding:0.3rem 0.6rem; text-align:right;\\">" + escapeHtml(r.size) + "</td>" +
+        "<td class=\\"muted\\" style=\\"padding:0.3rem 0 0.3rem 0.6rem; text-align:right;\\">" + escapeHtml(r.reclaimable) + "</td>";
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    tbody.innerHTML = "<tr><td class=\\"muted\\">Error: " + escapeHtml(e.message) + "</td></tr>";
+  }
+}
+
+async function showDiskUsageDetail() {
+  const pre = document.getElementById("diskUsageLog");
+  pre.style.display = "block";
+  pre.textContent = "Loading…";
+  try {
+    const data = await api("/api/disk-usage/verbose");
+    pre.textContent = data.text || "(empty)";
+  } catch (e) {
+    pre.textContent = "Error: " + e.message;
   }
 }
 
@@ -2193,6 +2306,7 @@ async function init() {
   refresh();
   refreshDb();
   refreshSites();
+  refreshDiskUsage();
   refreshUpdateCheck();
   refreshVersions();
   setInterval(refresh, 5000);
@@ -2639,6 +2753,10 @@ const server = http.createServer((req, res) => {
       handleStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/sites") {
       handleSites(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/disk-usage") {
+      handleDiskUsage(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/disk-usage/verbose") {
+      handleDiskUsageVerbose(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/update-check") {
       handleUpdateCheck(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/versions") {
