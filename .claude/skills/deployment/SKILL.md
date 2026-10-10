@@ -351,11 +351,20 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   the query runs inside a one-off `postgres:16-alpine` container on `ucms-net`, same trick
   `run.sh` uses for the nightly dump itself; in systemd mode it runs straight against the
   host's own `psql` client (already guaranteed present by `ensure_postgres`). The query text
-  is written to a throwaway file first (a real file write, not a shell string) and
-  `DATABASE_URL` is passed as one opaque `execFile` argv element — neither is ever re-parsed
-  as shell syntax, so this isn't exposed to the `source`/`eval` injection class the bare-metal
-  `run.sh` fix above already closed. `apps/api`'s own validation (`validateBackupDestination`
-  in `portal-settings.ts`) is duplicated, not shared, into `monitor/server.js`
+  is written to a throwaway file first (a real file write, not a shell string), and the
+  connection itself is never a URI argv — `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`
+  are passed via `execFile`'s own `env` option (docker mode forwards them into the container by
+  *name only*, `-e PGPASSWORD` with no `=value`, so the value lives only in `docker`'s own
+  process environment, never its command line). A first draft passed the whole
+  `postgres://user:password@host/db` string as a plain argv element instead — caught by an
+  automated security review as a "secrets in process arguments" finding, since that's visible
+  to ANY local user on the box via `ps aux`, not just root; this is the exact same `ps aux`
+  threat model as the `docker run -e VAR=value` finding `install_backup_cron` itself already
+  fixed above, just recurring in a different call. Neither the query text nor the connection
+  is ever re-parsed as shell syntax (this is a plain `execFile` argv array, no shell involved),
+  so none of this is exposed to the `source`/`eval` injection class the bare-metal `run.sh` fix
+  above closed either. `apps/api`'s own validation (`validateBackupDestination` in
+  `portal-settings.ts`) is duplicated, not shared, into `monitor/server.js`
   (`validateBackupDestinationPatch`) — these are two separate deployables with no shared
   module to put it in.
   **How install.sh wires this up**: `install_backup_cron()` itself runs before the stack (and
@@ -364,18 +373,29 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `finish_backup_destination_setup()`, called after `install_monitor` once the DB is
   confirmed reachable (`create_superadmin`/`create_superadmin_production` already forced
   `ensurePublicSchema` to create `platform_settings` by then) and after
-  `/etc/ucms-monitor.env` exists, does two things: writes the same control-plane
-  `DATABASE_URL` `install_backup_cron` already snapshots into `backup.env` into
-  `/etc/ucms-monitor.env` too (so the dashboard's own `psql` calls have something to connect
-  with), and — only if `BACKUP_OFFSITE_TARGET` is non-empty — seeds the row with
-  `{type:"ssh", ssh:{target:...}}` via the same container-wrapped-or-native `psql` approach.
-  A non-interactive install, or an interactive one where the prompt was declined, just leaves
-  the column's own `'{"type":"local"}'` default in place.
+  `/etc/ucms-monitor.env` exists, does two things: writes the same control-plane connection
+  `install_backup_cron` already snapshots into `backup.env` into `/etc/ucms-monitor.env` too —
+  as discrete `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE` fields (a new `parse_pg_url`
+  helper splits bare-metal's single `DATABASE_URL` into these with pure parameter expansion;
+  docker mode's values are fixed/known already, no parsing needed), never a single
+  `DATABASE_URL` line, so the dashboard's own `psql` calls never have to touch a connection URI
+  at all — and, only if `BACKUP_OFFSITE_TARGET` is non-empty, seeds the row with `{type:"ssh",
+  ssh:{target:...}}`, itself via the same env-vars-not-argv `psql`/`docker run` pattern (a
+  `PGPASSWORD=... docker run ... -e PGPASSWORD ...` prefix, not a URI argument). A
+  non-interactive install, or an interactive one where the prompt was declined, just leaves the
+  column's own `'{"type":"local"}'` default in place.
   **How the nightly push actually happens**: the generated `run.sh` (both docker and
   bare-metal variants) queries `platform_settings.backup_destination` fresh on every run
   (never baked into the generated file) right after the existing dump/media-snapshot steps,
   so a change made in Settings or the monitor dashboard takes effect the very next scheduled
-  run with no re-install. `ssh` runs a plain `rsync`. `s3`/`gdrive` both go through
+  run with no re-install. `ssh` runs a plain `rsync -a --delete -- "$src" "$target"` — the
+  `SSH_TARGET_RE`/`BACKUP_SSH_TARGET_RE` validators (`portal-settings.ts`, `monitor/server.js`,
+  and `install_backup_cron`'s own prompt) all reject a *leading* dash, not just an odd
+  character set, and the `--` is kept anyway as belt-and-suspenders: rsync treats any argv
+  token starting with `-` as an option regardless of quoting, so a target saved as
+  `--rsync-path=...` would otherwise run as root once a day — another automated-review finding,
+  on the SAME value three different call sites validate independently. `s3`/`gdrive` both go
+  through
   **rclone** — the one tool that natively speaks S3/R2 and Google Drive without separate
   SDKs/dependencies per backend — with a fresh `rclone.conf` (ini format) generated into a
   `mktemp -d` directory via `printf`-per-line (never a single interpolated connection-string

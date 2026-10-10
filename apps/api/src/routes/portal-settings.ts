@@ -173,7 +173,13 @@ function validateStorageLimits(body: unknown): string | null {
   return null;
 }
 
-const SSH_TARGET_RE = /^[A-Za-z0-9_.@:/-]+$/;
+// Leading char must be alnum — not just "no weird charset" but specifically
+// no leading `-`: rsync parses ANY argv token starting with `-` as an
+// option regardless of quoting, so a target like `--rsync-path=...` would
+// run as root once a day via run.sh's `rsync -a --delete -- "$src" "$target"`
+// (that trailing `--` is belt-and-suspenders on top of this, not a
+// substitute for it — caught by an automated security review).
+const SSH_TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9_.@:/-]*$/;
 const GDRIVE_FOLDER_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 // Where the nightly backup cron pushes a copy after its local dump — see
