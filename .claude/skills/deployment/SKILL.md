@@ -174,6 +174,32 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   keepalived, DNS multi-A-record failover, or a dedicated load balancer in front — see the
   paused multi-VPS/HA rollout brainstorm) and is a deliberate cost/complexity tradeoff, not
   an oversight.
+- **Disk hygiene** (found via a live-VPS disk-full scare, 2026-10-10: `/var/lib/containerd`
+  had grown to 19G on a 40G disk, mostly unbounded Docker build cache from many deploys over
+  time, plus unrelated leftover images from a prior non-usim_cms setup on that box). Three
+  fixes, all unattended/automatic — no cron job to remember, same philosophy as
+  `ensure_docker_live_restore` below: (1) every service in `docker-compose.yml` and
+  `docker-compose.release.yml` now sets `logging: *default-logging` (`json-file`, `max-size:
+  10m`, `max-file: 3` — a 30MB ceiling per container) instead of Docker's own unbounded
+  default, which otherwise keeps every line of stdout forever. (2) `scripts/deploy.sh`'s
+  `do_deploy` runs `docker builder prune -af --filter "until=24h"` + `docker image prune -af`
+  right after every successful promote — safe because both only ever remove cache/images with
+  **zero** container references, so the just-stopped old color (kept for instant rollback,
+  see above) is never touched; the `until=24h` filter keeps the current deploy's own layer
+  cache for next time, only sweeping cache that's accumulated past a day. (3) `install.sh`'s
+  `ensure_journald_cap` writes `/etc/systemd/journald.conf.d/00-usim-cms-size-cap.conf`
+  (`SystemMaxUse=200M`) — same idempotent drop-in-file pattern as `ensure_docker_live_restore`,
+  called from the same two install-mode call sites, for the host's own `/var/log/journal`
+  (SSH/kernel/systemd logs — unrelated to any container's own capped log above), which was
+  separately observed past 1.8G with no cap. **Caveat for an already-deployed instance**: (1)
+  and (2) ship as ordinary app code (next `git pull` + `docker compose up -d --build` /
+  `scripts/deploy.sh` run picks them up); (3) is host-level provisioning like
+  `ensure_docker_live_restore`, so an already-live VPS needs a re-run of `install.sh` (safe,
+  idempotent) to actually get the journald cap. None of this is a substitute for occasionally
+  checking real usage by hand — `sudo du -xh --max-depth=3 / | sort -rh | head -30` and
+  `docker system df -v` are still the right first move if disk pressure shows up again, since a
+  genuinely new, large, legitimate growth source (e.g. media uploads, Postgres data itself)
+  needs a different fix than a cache/log cap.
 - Tenant backup/restore/migration is `apps/api/src/backup.ts`, not `pg_dump`: JSON dump
   of a tenant's rows + its local uploads, zipped — restores across Postgres versions and
   onto a different server/host (rewrites `/uploads/<host>/` references on cross-host

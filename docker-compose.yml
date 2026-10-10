@@ -1,7 +1,20 @@
+# Shared by every service below via `logging: *default-logging` — without a
+# cap, Docker's default json-file driver keeps every line of container stdout
+# forever, which silently fills the disk over months (found growing
+# unbounded on a live VPS, see the disk-hygiene note in
+# .claude/skills/deployment/SKILL.md). 10m x 3 files = 30MB ceiling per
+# container, far more than needed to debug a recent issue.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
       POSTGRES_DB: usim_cms
@@ -50,6 +63,7 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.2-p0
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: ${PGBOUNCER_MEM_LIMIT:-128m}
     depends_on:
       db:
@@ -79,6 +93,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     networks:
       - ucms-net
@@ -120,6 +135,7 @@ services:
     # cert-swap restart) on every restart after the first.
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     restart: unless-stopped
+    logging: *default-logging
     # Same OOM-avoidance reasoning as db's mem_limit above — Caddy itself
     # is normally light, this just keeps it from being the OOM-killer's
     # collateral damage during a spike elsewhere on the box.

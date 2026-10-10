@@ -236,6 +236,17 @@ do_deploy() {
     docker compose -p "ucms-$CURRENT" -f "$RELEASE_FILE" stop || true
   fi
 
+  # Every rebuild retags api/frontend/admin's images, leaving the previous
+  # build dangling (still-referenced images — the stopped old color above —
+  # are never touched by either command, so rollback is unaffected). Left
+  # unpruned this silently fills the disk over weeks of deploys (observed:
+  # 13GB of stale build cache on one live VPS). `until=24h` on the builder
+  # cache keeps today's layers around for THIS deploy's own cache hits, only
+  # sweeping cache older than that.
+  echo "-- pruning stale build cache & dangling images --"
+  docker builder prune -af --filter "until=24h" >/dev/null || true
+  docker image prune -af >/dev/null || true
+
   echo "== deploy complete: $next is live =="
 }
 
