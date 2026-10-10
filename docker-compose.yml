@@ -61,7 +61,7 @@ services:
   # mounted pgbouncer.ini alone instead of overwriting it with its own
   # env-var-generated config, and ships psql for the healthcheck below.
   pgbouncer:
-    image: edoburu/pgbouncer:v1.25.2-p0
+    image: edoburu/pgbouncer:v1.26.0-p0
     restart: unless-stopped
     logging: *default-logging
     mem_limit: ${PGBOUNCER_MEM_LIMIT:-128m}
