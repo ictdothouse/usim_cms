@@ -1072,6 +1072,32 @@ EOF
     rm -f /etc/ucms-monitor.env.bak
     echo "Reusing existing monitor password from /etc/ucms-monitor.env."
   fi
+
+  # Alert webhook (monitor/server.js's up/down + disk-threshold alerts, see
+  # that file's own ALERT_WEBHOOK_URL comment) — without this, every alert
+  # this dashboard already tracks (service down, disk over threshold) stays
+  # completely silent, since there's no email/SMTP client here by design.
+  # Interactive-only, same off-on-non-interactive-run convention as
+  # configure_optional_integrations; a blank reply keeps whatever is already
+  # configured instead of wiping it, since this runs again on every
+  # install.sh re-run (not just first install).
+  if [ -t 0 ]; then
+    local existing_webhook alert_webhook
+    existing_webhook="$(grep -m1 '^ALERT_WEBHOOK_URL=' /etc/ucms-monitor.env 2>/dev/null | cut -d= -f2-)"
+    echo ""
+    if [ -n "$existing_webhook" ]; then
+      echo "Alert webhook is already configured."
+      read -r -p "Replace it? Slack/Discord/Teams incoming webhook, or custom endpoint (blank = keep current): " alert_webhook
+    else
+      echo "No alert webhook configured yet — service-down/disk-space alerts would go unnoticed."
+      read -r -p "Alert webhook URL (Slack/Discord/Teams incoming webhook, or custom endpoint; blank = skip): " alert_webhook
+    fi
+    if [ -n "$alert_webhook" ]; then
+      set_env_kv /etc/ucms-monitor.env ALERT_WEBHOOK_URL "$alert_webhook"
+      echo "  Saved — test it from the monitor dashboard, or POST /api/alerts/test, once it's reachable."
+    fi
+  fi
+
   sed -e "s|__NODE_BIN__|${node_bin}|g" -e "s|__REPO_DIR__|${REPO_DIR}|g" \
     monitor/ucms-monitor.service.template > /etc/systemd/system/ucms-monitor.service
   systemctl daemon-reload
