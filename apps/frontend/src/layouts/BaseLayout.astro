@@ -1439,7 +1439,15 @@ const fontsHref = allFonts.length
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
                 selectionResizeObserver.observe(visualTarget(selectedNode));
                 reportSelectedRect();
-                buildSpacingHandles(selectedNode, String(e.data.path).split(".").map(Number));
+                // Skip when a slide-nested child is the real target (slideChild) —
+                // that child gets its own full gesture chrome from selectSlideNode
+                // above (resize handles, rotate/move, toolbar), anchored to itself.
+                // Also building padding/margin handles for the outer slider element
+                // at the same time drew two unrelated, disconnected sets of drag
+                // chrome at once — the slider's own box can be full-bleed, so its
+                // corner handles end up nowhere near the small selected slide child,
+                // reading as broken/overlapping rather than as two valid selections.
+                if (!slideChild) buildSpacingHandles(selectedNode, String(e.data.path).split(".").map(Number));
               }
               return;
             }
