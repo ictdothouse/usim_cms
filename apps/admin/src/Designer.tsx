@@ -417,6 +417,8 @@ export default function Designer({
     handleFrameLoad,
   } = useLiveEditBridge({
     bp,
+    linkedPadding,
+    linkedMargin,
     sliderSlideIdx,
     sliderInnerSel,
     blocks,

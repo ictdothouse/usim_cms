@@ -27,6 +27,7 @@ import {
   updateSlideElementBp,
 } from "../parsers";
 import { scaledFreeFont } from "../style";
+import { writeDragSideKeys, applySectionSpacingWrite } from "../spacingDrag";
 import type { Block, Sel, SectionProps } from "../types";
 
 export interface LiveEditBridgeDeps {
@@ -66,6 +67,12 @@ export interface LiveEditBridgeDeps {
   // DeviceViewport) — also decides which bp bag a free-position drag in the
   // iframe writes to, same rule ElPreview.tsx's own drag commit follows.
   bp: "desktop" | "tablet" | "mobile";
+  // Inspector FourSideControl's "linked" chain-icon toggles (useBpStyle) —
+  // read-only here, forwarded to the iframe (designer:selected) so its own
+  // padding/margin drag handles fan a drag out to all 4 sides live, same as
+  // Blocks mode's DesignerCanvas.tsx already does with the same two flags.
+  linkedPadding: boolean;
+  linkedMargin: boolean;
 }
 
 export interface LiveEditBridgeApi {
@@ -88,6 +95,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
     tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
     setError, setReloading, setCtxMenu, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
+    linkedPadding, linkedMargin,
     structuralTick, bumpStructural, bp,
   } = deps;
 
@@ -403,6 +411,37 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         if (sliderId && action === "delete") setSliderInnerSel((m) => ({ ...m, [sliderId]: null }));
         return;
       }
+      if (e.data?.type === "designer:spacingDrag") {
+        // Posted once on pointerup by BaseLayout.astro's own padding/margin
+        // drag handles — the gesture (live visual feedback, linked fan-out)
+        // already ran entirely inside the iframe; this just commits the
+        // final value through the same write functions DesignerCanvas.tsx's
+        // Blocks-mode handles use (spacingDrag.ts), one mutate() per drag.
+        const spacingPath = String(e.data.path ?? "")
+          .split(".")
+          .map(Number);
+        const fields = Array.isArray(e.data.fields) ? e.data.fields.map(String) : [];
+        const px = Number(e.data.px);
+        if (![1, 3, 4].includes(spacingPath.length) || !fields.length || !Number.isFinite(px)) return;
+        if (isSectionLocked(spacingPath[0])) {
+          toast.error(t("designer-section-locked-toast"));
+          return;
+        }
+        const bpKeyFn = (k: string) => `${bp}:${k}`;
+        const linked = fields.length > 1;
+        mutate((bs) => {
+          if (spacingPath.length === 1) {
+            applySectionSpacingWrite(bs[spacingPath[0]].props as unknown as SectionProps, fields, fields[0], px, linked, bp, bpKeyFn);
+          } else if (spacingPath.length === 3) {
+            const [b, r, c] = spacingPath;
+            writeDragSideKeys(section(bs, b).rows[r].columns[c], fields, fields[0], px, linked, bp, bpKeyFn);
+          } else {
+            const [b, r, c, elIdx] = spacingPath;
+            writeDragSideKeys(section(bs, b).rows[r].columns[c].elements[elIdx], fields, fields[0], px, linked, bp, bpKeyFn);
+          }
+        });
+        return;
+      }
       const path = String(e.data?.path ?? "")
         .split(".")
         .map(Number);
@@ -506,6 +545,10 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       // "slideIdx.r.c.e" of the selected slide child, so the iframe re-attaches
       // its handles/toolbar after a reload (BaseLayout.astro's bridge).
       slideSel: inner && selEl ? `${sliderSlideIdx[selEl.id] ?? 0}.${inner.r}.${inner.c}.${inner.e}` : null,
+      // So the iframe's own padding/margin drag handles (BaseLayout.astro)
+      // fan a drag out to all 4 sides live when linked — same flags
+      // DesignerCanvas.tsx's Blocks-mode handles already read.
+      spacing: { linkedPadding, linkedMargin },
       // The iframe has no i18n of its own — its slide toolbar uses these.
       labels: {
         editLink: t("designer-edit-link"),
@@ -528,7 +571,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       post({ type: "designer:text", path: sel.join("."), editable: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sel, liveSrc, sliderInnerSel, sliderSlideIdx]);
+  }, [mode, sel, liveSrc, sliderInnerSel, sliderSlideIdx, linkedPadding, linkedMargin]);
 
   return { mode, liveSrc, liveSrcA, liveSrcB, activeSlot, frameARef, frameBRef, liveFrame, selectedRect, enterLive, toggleLive, handleFrameLoad };
 }
