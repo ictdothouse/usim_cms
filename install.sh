@@ -377,6 +377,33 @@ configure_optional_integrations() {
 # credentials file here, instead of referencing the repo at cron-run time,
 # closes that off.
 # ---------------------------------------------------------------------------
+
+# Splits a postgres://user:pass@host[:port]/dbname URI into PG_URL_HOST/
+# PG_URL_PORT/PG_URL_USER/PG_URL_PASSWORD/PG_URL_DATABASE globals, using pure
+# parameter expansion — no external parser, and every password this
+# installer itself generates (openssl rand -hex, see fill_env_if_blank) is
+# plain hex, so this never has to handle URL-encoded special characters.
+# Exists so psql/docker never has to be handed a raw connection URI as a CLI
+# argument (see install_backup_cron's own comment on why that's a leak).
+parse_pg_url() {
+  local url="${1#postgres://}"
+  url="${url#postgresql://}"
+  local userinfo="${url%%@*}"
+  local hostinfo="${url#*@}"
+  PG_URL_USER="${userinfo%%:*}"
+  PG_URL_PASSWORD="${userinfo#*:}"
+  local hostport="${hostinfo%%/*}"
+  PG_URL_DATABASE="${hostinfo#*/}"
+  PG_URL_DATABASE="${PG_URL_DATABASE%%\?*}"
+  if [[ "$hostport" == *:* ]]; then
+    PG_URL_HOST="${hostport%%:*}"
+    PG_URL_PORT="${hostport#*:}"
+  else
+    PG_URL_HOST="$hostport"
+    PG_URL_PORT="5432"
+  fi
+}
+
 install_backup_cron() {
   local mode="$1"
   if [ ! -t 0 ]; then
@@ -415,11 +442,15 @@ install_backup_cron() {
   echo "  covers a plain SSH/rsync target.)"
   read -r -p "  Off-site target to rsync a copy to after each run (user@host:/path, blank = skip): " BACKUP_OFFSITE_TARGET
   # This ends up inside a JSON value a later step inserts into the database
-  # AND (every night after) a line run.sh hands to rsync — a stray quote or
-  # shell metacharacter here would be a real injection either way, not just
-  # a typo. Reject anything outside a plain user@host:/path shape.
-  if [ -n "$BACKUP_OFFSITE_TARGET" ] && ! [[ "$BACKUP_OFFSITE_TARGET" =~ ^[A-Za-z0-9_.@:/-]+$ ]]; then
-    echo "  Contains characters other than letters/digits/._@:/- — skipping off-site rsync." >&2
+  # AND (every night after) an argument run.sh hands rsync — a stray quote or
+  # shell metacharacter here would be a real injection either way, not just a
+  # typo. A LEADING dash is rejected too (not just an odd charset): rsync
+  # parses any argv token starting with `-` as an option regardless of
+  # quoting, so e.g. `--rsync-path=...` here would run as root once a day —
+  # caught by an automated security review, not by hand-testing a normal
+  # user@host:/path value.
+  if [ -n "$BACKUP_OFFSITE_TARGET" ] && ! [[ "$BACKUP_OFFSITE_TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9_.@:/-]*$ ]]; then
+    echo "  Contains characters other than letters/digits/._@:/- (or starts with a dash) — skipping off-site rsync." >&2
     BACKUP_OFFSITE_TARGET=""
   fi
 
@@ -481,12 +512,34 @@ install_backup_cron() {
   if [ "$mode" = "docker" ]; then
     local pg_app_password
     pg_app_password="$(grep -m1 '^POSTGRES_APP_PASSWORD=' "${REPO_DIR}/.env" | cut -d= -f2-)"
-    printf 'DATABASE_URL=postgres://usim_cms_app:%s@db:5432/usim_cms\n' "$pg_app_password" > "$env_file"
+    {
+      printf 'DATABASE_URL=postgres://usim_cms_app:%s@db:5432/usim_cms\n' "$pg_app_password"
+      # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE alongside the URL above —
+      # backup.sh itself still reads DATABASE_URL (unchanged), but run.sh's
+      # own off-site-destination queries (below) connect via these instead of
+      # ever handing psql the URL as a CLI argument: a connection URI embeds
+      # the password, and an argv is visible to any local user on this box
+      # via `ps aux`, not just root — same class of leak `docker run -e`
+      # already got fixed for below (see that comment on --env-file vs -e).
+      # Discrete here already (no parsing needed) since docker mode's values
+      # are fixed/known, not read back out of an opaque URL.
+      printf 'PGHOST=db\n'
+      printf 'PGPORT=5432\n'
+      printf 'PGUSER=usim_cms_app\n'
+      printf 'PGPASSWORD=%s\n' "$pg_app_password"
+      printf 'PGDATABASE=usim_cms\n'
+    } > "$env_file"
   else
     local db_url
     db_url="$(grep -m1 '^DATABASE_URL=' "${REPO_DIR}/apps/api/.env" | cut -d= -f2-)"
+    parse_pg_url "$db_url"
     {
       printf 'DATABASE_URL=%s\n' "$db_url"
+      printf 'PGHOST=%s\n' "$PG_URL_HOST"
+      printf 'PGPORT=%s\n' "$PG_URL_PORT"
+      printf 'PGUSER=%s\n' "$PG_URL_USER"
+      printf 'PGPASSWORD=%s\n' "$PG_URL_PASSWORD"
+      printf 'PGDATABASE=%s\n' "$PG_URL_DATABASE"
       printf 'UPLOADS_DIR=%s\n' "${REPO_DIR}/apps/api/uploads"
     } > "$env_file"
   fi
@@ -532,16 +585,25 @@ RETENTION_DAYS="${RETENTION_DAYS:-14}" \
 # re-install needed. db's port is never published to the host (see
 # docker-compose.yml's own comment on the db service), so the query runs
 # inside a one-off postgres:16-alpine container on ucms-net, same as the
-# dump step above — DATABASE_URL reaches it via --env-file, never a CLI arg
-# (see this function's own comment on why `-e` would leak it via `ps aux`).
+# dump step above. No connection URI is ever passed to psql as a CLI
+# argument — --env-file backup.env already forwards PGHOST/PGPORT/PGUSER/
+# PGPASSWORD/PGDATABASE (install_backup_cron writes them alongside
+# DATABASE_URL) into the container's own environment, where libpq picks
+# them up automatically; an argv containing the password would otherwise be
+# visible to any local user on this box via `ps aux`, not just root (same
+# class of leak this function's own comment already flags for `-e`).
 pg() {
-  docker run --rm --network ucms-net --env-file backup.env postgres:16-alpine psql "$(grep -m1 '^DATABASE_URL=' backup.env | cut -d= -f2-)" -tAc "$1" 2>/dev/null
+  docker run --rm --network ucms-net --env-file backup.env postgres:16-alpine psql -tAc "$1" 2>/dev/null
 }
 dest_type="$(pg "SELECT backup_destination->>'type' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
 case "$dest_type" in
   ssh)
     target="$(pg "SELECT backup_destination->'ssh'->>'target' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
-    [ -n "$target" ] && rsync -a --delete "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
+    # `--` stops rsync from ever parsing a leading-dash target as an option
+    # (argument injection) — belt-and-suspenders on top of the stored
+    # value's own validation (apps/api/src/routes/portal-settings.ts /
+    # monitor/server.js both reject a leading dash before this is saved).
+    [ -n "$target" ] && rsync -a --delete -- "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
     ;;
   s3|gdrive)
     # rclone itself runs in its own container (rclone/rclone) rather than on
@@ -615,18 +677,26 @@ RETENTION_DAYS="${RETENTION_DAYS:-14}" \
 # --- off-site push (platform_settings.backup_destination) --- same
 # reasoning as the docker-mode run.sh's own comment on this block: queried
 # fresh every run so a Settings/monitor-dashboard change takes effect
-# immediately, no re-install needed. Runs psql/rclone natively — unlike
-# docker mode, this host's own Postgres (DATABASE_URL, already loaded above)
-# and rclone (installed by install_backup_cron) are both directly reachable,
-# no container wrapper needed.
+# immediately, no re-install needed. No connection URI is ever passed to
+# psql as a CLI argument — PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE were
+# already exported above by the read loop (same backup.env this generated),
+# so libpq picks them up automatically; an argv containing the password
+# would otherwise be visible to any local user on this box via `ps aux`,
+# not just root. rclone (installed by install_backup_cron) runs natively —
+# unlike docker mode, this host's own Postgres is directly reachable, no
+# container wrapper needed.
 pg() {
-  psql "$DATABASE_URL" -tAc "$1" 2>/dev/null
+  psql -tAc "$1" 2>/dev/null
 }
 dest_type="$(pg "SELECT backup_destination->>'type' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
 case "$dest_type" in
   ssh)
     target="$(pg "SELECT backup_destination->'ssh'->>'target' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
-    [ -n "$target" ] && rsync -a --delete "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
+    # `--` stops rsync from ever parsing a leading-dash target as an option
+    # (argument injection) — belt-and-suspenders on top of the stored
+    # value's own validation (apps/api/src/routes/portal-settings.ts /
+    # monitor/server.js both reject a leading dash before this is saved).
+    [ -n "$target" ] && rsync -a --delete -- "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
     ;;
   s3|gdrive)
     # conf_dir holds the generated rclone.conf (and, for gdrive, the
@@ -710,14 +780,14 @@ ${marker_end}"
 
 # Finishes what install_backup_cron() started: gives the ops monitor (a
 # separate, zero-dependency Node process — see monitor/server.js's own header
-# comment) the same control-plane DATABASE_URL already snapshotted into
-# /opt/ucms/backup/backup.env, so its "Backup destination" card can read/
-# write platform_settings.backup_destination too (via psql, not a pg driver —
-# see that file's own comment on why). Also seeds that row with the off-site
-# target install_backup_cron's own prompt collected, if any —
-# BACKUP_OFFSITE_TARGET is the global that function sets, empty when the
-# prompt was skipped, declined, or this is a non-interactive run, in which
-# case this just wires DATABASE_URL and leaves the column's own
+# comment) the same control-plane connection install_backup_cron already
+# snapshotted into /opt/ucms/backup/backup.env, so its "Backup destination"
+# card can read/write platform_settings.backup_destination too (via psql, not
+# a pg driver — see that file's own comment on why). Also seeds that row
+# with the off-site target install_backup_cron's own prompt collected, if
+# any — BACKUP_OFFSITE_TARGET is the global that function sets, empty when
+# the prompt was skipped, declined, or this is a non-interactive run, in
+# which case this just wires the connection and leaves the column's own
 # '{"type":"local"}' default alone. Must run after the DB is actually up and
 # reachable (create_superadmin/create_superadmin_production already forced
 # ensurePublicSchema to create platform_settings) and after install_monitor
@@ -726,31 +796,46 @@ ${marker_end}"
 # started yet), so it can't do this seeding itself.
 finish_backup_destination_setup() {
   local mode="$1"
-  local db_url
   if [ "$mode" = "docker" ]; then
     local pg_app_password
     pg_app_password="$(grep -m1 '^POSTGRES_APP_PASSWORD=' "${REPO_DIR}/.env" | cut -d= -f2-)"
-    db_url="postgres://usim_cms_app:${pg_app_password}@db:5432/usim_cms"
+    PG_URL_HOST="db"; PG_URL_PORT="5432"; PG_URL_USER="usim_cms_app"; PG_URL_PASSWORD="$pg_app_password"; PG_URL_DATABASE="usim_cms"
   else
+    local db_url
     db_url="$(grep -m1 '^DATABASE_URL=' "${REPO_DIR}/apps/api/.env" | cut -d= -f2-)"
+    parse_pg_url "$db_url"
   fi
-  set_env_kv /etc/ucms-monitor.env DATABASE_URL "$db_url"
+  # PGHOST/PGPORT/.../PGPASSWORD, never a connection URI — the dashboard's
+  # own psql calls (monitor/server.js's runPsql) read these the same way
+  # run.sh's own `pg()` does, so the password never has to be an argv to
+  # anything (see install_backup_cron's own comment on why that's a leak).
+  set_env_kv /etc/ucms-monitor.env PGHOST "$PG_URL_HOST"
+  set_env_kv /etc/ucms-monitor.env PGPORT "$PG_URL_PORT"
+  set_env_kv /etc/ucms-monitor.env PGUSER "$PG_URL_USER"
+  set_env_kv /etc/ucms-monitor.env PGPASSWORD "$PG_URL_PASSWORD"
+  set_env_kv /etc/ucms-monitor.env PGDATABASE "$PG_URL_DATABASE"
 
   if [ -z "${BACKUP_OFFSITE_TARGET:-}" ]; then
     return
   fi
-  # BACKUP_OFFSITE_TARGET was already regex-validated to [A-Za-z0-9_.@:/-]
-  # only (install_backup_cron above) — no quotes/backslashes possible, so
-  # embedding it directly in this JSON literal and then in this SQL string
-  # literal is safe without extra escaping.
+  # BACKUP_OFFSITE_TARGET was already regex-validated to a leading-alnum,
+  # [A-Za-z0-9_.@:/-]-only shape (install_backup_cron above) — no quotes/
+  # backslashes possible, so embedding it directly in this JSON literal and
+  # then in this SQL string literal is safe without extra escaping.
   local json sql
   json="$(printf '{"type":"ssh","ssh":{"target":"%s"}}' "$BACKUP_OFFSITE_TARGET")"
   sql="INSERT INTO platform_settings (id, backup_destination) VALUES ('singleton', '${json}'::jsonb) ON CONFLICT (id) DO UPDATE SET backup_destination = EXCLUDED.backup_destination, updated_at = now();"
   local ok=true
+  # PGPASSWORD is exported into THIS shell's own environment (never part of
+  # the docker/psql command line itself) and, for docker, forwarded into the
+  # container by name only (`-e PGPASSWORD` with no `=value`) — docker reads
+  # the value from its own process environment, so it's never visible via
+  # `ps aux` the way a `-e PGPASSWORD=...` or a bare connection URI would be.
+  export PGHOST="$PG_URL_HOST" PGPORT="$PG_URL_PORT" PGUSER="$PG_URL_USER" PGPASSWORD="$PG_URL_PASSWORD" PGDATABASE="$PG_URL_DATABASE"
   if [ "$mode" = "docker" ]; then
-    docker run --rm --network ucms-net postgres:16-alpine psql "$db_url" -c "$sql" >/dev/null 2>&1 || ok=false
+    docker run --rm --network ucms-net -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE postgres:16-alpine psql -c "$sql" >/dev/null 2>&1 || ok=false
   else
-    psql "$db_url" -c "$sql" >/dev/null 2>&1 || ok=false
+    psql -c "$sql" >/dev/null 2>&1 || ok=false
   fi
   if [ "$ok" = "true" ]; then
     echo "  Seeded the off-site target into the admin panel's Settings/monitor Backup destination card."

@@ -1921,22 +1921,36 @@ function handleSslIssue(req, res) {
 // postgres:16-alpine container, same trick install.sh's generated
 // /opt/ucms/backup/run.sh already uses for the nightly dump itself. In
 // systemd mode it runs straight against the host's own psql client (already
-// guaranteed present there by install.sh's ensure_postgres). DATABASE_URL
-// here is the exact same control-plane connection string install.sh
-// snapshots into /opt/ucms/backup/backup.env — install_backup_cron sets it
-// into this process's own env file (/etc/ucms-monitor.env) too.
-const BACKUP_DB_URL = process.env.DATABASE_URL || "";
+// guaranteed present there by install.sh's ensure_postgres). PGHOST/PGPORT/
+// PGUSER/PGPASSWORD/PGDATABASE here are the exact same control-plane
+// connection install.sh snapshots into /opt/ucms/backup/backup.env —
+// install_backup_cron's own finish_backup_destination_setup() sets them
+// into this process's own env file (/etc/ucms-monitor.env) too, as discrete
+// fields rather than one connection URI (see below for why).
+const PG_HOST = process.env.PGHOST || "";
+const PG_PORT = process.env.PGPORT || "5432";
+const PG_USER = process.env.PGUSER || "";
+const PG_PASSWORD = process.env.PGPASSWORD || "";
+const PG_DATABASE = process.env.PGDATABASE || "";
 
 // Runs a SQL script file through psql and returns stdout. The query text is
 // written to a throwaway file (fs.writeFileSync — a real file write, not a
-// shell command) and DATABASE_URL is passed as one opaque execFile argv
-// element, never interpolated into a shell string — neither value is ever
-// re-parsed as shell syntax the way install.sh's own `source backup.env` bug
-// was (see that file's install_backup_cron comment for the full writeup).
+// shell command). The connection is passed entirely via environment
+// variables (execFile's own `env` option), never as a URI argv element —
+// an argv is visible to ANY local user on this box via `ps aux`, not just
+// root, which a bare `postgres://user:password@host/db` string would
+// expose outright (caught by an automated security review). In docker
+// mode, `-e PGPASSWORD` etc. with no `=value` tells docker to forward
+// whatever that name already holds in ITS OWN process environment (set via
+// the `env` option below) into the container — the value itself never
+// appears in the `docker run` command line either. Neither value is ever
+// re-parsed as shell syntax the way install.sh's own `source backup.env`
+// bug was (see that file's install_backup_cron comment for the full
+// writeup) — this is a plain execFile argv array, no shell involved at all.
 function runPsql(sql) {
   return new Promise((resolve, reject) => {
-    if (!BACKUP_DB_URL) {
-      reject(new Error("DATABASE_URL not set for this monitor — re-run install.sh to pick up backup-destination support"));
+    if (!PG_HOST || !PG_USER || !PG_DATABASE) {
+      reject(new Error("PGHOST/PGUSER/PGDATABASE not set for this monitor — re-run install.sh to pick up backup-destination support"));
       return;
     }
     const tmpFile = path.join(os.tmpdir(), `ucms-pgquery-${crypto.randomUUID()}.sql`);
@@ -1946,12 +1960,17 @@ function runPsql(sql) {
         fs.unlinkSync(tmpFile);
       } catch {}
     };
+    const pgEnv = { ...process.env, PGHOST: PG_HOST, PGPORT: PG_PORT, PGUSER: PG_USER, PGPASSWORD: PG_PASSWORD, PGDATABASE: PG_DATABASE };
     const cmd = DEPLOY_MODE === "docker" ? "docker" : "psql";
     const args =
       DEPLOY_MODE === "docker"
-        ? ["run", "--rm", "--network", "ucms-net", "-v", `${tmpFile}:/query.sql:ro`, "postgres:16-alpine", "psql", BACKUP_DB_URL, "-tAq", "-f", "/query.sql"]
-        : [BACKUP_DB_URL, "-tAq", "-f", tmpFile];
-    execFile(cmd, args, { timeout: 15_000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        ? [
+            "run", "--rm", "--network", "ucms-net",
+            "-e", "PGHOST", "-e", "PGPORT", "-e", "PGUSER", "-e", "PGPASSWORD", "-e", "PGDATABASE",
+            "-v", `${tmpFile}:/query.sql:ro`, "postgres:16-alpine", "psql", "-tAq", "-f", "/query.sql",
+          ]
+        : ["-tAq", "-f", tmpFile];
+    execFile(cmd, args, { timeout: 15_000, maxBuffer: 1024 * 1024, env: pgEnv }, (err, stdout, stderr) => {
       cleanup();
       if (err) return reject(new Error(String(stderr || err.message).trim()));
       resolve(stdout);
@@ -1966,7 +1985,13 @@ function sqlStringLiteral(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
-const BACKUP_SSH_TARGET_RE = /^[A-Za-z0-9_.@:/-]+$/;
+// Leading char must be alnum — not just "no weird charset" but specifically
+// no leading `-`: rsync parses ANY argv token starting with `-` as an
+// option regardless of quoting, so a target like `--rsync-path=...` would
+// run as root once a day via run.sh's `rsync -a --delete -- "$src"
+// "$target"` (that trailing `--` is belt-and-suspenders on top of this, not
+// a substitute for it — caught by an automated security review).
+const BACKUP_SSH_TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9_.@:/-]*$/;
 const BACKUP_GDRIVE_FOLDER_RE = /^[A-Za-z0-9_-]+$/;
 
 // Same masking apps/api/src/db/tenant-pool/backup-destination.ts does
