@@ -964,6 +964,7 @@ function handleConfig(req, res) {
     mode: DEPLOY_MODE,
     services: SERVICES,
     dbManaged: DEPLOY_MODE === "docker" ? true : DB_MANAGED,
+    alertWebhookConfigured: Boolean(ALERT_WEBHOOK_URL),
   });
 }
 
@@ -2244,6 +2245,11 @@ const DASHBOARD_HTML = `<!doctype html>
 
 <div id="updateBanner" style="display:none; margin: 0.8rem 0; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;"></div>
 
+<div id="alertWebhookBanner" style="display:none; margin: 0.8rem 0; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;">
+  🔕 <b>No alert webhook configured</b> — service-down and disk-space alerts this dashboard already tracks have nobody to notify.
+  Set <code>ALERT_WEBHOOK_URL</code> in <code>/etc/ucms-monitor.env</code> (or re-run <code>install.sh</code>) and restart <code>ucms-monitor</code>.
+</div>
+
 <div class="tabs" id="tabs">
   <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
   <button class="tab-btn" data-tab="stack" onclick="switchTab('stack')">Stack &amp; versions</button>
@@ -2783,6 +2789,7 @@ async function init() {
   DB_MANAGED = cfg.dbManaged;
   document.getElementById("mode").textContent = "Mode: " + cfg.mode;
   document.getElementById("dbRestartBtn").style.display = DB_MANAGED ? "" : "none";
+  document.getElementById("alertWebhookBanner").style.display = cfg.alertWebhookConfigured ? "none" : "block";
   const logButtons = document.getElementById("logButtons");
   for (const name of SERVICES) {
     const b = document.createElement("button");
