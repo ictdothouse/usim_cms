@@ -203,7 +203,21 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   surfaces the same `docker system df` numbers directly (`getDockerDiskUsage`/
   `parseDockerSystemDf` in `monitor/server.js`, columns parsed by position off the header line
   since "Local Volumes"/"Build Cache" are multi-word types) plus a "Full breakdown" button for
-  the verbose per-image/per-volume view — no SSH needed for the first look anymore.
+  the verbose per-image/per-volume view — no SSH needed for the first look anymore. A second,
+  separate panel right below it (`getDbSizes`/`handleDbSizes`, `/api/db-sizes`) answers the
+  "Postgres data itself" half of that sentence directly: `SELECT datname, pg_database_size(datname)
+  FROM pg_database` run via `docker compose exec -T db psql -U postgres` (docker-mode only, same
+  scope line as the disk-usage panel — no DB credential is wired into this process for bare-metal
+  mode), listing every database's real size — control-plane `usim_cms` plus each tenant's own
+  `tenant_<host>` database (see apps/api/CLAUDE.md's multi-tenancy section: a tenant is a separate
+  database, not a schema) — so a genuinely growing tenant's data is visible without confusing it
+  with Docker/OS noise. **Per-tenant upload quota already exists separately** from any of this —
+  `storage_limits` (`apps/api/src/db/schema.ts`, superadmin-only, Settings' global tab + Multisite's
+  per-site tab) has both `maxUploadFileSizeMb` (per-file) and `maxTotalStorageMb` (whole-tenant
+  uploads folder), the latter a hard 413 block in `POST /api/media` (`getMergedStorageLimits`,
+  checked against the tenant's actual uploads-folder size) once exceeded — not a soft alert, a real
+  cap. One tenant's media can't silently fill the shared disk for every other tenant once this is
+  set; nothing further was needed here.
 - Tenant backup/restore/migration is `apps/api/src/backup.ts`, not `pg_dump`: JSON dump
   of a tenant's rows + its local uploads, zipped — restores across Postgres versions and
   onto a different server/host (rewrites `/uploads/<host>/` references on cross-host
@@ -305,7 +319,9 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   reads the same `getStatus()` the dashboard itself renders from and edge-triggers a plain JSON webhook
   POST (`{text, content}` — works unconfigured with a Slack/Discord/Teams incoming webhook, or a custom
   endpoint) whenever a monitored service (db/api/frontend/admin) flips up↔down, or disk usage (same `df`
-  read `getHostStats` already does for the dashboard) crosses `ALERT_DISK_THRESHOLD_PCT` (default 85) —
+  read `getHostStats` already does for the dashboard) crosses `ALERT_DISK_THRESHOLD_PCT` (default 75,
+  lowered from 85 in the 2026-10-10 disk-hygiene pass — on a small disk, 85% left too little runway
+  between "alert fires" and "actually full") —
   edge-triggered the same way, once on crossing, once again dropping back under, never on every poll
   while it stays over. `POST /api/alerts/test` (same basic-auth as every other monitor route) fires a
   one-off test message to verify wiring without waiting for a real outage. Deliberately no email/SMTP
