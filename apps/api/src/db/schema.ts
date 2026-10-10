@@ -395,6 +395,16 @@ export const platformSettings = pgTable("platform_settings", {
   // switcherPosition/switcherStyle above.
   seoTitleTemplate: text("seo_title_template").notNull().default(""),
   seoDefaultDescription: text("seo_default_description").notNull().default(""),
+  // Where the nightly backup cron (install.sh's install_backup_cron, run.sh)
+  // pushes a copy after the local pg_dump/uploads snapshot — settable here
+  // (Settings tab) or from the ops monitor dashboard, both editing this same
+  // row (monitor/server.js has no pg driver, so it shells out to psql
+  // directly instead of going through this API — see its own comment). See
+  // db/tenant-pool/backup-destination.ts for the shape and secret-masking
+  // rules; secrets (s3.secretAccessKey/gdrive.serviceAccountJson) live here
+  // in plaintext, same threat model as POSTGRES_APP_PASSWORD/SESSION_SECRET
+  // already sitting in plaintext .env files on this same box.
+  backupDestination: jsonb("backup_destination").notNull().default({ type: "local" }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

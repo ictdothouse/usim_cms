@@ -392,7 +392,15 @@ install_backup_cron() {
     return
   fi
 
-  local backup_dir retention offsite
+  local backup_dir retention
+  # Global (no `local`) — read by finish_backup_destination_setup, called
+  # later from each mode's install function once the DB is actually up (this
+  # function itself runs before the stack/DB exists in every mode, so it
+  # can't seed platform_settings.backup_destination directly — see that
+  # function's own comment). Reset here so a declined/non-interactive run
+  # leaves it empty rather than carrying a stale value from a shell that
+  # happened to already have it set.
+  BACKUP_OFFSITE_TARGET=""
   read -r -p "  Backup directory [/var/backups/usim_cms]: " backup_dir
   backup_dir="${backup_dir:-/var/backups/usim_cms}"
   read -r -p "  Retention in days [14]: " retention
@@ -402,14 +410,17 @@ install_backup_cron() {
     retention=14
   fi
   echo "  A backup sitting on this same VPS doesn't survive the VPS itself dying."
-  read -r -p "  Off-site target to rsync a copy to after each run (user@host:/path, blank = skip): " offsite
-  # This lands verbatim in a line root's cron hands to a shell — a stray ';'
-  # or similar here would be a root-level command injection, not just a typo.
-  # Reject anything outside a plain user@host:/path shape instead of trusting
-  # free-form input into that file.
-  if [ -n "$offsite" ] && ! [[ "$offsite" =~ ^[A-Za-z0-9_.@:/-]+$ ]]; then
+  echo "  (S3/R2/Google Drive destinations can be set up afterward in the admin"
+  echo "  panel's Settings tab or the ops monitor dashboard — this prompt only"
+  echo "  covers a plain SSH/rsync target.)"
+  read -r -p "  Off-site target to rsync a copy to after each run (user@host:/path, blank = skip): " BACKUP_OFFSITE_TARGET
+  # This ends up inside a JSON value a later step inserts into the database
+  # AND (every night after) a line run.sh hands to rsync — a stray quote or
+  # shell metacharacter here would be a real injection either way, not just
+  # a typo. Reject anything outside a plain user@host:/path shape.
+  if [ -n "$BACKUP_OFFSITE_TARGET" ] && ! [[ "$BACKUP_OFFSITE_TARGET" =~ ^[A-Za-z0-9_.@:/-]+$ ]]; then
     echo "  Contains characters other than letters/digits/._@:/- — skipping off-site rsync." >&2
-    offsite=""
+    BACKUP_OFFSITE_TARGET=""
   fi
 
   # Backup dumps contain password hashes, audit-log rows, every tenant's full
@@ -444,6 +455,18 @@ install_backup_cron() {
   cp "${REPO_DIR}/apps/api/scripts/backup-media.sh" "${cron_dir}/backup-media.sh"
   chown root:root "${cron_dir}/backup.sh" "${cron_dir}/backup-media.sh"
   chmod 700 "${cron_dir}/backup.sh" "${cron_dir}/backup-media.sh"
+
+  if [ "$mode" = "baremetal" ]; then
+    # Needed only if/when the destination is later set to S3/R2/Google Drive
+    # (admin panel Settings tab or the monitor dashboard) — installed
+    # unconditionally up front, best-effort, so switching to it later never
+    # needs a re-run of this installer. Docker mode instead runs rclone via
+    # the rclone/rclone image at push time (see run.sh below), so the host
+    # itself never needs the package — same "docker mode stays clean, bare-
+    # metal installs natively" split this script already follows elsewhere
+    # (compare ensure_postgres).
+    pkg_install rclone || echo "  rclone install failed/unavailable — S3/R2/Google Drive backup destinations won't work until it's installed by hand." >&2
+  fi
 
   # Credentials the dump needs, snapshotted into their OWN root-only file
   # instead of having the cron job `source` the repo's .env/apps/api/.env
@@ -501,6 +524,66 @@ docker run --rm \
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
 RETENTION_DAYS="${RETENTION_DAYS:-14}" \
   bash backup-media.sh "$@"
+
+# --- off-site push (platform_settings.backup_destination) ---
+# Queried fresh on every run, never baked into this generated file, so a
+# superadmin changing this in the admin panel's Settings tab or the ops
+# monitor dashboard takes effect on the very next scheduled run with no
+# re-install needed. db's port is never published to the host (see
+# docker-compose.yml's own comment on the db service), so the query runs
+# inside a one-off postgres:16-alpine container on ucms-net, same as the
+# dump step above — DATABASE_URL reaches it via --env-file, never a CLI arg
+# (see this function's own comment on why `-e` would leak it via `ps aux`).
+pg() {
+  docker run --rm --network ucms-net --env-file backup.env postgres:16-alpine psql "$(grep -m1 '^DATABASE_URL=' backup.env | cut -d= -f2-)" -tAc "$1" 2>/dev/null
+}
+dest_type="$(pg "SELECT backup_destination->>'type' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
+case "$dest_type" in
+  ssh)
+    target="$(pg "SELECT backup_destination->'ssh'->>'target' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
+    [ -n "$target" ] && rsync -a --delete "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
+    ;;
+  s3|gdrive)
+    # rclone itself runs in its own container (rclone/rclone) rather than on
+    # the host — docker mode keeps the host clean, see install_backup_cron's
+    # own comment on this split. conf_dir holds the generated rclone.conf
+    # (and, for gdrive, the service-account key) only for this run's
+    # lifetime — trap cleans it up even if rclone itself fails.
+    conf_dir="$(mktemp -d)"
+    trap 'rm -rf "$conf_dir"' EXIT
+    if [ "$dest_type" = "s3" ]; then
+      {
+        printf '[dest]\n'
+        printf 'type = s3\n'
+        printf 'provider = Other\n'
+        printf 'access_key_id = %s\n' "$(pg "SELECT backup_destination->'s3'->>'accessKeyId' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        printf 'secret_access_key = %s\n' "$(pg "SELECT backup_destination->'s3'->>'secretAccessKey' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        printf 'endpoint = %s\n' "$(pg "SELECT backup_destination->'s3'->>'endpoint' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        region="$(pg "SELECT backup_destination->'s3'->>'region' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        [ -n "$region" ] && printf 'region = %s\n' "$region"
+      } > "${conf_dir}/rclone.conf"
+      bucket="$(pg "SELECT backup_destination->'s3'->>'bucket' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+      remote_path="dest:${bucket}/$(hostname)"
+    else
+      # Written via redirection straight from psql's own stdout, never
+      # round-tripped through a bash variable — the service-account key is a
+      # multi-line-shaped JSON blob, and this is the exact-byte-preserving
+      # way to land it in a file (see install_backup_cron's own comment on
+      # why this differs from the plain scalar fields above).
+      pg "SELECT backup_destination->'gdrive'->>'serviceAccountJson' FROM platform_settings WHERE id='singleton'" > "${conf_dir}/sa.json"
+      folder_id="$(pg "SELECT backup_destination->'gdrive'->>'folderId' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+      {
+        printf '[dest]\n'
+        printf 'type = drive\n'
+        printf 'service_account_file = /config/sa.json\n'
+        printf 'root_folder_id = %s\n' "$folder_id"
+      } > "${conf_dir}/rclone.conf"
+      remote_path="dest:"
+    fi
+    docker run --rm -v "${BACKUP_DIR:-/var/backups/usim_cms}:/data:ro" -v "${conf_dir}:/config:ro" \
+      rclone/rclone:latest sync /data "${remote_path}" --config /config/rclone.conf
+    ;;
+esac
 EOF
   else
     cat > "$run_script" <<'EOF'
@@ -528,6 +611,59 @@ bash backup.sh "$@"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
 RETENTION_DAYS="${RETENTION_DAYS:-14}" \
   bash backup-media.sh "$@"
+
+# --- off-site push (platform_settings.backup_destination) --- same
+# reasoning as the docker-mode run.sh's own comment on this block: queried
+# fresh every run so a Settings/monitor-dashboard change takes effect
+# immediately, no re-install needed. Runs psql/rclone natively — unlike
+# docker mode, this host's own Postgres (DATABASE_URL, already loaded above)
+# and rclone (installed by install_backup_cron) are both directly reachable,
+# no container wrapper needed.
+pg() {
+  psql "$DATABASE_URL" -tAc "$1" 2>/dev/null
+}
+dest_type="$(pg "SELECT backup_destination->>'type' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
+case "$dest_type" in
+  ssh)
+    target="$(pg "SELECT backup_destination->'ssh'->>'target' FROM platform_settings WHERE id='singleton'" | tr -d '[:space:]')"
+    [ -n "$target" ] && rsync -a --delete "${BACKUP_DIR:-/var/backups/usim_cms}/" "${target}/"
+    ;;
+  s3|gdrive)
+    # conf_dir holds the generated rclone.conf (and, for gdrive, the
+    # service-account key) only for this run's lifetime — trap cleans it up
+    # even if rclone itself fails.
+    conf_dir="$(mktemp -d)"
+    trap 'rm -rf "$conf_dir"' EXIT
+    if [ "$dest_type" = "s3" ]; then
+      {
+        printf '[dest]\n'
+        printf 'type = s3\n'
+        printf 'provider = Other\n'
+        printf 'access_key_id = %s\n' "$(pg "SELECT backup_destination->'s3'->>'accessKeyId' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        printf 'secret_access_key = %s\n' "$(pg "SELECT backup_destination->'s3'->>'secretAccessKey' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        printf 'endpoint = %s\n' "$(pg "SELECT backup_destination->'s3'->>'endpoint' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        region="$(pg "SELECT backup_destination->'s3'->>'region' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+        [ -n "$region" ] && printf 'region = %s\n' "$region"
+      } > "${conf_dir}/rclone.conf"
+      bucket="$(pg "SELECT backup_destination->'s3'->>'bucket' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+      remote_path="dest:${bucket}/$(hostname)"
+    else
+      # Written via redirection straight from psql's own stdout, never
+      # round-tripped through a bash variable — see the docker-mode run.sh's
+      # matching comment for why.
+      pg "SELECT backup_destination->'gdrive'->>'serviceAccountJson' FROM platform_settings WHERE id='singleton'" > "${conf_dir}/sa.json"
+      folder_id="$(pg "SELECT backup_destination->'gdrive'->>'folderId' FROM platform_settings WHERE id='singleton'" | tr -d '\r\n')"
+      {
+        printf '[dest]\n'
+        printf 'type = drive\n'
+        printf 'service_account_file = %s/sa.json\n' "$conf_dir"
+        printf 'root_folder_id = %s\n' "$folder_id"
+      } > "${conf_dir}/rclone.conf"
+      remote_path="dest:"
+    fi
+    rclone sync "${BACKUP_DIR:-/var/backups/usim_cms}" "${remote_path}" --config "${conf_dir}/rclone.conf"
+    ;;
+esac
 EOF
   fi
   chown root:root "$run_script"
@@ -539,15 +675,16 @@ EOF
   # in root's crontab, unrelated to usim_cms, is left untouched.
   local marker_start="# >>> usim_cms backup (install.sh) >>>"
   local marker_end="# <<< usim_cms backup (install.sh) <<<"
+  # Off-site push is now a single run.sh step driven by
+  # platform_settings.backup_destination (queried fresh every run), not a
+  # second static crontab line — see run.sh's own "off-site push" comment
+  # above. That is what lets a superadmin change the destination later from
+  # the admin panel's Settings tab or the ops monitor dashboard and have it
+  # take effect the very next night, with no crontab/installer re-run.
   local new_block="${marker_start}
 BACKUP_DIR=${backup_dir}
 RETENTION_DAYS=${retention}
-0 2 * * * ${run_script} >> /var/log/ucms-backup.log 2>&1"
-  if [ -n "$offsite" ]; then
-    new_block="${new_block}
-30 2 * * * rsync -a --delete ${backup_dir}/ ${offsite}/ >> /var/log/ucms-backup.log 2>&1"
-  fi
-  new_block="${new_block}
+0 2 * * * ${run_script} >> /var/log/ucms-backup.log 2>&1
 ${marker_end}"
 
   # `crontab -l` exits 1 (no output) when root has never had a crontab before
@@ -560,13 +697,65 @@ ${marker_end}"
   { (crontab -l 2>/dev/null || true) | sed "/${marker_start}/,/${marker_end}/d"; echo "$new_block"; } | crontab -
 
   echo "  Backup cron installed: daily 02:00, ${retention}-day retention -> ${backup_dir}"
-  if [ -n "$offsite" ]; then
-    echo "  Off-site rsync to ${offsite} at 02:30 — needs passwordless SSH key auth"
-    echo "  to that host already set up (ssh-copy-id), same requirement"
-    echo "  backup-media.sh's own SOURCE_HOST pull-mode documents."
+  if [ -n "$BACKUP_OFFSITE_TARGET" ]; then
+    echo "  Off-site rsync to ${BACKUP_OFFSITE_TARGET} right after each run — needs"
+    echo "  passwordless SSH key auth to that host already set up (ssh-copy-id),"
+    echo "  same requirement backup-media.sh's own SOURCE_HOST pull-mode documents."
   else
-    echo "  NOTE: backups stay on this VPS only. Re-run this installer or"
-    echo "  'crontab -e' later to add an off-site target."
+    echo "  NOTE: backups stay on this VPS only by default. Set an off-site target"
+    echo "  (SSH/rsync, S3/R2, or Google Drive) any time afterward in the admin"
+    echo "  panel's Settings tab or the ops monitor dashboard — no re-install needed."
+  fi
+}
+
+# Finishes what install_backup_cron() started: gives the ops monitor (a
+# separate, zero-dependency Node process — see monitor/server.js's own header
+# comment) the same control-plane DATABASE_URL already snapshotted into
+# /opt/ucms/backup/backup.env, so its "Backup destination" card can read/
+# write platform_settings.backup_destination too (via psql, not a pg driver —
+# see that file's own comment on why). Also seeds that row with the off-site
+# target install_backup_cron's own prompt collected, if any —
+# BACKUP_OFFSITE_TARGET is the global that function sets, empty when the
+# prompt was skipped, declined, or this is a non-interactive run, in which
+# case this just wires DATABASE_URL and leaves the column's own
+# '{"type":"local"}' default alone. Must run after the DB is actually up and
+# reachable (create_superadmin/create_superadmin_production already forced
+# ensurePublicSchema to create platform_settings) and after install_monitor
+# has created /etc/ucms-monitor.env — unlike install_backup_cron's own call
+# site, which runs before any of that in every mode (the stack isn't even
+# started yet), so it can't do this seeding itself.
+finish_backup_destination_setup() {
+  local mode="$1"
+  local db_url
+  if [ "$mode" = "docker" ]; then
+    local pg_app_password
+    pg_app_password="$(grep -m1 '^POSTGRES_APP_PASSWORD=' "${REPO_DIR}/.env" | cut -d= -f2-)"
+    db_url="postgres://usim_cms_app:${pg_app_password}@db:5432/usim_cms"
+  else
+    db_url="$(grep -m1 '^DATABASE_URL=' "${REPO_DIR}/apps/api/.env" | cut -d= -f2-)"
+  fi
+  set_env_kv /etc/ucms-monitor.env DATABASE_URL "$db_url"
+
+  if [ -z "${BACKUP_OFFSITE_TARGET:-}" ]; then
+    return
+  fi
+  # BACKUP_OFFSITE_TARGET was already regex-validated to [A-Za-z0-9_.@:/-]
+  # only (install_backup_cron above) — no quotes/backslashes possible, so
+  # embedding it directly in this JSON literal and then in this SQL string
+  # literal is safe without extra escaping.
+  local json sql
+  json="$(printf '{"type":"ssh","ssh":{"target":"%s"}}' "$BACKUP_OFFSITE_TARGET")"
+  sql="INSERT INTO platform_settings (id, backup_destination) VALUES ('singleton', '${json}'::jsonb) ON CONFLICT (id) DO UPDATE SET backup_destination = EXCLUDED.backup_destination, updated_at = now();"
+  local ok=true
+  if [ "$mode" = "docker" ]; then
+    docker run --rm --network ucms-net postgres:16-alpine psql "$db_url" -c "$sql" >/dev/null 2>&1 || ok=false
+  else
+    psql "$db_url" -c "$sql" >/dev/null 2>&1 || ok=false
+  fi
+  if [ "$ok" = "true" ]; then
+    echo "  Seeded the off-site target into the admin panel's Settings/monitor Backup destination card."
+  else
+    echo "  Could not seed the off-site target into the database — set it by hand later in Settings or the monitor dashboard." >&2
   fi
 }
 
@@ -1048,6 +1237,7 @@ install_docker_mode() {
   local node_bin
   node_bin=$(ensure_private_node)
   install_monitor "$node_bin" "docker" "$monitor_port"
+  finish_backup_destination_setup "docker"
   open_firewall_ports "$api_port" "$frontend_port" "$admin_port" "$monitor_port"
 
   echo ""
@@ -1321,6 +1511,7 @@ install_production_mode() {
   local node_bin
   node_bin=$(ensure_private_node)
   install_monitor "$node_bin" "docker" "$monitor_port" "production"
+  finish_backup_destination_setup "docker"
 
   if [ "$NEEDS_NGINX_SNIPPET" = "true" ]; then
     open_firewall_ports "$monitor_port"
@@ -1562,6 +1753,7 @@ EOF
   create_superadmin "$api_port"
 
   install_monitor "$node_bin" "systemd" "$monitor_port"
+  finish_backup_destination_setup "baremetal"
   # Record whether we own Postgres (so the monitor only offers to restart it
   # when it's not something another app on this VPS also depends on) and the
   # values its "pull latest & rebuild" action needs to redo the build step —

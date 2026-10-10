@@ -147,6 +147,20 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
   const [seoErr, setSeoErr] = useState<string | null>(null);
   const [seoBusy, setSeoBusy] = useState(false);
   const [seoMsg, setSeoMsg] = useState<string | null>(null);
+  const [backupType, setBackupType] = useState<api.BackupDestinationType>("local");
+  const [backupSshTarget, setBackupSshTarget] = useState("");
+  const [backupS3Endpoint, setBackupS3Endpoint] = useState("");
+  const [backupS3Bucket, setBackupS3Bucket] = useState("");
+  const [backupS3Region, setBackupS3Region] = useState("");
+  const [backupS3AccessKeyId, setBackupS3AccessKeyId] = useState("");
+  const [backupS3SecretAccessKey, setBackupS3SecretAccessKey] = useState("");
+  const [backupS3SecretSet, setBackupS3SecretSet] = useState(false);
+  const [backupGdriveFolderId, setBackupGdriveFolderId] = useState("");
+  const [backupGdriveServiceAccountJson, setBackupGdriveServiceAccountJson] = useState("");
+  const [backupGdriveConfigured, setBackupGdriveConfigured] = useState(false);
+  const [backupErr, setBackupErr] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [proxyTenants, setProxyTenants] = useState<Array<Record<string, unknown>>>(tenants);
   const [certUploadHost, setCertUploadHost] = useState<string | null>(null);
   const [certFile, setCertFile] = useState<File | null>(null);
@@ -349,6 +363,58 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
       setSeoErr((e as Error).message);
     } finally {
       setSeoBusy(false);
+    }
+  }
+
+  function reloadBackupDestination() {
+    void api
+      .getBackupDestination(token)
+      .then((d) => {
+        setBackupType(d.type);
+        setBackupSshTarget(d.sshTarget);
+        setBackupS3Endpoint(d.s3Endpoint);
+        setBackupS3Bucket(d.s3Bucket);
+        setBackupS3Region(d.s3Region);
+        setBackupS3AccessKeyId(d.s3AccessKeyId);
+        setBackupS3SecretAccessKey("");
+        setBackupS3SecretSet(d.s3SecretAccessKeySet);
+        setBackupGdriveFolderId(d.gdriveFolderId);
+        setBackupGdriveServiceAccountJson("");
+        setBackupGdriveConfigured(d.gdriveServiceAccountConfigured);
+      })
+      .catch((e) => setBackupErr((e as Error).message));
+  }
+  useEffect(reloadBackupDestination, [token]);
+
+  async function saveBackupDestination() {
+    setBackupErr(null);
+    setBackupMsg(null);
+    setBackupBusy(true);
+    try {
+      const patch: api.BackupDestinationPatch =
+        backupType === "ssh"
+          ? { type: "ssh", ssh: { target: backupSshTarget.trim() } }
+          : backupType === "s3"
+            ? {
+                type: "s3",
+                s3: {
+                  endpoint: backupS3Endpoint.trim(),
+                  bucket: backupS3Bucket.trim(),
+                  region: backupS3Region.trim(),
+                  accessKeyId: backupS3AccessKeyId.trim(),
+                  secretAccessKey: backupS3SecretAccessKey,
+                },
+              }
+            : backupType === "gdrive"
+              ? { type: "gdrive", gdrive: { folderId: backupGdriveFolderId.trim(), serviceAccountJson: backupGdriveServiceAccountJson } }
+              : { type: "local" };
+      await api.setBackupDestination(token, patch);
+      setBackupMsg(t("tenant-languages-saved"));
+      reloadBackupDestination();
+    } catch (e) {
+      setBackupErr((e as Error).message);
+    } finally {
+      setBackupBusy(false);
     }
   }
 
@@ -818,6 +884,88 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
             </label>
             <button onClick={() => void saveSeoSettings()} disabled={seoBusy} className={btnPrimary}>
               {seoBusy ? t("settings-busy") : t("tenant-languages-save-btn")}
+            </button>
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="text-xs font-bold text-ink">{t("settings-backup-dest-title")}</h3>
+            <p className="text-xs text-sub">{t("settings-backup-dest-desc")}</p>
+            {backupErr && <p className="text-xs text-red-600">{backupErr}</p>}
+            {backupMsg && <p className="text-xs text-green-700">{backupMsg}</p>}
+            <select
+              value={backupType}
+              onChange={(e) => setBackupType(e.target.value as api.BackupDestinationType)}
+              className="w-full rounded-md border border-line/30 px-2 py-1 text-xs"
+            >
+              <option value="local">{t("settings-backup-type-local")}</option>
+              <option value="ssh">{t("settings-backup-type-ssh")}</option>
+              <option value="s3">{t("settings-backup-type-s3")}</option>
+              <option value="gdrive">{t("settings-backup-type-gdrive")}</option>
+            </select>
+            {backupType === "ssh" && (
+              <input
+                className={inputCls}
+                placeholder={t("settings-backup-ssh-target-placeholder")}
+                value={backupSshTarget}
+                onChange={(e) => setBackupSshTarget(e.target.value)}
+              />
+            )}
+            {backupType === "s3" && (
+              <div className="space-y-2">
+                <input
+                  className={inputCls}
+                  placeholder={t("settings-backup-s3-endpoint-placeholder")}
+                  value={backupS3Endpoint}
+                  onChange={(e) => setBackupS3Endpoint(e.target.value)}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    className={inputCls}
+                    placeholder={t("settings-backup-s3-bucket-placeholder")}
+                    value={backupS3Bucket}
+                    onChange={(e) => setBackupS3Bucket(e.target.value)}
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder={t("settings-backup-s3-region-placeholder")}
+                    value={backupS3Region}
+                    onChange={(e) => setBackupS3Region(e.target.value)}
+                  />
+                </div>
+                <input
+                  className={inputCls}
+                  placeholder={t("settings-backup-s3-access-key-placeholder")}
+                  value={backupS3AccessKeyId}
+                  onChange={(e) => setBackupS3AccessKeyId(e.target.value)}
+                />
+                <input
+                  type="password"
+                  className={inputCls}
+                  placeholder={backupS3SecretSet ? t("settings-backup-s3-secret-key-set-placeholder") : t("settings-backup-s3-secret-key-placeholder")}
+                  value={backupS3SecretAccessKey}
+                  onChange={(e) => setBackupS3SecretAccessKey(e.target.value)}
+                />
+              </div>
+            )}
+            {backupType === "gdrive" && (
+              <div className="space-y-2">
+                <input
+                  className={inputCls}
+                  placeholder={t("settings-backup-gdrive-folder-placeholder")}
+                  value={backupGdriveFolderId}
+                  onChange={(e) => setBackupGdriveFolderId(e.target.value)}
+                />
+                <p className="text-[11px] text-sub">{t("settings-backup-gdrive-hint")}</p>
+                <textarea
+                  rows={4}
+                  className={`${inputCls} resize-none font-mono text-[11px]`}
+                  placeholder={backupGdriveConfigured ? t("settings-backup-gdrive-json-set-placeholder") : t("settings-backup-gdrive-json-placeholder")}
+                  value={backupGdriveServiceAccountJson}
+                  onChange={(e) => setBackupGdriveServiceAccountJson(e.target.value)}
+                />
+              </div>
+            )}
+            <button onClick={() => void saveBackupDestination()} disabled={backupBusy} className={btnPrimary}>
+              {backupBusy ? t("settings-busy") : t("settings-backup-save-btn")}
             </button>
           </div>
         </>

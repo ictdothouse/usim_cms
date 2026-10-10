@@ -323,6 +323,75 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   (when configured) still needs passwordless SSH key auth to that host set up by hand first
   (`ssh-copy-id`) — same prerequisite `SOURCE_HOST` pull-mode above already documents,
   install.sh doesn't automate key exchange.
+- **Backup destination is now a runtime setting, not just an install-time prompt
+  (2026-10-10)** — closes the remaining gap the bullet above left open: the off-site target
+  used to be baked into a static crontab `rsync` line at install time, so changing it later
+  meant re-running the installer or hand-editing `crontab -e`. It now lives in
+  `platform_settings.backup_destination` (a jsonb column, `schema.ts`/`bootstrap-public.sql`),
+  one of 4 shapes — `{type:"local"}` (default, stays on this VPS), `{type:"ssh",
+  ssh:{target}}` (plain rsync, the old behavior), `{type:"s3", s3:{endpoint, bucket, region,
+  accessKeyId, secretAccessKey}}` (S3-compatible — Cloudflare R2 is this with its own
+  endpoint), or `{type:"gdrive", gdrive:{folderId, serviceAccountJson}}` — and is editable
+  from TWO places that both just edit this same row: the admin panel's Settings tab
+  (`GET`/`PUT /api/portal/backup-destination`, `apps/api/src/routes/portal-settings.ts` +
+  `src/db/tenant-pool/backup-destination.ts`, superadmin-only, same singleton-row pattern as
+  `getMfaEnabled`/`setMfaEnabled`) and the ops monitor dashboard's own "Backup destination"
+  card (Database & Sites tab). A secret (`s3.secretAccessKey`/`gdrive.serviceAccountJson`)
+  never round-trips back to either UI in plaintext once saved — both GET routes report a
+  `*Set`/`*Configured` boolean instead, and a blank field on save means "keep what's already
+  stored", not "wipe it".
+  **Why the monitor dashboard talks to Postgres via `psql`, not a new internal API call into
+  apps/api**: `monitor/server.js` is a deliberately zero-dependency Node file (no npm
+  packages at all, see its own header comment) — adding a `pg` driver just for this one
+  feature would break that promise, and a new internal HTTP endpoint into apps/api would need
+  its own auth scheme separate from both the browser session apps/admin uses and the Basic
+  Auth this dashboard already gates everything behind. Instead it shells out to `psql`
+  directly (`runPsql` in `monitor/server.js`): in docker mode, `db`'s port is never published
+  to the host (same constraint `install_backup_cron`'s own `run.sh` already works around), so
+  the query runs inside a one-off `postgres:16-alpine` container on `ucms-net`, same trick
+  `run.sh` uses for the nightly dump itself; in systemd mode it runs straight against the
+  host's own `psql` client (already guaranteed present by `ensure_postgres`). The query text
+  is written to a throwaway file first (a real file write, not a shell string) and
+  `DATABASE_URL` is passed as one opaque `execFile` argv element — neither is ever re-parsed
+  as shell syntax, so this isn't exposed to the `source`/`eval` injection class the bare-metal
+  `run.sh` fix above already closed. `apps/api`'s own validation (`validateBackupDestination`
+  in `portal-settings.ts`) is duplicated, not shared, into `monitor/server.js`
+  (`validateBackupDestinationPatch`) — these are two separate deployables with no shared
+  module to put it in.
+  **How install.sh wires this up**: `install_backup_cron()` itself runs before the stack (and
+  therefore the DB) is even up in every mode, so it can't seed this row directly — it only
+  collects the off-site answer into a global, `BACKUP_OFFSITE_TARGET`. A new
+  `finish_backup_destination_setup()`, called after `install_monitor` once the DB is
+  confirmed reachable (`create_superadmin`/`create_superadmin_production` already forced
+  `ensurePublicSchema` to create `platform_settings` by then) and after
+  `/etc/ucms-monitor.env` exists, does two things: writes the same control-plane
+  `DATABASE_URL` `install_backup_cron` already snapshots into `backup.env` into
+  `/etc/ucms-monitor.env` too (so the dashboard's own `psql` calls have something to connect
+  with), and — only if `BACKUP_OFFSITE_TARGET` is non-empty — seeds the row with
+  `{type:"ssh", ssh:{target:...}}` via the same container-wrapped-or-native `psql` approach.
+  A non-interactive install, or an interactive one where the prompt was declined, just leaves
+  the column's own `'{"type":"local"}'` default in place.
+  **How the nightly push actually happens**: the generated `run.sh` (both docker and
+  bare-metal variants) queries `platform_settings.backup_destination` fresh on every run
+  (never baked into the generated file) right after the existing dump/media-snapshot steps,
+  so a change made in Settings or the monitor dashboard takes effect the very next scheduled
+  run with no re-install. `ssh` runs a plain `rsync`. `s3`/`gdrive` both go through
+  **rclone** — the one tool that natively speaks S3/R2 and Google Drive without separate
+  SDKs/dependencies per backend — with a fresh `rclone.conf` (ini format) generated into a
+  `mktemp -d` directory via `printf`-per-line (never a single interpolated connection-string
+  argument, which would break on a key containing a comma/colon and was the original design
+  before this one) and cleaned up by a `trap ... EXIT` since it holds live credentials. The
+  Google Drive service-account JSON is written straight from `psql`'s own stdout via shell
+  redirection (`pg "..." > sa.json`), never round-tripped through a bash variable — the one
+  field here that's a multi-line-shaped blob rather than a scalar, so exact-byte redirection
+  is used instead of the `tr -d` scalar fields get. **Docker mode runs rclone via the
+  `rclone/rclone` image** (pulled on first actual use, never pulled for `local`/`ssh`
+  destinations) rather than installing it on the host, keeping with this project's existing
+  "docker mode's host stays clean, bare-metal installs natively" split (compare
+  `ensure_postgres`); bare-metal gets `pkg_install rclone` unconditionally inside
+  `install_backup_cron` (best-effort — a failure only blocks S3/R2/Google Drive, not the
+  local/SSH paths or the rest of the installer) since the destination can be switched to
+  S3/R2/Google Drive later without re-running the installer.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s

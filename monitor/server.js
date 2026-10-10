@@ -17,6 +17,7 @@ import http from "node:http";
 import https from "node:https";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import process from "node:process";
@@ -1908,6 +1909,177 @@ function handleSslIssue(req, res) {
   });
 }
 
+// Backup destination (superadmin-configurable off-site push target for the
+// nightly backup cron), stored in the control-plane DB's
+// platform_settings.backup_destination column — same row apps/admin's
+// Settings tab edits (see apps/api/src/routes/portal-settings.ts). This file
+// has no pg npm driver (see the header comment's "zero-dependency" promise),
+// so it reads/writes that row by shelling out to psql instead of adding one.
+// In docker mode, db's port is never published to the host (see
+// docker-compose.yml's own comment on the db service) — only a container on
+// ucms-net can reach it — so the query runs inside a one-off
+// postgres:16-alpine container, same trick install.sh's generated
+// /opt/ucms/backup/run.sh already uses for the nightly dump itself. In
+// systemd mode it runs straight against the host's own psql client (already
+// guaranteed present there by install.sh's ensure_postgres). DATABASE_URL
+// here is the exact same control-plane connection string install.sh
+// snapshots into /opt/ucms/backup/backup.env — install_backup_cron sets it
+// into this process's own env file (/etc/ucms-monitor.env) too.
+const BACKUP_DB_URL = process.env.DATABASE_URL || "";
+
+// Runs a SQL script file through psql and returns stdout. The query text is
+// written to a throwaway file (fs.writeFileSync — a real file write, not a
+// shell command) and DATABASE_URL is passed as one opaque execFile argv
+// element, never interpolated into a shell string — neither value is ever
+// re-parsed as shell syntax the way install.sh's own `source backup.env` bug
+// was (see that file's install_backup_cron comment for the full writeup).
+function runPsql(sql) {
+  return new Promise((resolve, reject) => {
+    if (!BACKUP_DB_URL) {
+      reject(new Error("DATABASE_URL not set for this monitor — re-run install.sh to pick up backup-destination support"));
+      return;
+    }
+    const tmpFile = path.join(os.tmpdir(), `ucms-pgquery-${crypto.randomUUID()}.sql`);
+    fs.writeFileSync(tmpFile, sql, { mode: 0o600 });
+    const cleanup = () => {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {}
+    };
+    const cmd = DEPLOY_MODE === "docker" ? "docker" : "psql";
+    const args =
+      DEPLOY_MODE === "docker"
+        ? ["run", "--rm", "--network", "ucms-net", "-v", `${tmpFile}:/query.sql:ro`, "postgres:16-alpine", "psql", BACKUP_DB_URL, "-tAq", "-f", "/query.sql"]
+        : [BACKUP_DB_URL, "-tAq", "-f", tmpFile];
+    execFile(cmd, args, { timeout: 15_000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      cleanup();
+      if (err) return reject(new Error(String(stderr || err.message).trim()));
+      resolve(stdout);
+    });
+  });
+}
+
+// SQL string-literal escaping (double a single quote), NOT shell escaping —
+// this value is embedded in a .sql file psql reads with -f, never a shell
+// command line. Standard, well-known Postgres literal-quoting rule.
+function sqlStringLiteral(value) {
+  return "'" + String(value).replace(/'/g, "''") + "'";
+}
+
+const BACKUP_SSH_TARGET_RE = /^[A-Za-z0-9_.@:/-]+$/;
+const BACKUP_GDRIVE_FOLDER_RE = /^[A-Za-z0-9_-]+$/;
+
+// Same masking apps/api/src/db/tenant-pool/backup-destination.ts does
+// independently (duplicated, not shared — this file and apps/api are
+// separate deployables with no shared module) — secrets never round-trip to
+// this dashboard's browser in plaintext once saved.
+function maskBackupDestination(cfg) {
+  const out = { type: cfg.type || "local" };
+  if (cfg.ssh) out.ssh = { target: cfg.ssh.target || "" };
+  if (cfg.s3) {
+    out.s3 = {
+      endpoint: cfg.s3.endpoint || "",
+      bucket: cfg.s3.bucket || "",
+      region: cfg.s3.region || "",
+      accessKeyId: cfg.s3.accessKeyId || "",
+      secretAccessKeySet: Boolean(cfg.s3.secretAccessKey),
+    };
+  }
+  if (cfg.gdrive) {
+    out.gdrive = { folderId: cfg.gdrive.folderId || "", serviceAccountConfigured: Boolean(cfg.gdrive.serviceAccountJson) };
+  }
+  return out;
+}
+
+// Mirrors apps/api's validateBackupDestination (portal-settings.ts) — same
+// rules, duplicated for the same "no shared module across these two
+// deployables" reason as the masking function above. `existing` lets a blank
+// secret/JSON field on an edit mean "keep what's already stored".
+function validateBackupDestinationPatch(body, existing) {
+  const type = body.type;
+  if (type === "local") return { merged: { type } };
+  if (type === "ssh") {
+    const target = String((body.ssh && body.ssh.target) || "").trim();
+    if (!target || !BACKUP_SSH_TARGET_RE.test(target)) return { error: "ssh.target must look like user@host:/path" };
+    return { merged: { type, ssh: { target } } };
+  }
+  if (type === "s3") {
+    const s3 = body.s3 || {};
+    const endpoint = String(s3.endpoint || "").trim();
+    const bucket = String(s3.bucket || "").trim();
+    const region = String(s3.region || "").trim();
+    const accessKeyId = String(s3.accessKeyId || "").trim();
+    const secretAccessKey = String(s3.secretAccessKey || "");
+    if (!endpoint || !bucket || !accessKeyId) return { error: "s3 endpoint/bucket/accessKeyId are required" };
+    for (const v of [endpoint, bucket, region, accessKeyId, secretAccessKey]) {
+      if (/[\r\n]/.test(v)) return { error: "s3 fields cannot contain newlines" };
+    }
+    const keptSecret = secretAccessKey || (existing.s3 && existing.s3.secretAccessKey) || "";
+    if (!keptSecret) return { error: "s3.secretAccessKey is required" };
+    return { merged: { type, s3: { endpoint, bucket, region, accessKeyId, secretAccessKey: keptSecret } } };
+  }
+  if (type === "gdrive") {
+    const gdrive = body.gdrive || {};
+    const folderId = String(gdrive.folderId || "").trim();
+    const serviceAccountJson = String(gdrive.serviceAccountJson || "");
+    if (!folderId || !BACKUP_GDRIVE_FOLDER_RE.test(folderId)) return { error: "gdrive.folderId must be a plain Google Drive folder ID" };
+    const keptJson = serviceAccountJson || (existing.gdrive && existing.gdrive.serviceAccountJson) || "";
+    if (!keptJson) return { error: "gdrive.serviceAccountJson is required" };
+    if (keptJson.length > 20_000) return { error: "gdrive.serviceAccountJson is too large" };
+    try {
+      JSON.parse(keptJson);
+    } catch {
+      return { error: "gdrive.serviceAccountJson must be valid JSON" };
+    }
+    return { merged: { type, gdrive: { folderId, serviceAccountJson: keptJson } } };
+  }
+  return { error: "type must be one of local/ssh/s3/gdrive" };
+}
+
+async function getBackupDestinationRow() {
+  const out = await runPsql("SELECT backup_destination FROM public.platform_settings WHERE id = 'singleton';");
+  const trimmed = out.trim();
+  if (!trimmed) return { type: "local" };
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && parsed.type ? parsed : { type: "local" };
+  } catch {
+    return { type: "local" };
+  }
+}
+
+function handleGetBackupDestination(req, res) {
+  getBackupDestinationRow()
+    .then((cfg) => sendJson(res, 200, maskBackupDestination(cfg)))
+    .catch((e) => sendJson(res, 500, { error: String(e.message || e) }));
+}
+
+function handleSetBackupDestination(req, res) {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(body || "{}");
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON body" });
+    }
+    try {
+      const existing = await getBackupDestinationRow();
+      const { error, merged } = validateBackupDestinationPatch(parsed, existing);
+      if (error) return sendJson(res, 400, { error });
+      const literal = sqlStringLiteral(JSON.stringify(merged));
+      await runPsql(
+        `INSERT INTO public.platform_settings (id, backup_destination) VALUES ('singleton', ${literal}::jsonb) ` +
+          `ON CONFLICT (id) DO UPDATE SET backup_destination = EXCLUDED.backup_destination, updated_at = now();`,
+      );
+      sendJson(res, 200, maskBackupDestination(merged));
+    } catch (e) {
+      sendJson(res, 500, { error: String(e.message || e) });
+    }
+  });
+}
+
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -2069,6 +2241,42 @@ const DASHBOARD_HTML = `<!doctype html>
   <div class="row">
     <button class="secondary" onclick="refreshDbSizes()">Refresh</button>
   </div>
+
+  <h3>Backup destination</h3>
+  <p class="muted">Where the nightly backup cron (<code>/opt/ucms/backup/run.sh</code>) pushes a copy after the local dump finishes. Same setting as the admin panel's Settings tab — editing it here or there updates the same row.</p>
+  <div class="row">
+    <select id="backupDestType" onchange="onBackupDestTypeChange()" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;">
+      <option value="local">Local only (no off-site copy)</option>
+      <option value="ssh">Remote host (SSH/rsync)</option>
+      <option value="s3">S3 / Cloudflare R2</option>
+      <option value="gdrive">Google Drive</option>
+    </select>
+  </div>
+  <div id="backupDestFields_ssh" class="row" style="display:none;">
+    <input id="backupSshTarget" placeholder="user@host:/path" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit; min-width:260px;" />
+  </div>
+  <div id="backupDestFields_s3" style="display:none;">
+    <div class="row">
+      <input id="backupS3Endpoint" placeholder="Endpoint (e.g. https://xxx.r2.cloudflarestorage.com)" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit; min-width:300px;" />
+      <input id="backupS3Bucket" placeholder="Bucket" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+      <input id="backupS3Region" placeholder="Region (optional, R2: auto)" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+    </div>
+    <div class="row">
+      <input id="backupS3AccessKey" placeholder="Access key ID" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
+      <input id="backupS3SecretKey" type="password" placeholder="Secret access key" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit; min-width:260px;" />
+    </div>
+  </div>
+  <div id="backupDestFields_gdrive" style="display:none;">
+    <div class="row">
+      <input id="backupGdriveFolder" placeholder="Shared Google Drive folder ID" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit; min-width:260px;" />
+    </div>
+    <p class="muted">Share that Drive folder with the service account's own email (<code>client_email</code> inside the JSON below) before saving.</p>
+    <textarea id="backupGdriveJson" placeholder="Paste the service-account JSON key here" rows="4" style="width:100%; font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem; padding:0.4rem; border-radius:6px; border:1px solid #8884; background:transparent; color:inherit;"></textarea>
+  </div>
+  <div class="row">
+    <button onclick="saveBackupDestination()">Save</button>
+    <span class="muted" id="backupDestMsg"></span>
+  </div>
 </div>
 
 <div class="tab-panel" id="panel-ssl">
@@ -2222,6 +2430,72 @@ async function refreshDbSizes() {
     }
   } catch (e) {
     tbody.innerHTML = "<tr><td class=\\"muted\\">Error: " + escapeHtml(e.message) + "</td></tr>";
+  }
+}
+
+function onBackupDestTypeChange() {
+  const type = document.getElementById("backupDestType").value;
+  for (const t of ["ssh", "s3", "gdrive"]) {
+    document.getElementById("backupDestFields_" + t).style.display = t === type ? "" : "none";
+  }
+}
+
+async function refreshBackupDestination() {
+  const msg = document.getElementById("backupDestMsg");
+  try {
+    const cfg = await api("/api/backup-destination");
+    document.getElementById("backupDestType").value = cfg.type || "local";
+    onBackupDestTypeChange();
+    if (cfg.ssh) document.getElementById("backupSshTarget").value = cfg.ssh.target || "";
+    if (cfg.s3) {
+      document.getElementById("backupS3Endpoint").value = cfg.s3.endpoint || "";
+      document.getElementById("backupS3Bucket").value = cfg.s3.bucket || "";
+      document.getElementById("backupS3Region").value = cfg.s3.region || "";
+      document.getElementById("backupS3AccessKey").value = cfg.s3.accessKeyId || "";
+      document.getElementById("backupS3SecretKey").placeholder = cfg.s3.secretAccessKeySet
+        ? "Secret already set — leave blank to keep"
+        : "Secret access key";
+    }
+    if (cfg.gdrive) {
+      document.getElementById("backupGdriveFolder").value = cfg.gdrive.folderId || "";
+      document.getElementById("backupGdriveJson").placeholder = cfg.gdrive.serviceAccountConfigured
+        ? "Service-account JSON already set — leave blank to keep"
+        : "Paste the service-account JSON key here";
+    }
+  } catch (e) {
+    msg.textContent = "Error: " + e.message;
+  }
+}
+
+async function saveBackupDestination() {
+  const type = document.getElementById("backupDestType").value;
+  const body = { type };
+  if (type === "ssh") {
+    body.ssh = { target: document.getElementById("backupSshTarget").value.trim() };
+  } else if (type === "s3") {
+    body.s3 = {
+      endpoint: document.getElementById("backupS3Endpoint").value.trim(),
+      bucket: document.getElementById("backupS3Bucket").value.trim(),
+      region: document.getElementById("backupS3Region").value.trim(),
+      accessKeyId: document.getElementById("backupS3AccessKey").value.trim(),
+      secretAccessKey: document.getElementById("backupS3SecretKey").value,
+    };
+  } else if (type === "gdrive") {
+    body.gdrive = {
+      folderId: document.getElementById("backupGdriveFolder").value.trim(),
+      serviceAccountJson: document.getElementById("backupGdriveJson").value,
+    };
+  }
+  const msg = document.getElementById("backupDestMsg");
+  msg.textContent = "Saving…";
+  try {
+    await api("/api/backup-destination", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+    msg.textContent = "Saved.";
+    document.getElementById("backupS3SecretKey").value = "";
+    document.getElementById("backupGdriveJson").value = "";
+    refreshBackupDestination();
+  } catch (e) {
+    msg.textContent = "Error: " + e.message;
   }
 }
 
@@ -2395,6 +2669,7 @@ async function init() {
   refreshSites();
   refreshDiskUsage();
   refreshDbSizes();
+  refreshBackupDestination();
   refreshUpdateCheck();
   refreshVersions();
   setInterval(refresh, 5000);
@@ -2881,6 +3156,10 @@ const server = http.createServer((req, res) => {
       handleSslIssue(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/alerts/test") {
       handleAlertTest(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/backup-destination") {
+      handleGetBackupDestination(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/backup-destination") {
+      handleSetBackupDestination(req, res);
     } else {
       sendJson(res, 404, { error: "not found" });
     }

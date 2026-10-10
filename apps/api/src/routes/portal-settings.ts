@@ -20,7 +20,11 @@ import {
   setTenantStorageLimits,
   setTenantMaintenanceMode,
   insertAuditLog,
+  getBackupDestination,
+  setBackupDestination,
+  maskBackupDestination,
 } from "../db/tenant-pool.js";
+import type { BackupDestinationConfig } from "../db/tenant-pool.js";
 
 // Language-switcher placement/style — shared enum for both the global
 // (platform_settings) and per-site (tenant_languages) settings.
@@ -167,6 +171,63 @@ function validateStorageLimits(body: unknown): string | null {
   // backup-restore upload's own per-call override, index.ts ~line 1207).
   if (typeof b.maxUploadFileSizeMb === "number" && b.maxUploadFileSizeMb > 500) return "maxUploadFileSizeMb cannot exceed 500";
   return null;
+}
+
+const SSH_TARGET_RE = /^[A-Za-z0-9_.@:/-]+$/;
+const GDRIVE_FOLDER_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+// Where the nightly backup cron pushes a copy after its local dump — see
+// schema.ts's platformSettings.backupDestination comment and install.sh's
+// install_backup_cron/run.sh (the actual consumer; it reads this same row
+// straight via psql, not through this API). `existing` lets a blank
+// secret/JSON field on an edit mean "keep what's already stored" instead of
+// forcing a re-paste or silently wiping it — same convention the masked GET
+// response already implies by never sending the secret back.
+function validateBackupDestination(body: unknown, existing: BackupDestinationConfig): string | BackupDestinationConfig {
+  const b = (body as Record<string, unknown>) || {};
+  const type = b.type;
+  if (type === "local") return { type };
+  if (type === "ssh") {
+    const ssh = (b.ssh as Record<string, unknown>) || {};
+    const target = String(ssh.target || "").trim();
+    // Same shape install.sh's own off-site prompt validates — this still
+    // ends up driving a root cron job's rsync target, not just a UI string.
+    if (!target || !SSH_TARGET_RE.test(target)) return "ssh.target must look like user@host:/path";
+    return { type, ssh: { target } };
+  }
+  if (type === "s3") {
+    const s3 = (b.s3 as Record<string, unknown>) || {};
+    const endpoint = String(s3.endpoint || "").trim();
+    const bucket = String(s3.bucket || "").trim();
+    const region = String(s3.region || "").trim();
+    const accessKeyId = String(s3.accessKeyId || "").trim();
+    const secretAccessKey = String(s3.secretAccessKey || "");
+    if (!endpoint || !bucket || !accessKeyId) return "s3 endpoint/bucket/accessKeyId are required";
+    // These land in a generated rclone.conf (ini format) on the VPS — a
+    // stray newline would let one field inject a whole extra config line.
+    for (const v of [endpoint, bucket, region, accessKeyId, secretAccessKey]) {
+      if (/[\r\n]/.test(v)) return "s3 fields cannot contain newlines";
+    }
+    const keptSecret = secretAccessKey || existing.s3?.secretAccessKey || "";
+    if (!keptSecret) return "s3.secretAccessKey is required";
+    return { type, s3: { endpoint, bucket, region, accessKeyId, secretAccessKey: keptSecret } };
+  }
+  if (type === "gdrive") {
+    const gdrive = (b.gdrive as Record<string, unknown>) || {};
+    const folderId = String(gdrive.folderId || "").trim();
+    const serviceAccountJson = String(gdrive.serviceAccountJson || "");
+    if (!folderId || !GDRIVE_FOLDER_ID_RE.test(folderId)) return "gdrive.folderId must be a plain Google Drive folder ID";
+    const keptJson = serviceAccountJson || existing.gdrive?.serviceAccountJson || "";
+    if (!keptJson) return "gdrive.serviceAccountJson is required";
+    if (keptJson.length > 20_000) return "gdrive.serviceAccountJson is too large";
+    try {
+      JSON.parse(keptJson);
+    } catch {
+      return "gdrive.serviceAccountJson must be valid JSON";
+    }
+    return { type, gdrive: { folderId, serviceAccountJson: keptJson } };
+  }
+  return "type must be one of local/ssh/s3/gdrive";
 }
 
 // Superadmin-only "Login Methods"/theme/branding/storage-limits/maintenance
@@ -334,6 +395,31 @@ export function registerPortalSettingsRoutes(app: FastifyInstance) {
     const { maxUploadFileSizeMb = null, maxTotalStorageMb = null } = req.body as Record<string, number | null>;
     await setTenantStorageLimits(host, { maxUploadFileSizeMb, maxTotalStorageMb });
     return { saved: true };
+  });
+
+  app.get("/api/portal/backup-destination", async (req, reply) => {
+    if (!verifySuperadmin(req, reply)) return;
+    return maskBackupDestination(await getBackupDestination());
+  });
+
+  app.put("/api/portal/backup-destination", async (req, reply) => {
+    const session = verifySuperadmin(req, reply);
+    if (!session) return;
+    const existing = await getBackupDestination();
+    const result = validateBackupDestination(req.body, existing);
+    if (typeof result === "string") {
+      reply.code(400);
+      return { error: result };
+    }
+    await setBackupDestination(result);
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.backup_destination",
+      meta: { type: result.type },
+      ip: req.ip,
+    });
+    return maskBackupDestination(result);
   });
 
   // Manage Site's maintenance-mode toggle — separate from suspend/delete, see

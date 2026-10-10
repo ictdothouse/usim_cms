@@ -231,6 +231,55 @@ export const getLoginSettings = (token: string) =>
 export const setLoginSettings = (token: string, patch: Partial<LoginSettings>) =>
   request("/api/portal/login-settings", null, token, { method: "PUT", body: JSON.stringify(patch) }).then(toLoginSettings);
 
+// Where the nightly backup cron pushes a copy after its local dump — same
+// row the ops monitor dashboard's own "Backup destination" card edits.
+// Secrets (s3SecretAccessKey/gdriveServiceAccountJson) are only ever sent on
+// write; GET reports *Set booleans instead, never the stored value itself.
+export type BackupDestinationType = "local" | "ssh" | "s3" | "gdrive";
+export interface BackupDestination {
+  type: BackupDestinationType;
+  sshTarget: string;
+  s3Endpoint: string;
+  s3Bucket: string;
+  s3Region: string;
+  s3AccessKeyId: string;
+  s3SecretAccessKeySet: boolean;
+  gdriveFolderId: string;
+  gdriveServiceAccountConfigured: boolean;
+}
+
+function toBackupDestination(b: Record<string, unknown>): BackupDestination {
+  const ssh = (b.ssh as Record<string, unknown>) || {};
+  const s3 = (b.s3 as Record<string, unknown>) || {};
+  const gdrive = (b.gdrive as Record<string, unknown>) || {};
+  return {
+    type: (b.type as BackupDestinationType) || "local",
+    sshTarget: (ssh.target as string) || "",
+    s3Endpoint: (s3.endpoint as string) || "",
+    s3Bucket: (s3.bucket as string) || "",
+    s3Region: (s3.region as string) || "",
+    s3AccessKeyId: (s3.accessKeyId as string) || "",
+    s3SecretAccessKeySet: Boolean(s3.secretAccessKeySet),
+    gdriveFolderId: (gdrive.folderId as string) || "",
+    gdriveServiceAccountConfigured: Boolean(gdrive.serviceAccountConfigured),
+  };
+}
+
+export const getBackupDestination = (token: string) =>
+  request("/api/portal/backup-destination", null, token).then(toBackupDestination);
+
+// secretAccessKey/serviceAccountJson blank (or omitted) means "keep whatever
+// is already stored" — only a non-empty value ever overwrites a secret.
+export interface BackupDestinationPatch {
+  type: BackupDestinationType;
+  ssh?: { target: string };
+  s3?: { endpoint: string; bucket: string; region: string; accessKeyId: string; secretAccessKey?: string };
+  gdrive?: { folderId: string; serviceAccountJson?: string };
+}
+
+export const setBackupDestination = (token: string, patch: BackupDestinationPatch) =>
+  request("/api/portal/backup-destination", null, token, { method: "PUT", body: JSON.stringify(patch) }).then(toBackupDestination);
+
 // Public, unauthenticated — the login page needs this before anyone has
 // signed in, to decide which buttons/forms to show (see App.tsx's login page
 // and the mode-1/2/3 split documented in apps/api/CLAUDE.md's Auth
