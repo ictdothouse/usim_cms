@@ -57,6 +57,11 @@ ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "entra_client_
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "seo_title_template" text DEFAULT '' NOT NULL;
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "seo_default_description" text DEFAULT '' NOT NULL;
 
+-- Off-site backup push target (Settings "Backup destination" card, also
+-- editable from the ops monitor dashboard) — see schema.ts's own comment on
+-- this column and db/tenant-pool/backup-destination.ts for the shape.
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "backup_destination" jsonb DEFAULT '{"type":"local"}'::jsonb NOT NULL;
+
 -- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
 -- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
 -- counter table.

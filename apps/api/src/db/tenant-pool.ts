@@ -102,3 +102,6 @@ export {
   setTenantStorageLimits,
   getMergedStorageLimits,
 } from "./tenant-pool/storage.js";
+
+export type { BackupDestinationType, BackupDestinationConfig, MaskedBackupDestination } from "./tenant-pool/backup-destination.js";
+export { maskBackupDestination, getBackupDestination, setBackupDestination } from "./tenant-pool/backup-destination.js";
