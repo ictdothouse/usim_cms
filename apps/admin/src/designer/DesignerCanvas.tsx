@@ -38,6 +38,7 @@ import {
   SPACE, lengthValue, colStyle, overlayColors, shadowToCss, RADIUS, BORDER, RADIUS_CORNER_KEYS,
 } from "./style";
 import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./fields";
+import { writeDragSideKeys, applySectionSpacingWrite } from "./spacingDrag";
 import { ElPreview } from "./ElPreview";
 import { DEVICE_DIMS } from "./DeviceViewport";
 import type { Bp, Block, Col, Row, El, SectionProps, Drag } from "./types";
@@ -173,29 +174,6 @@ export function DesignerCanvas({
     if (!props) return false;
     const key = bp === "desktop" ? "hideDesktop" : bp === "tablet" ? "hideTablet" : "hideMobile";
     return props[key] === "true";
-  }
-  // Canvas drag-to-resize write for a four-side control: when `linked` is on
-  // (the chain-icon toggle), one dragged handle must move all sides together
-  // — same rule as the Inspector's linked input, which fans the same value
-  // out to every side key. `target` is already the cloned-next-state node
-  // (from startSpacingDrag's `apply` callback), mutated in place.
-  function writeDragSideKeys(
-    target: { props?: Record<string, string>; bp?: Record<string, string> },
-    keys: readonly string[],
-    activeKey: string,
-    px: number,
-    linked: boolean,
-  ) {
-    const touched = linked ? keys : [activeKey];
-    if (bp === "desktop") {
-      const patch: Record<string, string> = {};
-      for (const k of touched) patch[k] = `${px}px`;
-      target.props = { ...(target.props ?? {}), ...patch };
-    } else {
-      const patch: Record<string, string> = {};
-      for (const k of touched) patch[bpKey(k)] = `${px}px`;
-      target.bp = { ...(target.bp ?? {}), ...patch };
-    }
   }
   function sectionBpStyle(sp: SectionProps): React.CSSProperties {
     const v = (key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
@@ -521,14 +499,7 @@ export function DesignerCanvas({
                   // this section writes directly instead.
                   const applyDrag = (key: string, px: number) => (next: Block[]) => {
                     const props = next[b].props as unknown as SectionProps;
-                    const keys = linkedPadding ? Object.values(PADDING_SIDE_KEYS) : [key];
-                    if (bp === "desktop") {
-                      for (const k of keys) (props as unknown as Record<string, string>)[k] = `${px}px`;
-                    } else {
-                      const patch: Record<string, string> = {};
-                      for (const k of keys) patch[bpKey(k)] = `${px}px`;
-                      props.bp = { ...(props.bp ?? {}), ...patch };
-                    }
+                    applySectionSpacingWrite(props, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding, bp, bpKey);
                   };
                   return (
                     <>
@@ -603,14 +574,7 @@ export function DesignerCanvas({
                   const leftPx = sidePx("left");
                   const applyDrag = (key: string, px: number) => (next: Block[]) => {
                     const props = next[b].props as unknown as SectionProps;
-                    const keys = linkedMargin ? Object.values(MARGIN_SIDE_KEYS) : [key];
-                    if (bp === "desktop") {
-                      for (const k of keys) (props as unknown as Record<string, string>)[k] = `${px}px`;
-                    } else {
-                      const patch: Record<string, string> = {};
-                      for (const k of keys) patch[bpKey(k)] = `${px}px`;
-                      props.bp = { ...(props.bp ?? {}), ...patch };
-                    }
+                    applySectionSpacingWrite(props, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin, bp, bpKey);
                   };
                   const k = (edge: string) => bandKey(`sec.${b}.margin`, edge, linkedMargin);
                   const pxOf = { top: topPx, right: rightPx, bottom: bottomPx, left: leftPx } as const;
@@ -858,6 +822,8 @@ export function DesignerCanvas({
                                               key,
                                               px,
                                               linkedPadding,
+                                              bp,
+                                              bpKey,
                                             );
                                           },
                                           k(edge),
@@ -893,6 +859,8 @@ export function DesignerCanvas({
                                               key,
                                               px,
                                               linkedPadding,
+                                              bp,
+                                              bpKey,
                                             );
                                           },
                                           k(edge),
@@ -934,7 +902,7 @@ export function DesignerCanvas({
                                   dir,
                                   (next, px) => {
                                     const target = section(next, b).rows[r].columns[c];
-                                    writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
+                                    writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin, bp, bpKey);
                                   },
                                   k(edge),
                                 );
@@ -1051,7 +1019,7 @@ export function DesignerCanvas({
                                       dir,
                                       (next, px) => {
                                         const target = section(next, b).rows[r].columns[c].elements[e];
-                                        writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin);
+                                        writeDragSideKeys(target, Object.values(MARGIN_SIDE_KEYS), key, px, linkedMargin, bp, bpKey);
                                       },
                                       k(edge),
                                     );
@@ -1123,7 +1091,7 @@ export function DesignerCanvas({
                                               edge === "top" ? 1 : -1,
                                               (next, px) => {
                                                 const target = section(next, b).rows[r].columns[c].elements[e];
-                                                writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
+                                                writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding, bp, bpKey);
                                               },
                                               k(edge),
                                             );
@@ -1153,7 +1121,7 @@ export function DesignerCanvas({
                                               edge === "left" ? 1 : -1,
                                               (next, px) => {
                                                 const target = section(next, b).rows[r].columns[c].elements[e];
-                                                writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding);
+                                                writeDragSideKeys(target, Object.values(PADDING_SIDE_KEYS), key, px, linkedPadding, bp, bpKey);
                                               },
                                               k(edge),
                                             );

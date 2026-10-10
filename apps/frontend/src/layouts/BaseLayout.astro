@@ -1087,6 +1087,143 @@ const fontsHref = allFonts.length
             return getComputedStyle(node).display === "contents" ? node.firstElementChild || node : node;
           }
 
+          // Padding/margin drag handles — parity with Blocks mode's
+          // DesignerCanvas.tsx (startSpacingDrag/writeDragSideKeys), ported
+          // here so Live Edit's real rendered page gets the same drag-to-
+          // resize UX instead of Inspector-field-only editing. Scoped to
+          // Section (path length 1), Column (3) and Element (4) — same
+          // depths Blocks mode's own handles cover; Row has none there
+          // either (and has no data-designer-path here to address it).
+          // Reads current values via getComputedStyle rather than
+          // reimplementing the PAD-table/axis-fallback resolution chain a
+          // third time — the browser has already resolved that into the
+          // real rendered px, which is the actual source of truth here.
+          const PADDING_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" };
+          const MARGIN_KEYS = { top: "marginTop", right: "marginRight", bottom: "marginBottom", left: "marginLeft" };
+          const MARGIN_COLOR = "#f59e0b";
+          // Set once per designer:selected message (see below) from
+          // useLiveEditBridge.ts's own linkedPadding/linkedMargin — the
+          // Inspector's chain-icon toggle, not duplicated here.
+          let spacing = { linkedPadding: true, linkedMargin: true };
+          let spacingHandleBox = null;
+          let spacingHandleEls = [];
+          let spacingRestorePosition = null;
+
+          function kebab(key) {
+            return key.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+          }
+
+          function destroySpacingHandles() {
+            for (const el of spacingHandleEls) el.remove();
+            spacingHandleEls = [];
+            if (spacingHandleBox && spacingRestorePosition !== null) {
+              spacingHandleBox.style.position = spacingRestorePosition;
+            }
+            spacingHandleBox = null;
+            spacingRestorePosition = null;
+          }
+
+          function positionSpacingHandle(handle, edge, isMargin) {
+            Object.assign(handle.style, { left: "", right: "", top: "", bottom: "", transform: "" });
+            if (edge === "top") {
+              Object.assign(handle.style, isMargin ? { right: "32px", top: "-8px" } : { left: "50%", top: "0", transform: "translate(-50%,-50%)" });
+            } else if (edge === "bottom") {
+              Object.assign(handle.style, isMargin ? { right: "32px", bottom: "-8px" } : { left: "50%", bottom: "0", transform: "translate(-50%,50%)" });
+            } else if (edge === "left") {
+              Object.assign(handle.style, isMargin ? { top: "32px", left: "-8px" } : { top: "50%", left: "0", transform: "translate(-50%,-50%)" });
+            } else {
+              Object.assign(handle.style, isMargin ? { top: "32px", right: "-8px" } : { top: "50%", right: "0", transform: "translate(50%,-50%)" });
+            }
+          }
+
+          function buildSpacingHandles(node, path) {
+            if (![1, 3, 4].includes(path.length)) return;
+            const box = visualTarget(node);
+            if (!box) return;
+            spacingHandleBox = box;
+            spacingRestorePosition = getComputedStyle(box).position === "static" ? box.style.position || "" : null;
+            if (spacingRestorePosition !== null) box.style.position = "relative";
+
+            function addHandle(isMargin, edge) {
+              const keyMap = isMargin ? MARGIN_KEYS : PADDING_KEYS;
+              const key = keyMap[edge];
+              const prop = kebab(key);
+              const axis = edge === "top" || edge === "bottom" ? "y" : "x";
+              const sign = edge === "top" || edge === "left" ? 1 : -1;
+              const linked = isMargin ? spacing.linkedMargin : spacing.linkedPadding;
+              const touched = linked ? Object.values(keyMap) : [key];
+              const stripe = isMargin
+                ? "repeating-linear-gradient(45deg,rgba(245,158,11,0.35) 0,rgba(245,158,11,0.35) 6px,rgba(245,158,11,0.12) 6px,rgba(245,158,11,0.12) 12px)"
+                : "repeating-linear-gradient(45deg,rgba(15,98,254,0.35) 0,rgba(15,98,254,0.35) 6px,rgba(15,98,254,0.12) 6px,rgba(15,98,254,0.12) 12px)";
+
+              const band = document.createElement("div");
+              band.style.cssText = `position:absolute;pointer-events:none;z-index:9998;display:none;background-image:${stripe};`;
+              box.appendChild(band);
+              spacingHandleEls.push(band);
+
+              const handle = document.createElement("div");
+              handle.style.cssText =
+                "position:absolute;z-index:9999;padding:2px 6px;border-radius:4px;color:#fff;" +
+                "font:700 9px/1.2 system-ui,sans-serif;user-select:none;" +
+                `background:${isMargin ? MARGIN_COLOR : ACCENT};` +
+                `cursor:${axis === "y" ? "ns-resize" : "ew-resize"};`;
+              positionSpacingHandle(handle, edge, isMargin);
+              box.appendChild(handle);
+              spacingHandleEls.push(handle);
+
+              function currentPx() {
+                return Math.round(parseFloat(getComputedStyle(box).getPropertyValue(prop)) || 0);
+              }
+              function render(px) {
+                handle.textContent = `${px}px`;
+                band.style.display = px ? "block" : "none";
+                if (!px) return;
+                const offset = isMargin ? -px : 0;
+                if (edge === "top") Object.assign(band.style, { left: "0", right: "0", top: `${offset}px`, bottom: "", height: `${px}px`, width: "" });
+                else if (edge === "bottom")
+                  Object.assign(band.style, { left: "0", right: "0", bottom: `${offset}px`, top: "", height: `${px}px`, width: "" });
+                else if (edge === "left")
+                  Object.assign(band.style, { top: "0", bottom: "0", left: `${offset}px`, right: "", width: `${px}px`, height: "" });
+                else Object.assign(band.style, { top: "0", bottom: "0", right: `${offset}px`, left: "", width: `${px}px`, height: "" });
+              }
+              render(currentPx());
+
+              handle.addEventListener("pointerenter", () => render(currentPx()));
+              handle.addEventListener("pointerleave", () => {
+                if (handle.dataset.dragging !== "1") render(0);
+              });
+
+              handle.addEventListener("pointerdown", (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                handle.dataset.dragging = "1";
+                const startPx = currentPx();
+                const startPos = axis === "y" ? e.clientY : e.clientX;
+                let lastPx = startPx;
+                track(
+                  e,
+                  (ev) => {
+                    const pos = axis === "y" ? ev.clientY : ev.clientX;
+                    lastPx = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
+                    for (const k of touched) setImp(box, kebab(k), `${lastPx}px`);
+                    render(lastPx);
+                  },
+                  (moved) => {
+                    delete handle.dataset.dragging;
+                    if (!moved) {
+                      render(0);
+                      return;
+                    }
+                    parent.postMessage({ type: "designer:spacingDrag", path: path.join("."), fields: touched, px: lastPx }, targetOrigin);
+                  },
+                );
+              });
+            }
+
+            ["top", "bottom", "left", "right"].forEach((edge) => addHandle(false, edge));
+            ["top", "bottom", "left", "right"].forEach((edge) => addHandle(true, edge));
+          }
+
           // Puck-style hover/selected feedback: a light dashed outline under
           // the pointer, a solid one on whatever `sel` currently is in
           // Designer.tsx (see its designer:selected postMessage below) —
@@ -1285,8 +1422,10 @@ const fontsHref = allFonts.length
             }
             if (e.data.type === "designer:selected") {
               if (e.data.labels) labels = e.data.labels;
+              if (e.data.spacing) spacing = e.data.spacing;
               if (selectedNode) visualTarget(selectedNode).style.outline = "";
               selectionResizeObserver.disconnect();
+              destroySpacingHandles();
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
               // Designer names the selected slide child ("slideIdx.r.c.e") —
               // re-attaches its chrome after every reload, and drops it when
@@ -1300,6 +1439,7 @@ const fontsHref = allFonts.length
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
                 selectionResizeObserver.observe(visualTarget(selectedNode));
                 reportSelectedRect();
+                buildSpacingHandles(selectedNode, String(e.data.path).split(".").map(Number));
               }
               return;
             }
