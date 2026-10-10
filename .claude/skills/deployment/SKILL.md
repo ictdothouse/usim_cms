@@ -245,12 +245,44 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   sets `UPLOADS_DIR=apps/api/uploads` directly. Restore is a plain `rsync -a --delete
   .../latest/ uploads/<tenantFolder>/`; migrating a tenant to a new server is the same
   `rsync` pointed at `newhost:` instead — no app code involved either way, meant for a cron
-  job (`0 2 * * *`) same as `backup.sh`, not wired into `install.sh` (opt-in, same as
-  `backup.sh` itself). **Multi-VPS fleet (one department's usim_cms per VPS, each with a
-  small local disk)**: a backup written back onto the same disk it's protecting doesn't
-  survive that disk filling up or the VPS dying — set `SOURCE_HOST=user@app-vps-ip` to run
-  the script in pull mode from a separate backup box instead (plain SSH, no new
-  dependency), an explicit tenant-host list required (no remote directory listing).
+  job (`0 2 * * *`) same as `backup.sh`. **Multi-VPS fleet (one department's usim_cms per
+  VPS, each with a small local disk)**: a backup written back onto the same disk it's
+  protecting doesn't survive that disk filling up or the VPS dying — set
+  `SOURCE_HOST=user@app-vps-ip` to run the script in pull mode from a separate backup box
+  instead (plain SSH, no new dependency), an explicit tenant-host list required (no remote
+  directory listing).
+- **Backup cron is now wired into `install.sh` (2026-10-10)** — `install_backup_cron()`,
+  called from all three `install_*_mode` functions right after `configure_optional_
+  integrations`, closing the gap the two bullets above used to call out ("not wired into
+  `install.sh`, opt-in"): a fresh client VPS used to ship both backup scripts with zero
+  automatic schedule, so "ready for a client" audits kept finding this as the top open item.
+  Interactive-only (same off-on-non-interactive-run convention as `configure_optional_
+  integrations`), `[Y/n]`-defaulted (backups are a safety feature, not an opt-in integration
+  — deliberately asymmetric with that function's own `[y/N]` prompts). Asks for
+  `BACKUP_DIR` (default `/var/backups/usim_cms`), `RETENTION_DAYS` (default 14), and an
+  optional off-site `user@host:/path` rsync target — the install flow's own answer to "how
+  do I not lose everything if this VPS dies," since `backup-media.sh`'s own `SOURCE_HOST`
+  pull-mode only helps a SEPARATE backup box pulling FROM this one, nothing this VPS's own
+  cron can set up unilaterally. Installs `cron`/`cronie` via the existing `PKG_MGR` dispatch
+  if `crontab` isn't already present, then merges a marker-delimited block
+  (`# >>> usim_cms backup (install.sh) >>>` / `# <<< ... <<<`) into root's crontab —
+  `sed`-deleted and re-appended on every run, so re-running the installer replaces its own
+  prior entry instead of duplicating it, same idempotent-rerun convention as everything else
+  here; anything else already in root's crontab is left alone. The cron line itself calls a
+  mode-specific wrapper, never `backup.sh`/`backup-media.sh` directly: **`scripts/
+  docker-backup.sh`** (docker + production mode) runs `backup.sh` inside a one-off
+  `postgres:16-alpine` container attached to `ucms-net`, talking to `db:5432` directly
+  (bypassing pgbouncer — a long-running dump shouldn't sit on one of its few pooled backend
+  connections for no benefit) because `db`'s port is deliberately never published to the
+  host (see its own compose comment), so a plain host cron job has no way to reach it at
+  all; then runs `backup-media.sh` directly on the host (no network boundary there — it
+  only needs the docker CLI to resolve the `ucms-uploads` volume's path). **`scripts/
+  baremetal-backup.sh`** needs none of that — bare-metal's Postgres is directly reachable,
+  so it just sources `apps/api/.env` and calls both scripts as-is. Both wrappers are plain
+  cron entry points, not something to run by hand with different arguments than cron itself
+  would use. Off-site rsync (when configured) still needs passwordless SSH key auth to that
+  host set up by hand first (`ssh-copy-id`) — same prerequisite `SOURCE_HOST` pull-mode
+  above already documents, install.sh doesn't automate key exchange.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
