@@ -1491,7 +1491,21 @@ NEEDS_NGINX_SNIPPET="false"
 # app owns) and this box needs one manual nginx vhost added afterward (see
 # print_nginx_snippet) — install.sh never edits another app's nginx config
 # itself, that's too blind an action to automate on a shared box.
+#
+# Real incident, 2026-10-10: port_in_use is a plain `ss -ltn` check with no
+# idea which process owns a port — on a re-run of `--mode=production` against
+# an ALREADY-LIVE box, our own already-running `proxy` container is itself
+# sitting on 80/443 (as expected), but this function can't tell that apart
+# from a foreign app and wrongly switched Caddy to loopback-only ports,
+# disabling auto-HTTPS — taking the live admin panel and every tenant site
+# offline until manually reverted. Guard: if our own `proxy` service is
+# already up, whatever holds 80/443 right now is almost certainly it, not a
+# foreign app — leave its existing bind untouched instead of re-detecting.
 ensure_caddy_bind_ports() {
+  if [ -n "$(docker compose ps proxy --status running -q 2>/dev/null)" ]; then
+    echo "proxy is already running — leaving its existing port bind untouched."
+    return
+  fi
   if port_in_use 80 || port_in_use 443; then
     echo ""
     echo "Port 80 and/or 443 already in use by another app on this VPS."
