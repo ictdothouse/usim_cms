@@ -357,6 +357,90 @@ configure_optional_integrations() {
   echo ""
 }
 
+# ---------------------------------------------------------------------------
+# Scheduled backups — apps/api/scripts/backup.sh (pg_dump) + backup-media.sh
+# (uploads rsync) exist but have no automatic schedule of their own (meant to
+# be cron'd per the comment in each — see .claude/skills/deployment/SKILL.md).
+# Wires them into root's crontab via a mode-specific wrapper
+# (scripts/docker-backup.sh or scripts/baremetal-backup.sh — see their own
+# headers for why docker mode needs one and bare-metal doesn't). Skippable,
+# same interactive-only/off-on-Enter convention as configure_optional_
+# integrations — a non-interactive run gets no cron job, same as today.
+# $1 = "docker" | "baremetal"
+# ---------------------------------------------------------------------------
+install_backup_cron() {
+  local mode="$1"
+  if [ ! -t 0 ]; then
+    return
+  fi
+  echo ""
+  echo "-- Scheduled backups (pg_dump + uploads snapshot via cron) --"
+  echo "   Without this, the backup scripts exist but never run automatically."
+  local backup_yn=""
+  read -r -p "Set up a daily backup cron job now? [Y/n]: " backup_yn
+  if [ "$backup_yn" = "n" ] || [ "$backup_yn" = "N" ]; then
+    echo "  Skipped — remember backups won't run until you schedule them yourself."
+    return
+  fi
+
+  local backup_dir retention offsite
+  read -r -p "  Backup directory [/var/backups/usim_cms]: " backup_dir
+  backup_dir="${backup_dir:-/var/backups/usim_cms}"
+  read -r -p "  Retention in days [14]: " retention
+  retention="${retention:-14}"
+  echo "  A backup sitting on this same VPS doesn't survive the VPS itself dying."
+  read -r -p "  Off-site target to rsync a copy to after each run (user@host:/path, blank = skip): " offsite
+
+  mkdir -p "$backup_dir"
+
+  # cron/cronie isn't on every minimal distro image — same PKG_MGR dispatch
+  # detect_os_family already set up for everything else in this script.
+  if ! command -v crontab >/dev/null 2>&1; then
+    if [ "$PKG_MGR" = "apt" ]; then
+      pkg_install cron
+    else
+      pkg_install cronie
+      systemctl enable --now crond
+    fi
+  fi
+
+  local script_path
+  if [ "$mode" = "docker" ]; then
+    script_path="${REPO_DIR}/scripts/docker-backup.sh"
+  else
+    script_path="${REPO_DIR}/scripts/baremetal-backup.sh"
+  fi
+
+  # Marker-delimited block, so re-running this installer replaces its own
+  # prior entry instead of appending a duplicate every time (same idempotent-
+  # rerun convention the rest of this script follows) — anything else already
+  # in root's crontab, unrelated to usim_cms, is left untouched.
+  local marker_start="# >>> usim_cms backup (install.sh) >>>"
+  local marker_end="# <<< usim_cms backup (install.sh) <<<"
+  local new_block="${marker_start}
+BACKUP_DIR=${backup_dir}
+RETENTION_DAYS=${retention}
+0 2 * * * ${script_path} >> /var/log/ucms-backup.log 2>&1"
+  if [ -n "$offsite" ]; then
+    new_block="${new_block}
+30 2 * * * rsync -a --delete ${backup_dir}/ ${offsite}/ >> /var/log/ucms-backup.log 2>&1"
+  fi
+  new_block="${new_block}
+${marker_end}"
+
+  { crontab -l 2>/dev/null | sed "/${marker_start}/,/${marker_end}/d"; echo "$new_block"; } | crontab -
+
+  echo "  Backup cron installed: daily 02:00, ${retention}-day retention -> ${backup_dir}"
+  if [ -n "$offsite" ]; then
+    echo "  Off-site rsync to ${offsite} at 02:30 — needs passwordless SSH key auth"
+    echo "  to that host already set up (ssh-copy-id), same requirement"
+    echo "  backup-media.sh's own SOURCE_HOST pull-mode documents."
+  else
+    echo "  NOTE: backups stay on this VPS only. Re-run this installer or"
+    echo "  'crontab -e' later to add an off-site target."
+  fi
+}
+
 # Private, pinned Node runtime — never touches system Node (no NodeSource
 # repo, no global npm/pnpm), so it can never conflict with whatever Node
 # version any other project on this VPS already relies on. Referenced only
@@ -810,6 +894,7 @@ install_docker_mode() {
   set_env_kv .env FRONTEND_PORT "$frontend_port"
   set_env_kv .env ADMIN_PORT "$admin_port"
   configure_optional_integrations .env
+  install_backup_cron "docker"
   # Remove a stale override from a previous run of this script (pre-fix
   # versions generated one) — leaving it in place would still trigger the
   # same bind-both-ports bug described above.
@@ -1072,6 +1157,7 @@ install_production_mode() {
   grep -qE '^FRONTEND_REPLICAS=.+' .env || set_env_kv .env FRONTEND_REPLICAS "1"
   grep -qE '^ADMIN_REPLICAS=.+' .env || set_env_kv .env ADMIN_REPLICAS "1"
   configure_optional_integrations .env
+  install_backup_cron "docker"
 
   write_pgbouncer_userlist
 
@@ -1235,6 +1321,7 @@ install_baremetal_mode() {
   grep -q '^SESSION_SECRET=' apps/api/.env || echo "SESSION_SECRET=" >> apps/api/.env
   fill_env_if_blank apps/api/.env SESSION_SECRET
   configure_optional_integrations apps/api/.env
+  install_backup_cron "baremetal"
 
   echo ""
   echo "Installing dependencies (pnpm via corepack, first run can take a while)..."
