@@ -199,7 +199,11 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   checking real usage by hand — `sudo du -xh --max-depth=3 / | sort -rh | head -30` and
   `docker system df -v` are still the right first move if disk pressure shows up again, since a
   genuinely new, large, legitimate growth source (e.g. media uploads, Postgres data itself)
-  needs a different fix than a cache/log cap.
+  needs a different fix than a cache/log cap. The dashboard's "Database & Sites" tab now
+  surfaces the same `docker system df` numbers directly (`getDockerDiskUsage`/
+  `parseDockerSystemDf` in `monitor/server.js`, columns parsed by position off the header line
+  since "Local Volumes"/"Build Cache" are multi-word types) plus a "Full breakdown" button for
+  the verbose per-image/per-volume view — no SSH needed for the first look anymore.
 - Tenant backup/restore/migration is `apps/api/src/backup.ts`, not `pg_dump`: JSON dump
   of a tenant's rows + its local uploads, zipped — restores across Postgres versions and
   onto a different server/host (rewrites `/uploads/<host>/` references on cross-host
