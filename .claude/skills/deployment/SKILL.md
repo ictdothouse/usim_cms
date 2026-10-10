@@ -303,8 +303,16 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   host (see its own compose comment), so a plain host cron job has no way to reach it at
   all; then runs `backup-media.sh` directly on the host (no network boundary there — it only
   needs the docker CLI to resolve the `ucms-uploads` volume's path). Bare-metal's `run.sh`
-  needs none of that — its Postgres is directly reachable, so it just sources the generated
-  `backup.env` and calls both scripts as-is. Either way, a credential rotation
+  needs none of that — its Postgres is directly reachable — but deliberately does NOT
+  `source backup.env` to load it: a bash assignment's right-hand side still runs command
+  substitution even when the line comes from a sourced file (`FOO=$(cmd)` executes `cmd`),
+  so sourcing a `DATABASE_URL` copied verbatim out of `apps/api/.env` would run anything
+  shell-special a stored password/URL happened to contain, as root, once a day — caught by
+  the same review pass as the two issues above, confirmed with a real `$(touch ...)` payload
+  in local testing. Instead it reads `backup.env` line by line and exports each
+  `${line%%=*}=${line#*=}` split — plain parameter expansion, which substitutes the value's
+  stored text once without ever re-parsing it as shell syntax, unlike `source`/`eval`. Either
+  way, a credential rotation
   (`POSTGRES_APP_PASSWORD`/`DATABASE_URL`) needs this installer re-run to regenerate
   `backup.env` — a point-in-time snapshot, not a live reference — same already-documented
   caveat as PgBouncer's own live-password-rotation steps above. `$backup_dir` and

@@ -511,9 +511,19 @@ EOF
 # re-running install.sh, not hand-edited here.
 set -euo pipefail
 cd "$(dirname "$0")"
-set -a
-source backup.env
-set +a
+# Deliberately NOT `source backup.env` — a plain bash assignment's
+# right-hand side still undergoes command substitution even when the line
+# comes from a sourced file (`FOO=$(cmd)` runs `cmd`), so sourcing a
+# DATABASE_URL copied verbatim out of apps/api/.env would execute anything
+# shell-special a stored password/URL happened to contain, as root, once a
+# day. Parameter-expansion splitting on the first `=` and exporting the
+# pieces as a single already-literal string reads the same KEY=VALUE shape
+# without ever re-interpreting the value's own content as shell syntax.
+while IFS= read -r line; do
+  case "$line" in
+    *=*) export "${line%%=*}=${line#*=}" ;;
+  esac
+done < backup.env
 bash backup.sh "$@"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
 RETENTION_DAYS="${RETENTION_DAYS:-14}" \
