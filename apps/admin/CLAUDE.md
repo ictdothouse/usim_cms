@@ -1666,4 +1666,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   bridge re-sends `designer:selected` on change, which rebuilds the handles.
   The pill is hidden until a badge is hovered/dragged, then fades out after 3s
   idle (held while hovering the badge or pill); `spacingLockBarKeep` carries
-  its visibility across the rebuild a lock click triggers.
+  its visibility across the rebuild a lock click triggers. Badges/bands are
+  appended INTO the box and tagged `data-ds-chrome` — BaseLayout's editor CSS
+  detects an empty column/container with `:not(:has(> :not([data-ds-chrome])))`
+  (not `:empty`, which the badges broke, collapsing a selected empty column to
+  0px). Same editor-only CSS draws a faint dashed guide on every
+  `.ds-section`/`.ds-col`/`.ds-container` (class added in ContainerBlock.astro);
+  hover outline is solid so it reads apart from the guide.

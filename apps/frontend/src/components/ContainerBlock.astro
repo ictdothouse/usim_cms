@@ -292,6 +292,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       }
       return (
         <div
+          class="ds-container"
           data-designer-path={designerEdit ? childPath : undefined}
           data-vis={hasBp ? childPath : undefined}
           style={[
@@ -323,7 +324,7 @@ const containerChildren = (el.children ?? []).map((child, i) => renderContainerC
 return (
   <>
     <div
-      class={p.cssClass}
+      class={cls("ds-container", p.cssClass)}
       style={[
         "display:flex",
         `flex-direction:${p.flexDirection || "row"}`,
