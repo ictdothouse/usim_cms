@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { buffer as streamToBuffer } from "node:stream/consumers";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -10,9 +11,12 @@ import { generateImageVariants, deleteImageVariants } from "../image-variants.js
 import {
   uploadFile,
   deleteFile,
-  isLocalDriver,
+  getStorageConfig,
+  isFile,
   isValidMediaKey,
+  legacyTenantFolder,
   localUploadsDir,
+  LEGACY_MOVED_MARKER,
   mediaDatePath,
   mediaStem,
   s3PublicUrl,
@@ -21,10 +25,8 @@ import {
 
 // Public, unauthenticated serving of phase-1 media URLs
 // (/uploads/<yyyy>/<mm>/<file>, see storage.ts's scheme comment). Registered
-// on the root app next to the /uploads/ static plugin: a 3-segment path with
-// a year/month shape lands here, everything else (legacy
-// /uploads/<host_folder>/<file>, /uploads/_global/...) falls through to the
-// static wildcard. The tenant comes from the Host header (Caddy and the
+// on the root app next to the /uploads/ static plugin, which still serves
+// anything deeper. The tenant comes from the Host header (Caddy and the
 // install.sh nginx block both preserve it); /_tenant/<host>/... is the
 // host-explicit form for requests that don't arrive on a tenant domain —
 // apps/admin's publicMediaBase uses it in dev, where everything talks to
@@ -37,9 +39,33 @@ export function registerMediaServeRoutes(app: FastifyInstance) {
       return reply;
     }
     const fullKey = `${tenantMediaPrefix(tenant.id)}/${key}`;
-    // sendFile inherits the static plugin's 1y immutable Cache-Control.
-    return isLocalDriver ? reply.sendFile(fullKey, localUploadsDir) : reply.redirect(s3PublicUrl(fullKey), 302);
+    // Dual-read, whatever the active driver: a local copy wins, else the
+    // bucket — so files are reachable at every point of a local⇄S3 migration
+    // in either direction. sendFile inherits the static plugin's 1y
+    // immutable Cache-Control.
+    if (await isFile(path.join(localUploadsDir, fullKey))) return reply.sendFile(fullKey, localUploadsDir);
+    const { s3 } = await getStorageConfig();
+    if (s3) return reply.redirect(s3PublicUrl(s3, fullKey), 302);
+    reply.callNotFound();
+    return reply;
   }
+  // Legacy /uploads/<host_folder>/<file> and /uploads/_global/<file>. Takes
+  // 2-segment paths ahead of the static wildcard so a folder the normalize job
+  // emptied (media-migration.ts) 301s to the file's new URL instead of 404ing
+  // for a cached page or an old shared link.
+  app.get("/uploads/:folder/:file", async (req, reply) => {
+    const { folder, file } = req.params as { folder: string; file: string };
+    const rel = `${folder}/${file}`;
+    if (rel.includes("..") || rel.includes("\\") || folder.startsWith(".") || file.startsWith(".")) {
+      reply.callNotFound();
+      return reply;
+    }
+    if (await isFile(path.join(localUploadsDir, rel))) return reply.sendFile(rel, localUploadsDir);
+    const month = (await readFile(path.join(localUploadsDir, folder, LEGACY_MOVED_MARKER), "utf8").catch(() => "")).trim();
+    if (month && isValidMediaKey(`${month}/${file}`)) return reply.redirect(`/uploads/${month}/${file}`, 301);
+    reply.callNotFound();
+    return reply;
+  });
   type KeyParams = { host?: string; year: string; month: string; file: string };
   app.get("/uploads/:year/:month/:file", (req, reply) => {
     const { year, month, file } = req.params as KeyParams;
@@ -90,7 +116,6 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
     "application/zip": ".zip",
   };
-  const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
   protectedScope.post("/api/media", async (req, reply) => {
     if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "media.upload")) {
@@ -265,7 +290,7 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
     }
     // Legacy rows (no storageKey) live flat under uploads/<host_folder>/.
     const tenant = row.storageKey ? await getTenantRecord(req.tenantHost) : null;
-    const folder = row.storageKey && tenant ? `${tenantMediaPrefix(tenant.id)}/${path.posix.dirname(row.storageKey)}` : tenantFolder(req.tenantHost);
+    const folder = row.storageKey && tenant ? `${tenantMediaPrefix(tenant.id)}/${path.posix.dirname(row.storageKey)}` : legacyTenantFolder(req.tenantHost);
     await deleteFile(folder, row.filename);
     await deleteImageVariants(folder, path.parse(row.filename).name, row.width);
     return { deleted: true, id };

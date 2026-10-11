@@ -281,6 +281,63 @@ export interface BackupDestinationPatch {
 export const setBackupDestination = (token: string, patch: BackupDestinationPatch) =>
   request("/api/portal/backup-destination", null, token, { method: "PUT", body: JSON.stringify(patch) }).then(toBackupDestination);
 
+// Settings > Storage — runtime media driver + S3/R2 connection, and the one
+// background media job (apps/api routes/media-storage.ts). The secret is only
+// ever sent on write; GET reports secretAccessKeySet. source "env" = nothing
+// saved yet, the STORAGE_DRIVER/S3_* env vars are in effect.
+export interface MediaStorageS3 {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  publicUrlBase: string;
+  forcePathStyle: boolean;
+  secretAccessKeySet: boolean;
+}
+export type MediaMigrationKind = "normalize" | "to-s3" | "to-local";
+export interface MediaMigration {
+  kind: MediaMigrationKind;
+  state: "running" | "done" | "failed";
+  deleteSource: boolean;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  tenantsTotal: number;
+  tenantsDone: number;
+  currentHost?: string;
+  done: number;
+  skipped: number;
+  failed: number;
+  bytes: number;
+  errors: string[];
+}
+export interface MediaStorageView {
+  source: "settings" | "env";
+  config: { driver: "local" | "s3"; s3?: MediaStorageS3 };
+  migration: MediaMigration | null;
+}
+export interface MediaStorageS3Patch {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey?: string; // blank/omitted = keep the stored one
+  publicUrlBase: string;
+  forcePathStyle: boolean;
+}
+export interface MediaProbeResult {
+  ok: boolean;
+  steps: Array<{ step: "write" | "public-read" | "delete"; ok: boolean; error?: string }>;
+}
+
+export const getMediaStorage = (token: string): Promise<MediaStorageView> => request("/api/portal/media-storage", null, token);
+export const setMediaStorage = (token: string, patch: { driver: "local" | "s3"; s3?: MediaStorageS3Patch }): Promise<MediaStorageView> =>
+  request("/api/portal/media-storage", null, token, { method: "PUT", body: JSON.stringify(patch) });
+export const testMediaStorage = (token: string, s3: MediaStorageS3Patch): Promise<MediaProbeResult> =>
+  request("/api/portal/media-storage/test", null, token, { method: "POST", body: JSON.stringify({ s3 }) });
+export const startMediaMigration = (token: string, kind: MediaMigrationKind, deleteSource: boolean): Promise<{ migration: MediaMigration }> =>
+  request("/api/portal/media-storage/migrate", null, token, { method: "POST", body: JSON.stringify({ kind, deleteSource }) });
+
 // Public, unauthenticated — the login page needs this before anyone has
 // signed in, to decide which buttons/forms to show (see App.tsx's login page
 // and the mode-1/2/3 split documented in apps/api/CLAUDE.md's Auth

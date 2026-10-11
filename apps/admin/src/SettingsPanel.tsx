@@ -5,6 +5,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import type { Key } from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useT, inputCls, btnPrimary, btnGhost, card } from "./App";
+import MediaStorageCard from "./MediaStorageCard";
 
 // Common languages for the "add language" typeahead below — picking a
 // suggestion fills both code and label at once so an author never has to
@@ -968,6 +969,7 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
               {backupBusy ? t("settings-busy") : t("settings-backup-save-btn")}
             </button>
           </div>
+          <MediaStorageCard token={token} />
         </>
       )}
 
