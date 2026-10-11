@@ -85,10 +85,11 @@ export function useBpStyle(): BpStyleApi {
   // FourSideControl "linked" toggles — Inspector UI-only state, one shared
   // input fans its value out to all 4 sides when true, independent per-side
   // when false. Not persisted — doesn't change what's already stored, only
-  // which input(s) are shown.
-  const [linkedPadding, setLinkedPadding] = useState(true);
+  // which input(s) are shown. Padding/margin start unlinked so a canvas drag
+  // moves only the dragged side unless the author locks it.
+  const [linkedPadding, setLinkedPadding] = useState(false);
   const [linkedRadius, setLinkedRadius] = useState(true);
-  const [linkedMargin, setLinkedMargin] = useState(true);
+  const [linkedMargin, setLinkedMargin] = useState(false);
   // Breakpoint edit mode — admin-preview only (Framer-style Desktop/Tablet/
   // Mobile toggle). Narrows the canvas width and routes Inspector field
   // edits into each node's `bp` override bag instead of its base props.

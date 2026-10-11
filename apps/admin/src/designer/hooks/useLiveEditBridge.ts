@@ -68,11 +68,13 @@ export interface LiveEditBridgeDeps {
   // iframe writes to, same rule ElPreview.tsx's own drag commit follows.
   bp: "desktop" | "tablet" | "mobile";
   // Inspector FourSideControl's "linked" chain-icon toggles (useBpStyle) —
-  // read-only here, forwarded to the iframe (designer:selected) so its own
-  // padding/margin drag handles fan a drag out to all 4 sides live, same as
-  // Blocks mode's DesignerCanvas.tsx already does with the same two flags.
+  // forwarded to the iframe (designer:selected) so its padding/margin drag
+  // handles fan a drag out to all 4 sides when linked; the iframe's own
+  // floating lock pill flips them back here (designer:spacingLink).
   linkedPadding: boolean;
   linkedMargin: boolean;
+  setLinkedPadding: React.Dispatch<React.SetStateAction<boolean>>;
+  setLinkedMargin: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export interface LiveEditBridgeApi {
@@ -95,7 +97,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
     tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
     setError, setReloading, setCtxMenu, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
-    linkedPadding, linkedMargin,
+    linkedPadding, linkedMargin, setLinkedPadding, setLinkedMargin,
     structuralTick, bumpStructural, bp,
   } = deps;
 
@@ -411,6 +413,11 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         if (sliderId && action === "delete") setSliderInnerSel((m) => ({ ...m, [sliderId]: null }));
         return;
       }
+      if (e.data?.type === "designer:spacingLink") {
+        if (e.data.kind === "padding") setLinkedPadding((v) => !v);
+        else if (e.data.kind === "margin") setLinkedMargin((v) => !v);
+        return;
+      }
       if (e.data?.type === "designer:spacingDrag") {
         // Posted once on pointerup by BaseLayout.astro's own padding/margin
         // drag handles — the gesture (live visual feedback, linked fan-out)
@@ -565,6 +572,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         top: t("designer-align-top"),
         middle: t("designer-align-middle"),
         bottom: t("designer-align-bottom"),
+        linkSides: t("designer-f-link-sides"),
       },
     });
     if (sel && selEl && (selEl.type === "heading" || selEl.type === "text")) {

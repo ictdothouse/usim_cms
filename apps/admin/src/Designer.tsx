@@ -419,6 +419,8 @@ export default function Designer({
     bp,
     linkedPadding,
     linkedMargin,
+    setLinkedPadding,
+    setLinkedMargin,
     sliderSlideIdx,
     sliderInnerSel,
     blocks,
