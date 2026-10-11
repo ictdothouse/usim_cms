@@ -162,5 +162,7 @@ networks:
 # that driver keeps files outside Docker entirely.
 volumes:
   api-uploads:
-    name: ucms-uploads
+    # scripts/uploads-volume.sh (run by deploy.sh) creates it and sets
+    # UPLOADS_VOLUME when .env picks a custom folder/NFS location.
+    name: ${UPLOADS_VOLUME:-ucms-uploads}
     external: true

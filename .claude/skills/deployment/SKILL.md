@@ -240,9 +240,10 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `uploads/<tenantFolder>/` into `BACKUP_DIR/media/<tenantFolder>/<timestamp>/` — unchanged
   files are hardlinked against the prior snapshot (near-zero extra disk per run), a `latest`
   symlink always points at the newest one, and `RETENTION_DAYS` (same convention as
-  `backup.sh`) prunes old snapshot dirs. Docker mode resolves the named `ucms-uploads`
-  volume's real host path via `docker volume inspect` automatically; bare-metal/local-dev
-  sets `UPLOADS_DIR=apps/api/uploads` directly. Restore is a plain `rsync -a --delete
+  `backup.sh`) prunes old snapshot dirs. Docker mode resolves the live api container's own
+  `/app/uploads` mount (`docker inspect`), so it follows a custom uploads location with no
+  reconfiguration (default `ucms-uploads` volume when no api runs); bare-metal/local-dev
+  sets `UPLOADS_DIR` (apps/api/.env's value, else `apps/api/uploads`). Restore is a plain `rsync -a --delete
   .../latest/ uploads/<tenantFolder>/`; migrating a tenant to a new server is the same
   `rsync` pointed at `newhost:` instead — no app code involved either way, meant for a cron
   job (`0 2 * * *`) same as `backup.sh`. **Multi-VPS fleet (one department's usim_cms per
@@ -629,6 +630,34 @@ the failed new color — safe to re-run.
   a background "move to S3/R2 / back to disk / reorganise legacy files" job on the same
   card — see apps/api/CLAUDE.md "Media location phases 2-3". A deploy kills a running job;
   start it again after the deploy (it skips what's already moved).
+- **Local/on-premise uploads location (2026-10-11).** install.sh's "Media storage" prompt
+  replaces the old unvalidated S3 env-var prompt (S3/R2/MinIO is now only set in Settings,
+  probe-gated). Production mode writes repo-root `.env`:
+  - unset → the default Docker volume `ucms-uploads` (`/var/lib/docker/volumes/ucms-uploads/_data`);
+  - `UPLOADS_PATH=/data/ucms-uploads` → a folder on the host (dedicated disk, SAN LUN, or a
+    NAS/SMB share the OS mounts);
+  - `UPLOADS_NFS=host:/export` (+`UPLOADS_NFS_OPTS`, default `nfsvers=4.1,hard`) → mounted
+    by Docker's local driver itself, no fstab.
+
+  `scripts/uploads-volume.sh` (called by deploy.sh — never by hand) turns that into the volume
+  docker-compose.release.yml mounts at `/app/uploads`: each custom location gets its own name
+  `ucms-uploads-<hash>` (`name: ${UPLOADS_VOLUME:-ucms-uploads}`, `external: true`). A changed
+  location rides the blue-green deploy with zero downtime — `prepare` (after build, before
+  `up`) creates the volume, chowns it to the image's `app` user and write-tests it as that
+  user (a deploy stops BEFORE going live if the folder/NFS export isn't writable, printing
+  the uid:gid to grant), copies the old volume over as `app` while the old color serves;
+  `finish` (after promote) copies files newer than the copy's stamp and writes
+  `UPLOADS_VOLUME` into `.env`. The old volume is kept as the rollback color's volume and
+  never auto-deleted (the log prints the `docker volume rm` once you're happy) — a rollback
+  after a move serves the OLD volume, so uploads made since are not visible there. Guards:
+  absolute path only, system trees (/etc, /usr, /var/lib/docker, ...) refused, a non-empty
+  folder without the `.ucms-uploads` marker refused (install.sh asks before adopting one),
+  NFS shape/options validated, `addr=` can't be overridden. Steady state costs one
+  `docker volume inspect`. Trial mode keeps the plain default volume. Bare-metal writes
+  `UPLOADS_DIR` to apps/api/.env instead (storage.ts reads it; NFS/SMB must be mounted by
+  the OS there). The uploads root's bookkeeping dotfiles are never served (`@fastify/static`
+  `dotfiles: "ignore"`). Verified end-to-end against Docker (folder move + mid-deploy delta,
+  steady state, refusals, unreachable NFS) with a throwaway harness, not on a VPS.
 - **This is a real, deliberate change to what the "Domain & SSL Automation" switch
   (`getProxyAutomationEnabled`) means.** That switch used to gate the ONLY way Caddy's
   config ever got pushed dynamically (tenant create/delete, `PUT /api/portal/proxy-

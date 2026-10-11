@@ -585,6 +585,11 @@ callouts before assuming any of this is speculative hardening.
     text/folder) 404'd on every row in prod, and normalize couldn't set storage_key.
   - **Not covered.** Legacy S3 rows (absolute bucket URLs) stay as-is. `_global` branding files
     are untouched. Backup zips and disk usage only count this box's disk.
+  - **Where "local" is.** `localUploadsDir` is `UPLOADS_DIR` when set (bare-metal installs on a
+    dedicated disk/NAS mount), else `apps/api/uploads` — `/app/uploads` in Docker, where
+    scripts/uploads-volume.sh decides what's mounted there (default volume, a host folder, or
+    an NFS export; see the deployment skill). The static plugin uses `dotfiles: "ignore"` so
+    the root's bookkeeping files (`.ucms-uploads`, `.moved-to`, migration stamps) never serve.
 - **Tenant-host check is now a deny-list, not an allow-list (2026-09-17, security audit finding).**
   `requireTenantAuth` (`plugins/auth.ts`) used to check `session.role === "webmaster"` before enforcing
   `allowedHosts.includes(req.tenantHost)` — a third role value (never existed yet, but nothing in the DB

@@ -169,6 +169,20 @@ promote() {
   return 1
 }
 
+# Compose names a built-but-untagged service image <project>-<service>
+# (older compose v2 releases used an underscore).
+api_image_of() {
+  local name
+  for name in "$1-api" "$1_api"; do
+    if docker image inspect "$name" >/dev/null 2>&1; then
+      echo "$name"
+      return 0
+    fi
+  done
+  echo "no built api image found for $1" >&2
+  return 1
+}
+
 do_deploy() {
   local next project
   if [ "$CURRENT" = "blue" ]; then next="green"; else next="blue"; fi
@@ -179,13 +193,18 @@ do_deploy() {
   echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
   docker compose up -d db pgbouncer redis proxy
 
-  # ucms-uploads (docker-compose.yml) isn't mounted by db/proxy, so the `up`
-  # above never creates it — but docker-compose.release.yml's api service
-  # references it as `external: true` (must already exist). Idempotent.
-  docker volume create ucms-uploads >/dev/null
-
   echo "-- building & starting $next --"
   docker compose -p "$project" -f "$RELEASE_FILE" build
+
+  # The uploads volume docker-compose.release.yml mounts (`external: true`,
+  # so it must exist first): the default ucms-uploads, or the folder/NFS
+  # share .env's UPLOADS_PATH/UPLOADS_NFS name. A changed location is copied
+  # over here while $CURRENT keeps serving, and finished after promote below.
+  local api_image
+  api_image="$(api_image_of "$project")"
+  UPLOADS_VOLUME="$(bash scripts/uploads-volume.sh prepare "$api_image")"
+  export UPLOADS_VOLUME
+
   docker compose -p "$project" -f "$RELEASE_FILE" up -d --remove-orphans \
     --scale api="$API_REPLICAS" --scale frontend="$FRONTEND_REPLICAS" --scale admin="$ADMIN_REPLICAS"
 
@@ -235,6 +254,12 @@ do_deploy() {
     echo "-- stopping old color ($CURRENT) — kept, not removed, for instant rollback --"
     docker compose -p "ucms-$CURRENT" -f "$RELEASE_FILE" stop || true
   fi
+
+  # No-op unless prepare started an uploads move. A failure here never
+  # fails the deploy ($next is already live on the new volume) — the move
+  # stays pending and the next deploy redoes it from the start.
+  bash scripts/uploads-volume.sh finish "$api_image" ||
+    echo "WARNING: uploads move didn't finish — files uploaded during this deploy may be missing; run another deploy to redo it." >&2
 
   # Every rebuild retags api/frontend/admin's images, leaving the previous
   # build dangling (still-referenced images — the stopped old color above —

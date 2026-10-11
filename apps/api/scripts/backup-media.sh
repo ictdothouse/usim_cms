@@ -30,11 +30,24 @@ RETENTION_DAYS="${RETENTION_DAYS:-14}"
 SOURCE_HOST="${SOURCE_HOST:-}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# Docker mode: whatever the live api container has mounted at /app/uploads —
+# the default `ucms-uploads` volume, or the folder/NFS volume .env's
+# UPLOADS_PATH/UPLOADS_NFS selected (scripts/uploads-volume.sh) — so a storage
+# move needs no backup reconfiguration. Falls back to the default volume when
+# no api container is running.
+live_uploads_dir() {
+  local c
+  c=$(docker ps --filter "label=com.docker.compose.service=api" --format '{{.Names}}' 2>/dev/null | head -1)
+  if [ -n "$c" ]; then
+    docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/uploads"}}{{.Source}}{{end}}{{end}}' "$c" 2>/dev/null
+  else
+    docker volume inspect ucms-uploads --format '{{ .Mountpoint }}' 2>/dev/null
+  fi
+}
+
 if [ -z "$SOURCE_HOST" ]; then
-  # Docker mode: uploads live in the named `ucms-uploads` volume (docker-compose.yml),
-  # not a bind mount — resolve its real host path unless UPLOADS_DIR already points at
-  # it directly (bare-metal / local-dev, where apps/api/uploads is a plain directory).
-  UPLOADS_DIR="${UPLOADS_DIR:-$(docker volume inspect ucms-uploads --format '{{ .Mountpoint }}' 2>/dev/null || true)}"
+  # UPLOADS_DIR set = bare-metal / local-dev (a plain directory) or an explicit override.
+  UPLOADS_DIR="${UPLOADS_DIR:-$(live_uploads_dir || true)}"
   if [ -z "$UPLOADS_DIR" ]; then
     echo "Could not resolve uploads dir — set UPLOADS_DIR explicitly (e.g. apps/api/uploads for bare-metal)." >&2
     exit 1

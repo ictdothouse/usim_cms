@@ -324,7 +324,7 @@ write_pgbouncer_userlist() {
 # ---------------------------------------------------------------------------
 # Optional integrations (shared across docker/production/bare-metal modes) —
 # every one of these is unset-means-off in the app code itself (entra.ts/
-# metrics.ts/storage.ts each check for their own var, same convention as
+# metrics.ts each check for their own var, same convention as
 # REDIS_URL/ALERT_WEBHOOK_URL elsewhere in this project), so skipping every
 # prompt below (Enter through all of them, or a non-interactive run) leaves
 # a fresh install byte-identical to one without this function at all.
@@ -367,31 +367,101 @@ configure_optional_integrations() {
     echo "  Generated METRICS_SECRET — send it as an x-metrics-secret header when scraping."
   fi
 
-  # --- S3-compatible object storage (apps/api/src/storage.ts) ---
-  local s3_yn=""
-  read -r -p "Use S3-compatible storage for uploads instead of local disk? [y/N]: " s3_yn
-  if [ "$s3_yn" = "y" ] || [ "$s3_yn" = "Y" ]; then
-    local s3_endpoint="" s3_region="" s3_bucket="" s3_key="" s3_secret="" s3_path_style_yn="" s3_public_url=""
-    read -r -p "  S3 endpoint (e.g. https://s3.amazonaws.com, or a MinIO/Sangfor URL): " s3_endpoint
-    read -r -p "  S3 region (default us-east-1): " s3_region
-    read -r -p "  S3 bucket name: " s3_bucket
-    read -r -p "  S3 access key ID: " s3_key
-    read -r -s -p "  S3 secret access key: " s3_secret
-    echo ""
-    set_env_kv "$file" STORAGE_DRIVER "s3"
-    set_env_kv "$file" S3_ENDPOINT "$s3_endpoint"
-    set_env_kv "$file" S3_REGION "${s3_region:-us-east-1}"
-    set_env_kv "$file" S3_BUCKET "$s3_bucket"
-    set_env_kv "$file" S3_ACCESS_KEY_ID "$s3_key"
-    set_env_kv "$file" S3_SECRET_ACCESS_KEY "$s3_secret"
-    read -r -p "  Path-style URLs needed (MinIO/Sangfor, not AWS)? [y/N]: " s3_path_style_yn
-    if [ "$s3_path_style_yn" = "y" ] || [ "$s3_path_style_yn" = "Y" ]; then
-      set_env_kv "$file" S3_FORCE_PATH_STYLE "true"
-    fi
-    read -r -p "  Public URL base for served media (blank = derive automatically): " s3_public_url
-    [ -n "$s3_public_url" ] && set_env_kv "$file" S3_PUBLIC_URL_BASE "$s3_public_url"
+  echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Where uploaded media lives. Docker/production: UPLOADS_PATH or UPLOADS_NFS
+# in .env, turned into the api's /app/uploads volume by
+# scripts/uploads-volume.sh on every deploy — which also moves the existing
+# files, zero-downtime, when a later re-run changes the answer. Bare-metal:
+# UPLOADS_DIR in apps/api/.env (an NFS/SMB share must be mounted by the OS
+# first there). S3-compatible object storage is never asked for here: it's
+# set up in the admin panel, which tests the connection (write + public read
+# + delete) before saving — an install prompt answered "y" then left blank
+# is how one VPS lost every image (2026-10-11). Enter keeps the current
+# answer; a non-interactive run keeps whatever the env file says (preset
+# UPLOADS_PATH/UPLOADS_NFS there for unattended installs).
+# $1 = "docker" | "baremetal", $2 = the env file that mode reads
+# ---------------------------------------------------------------------------
+configure_media_storage() {
+  local mode="$1" file="$2" current=1 choice="" value="" opts="" yn=""
+  if [ "$mode" = "docker" ]; then
+    if grep -qE '^UPLOADS_PATH=.+' "$file"; then current=2; fi
+    if grep -qE '^UPLOADS_NFS=.+' "$file"; then current=3; fi
+  elif grep -qE '^UPLOADS_DIR=.+' "$file"; then
+    current=2
+  fi
+  if [ ! -t 0 ]; then
+    return
   fi
   echo ""
+  echo "-- Media storage (uploaded images, video, documents) --"
+  echo "  1) This server — managed automatically"
+  echo "  2) A folder on this server (dedicated disk, SAN volume, or a NAS share the OS already mounts)"
+  if [ "$mode" = "docker" ]; then
+    echo "  3) NFS share on another server (mounted by Docker itself — no /etc/fstab needed)"
+  fi
+  echo "  4) S3-compatible object storage (AWS S3, Cloudflare R2, MinIO, Ceph, ...)"
+  while true; do
+    read -r -p "Choice [$current]: " choice
+    case "${choice:-$current}" in
+      1)
+        if [ "$mode" = "docker" ]; then
+          set_env_kv "$file" UPLOADS_PATH ""
+          set_env_kv "$file" UPLOADS_NFS ""
+        else
+          set_env_kv "$file" UPLOADS_DIR ""
+        fi
+        break
+        ;;
+      2)
+        read -r -p "  Folder (absolute path, e.g. /data/ucms-uploads): " value
+        bash scripts/uploads-volume.sh check-path "$value" || continue
+        value="${value%/}"
+        if [ -d "$value" ] && [ -n "$(ls -A "$value" 2>/dev/null)" ] && [ ! -e "$value/.ucms-uploads" ]; then
+          read -r -p "  $value already has files. Use it as the uploads folder anyway? [y/N]: " yn
+          if [ "$yn" != "y" ] && [ "$yn" != "Y" ]; then continue; fi
+          touch "$value/.ucms-uploads"
+        fi
+        mkdir -p "$value"
+        if [ "$mode" = "docker" ]; then
+          set_env_kv "$file" UPLOADS_PATH "$value"
+          set_env_kv "$file" UPLOADS_NFS ""
+          echo "  Saved — existing uploads move there automatically on the next deploy, with no downtime."
+        else
+          set_env_kv "$file" UPLOADS_DIR "$value"
+        fi
+        break
+        ;;
+      3)
+        if [ "$mode" != "docker" ]; then
+          echo "  Pick 1, 2 or 4."
+          continue
+        fi
+        read -r -p "  NFS export (nfs-server:/export/path): " value
+        read -r -p "  NFS mount options (blank = nfsvers=4.1,hard): " opts
+        # Shape-checked before set_env_kv's sed ever sees it; uploads-volume.sh
+        # check below applies the full rules to what was written.
+        if ! [[ "$value" =~ ^[A-Za-z0-9.-]+:/[A-Za-z0-9._/-]*$ ]] || ! [[ "$opts" =~ ^[A-Za-z0-9=.,_-]*$ ]]; then
+          echo "  Expected nfs-server:/export/path, and options of letters, digits and = . , _ - only."
+          continue
+        fi
+        set_env_kv "$file" UPLOADS_NFS "$value"
+        set_env_kv "$file" UPLOADS_NFS_OPTS "$opts"
+        set_env_kv "$file" UPLOADS_PATH ""
+        bash scripts/uploads-volume.sh check || continue
+        echo "  Saved — the share is write-tested on the next deploy, which stops before going live if the api can't write there."
+        break
+        ;;
+      4)
+        echo "  Set it up after install: admin panel > Settings > Media Storage. The connection, including the"
+        echo "  public URL, is tested before it's saved; until then uploads stay on this server."
+        break
+        ;;
+      *) echo "  Pick a number from the list." ;;
+    esac
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -600,7 +670,11 @@ _apply_backup_cron_files() {
       printf 'PGUSER=%s\n' "$PG_URL_USER"
       printf 'PGPASSWORD=%s\n' "$PG_URL_PASSWORD"
       printf 'PGDATABASE=%s\n' "$PG_URL_DATABASE"
-      printf 'UPLOADS_DIR=%s\n' "${REPO_DIR}/apps/api/uploads"
+      # The media-storage prompt may have moved uploads (UPLOADS_DIR in
+      # apps/api/.env); the default checkout folder otherwise.
+      local uploads_dir
+      uploads_dir="$(grep -m1 -E '^UPLOADS_DIR=/.+' "${REPO_DIR}/apps/api/.env" | cut -d= -f2- || true)"
+      printf 'UPLOADS_DIR=%s\n' "${uploads_dir:-${REPO_DIR}/apps/api/uploads}"
       printf 'BACKUP_CRON_VERSION=%s\n' "$BACKUP_CRON_VERSION"
     } > "$env_file"
   fi
@@ -1716,6 +1790,7 @@ install_production_mode() {
   grep -qE '^FRONTEND_REPLICAS=.+' .env || set_env_kv .env FRONTEND_REPLICAS "1"
   grep -qE '^ADMIN_REPLICAS=.+' .env || set_env_kv .env ADMIN_REPLICAS "1"
   configure_optional_integrations .env
+  configure_media_storage docker .env
   install_backup_cron "docker"
 
   write_pgbouncer_userlist
@@ -1723,7 +1798,6 @@ install_production_mode() {
   echo ""
   echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
   docker compose up -d db pgbouncer redis proxy
-  docker volume create ucms-uploads >/dev/null
 
   echo ""
   echo "-- first deploy (build+test+health-check+promote, see scripts/deploy.sh) --"
@@ -1881,6 +1955,7 @@ install_baremetal_mode() {
   grep -q '^SESSION_SECRET=' apps/api/.env || echo "SESSION_SECRET=" >> apps/api/.env
   fill_env_if_blank apps/api/.env SESSION_SECRET
   configure_optional_integrations apps/api/.env
+  configure_media_storage baremetal apps/api/.env
   install_backup_cron "baremetal"
 
   echo ""

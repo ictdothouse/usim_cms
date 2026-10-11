@@ -128,7 +128,10 @@ await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 // maxAge/immutable is safe here because every uploaded filename is a fresh
 // randomUUID() (see the upload routes below) — never reused/overwritten,
 // so a long-lived cache can never go stale.
-await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", maxAge: "1y", immutable: true });
+// dotfiles "ignore" (plugin default is "allow"): the uploads root holds
+// bookkeeping dotfiles — .ucms-uploads, .moved-to, migration stamps/temp
+// files — that are never content.
+await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", maxAge: "1y", immutable: true, dotfiles: "ignore" });
 // /uploads/<yyyy>/<mm>/<file> (phase-1 media URLs, tenant from Host, disk or
 // bucket) and legacy 2-segment /uploads/<folder>/<file> (incl. the 301 for
 // a folder the normalize job emptied).
