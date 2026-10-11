@@ -651,6 +651,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
               return designerEdit || elVisId ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}
+                  data-ds-type={designerEdit ? el.type : undefined}
                   data-vis={elVisId}
                   style="display:contents"
                 >
