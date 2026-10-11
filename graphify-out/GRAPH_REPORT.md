@@ -1,741 +1,634 @@
-# Graph Report - usim_cms  (2026-09-23)
+# Graph Report - usim_cms  (2026-10-08)
 
 ## Corpus Check
-- 70 files · ~344,098 words
+- 326 files · ~378,882 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2278 nodes · 4963 edges · 186 communities (120 shown, 59 thin omitted)
-- Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 181 edges (avg confidence: 0.84)
-- Token cost: 160,300 input · 0 output
+- 2303 nodes · 5458 edges · 134 communities (106 shown, 25 thin omitted)
+- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 166 edges (avg confidence: 0.85)
+- Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- Admin API Client Layer
-- Admin API URL Helpers
-- Monitor Server
-- Admin Categories & UI Basics
-- Admin TS Config
-- API Security Hardening Notes
-- Designer Elements & Fields
-- Installer Superadmin Setup
-- Admin UI Kit (Avatar/Card)
-- API Redis Cache Layer
-- Admin Package Deps (BlockNote/UI)
+- Design Canvas & Layout
+- Collection Data Models
+- Multi-Tenant Database
 - Frontend API Client
-- Admin UI Buttons/Permissions
-- Designer Block Controls
-- Admin Nav & Category Translations
-- Designer Element Preview
-- Designer Field Controls
-- Frontend Content Blocks
-- Designer Block Path & Context
-- API Auth (TOTP/CSRF)
-- Shadcn Admin Foundation Plan Docs
-- Collection Config Types
-- Tenant Pool Theme/Storage
-- Tenant Pool CRUD (Users/Roles/Languages)
-- Admin App Shell & i18n Context
-- Categories Panel
-- Designer Core State
-- Element Schema Package
-- Admin Package Manifest
-- Frontend Hero/Generic Blocks
-- Tenant Domain SSL & Menu Plans
-- Admin Designer CLAUDE Notes
-- API DB Schema
-- ESLint Config
-- Designer Page/Language Hook
-- Settings Panel
-- Designer Live-Edit Bridge
-- Installer Dev Mode
-- API Backup/Clone Store
-- Admin UI Kit (Checkbox/Scroll)
-- Designer Breakpoint Styling
-- Designer Clipboard
-- Cross-App Tailwind Deps
-- API Package Manifest
-- API Image Variants/Storage
-- API Proxy Sync (Caddy)
-- Media Manager
-- API Package Deps (AWS/Drizzle)
-- Deployment CLAUDE Notes
-- Branding Feature Spec Docs
-- Security/Auth CLAUDE Notes
-- Admin Component Aliases
-- Designer Side-Value Setters
-- Designer Tree & Live-Edit API
-- API Entra SSO
-- Admin Dev Dependencies
-- Pages Panel
-- API Package Scripts
-- API Cookie Helpers
-- Admin UI Kit (Alert Dialog)
-- Designer Field Groups/Input
-- Post Editor Page
-- Tenants Panel Clone Box
-- API add-user Script
-- Menu Link Validation
-- TS Base Config
-- Admin App Session/Impersonation
-- Users Panel
-- Admin UI Kit (Badge/Label)
-- Admin UI Kit (Sheet)
-- Admin UI Kit (Table)
-- Designer Undo/Redo
-- Menu Items Editor
-- Mega Menu Editor
-- API i18n/Language Docs
-- Element Style Package Manifest
-- Element Schema Package Manifest
-- Frontend Package Dependencies
-- Monitor Static File Server
-- QR Code Generator Types
-- Frontend HTML Cache & Middleware
-- Frontend/Admin CLAUDE Cross-Notes
-- Admin E2E Test Seed
-- Admin Package Scripts
-- Events Panel
-- API Dev Dependencies
-- Frontend Dev Server
-- Page Blueprint Plan Docs
-- Designer Site Chrome Hook
-- Roles Panel
-- Admin TS Config (root)
-- API Translation Service
-- Frontend Package Scripts
-- CI/Collection Config Notes
-- Admin UI Kit (Accordion)
-- Admin UI Kit (Tabs)
-- Designer Clipboard Copy/Read Fns
-- Menus Panel
-- Posts Panel
-- Security Panel (MFA)
-- API add-tenant Script
-- Docker Compose Services
-- Admin UI Kit (Radio Group)
-- Admin Download/Export API
-- Backup Media Script
-- Frontend TS Config
-- Architecture Overview Docs
-- Roadmap & Audit Docs
-- Installer Hardening Design Docs
-- Element Schema Dev Deps
-- Element Schema Scripts
-- Element Style Dev Deps
-- Element Style Scripts
-- Admin UI Kit (Popover)
-- Admin UI Kit (Progress)
-- Admin UI Kit (Separator)
-- Admin UI Kit (Switch)
-- Admin Login Settings API
-- Admin Pages/Posts Query API
-- Admin Menu Item API Types
-- Admin Upload/Media API
-- Overview CLAUDE Docs
-- Rate Limit & Cache Notes
-- API Backup Script
-- Frontend Container Block
-- Frontend Event List Block
-- Deployment Install Scripts
-- Docker DB Service & CI
-- UI/UX Audit Gaps
-- Admin Entry & Post Routing
-- Control Plane DB Notes
-- Static Export/Backup Notes
-- DB Role Rotation Script
-- Admin CI Test Step
-- Backup Scripts (media/sh)
-- Docker Proxy & Blue-Green
-- Architecture Known Gaps
-- Designer Layers Panel Docs
-- Layers Panel Drag Reorder Docs
-- Prettier Config
-- Entra SSO Client Note
-- Post Editor Page Note
-- ThemeForm Note
-- Maintenance Mode Note
-- Theme Presets Note
-- Frontend Chrome Preview Note
-- Frontend Middleware Note
-- Architecture Payload Features
-- Frontend CLAUDE Note
-- pnpm Workspace Note
-- Proxy Resilience Note
-- Tenant Usage Panel Note
-- Docker Admin Service
-- Multitenancy Docs
-- Tech Stack Docs
-- Announcement Feature Doc
-- Designer Blocks Feature Doc
-- Dynamic Collections Doc
-- Events Calendar Doc
-- Admin Env Docs
-- API Env Docs
-- UI/UX Audit Score Doc
-- Cache-Not-Shared Risk Doc
-- Connection Pool Risk Doc
-- Architecture Score Doc
-- Post Editor Bookmark Plan
-- Post Editor Categories Plan
-- Post Editor Full Page Plan
-- Live Edit Toolbar Action Plan
-- Live Edit Toolbar Component Plan
-- Post Metadata Display Plan
-- Post Metadata Theme Keys Plan
-- Admin Features Spec
-- Frontend Features Spec
-- GitHub Dependabot Config
-- CI Build Step
-- CI Overview
-- CI Typecheck Step
-- pnpm Workspace Overrides
+- Backup & Migration
+- Caching Layer
+- i18n Infrastructure
+- Authentication & MFA
+- Component Preview
+- Frontend Rendering
+- Module 10
+- Module 11
+- Module 12
+- Module 13
+- Module 14
+- Module 15
+- Module 16
+- Module 17
+- Module 18
+- Module 19
+- Module 20
+- Module 21
+- Module 22
+- Module 23
+- Module 24
+- Module 25
+- Module 26
+- Module 27
+- Module 28
+- Module 29
+- Module 30
+- Module 31
+- Module 32
+- Module 33
+- Module 34
+- Module 35
+- Module 36
+- Module 37
+- Module 38
+- Module 39
+- Module 40
+- Module 41
+- Module 42
+- Module 43
+- Module 44
+- Module 45
+- Module 46
+- Module 47
+- Module 48
+- Module 49
+- Module 50
+- Module 51
+- Module 52
+- Module 53
+- Module 54
+- Module 55
+- Module 56
+- Module 57
+- Module 58
+- Module 59
+- Module 60
+- Module 61
+- Module 63
+- Module 64
+- Module 65
+- Module 66
+- Module 67
+- Module 68
+- Module 69
+- Module 70
+- Module 71
+- Module 72
+- Module 73
+- Module 74
+- Module 75
+- Module 76
+- Module 77
+- Module 78
+- Module 79
+- Module 80
+- Module 81
+- Module 82
+- Module 83
+- Module 84
+- Module 85
+- Module 86
+- Module 87
+- Module 88
+- Module 89
+- Module 90
+- Module 91
+- Module 92
+- Module 93
+- Module 94
+- Module 95
+- Module 96
+- Module 97
+- Module 98
+- Module 99
+- Module 100
+- Module 101
+- Module 102
+- Module 103
+- Module 104
+- Module 105
+- Module 106
+- Module 107
+- Module 108
+- Module 109
+- Module 110
+- Module 111
+- Module 112
+- Module 113
+- Module 114
+- Module 115
+- Module 116
+- Module 117
+- Module 118
+- Module 119
+- Module 120
+- Module 121
+- Module 122
+- Module 123
+- Module 124
+- Module 126
+- Module 127
+- Module 128
+- Module 129
+- Module 131
+- Module 132
+- Module 133
 
 ## God Nodes (most connected - your core abstractions)
-1. `request()` - 124 edges
+1. `request()` - 128 edges
 2. `cn()` - 113 edges
-3. `Designer()` - 103 edges
-4. `useT()` - 66 edges
-5. `react` - 65 edges
-6. `ensurePublicSchema()` - 61 edges
-7. `lucide-react` - 37 edges
-8. `blockOpsFns()` - 33 edges
-9. `Block` - 29 edges
-10. `Key` - 29 edges
+3. `ensurePublicSchema()` - 73 edges
+4. `react` - 72 edges
+5. `useT()` - 68 edges
+6. `lucide-react` - 49 edges
+7. `blockOpsFns()` - 42 edges
+8. `Key` - 39 edges
+9. `registerAuthRoutes()` - 37 edges
+10. `Block` - 33 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Bug: Copy Style / Paste Style Non-Functional for Slider` --rationale_for--> `Slider/Banner Element Rework (2026-09-05)`  [AMBIGUOUS]
-  docs/SliderProblem.pdf → apps/admin/CLAUDE.md
-- `Animated Headline Hero Template` --semantically_similar_to--> `Slider/Banner Element Rework (2026-09-05)`  [INFERRED] [semantically similar]
-  docs/animated-headline.html → apps/admin/CLAUDE.md
-- `Brutalist Text-Only Hero Template` --semantically_similar_to--> `Slider/Banner Element Rework (2026-09-05)`  [INFERRED] [semantically similar]
-  docs/brutalist-text-only.html → apps/admin/CLAUDE.md
-- `Centered Classic Hero Template` --semantically_similar_to--> `Slider/Banner Element Rework (2026-09-05)`  [INFERRED] [semantically similar]
-  docs/centered-classic.html → apps/admin/CLAUDE.md
-- `Bug: Background/Overlay Color UX Confusing + Wrong Default` --rationale_for--> `Slider/Banner Element Rework (2026-09-05)`  [INFERRED]
-  docs/SliderProblem.pdf → apps/admin/CLAUDE.md
+- `pnpm workspace monorepo` --references--> `Cross-app render-value computation`  [EXTRACTED]
+  pnpm-workspace.yaml → packages/element-render/src/index.ts
+- `typescript-eslint recommended configs` --semantically_similar_to--> `TypeScript strict mode enabled`  [INFERRED] [semantically similar]
+  eslint.config.mjs → tsconfig.base.json
+- `Set-IfBlank()` --calls--> `node`  [INFERRED]
+  install.ps1 → package.json
+- `RefIdPicker()` --calls--> `useT()`  [EXTRACTED]
+  apps/admin/src/MenuItemsEditor.tsx → apps/admin/src/App.tsx
+- `downloadDesignMd()` --calls--> `slugify()`  [EXTRACTED]
+  apps/admin/src/ThemeForm.tsx → apps/admin/src/lib/utils.ts
 
 ## Import Cycles
+- 3-file cycle: `apps/admin/src/App.tsx -> apps/admin/src/ContentManager.tsx -> apps/admin/src/PagesPanel.tsx -> apps/admin/src/App.tsx`
+- 3-file cycle: `apps/admin/src/App.tsx -> apps/admin/src/ContentManager.tsx -> apps/admin/src/MediaManager.tsx -> apps/admin/src/App.tsx`
+- 3-file cycle: `apps/admin/src/App.tsx -> apps/admin/src/ContentManager.tsx -> apps/admin/src/CategoriesPanel.tsx -> apps/admin/src/App.tsx`
 - 3-file cycle: `apps/admin/src/App.tsx -> apps/admin/src/MenusPanel.tsx -> apps/admin/src/MenuItemsEditor.tsx -> apps/admin/src/App.tsx`
+- 3-file cycle: `apps/admin/src/App.tsx -> apps/admin/src/ContentManager.tsx -> apps/admin/src/PostsPanel.tsx -> apps/admin/src/App.tsx`
 - 4-file cycle: `apps/admin/src/App.tsx -> apps/admin/src/ContentManager.tsx -> apps/admin/src/MenusPanel.tsx -> apps/admin/src/MenuItemsEditor.tsx -> apps/admin/src/App.tsx`
 
 ## Hyperedges (group relationships)
-- **Menu + Header/Footer Feature Evolution (menu shipped, site_sections superseded by siteChrome)** — docs_superpowers_specs_2026_08_13_menu_header_footer_design_doc, docs_superpowers_plans_2026_08_13_menu_management_plan, docs_superpowers_specs_2026_09_04_header_footer_designer_design_doc [EXTRACTED 0.90]
-- **Designer.tsx God-Component Modularization** — apps_admin_claude_designer, apps_admin_claude_designertree_refactor, apps_admin_claude_recursive_container, apps_admin_claude_row_flex_container, apps_admin_claude_element_schema_package [EXTRACTED 1.00]
-- **Designer.tsx God-Component Refactor Program (Layer 0, Layer 1a, Slider Rework)** — docs_superpowers_specs_2026_08_20_designer_tsx_refactor_design_doc, docs_superpowers_plans_2026_08_20_designer_layer0_pure_helpers_plan, docs_superpowers_plans_2026_08_21_designer_layer1a_field_controls_plan, docs_superpowers_specs_2026_09_05_slider_banner_rework_design_doc [INFERRED 0.80]
-- **Architecture-audit findings resolved by PgBouncer/Redis/metrics fixes** — docs_laporan_penambahbaikan_seni_bina_connection_pool_risk, docs_laporan_penambahbaikan_seni_bina_cache_not_shared_risk, apps_api_claude_metrics_endpoint [INFERRED 0.85]
-- **Page Blueprint proposed as top-priority feature across product docs** — docs_cadangan_ciri_penting_cms_page_blueprint, docs_laporan_audit_ui_ux_page_blueprint_recommendation, docs_cadangan_ciri_penting_cms_roadmap [INFERRED 0.85]
-- **Proxy/Domain/SSL Automation + Settings + HA Infra Program** — docs_superpowers_specs_2026_08_12_tenant_domain_ssl_automation_design_doc, docs_superpowers_plans_2026_08_12_tenant_domain_ssl_automation_plan, docs_superpowers_specs_2026_08_13_settings_tabs_design_doc, docs_superpowers_specs_2026_09_06_proxy_db_ha_options_design_doc [INFERRED 0.85]
-- **CI Build & Test Pipeline** — github_workflows_ci_overview, github_workflows_ci_typecheck_step, github_workflows_ci_build_step, github_workflows_ci_api_test_step, github_workflows_ci_admin_test_step [EXTRACTED 1.00]
-- **Auth Hardening Mechanisms** — apps_api_claude_login_rate_limiting, apps_api_claude_mfa_totp, apps_api_claude_mandatory_mfa_enrollment, apps_api_claude_entra_sso, apps_api_claude_audit_log, apps_api_claude_session_cookie_csrf_migration [INFERRED 0.85]
-- **Blue-Green Deploy Pipeline** — dep_deploy_sh, dep_smoke_test, dep_deploy_promote_endpoint, dep_build_caddy_config, dep_test_gate_rollback [EXTRACTED 1.00]
+- **i18n Multi-Phase Implementation** — apps_api_i18n_phase_1_global_language_registry, apps_api_i18n_phase_2_per_tenant_subset, apps_api_i18n_phase_3_4_content_translations, apps_api_i18n_phase_5_opt_in_switch, apps_api_i18n_phase_5_default_language [INFERRED]
+- **Auth Hardening Suite** — apps_api_auth_rate_limiting_tenant, apps_api_auth_login_rate_limiting, apps_api_auth_entra_id_sso, apps_api_auth_entra_login_csrf, apps_api_auth_mfa_totp, apps_api_auth_mfa_mandatory_enrollment, apps_api_auth_session_cookie_csrf [INFERRED]
+- **Designer Canvas & Rendering System** — apps_admin_designer_page_builder, apps_admin_designer_live_edit, apps_admin_designer_device_preview_modal, apps_admin_designer_live_edit_preview_unified, apps_admin_designer_canva_draft_autosave, apps_api_pages_revisions_history [INFERRED]
+- **Multi-Layer Data Isolation** — architecture_database_per_tenant, architecture_control_plane, architecture_tenant_identity, design_decision_rls_defense_in_depth [INFERRED]
+- **Cross-app render consistency pattern** — packages_element_render_src_index_render_value_computation, apps_admin_designer_canvas, apps_frontend_renderer [INFERRED]
+- **Security validation boundary** — packages_element_schema_src_index_validation, css_injection_threat_vector, xss_threat_vector [INFERRED]
+- **Workspace-wide TypeScript + ESLint enforcement** —  [INFERRED]
+- **Bundler-driven transpilation strategy** —  [INFERRED]
 
-## Communities (186 total, 59 thin omitted)
+## Communities (134 total, 25 thin omitted)
 
-### Community 0 - "Admin API Client Layer"
-Cohesion: 0.03
-Nodes (78): createBlueprint(), createCategory(), createMediaFolder(), createPage(), createPortalTenant(), createPortalUser(), createSiteChrome(), createSymbol() (+70 more)
-
-### Community 1 - "Admin API URL Helpers"
-Cohesion: 0.03
-Nodes (65): API_URL, CloneMeta, ContentSearchResult, createEvent(), createMenu(), createPortalLanguage(), createPortalRole(), createPost() (+57 more)
-
-### Community 2 - "Monitor Server"
-Cohesion: 0.08
-Nodes (53): checkAuth(), composeArgsFor(), crypto, currentColor(), DEPLOY_LOG, deployState, { execFile, spawn }, fs (+45 more)
-
-### Community 3 - "Admin Categories & UI Basics"
-Cohesion: 0.12
-Nodes (39): card, ListEmpty(), ListLoading(), PAGE_SIZE, CreateForm, createSchema, Button, ButtonProps (+31 more)
-
-### Community 4 - "Admin TS Config"
-Cohesion: 0.04
-Nodes (43): compilerOptions, baseUrl, jsx, lib, noEmit, paths, exclude, extends (+35 more)
-
-### Community 5 - "API Security Hardening Notes"
-Cohesion: 0.08
-Nodes (46): assertValidTenantHost (createTenant DNS validation), DELETE /api/portal/clones/:id (clone + staging teardown), getTenantConnection(tenantHost), GET /metrics (hand-rolled Prometheus exposition), Missing FK indexes fix (posts/pages/media), Tenant-host check deny-list fix (role !== superadmin), Tenant pool idle eviction (IDLE_POOL_EVICT_MS sweep), assertValidTenantHost() (+38 more)
-
-### Community 6 - "Designer Elements & Fields"
-Cohesion: 0.08
-Nodes (31): ELS, COLUMN_FIELDS, COLUMN_SPACING_KEYS, CSS_CLASS_FIELD, FIELD_GROUP_BY_KEY, FIELD_ICONS, FieldLabel(), GROUP_META (+23 more)
-
-### Community 7 - "Installer Superadmin Setup"
-Cohesion: 0.12
-Nodes (43): create_superadmin(), create_superadmin_production(), curl_reachable(), curl_reachable_host(), detect_os_family(), detect_public_host(), diagnose_reachability(), ensure_app_database() (+35 more)
-
-### Community 8 - "Admin UI Kit (Avatar/Card)"
-Cohesion: 0.08
-Nodes (39): Avatar, AvatarFallback, AvatarImage, CardDescription, CardFooter, CardHeader, CardTitle, Command (+31 more)
-
-### Community 9 - "API Redis Cache Layer"
-Cohesion: 0.09
-Nodes (34): cacheGet(), cacheInvalidate(), cacheSet(), getCacheStats(), getClient(), getRedisClient(), getPoolStats(), publishSharedContent() (+26 more)
-
-### Community 10 - "Admin Package Deps (BlockNote/UI)"
+### Community 0 - "Design Canvas & Layout"
 Cohesion: 0.05
-Nodes (41): dependencies, @blocknote/core, @blocknote/mantine, @blocknote/react, class-variance-authority, clsx, cmdk, @hookform/resolvers (+33 more)
+Nodes (88): section(), rowDragProps(), DesignerCanvas(), BlockControls(), bpColStyle(), pxLabel(), spacingBand(), DesignerDevicePreviewModal() (+80 more)
 
-### Community 11 - "Frontend API Client"
-Cohesion: 0.07
-Nodes (36): apiGet(), applyLangOverrides(), BlueprintPreview, cache, Category, EventItem, fetchMenuLinkTargets(), getDefaultSiteChrome() (+28 more)
+### Community 1 - "Collection Data Models"
+Cohesion: 0.02
+Nodes (81): createBlueprint(), createCategory(), createMediaFolder(), createMenu(), createPage(), createPortalRole(), createPortalUser(), createPost() (+73 more)
 
-### Community 12 - "Admin UI Buttons/Permissions"
-Cohesion: 0.13
-Nodes (23): btnGhost, btnPrimary, FormError(), inputCls, PERMISSION_LABEL_KEY, PERMISSIONS, SESSION_KEY, QrCode() (+15 more)
-
-### Community 13 - "Designer Block Controls"
-Cohesion: 0.12
-Nodes (38): BlockControls(), LiveEditToolbar(), rowDragProps(), blockOpsFns(), copyColumn(), copyElement(), copyRow(), copySection() (+30 more)
-
-### Community 14 - "Admin Nav & Category Translations"
-Cohesion: 0.06
-Nodes (23): NavButton(), useT(), CategoryTranslations(), Dashboard(), PortalFeedPanel(), ChromeList(), onCreate(), remove() (+15 more)
-
-### Community 15 - "Designer Element Preview"
-Cohesion: 0.12
-Nodes (33): ElPreview(), mergeElBp(), scaleLength(), SectionPropsLike, startFreeElDrag(), up(), startFreeElResize(), move() (+25 more)
-
-### Community 16 - "Designer Field Controls"
-Cohesion: 0.12
-Nodes (34): BpToggle(), BufferedInput(), BufferedTextarea(), DragNumber(), FontPickerInput(), LangToggle(), NumberStepper(), addSlideElement() (+26 more)
-
-### Community 17 - "Frontend Content Blocks"
-Cohesion: 0.12
-Nodes (24): renderInline(), BORDER, cls(), elBorderShadowStyle(), elEntranceClass(), elHoverClass(), elRadius(), fluidClamp() (+16 more)
-
-### Community 18 - "Designer Block Path & Context"
-Cohesion: 0.15
-Nodes (24): BASE_LANG, DesignerCtx, BlockOpsDeps, __testOnly_blockOpsFns(), useBlockOps(), LiveEditBridgeDeps, PersistDeps, TemplateLibraryDeps (+16 more)
-
-### Community 19 - "API Auth (TOTP/CSRF)"
-Cohesion: 0.13
-Nodes (31): base32Decode(), base32Encode(), generateCsrfToken(), generateTotpSecret(), hashPassword(), isMfaSetupRequired(), SESSION_TTL_MS, SessionPayload (+23 more)
-
-### Community 20 - "Shadcn Admin Foundation Plan Docs"
-Cohesion: 0.07
-Nodes (36): MediaPickerModal Dialog Rewrite, shadcn Foundation + App.tsx Migration Phase 1 Plan, react-hook-form + zod Quick-Create Pattern, useConfirm Promise-Based Dialog Hook, designer/geometry.ts Module, designer/parsers.ts Module, Designer.tsx Layer 0 Pure Helper Extraction Plan, 18-of-25 Functions Scope Narrowing (+28 more)
-
-### Community 21 - "Collection Config Types"
-Cohesion: 0.07
-Nodes (21): AccessArgs, AccessFn, CollectionConfig, CollectionHooks, getTenantLanguageSelection(), canWriteBlueprint(), categoriesCollection, eventsCollection (+13 more)
-
-### Community 22 - "Tenant Pool Theme/Storage"
-Cohesion: 0.10
-Nodes (32): createThemePreset(), deleteThemePreset(), getGlobalStorageLimits(), getGlobalTheme(), getTenantStorageLimits(), listSharedContent(), listThemePresets(), setEntraSettings() (+24 more)
-
-### Community 23 - "Tenant Pool CRUD (Users/Roles/Languages)"
-Cohesion: 0.15
-Nodes (32): createLanguage(), createPageBlueprint(), createRole(), createUser(), deleteLanguage(), deletePageBlueprint(), deleteRole(), deleteUser() (+24 more)
-
-### Community 24 - "Admin App Shell & i18n Context"
-Cohesion: 0.10
-Nodes (24): BlueprintGallery, I18nCtx, NAV_GROUP_LABEL, NAV_GROUP_ORDER, NavGroup, PostEditorPage, Tab, TAB_GROUP (+16 more)
-
-### Community 25 - "Categories Panel"
-Cohesion: 0.09
-Nodes (25): CategoriesPanel(), onCreate(), refresh(), remove(), rename(), toggleMultilang(), slugify(), DISPLAY_ONLY_FONTS (+17 more)
-
-### Community 26 - "Designer Core State"
-Cohesion: 0.10
-Nodes (21): clone(), Designer(), LayersTree(), pick(), toggleExpand(), selEq(), clone(), usePersist() (+13 more)
-
-### Community 27 - "Element Schema Package"
-Cohesion: 0.14
-Nodes (31): ATTR_URL_KEYS, COLOR_KEYS, ENUM_VALUES, FREE_TEXT_KEYS, isSafeCard(), isSafeCards(), isSafeCssUrl(), isSafeRepeaterItem() (+23 more)
-
-### Community 28 - "Admin Package Manifest"
-Cohesion: 0.07
-Nodes (26): tsx, name, private, type, version, BOOKMARK_CARD_STYLE, bookmarkCardBlockSpec, bookmarkCardSchema (+18 more)
-
-### Community 29 - "Frontend Hero/Generic Blocks"
-Cohesion: 0.10
-Nodes (21): bgUrl, v, getBlueprintPreview(), getLivePreviewOverride(), getPageBySlug(), getTheme(), listCategories(), listPosts() (+13 more)
-
-### Community 30 - "Tenant Domain SSL & Menu Plans"
+### Community 2 - "Multi-Tenant Database"
 Cohesion: 0.08
-Nodes (30): Custom Certificate Upload/Revert Routes, Tenant Domain + SSL Automation Plan, platform_settings Singleton Table, proxy-sync.ts Module, Menu Label Always-Editable Simplification, MenuItemsEditor Component, menus Table (jsonb item tree), Menu Management Implementation Plan (+22 more)
+Nodes (69): getTenantMaintenanceMode(), listSharedContent(), publishSharedContent(), setTenantMaintenanceMode(), bootstrapPublicSql, dbDir, ensurePublicSchema(), migrationFiles (+61 more)
 
-### Community 31 - "Admin Designer CLAUDE Notes"
+### Community 3 - "Frontend API Client"
+Cohesion: 0.03
+Nodes (67): API_URL, CloneMeta, ContentSearchResult, createEvent(), createPortalLanguage(), createPortalTenant(), createThemePreset(), deleteCategory() (+59 more)
+
+### Community 4 - "Backup & Migration"
+Cohesion: 0.07
+Nodes (63): CloneMeta, cloneStore, DATE_KEYS, deleteClone(), exportStaticSite(), exportTenantBackup(), exportTenantDesignClone(), getClone() (+55 more)
+
+### Community 5 - "Caching Layer"
+Cohesion: 0.06
+Nodes (57): cacheGet(), cacheInvalidate(), cacheSet(), getCacheStats(), getClient(), AccessArgs, AccessFn, CollectionConfig (+49 more)
+
+### Community 6 - "i18n Infrastructure"
 Cohesion: 0.10
-Nodes (27): Per-Breakpoint Style-Override Bag (bp), Designer.tsx Page-Builder Canvas, designerTree.ts Depth-Agnostic Path Primitives, Live Edit postMessage Bridge (iframe selection), First Designer.tsx Playwright E2E Smoke Test, Recursive Container Element (v1), Row Flex Container Layout Mode, Slider/Banner Element Rework (2026-09-05) (+19 more)
+Nodes (40): BASE_LANG, DesignerCtx, BpToggle(), BufferedInput(), LangToggle(), FieldGroups(), COLUMN_FIELDS, COLUMN_SPACING_KEYS (+32 more)
 
-### Community 32 - "API DB Schema"
+### Community 7 - "Authentication & MFA"
+Cohesion: 0.09
+Nodes (51): base32Decode(), base32Encode(), generateCsrfToken(), generateTotpSecret(), hashPassword(), isMfaSetupRequired(), SESSION_TTL_MS, SessionPayload (+43 more)
+
+### Community 8 - "Component Preview"
+Cohesion: 0.10
+Nodes (49): arePropsEqual(), ElPreviewImpl(), FreeRectPct, FreeSiblingPct, mergeElBp(), RESIZE_HANDLES, ResizeDir, selEq() (+41 more)
+
+### Community 9 - "Frontend Rendering"
+Cohesion: 0.07
+Nodes (52): Designer.tsx admin canvas, Frontend site renderer, Per-breakpoint field overrides, CSS-injection via semicolon/paren/brace escaping, Unified design element system, WCAG contrast calculation, Free-positioned element style computation, Margin/padding style helpers (+44 more)
+
+### Community 10 - "Module 10"
+Cohesion: 0.10
+Nodes (41): BlueprintGallery, ListEmpty(), ListLoading(), PAGE_SIZE, CreateForm, createSchema, Button, ButtonProps (+33 more)
+
+### Community 11 - "Module 11"
+Cohesion: 0.06
+Nodes (41): apiGet(), applyLangOverrides(), BlueprintPreview, cache, Category, EventItem, fetchMenuLinkTargets(), getDefaultSiteChrome() (+33 more)
+
+### Community 12 - "Module 12"
+Cohesion: 0.10
+Nodes (48): checkAuth(), composeArgsFor(), currentColor(), DEPLOY_LOG, deployState, getAllContainers(), getComposeStatus(), getGitInfo() (+40 more)
+
+### Community 13 - "Module 13"
+Cohesion: 0.07
+Nodes (40): AccordionContent, AccordionItem, AccordionTrigger, Avatar, AvatarFallback, AvatarImage, CardDescription, CardFooter (+32 more)
+
+### Community 14 - "Module 14"
+Cohesion: 0.12
+Nodes (44): configure_optional_integrations(), create_superadmin(), create_superadmin_production(), curl_reachable(), curl_reachable_host(), detect_os_family(), detect_public_host(), diagnose_reachability() (+36 more)
+
+### Community 15 - "Module 15"
+Cohesion: 0.05
+Nodes (43): dependencies, @blocknote/core, @blocknote/mantine, @blocknote/react, class-variance-authority, clsx, cmdk, @hookform/resolvers (+35 more)
+
+### Community 16 - "Module 16"
+Cohesion: 0.14
+Nodes (27): btnGhost, btnPrimary, card, FormError(), I18nCtx, inputCls, NavButton(), PERMISSION_LABEL_KEY (+19 more)
+
+### Community 17 - "Module 17"
+Cohesion: 0.12
+Nodes (26): DesignerCanvasProps, ROW_PRESETS, DesignerPaletteProps, DEVICE_DIMS, ElPreview, BlockOpsDeps, __testOnly_blockOpsFns(), LiveEditBridgeDeps (+18 more)
+
+### Community 18 - "Module 18"
+Cohesion: 0.05
+Nodes (38): dependencies, astro, @astrojs/node, daisyui, ioredis, swiper, tailwindcss, @tailwindcss/vite (+30 more)
+
+### Community 19 - "Module 19"
+Cohesion: 0.05
+Nodes (33): tailwindcss, @tailwindcss/vite, tsx, @types/node, typescript, @ucms/element-render, @ucms/element-schema, @ucms/element-style (+25 more)
+
+### Community 20 - "Module 20"
+Cohesion: 0.08
+Nodes (25): NAV_GROUP_LABEL, NAV_GROUP_ORDER, NavGroup, useT(), CategoryTranslations(), CONTENT_SUBTAB_GROUP, ContentManager(), ContentSubTab (+17 more)
+
+### Community 21 - "Module 21"
+Cohesion: 0.12
+Nodes (28): CtxMenuState, DesignerDevicePreviewModalProps, PreviewModalState, DesignerHistoryModal(), DesignerHistoryModalProps, DesignerTemplatesModalProps, DesignerTopBarProps, BEZEL_PAD (+20 more)
+
+### Community 22 - "Module 22"
+Cohesion: 0.09
+Nodes (21): ClipLevel, DesignerPalette(), CONTENT_KEYS, ELS, LAYOUT_PRESETS, LayoutPreset, BlockOpsClipboard, CLIP_KEYS (+13 more)
+
+### Community 23 - "Module 23"
+Cohesion: 0.11
+Nodes (22): GOOGLE_FONTS, oklchToHex(), oklchToRgb(), DISPLAY_ONLY_FONTS, FONT_PAIRINGS, isLegibleFont(), presetToColors(), randomFontPairing() (+14 more)
+
+### Community 24 - "Module 24"
+Cohesion: 0.12
+Nodes (24): BlueprintGallery(), refresh(), remove(), saveEdit(), blueprintRows(), EventsPanel(), onCreate(), openEdit() (+16 more)
+
+### Community 25 - "Module 25"
+Cohesion: 0.11
+Nodes (20): SettingsPanel(), addLanguage(), pickRestoreFile(), reloadLanguages(), reloadLoginSettings(), reloadProxySettings(), reloadProxyTenants(), removeLanguage() (+12 more)
+
+### Community 26 - "Module 26"
 Cohesion: 0.07
 Nodes (26): auditLog, categories, designTemplates, events, languages, loginAttempts, media, mediaFolders (+18 more)
 
-### Community 33 - "ESLint Config"
-Cohesion: 0.08
-Nodes (25): devDependencies, eslint, @eslint/js, eslint-plugin-react-hooks, prettier, typescript-eslint, name, packageManager (+17 more)
+### Community 27 - "Module 27"
+Cohesion: 0.12
+Nodes (17): bgUrl, v, getBlueprintPreview(), getLivePreviewOverride(), getPageBySlug(), getTheme(), SiteChrome, Block (+9 more)
 
-### Community 34 - "Designer Page/Language Hook"
+### Community 28 - "Module 28"
+Cohesion: 0.10
+Nodes (17): SeoPreviewCard(), PostEditorPage, MediaPickerModal(), autoExcerpt(), DisplayOverride, effectiveDisplay(), fromDisplayOverride(), LangContent (+9 more)
+
+### Community 29 - "Module 29"
+Cohesion: 0.11
+Nodes (22): bestTextColor(), BORDER, computeFreePositionStyle(), contrastRatio(), elBorderShadowStyle(), elMarginStyle(), elPaddingStyle(), elRadius() (+14 more)
+
+### Community 30 - "Module 30"
+Cohesion: 0.19
+Nodes (16): block(), SRCSET_WIDTHS, string, renderInline(), cls(), elBorderShadowStyle(), fluidClamp(), fluidTextSize() (+8 more)
+
+### Community 31 - "Module 31"
 Cohesion: 0.16
-Nodes (16): clone(), PageAndLanguageDeps, usePageAndLanguage(), clickPageLanguagePill(), elTypeAtPath(), langStackKeysOverridden(), retranslatePageLanguage(), seedMissingTextOverrides() (+8 more)
+Nodes (18): getRedisClient(), createPageBlueprint(), deletePageBlueprint(), getPageBlueprint(), listPageBlueprints(), updatePageBlueprint(), createThemePreset(), deleteThemePreset() (+10 more)
 
-### Community 35 - "Settings Panel"
-Cohesion: 0.13
-Nodes (20): SettingsPanel(), addLanguage(), pickRestoreFile(), reloadLanguages(), reloadLoginSettings(), reloadProxySettings(), reloadProxyTenants(), removeLanguage() (+12 more)
-
-### Community 36 - "Designer Live-Edit Bridge"
-Cohesion: 0.13
-Nodes (21): section(), useLiveEditBridge(), onMessage(), toggleLive(), clone(), uid(), useTemplateLibrary(), confirmMakeComponent() (+13 more)
-
-### Community 37 - "Installer Dev Mode"
+### Community 32 - "Module 32"
 Cohesion: 0.20
 Nodes (22): checkDocker(), createSuperadmin(), ensureCredentials(), ensureReachableOrReport(), fetchStatusCode(), fillEnvIfBlank(), findFreePort(), flags (+14 more)
 
-### Community 38 - "API Backup/Clone Store"
-Cohesion: 0.19
-Nodes (20): CloneMeta, cloneStore, DATE_KEYS, deleteClone(), exportStaticSite(), exportTenantBackup(), exportTenantDesignClone(), getClone() (+12 more)
-
-### Community 39 - "Admin UI Kit (Checkbox/Scroll)"
-Cohesion: 0.10
-Nodes (15): Checkbox, ScrollArea, ScrollBar, Skeleton(), Textarea, TooltipContent, contrastRatio(), oklchToHex() (+7 more)
-
-### Community 40 - "Designer Breakpoint Styling"
-Cohesion: 0.17
-Nodes (17): bpColStyle(), bpMarginStyle(), bpPaddingStyle(), fourSideValue(), rowGridTemplate(), sectionBpStyle(), writeDragSideKeys(), Bp (+9 more)
-
-### Community 41 - "Designer Clipboard"
+### Community 33 - "Module 33"
 Cohesion: 0.14
-Nodes (14): ClipLevel, CONTENT_KEYS, BlockOpsClipboard, CLIP_KEYS, ClipboardApi, CLIPSTYLE_KEYS, __testOnly_clipboardFns(), useClipboard() (+6 more)
+Nodes (19): CategoriesPanel(), onCreate(), refresh(), remove(), rename(), toggleMultilang(), slugify(), pageHasContent() (+11 more)
 
-### Community 42 - "Cross-App Tailwind Deps"
+### Community 34 - "Module 34"
+Cohesion: 0.10
+Nodes (19): ioredis, tsx, @types/node, typescript, @ucms/element-schema, name, private, type (+11 more)
+
+### Community 35 - "Module 35"
+Cohesion: 0.10
+Nodes (20): dependencies, @ucms/element-style, devDependencies, tsx, @types/node, typescript, tsx, @types/node (+12 more)
+
+### Community 36 - "Module 36"
+Cohesion: 0.13
+Nodes (15): Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut() (+7 more)
+
+### Community 37 - "Module 37"
 Cohesion: 0.12
-Nodes (15): tailwindcss, @ucms/element-style, ioredis, devDependencies, @astrojs/check, typescript, name, private (+7 more)
+Nodes (18): Canva-style Draft Autosave, Live Edit Bridge, Designer Page Builder Canvas, Recursive Container Element, Row Flex Container, Selection Path Mutation De-hardcoding, Slider/Banner Rework (2026-09-05), Slider Canvas Canva-style Controls (+10 more)
 
-### Community 43 - "API Package Manifest"
-Cohesion: 0.12
-Nodes (15): tsx, @ucms/element-schema, name, private, type, version, drizzle-kit, @fastify/cors (+7 more)
-
-### Community 44 - "API Image Variants/Storage"
-Cohesion: 0.18
-Nodes (15): deleteImageVariants(), generateImageVariants(), ImageMeta, SRCSET_WIDTHS, deleteFile(), getS3Client(), isLocalDriver, localUploadsDir (+7 more)
-
-### Community 45 - "API Proxy Sync (Caddy)"
+### Community 38 - "Module 38"
 Cohesion: 0.24
-Nodes (14): buildCaddyConfig(), caddyRequest(), CaddyResponse, CaddyUpstreams, certId(), CLOUDFLARE_IP_RANGES, dials(), isValidDialTargets() (+6 more)
+Nodes (16): guideLine(), startFreeElDrag(), move(), up(), startFreeElResize(), move(), up(), startFreeElRotate() (+8 more)
 
-### Community 46 - "Media Manager"
+### Community 39 - "Module 39"
+Cohesion: 0.24
+Nodes (15): getMergedStorageLimits(), deleteImageVariants(), generateImageVariants(), ImageMeta, SRCSET_WIDTHS, registerMediaRoutes(), deleteFile(), getS3Client() (+7 more)
+
+### Community 40 - "Module 40"
+Cohesion: 0.11
+Nodes (17): devDependencies, tsx, @types/node, typescript, tsx, @types/node, typescript, main (+9 more)
+
+### Community 41 - "Module 41"
+Cohesion: 0.11
+Nodes (17): devDependencies, tsx, @types/node, typescript, tsx, @types/node, typescript, main (+9 more)
+
+### Community 42 - "Module 42"
+Cohesion: 0.20
+Nodes (13): AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter(), AlertDialogHeader(), AlertDialogOverlay, AlertDialogTitle (+5 more)
+
+### Community 43 - "Module 43"
 Cohesion: 0.21
 Nodes (12): MediaManager(), addFolder(), bulkDelete(), onDrop(), onFileChosen(), refreshFolders(), refreshItems(), remove() (+4 more)
 
-### Community 47 - "API Package Deps (AWS/Drizzle)"
+### Community 44 - "Module 44"
+Cohesion: 0.13
+Nodes (7): Designer(), fourSideValue(), onKey(), AnyFn, useStableFns(), redo(), undo()
+
+### Community 45 - "Module 45"
+Cohesion: 0.17
+Nodes (8): usePageAndLanguage(), clickPageLanguagePill(), elTypeAtPath(), langStackKeysOverridden(), retranslatePageLanguage(), seedMissingTextOverrides(), switchPageLanguage(), toggleLangStackKeys()
+
+### Community 46 - "Module 46"
+Cohesion: 0.22
+Nodes (13): CloneBox(), promote(), refresh(), remove(), replace(), run(), stage(), isStagingTenant() (+5 more)
+
+### Community 47 - "Module 47"
 Cohesion: 0.13
 Nodes (15): dependencies, @aws-sdk/client-s3, @aws-sdk/lib-storage, drizzle-orm, fastify, @fastify/cors, @fastify/helmet, @fastify/multipart (+7 more)
 
-### Community 48 - "Deployment CLAUDE Notes"
-Cohesion: 0.14
-Nodes (15): Usage & Cost Discipline policy (subagents/worktrees/skills), Blue-green zero-downtime deploys, Branded uploads fix (no api.<domain> leak), buildCaddyConfig / syncCaddy (proxy-sync.ts), Caddy reverse proxy / TLS terminator (proxy service), POST /api/ssl/issue (certbot auto-SSL for nginx), POST /internal/deploy/promote, scripts/deploy.sh (blue-green deploy driver) (+7 more)
+### Community 48 - "Module 48"
+Cohesion: 0.15
+Nodes (13): ESLint Flat Config (v9+), @eslint/js recommended config, eslint-plugin-react-hooks, apps/admin TypeScript/TSX linting scope, name, packageManager, private, version (+5 more)
 
-### Community 49 - "Branding Feature Spec Docs"
-Cohesion: 0.16
-Nodes (15): BrandingPanel Component, Superadmin Control Plane Follow-up (deferred: permissions, copy-on-place, clone tenant), Admin Restyle + Branding + Post/Media Design, media Library Collection, posts Collection (v1), site_theme.settings Fixed Schema, bookmarkCard BlockNote Custom Block, categories Table + posts.categoryId FK (+7 more)
-
-### Community 50 - "Security/Auth CLAUDE Notes"
-Cohesion: 0.14
-Nodes (14): Mandatory MFA Enrollment UI + QR Code, audit_log (instance-wide/cross-tenant action log), Designer.tsx (PageDesignerRoute, applyLangOverrides), Microsoft Entra ID SSO (entra.ts OIDC flow), Fastify global route-table lesson (no public+protected same path), generic-crud.ts (registerPublicCollectionRoutes, elevateIfAuthenticated), Entra login-CSRF fix (state nonce + cookie binding), isLoginRateLimited / recordLoginAttempt (login_attempts table) (+6 more)
-
-### Community 51 - "Admin Component Aliases"
-Cohesion: 0.14
-Nodes (13): aliases, components, utils, iconLibrary, rsc, $schema, style, tailwind (+5 more)
-
-### Community 52 - "Designer Side-Value Setters"
+### Community 49 - "Module 49"
 Cohesion: 0.22
-Nodes (14): onKey(), setColSideValue(), setElSideValue(), setFourSideValue(), langKeysOverridden(), setLangValue(), toggleLangKeys(), clone() (+6 more)
+Nodes (10): emptyItem(), ItemTranslations(), MenuItemsEditor(), addItem(), moveItem(), patchItem(), removeItem(), update() (+2 more)
 
-### Community 53 - "Designer Tree & Live-Edit API"
-Cohesion: 0.34
-Nodes (10): LiveEditBridgeApi, BORDER, childrenOf(), getNode(), insertAt(), locate(), moveColumn(), moveSection() (+2 more)
+### Community 50 - "Module 50"
+Cohesion: 0.15
+Nodes (12): aliases, components, utils, iconLibrary, rsc, $schema, style, tailwind (+4 more)
 
-### Community 54 - "API Entra SSO"
+### Community 51 - "Module 51"
 Cohesion: 0.22
-Nodes (12): base64UrlDecode(), EntraClaims, exchangeEntraCode(), getEntraAuthorizeUrl(), getJwks(), isEntraStateValid(), isPasswordLoginAllowed(), Jwk (+4 more)
+Nodes (10): InspectorRowPanel(), colStyle(), elBorderShadowStyle(), gapPx(), H_SIZE, overlayColors(), renderInline(), safeHref() (+2 more)
 
-### Community 55 - "Admin Dev Dependencies"
-Cohesion: 0.17
-Nodes (12): devDependencies, autoprefixer, @playwright/test, postcss, tailwindcss, tsx, @types/node, @types/react (+4 more)
+### Community 52 - "Module 52"
+Cohesion: 0.29
+Nodes (10): Bp, BpStyleApi, bpStyleFns(), bpGetValue(), bpKey(), bpKeysOverridden(), sideValue(), toggleBpKeys() (+2 more)
 
-### Community 56 - "Pages Panel"
-Cohesion: 0.24
-Nodes (10): pageHasContent(), PagesPanel(), onCreate(), refresh(), remove(), setHome(), setStatus(), useBlueprint() (+2 more)
-
-### Community 57 - "API Package Scripts"
+### Community 53 - "Module 53"
 Cohesion: 0.17
 Nodes (12): scripts, build, db:generate, db:migrate, db:setup-role, dev, start, tenant:add (+4 more)
 
-### Community 58 - "API Cookie Helpers"
-Cohesion: 0.32
-Nodes (11): appendSetCookie(), baseAttrs(), clearEntraStateCookie(), clearSessionCookie(), ENTRA_STATE_COOKIE_NAME, getCookie(), getEntraStateCookie(), getSessionCookie() (+3 more)
+### Community 54 - "Module 54"
+Cohesion: 0.29
+Nodes (10): LINK_TYPES, LinkType, validateCommonItemFields(), validateItem(), validateLinkFields(), validateMegaMenu(), validateMegaMenuItem(), validateMenuItems() (+2 more)
 
-### Community 59 - "Admin UI Kit (Alert Dialog)"
-Cohesion: 0.22
-Nodes (10): AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter(), AlertDialogHeader(), AlertDialogOverlay, AlertDialogTitle (+2 more)
+### Community 55 - "Module 55"
+Cohesion: 0.23
+Nodes (8): TenantDb, UnknownTenantError, fastify, FastifyRequest, tenantPlugin(), isTenantRateLimited(), MAX_PER_WINDOW, memoryBuckets
 
-### Community 60 - "Designer Field Groups/Input"
-Cohesion: 0.38
-Nodes (10): FieldGroups(), FieldGroupsProps, FieldInput(), FieldInputProps, Bp, Field, FieldGroupKey, Category (+2 more)
+### Community 56 - "Module 56"
+Cohesion: 0.17
+Nodes (11): compilerOptions, declaration, module, moduleResolution, outDir, rootDir, types, exclude (+3 more)
 
-### Community 61 - "Post Editor Page"
-Cohesion: 0.22
-Nodes (9): autoExcerpt(), effectiveDisplay(), fromDisplayOverride(), PostEditorPage(), askResyncLangs(), clickLanguagePill(), save(), switchLanguage() (+1 more)
+### Community 57 - "Module 57"
+Cohesion: 0.17
+Nodes (11): compilerOptions, declaration, module, moduleResolution, outDir, rootDir, types, exclude (+3 more)
 
-### Community 62 - "Tenants Panel Clone Box"
-Cohesion: 0.33
-Nodes (10): CloneBox(), promote(), refresh(), remove(), replace(), run(), stage(), SiteOpsPanel() (+2 more)
+### Community 58 - "Module 58"
+Cohesion: 0.17
+Nodes (11): compilerOptions, declaration, module, moduleResolution, outDir, rootDir, types, exclude (+3 more)
 
-### Community 63 - "API add-user Script"
+### Community 59 - "Module 59"
 Cohesion: 0.18
+Nodes (11): devDependencies, @playwright/test, tailwindcss, @tailwindcss/vite, tsx, @types/node, @types/react, @types/react-dom (+3 more)
+
+### Community 60 - "Module 60"
+Cohesion: 0.18
+Nodes (10): compilerOptions, baseUrl, jsx, lib, noEmit, paths, exclude, extends (+2 more)
+
+### Community 61 - "Module 61"
+Cohesion: 0.20
 Nodes (9): bootstrapSql, client, [email, password, role, tenantHost], bootstrapSql, client, [json], sql, client (+1 more)
 
-### Community 64 - "Menu Link Validation"
-Cohesion: 0.33
-Nodes (9): LINK_TYPES, LinkType, validateCommonItemFields(), validateItem(), validateLinkFields(), validateMegaMenu(), validateMegaMenuItem(), validateMenuItems() (+1 more)
-
-### Community 65 - "TS Base Config"
-Cohesion: 0.18
-Nodes (10): compilerOptions, esModuleInterop, forceConsistentCasingInFileNames, isolatedModules, module, moduleResolution, resolveJsonModule, skipLibCheck (+2 more)
-
-### Community 66 - "Admin App Session/Impersonation"
+### Community 63 - "Module 63"
 Cohesion: 0.22
 Nodes (5): App(), loadSession(), Toaster(), ToasterProps, next-themes
 
-### Community 67 - "Users Panel"
+### Community 64 - "Module 64"
+Cohesion: 0.22
+Nodes (9): SheetContent, SheetContentProps, SheetDescription, SheetFooter(), SheetHeader(), SheetOverlay, SheetTitle, sheetVariants (+1 more)
+
+### Community 65 - "Module 65"
+Cohesion: 0.44
+Nodes (6): PageAndLanguageDeps, applyLangOverrides(), isTextKey(), migrateOldTranslation(), pathKey(), TRANSLATABLE_TEXT_KEYS
+
+### Community 66 - "Module 66"
 Cohesion: 0.31
 Nodes (7): UsersPanel(), assignRole(), create(), refresh(), removeUser(), saveEditTenantHosts(), setUserExtraPermissions()
 
-### Community 68 - "Admin UI Kit (Badge/Label)"
+### Community 67 - "Module 67"
+Cohesion: 0.20
+Nodes (9): compilerOptions, module, moduleResolution, outDir, rootDir, types, extends, include (+1 more)
+
+### Community 68 - "Module 68"
+Cohesion: 0.24
+Nodes (6): listCategories(), listPages(), listPosts(), category, GET(), astro
+
+### Community 69 - "Module 69"
+Cohesion: 0.20
+Nodes (10): scripts, build, dev:admin, dev:api, dev:frontend, format, format:check, lint (+2 more)
+
+### Community 70 - "Module 70"
+Cohesion: 0.24
+Nodes (9): TypeScript esModuleInterop enabled, TypeScript isolatedModules enabled, TypeScript module: ESNext, TypeScript moduleResolution: Bundler, TypeScript resolveJsonModule enabled, TypeScript skipLibCheck enabled, TypeScript strict mode enabled, TypeScript target: ES2022 (+1 more)
+
+### Community 71 - "Module 71"
+Cohesion: 0.20
+Nodes (10): compilerOptions, esModuleInterop, forceConsistentCasingInFileNames, isolatedModules, module, moduleResolution, resolveJsonModule, skipLibCheck (+2 more)
+
+### Community 72 - "Module 72"
 Cohesion: 0.28
 Nodes (7): Badge(), BadgeProps, badgeVariants, Label, labelVariants, class-variance-authority, @radix-ui/react-label
 
-### Community 69 - "Admin UI Kit (Sheet)"
-Cohesion: 0.25
-Nodes (8): SheetContent, SheetContentProps, SheetDescription, SheetFooter(), SheetHeader(), SheetOverlay, SheetTitle, sheetVariants
-
-### Community 70 - "Admin UI Kit (Table)"
-Cohesion: 0.22
-Nodes (8): Table, TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow
-
-### Community 71 - "Designer Undo/Redo"
-Cohesion: 0.31
-Nodes (5): SetHoverBand, __testOnly_undoRedoFns(), UndoRedoApi, undoRedoFns(), useUndoRedo()
-
-### Community 72 - "Menu Items Editor"
-Cohesion: 0.36
-Nodes (8): emptyItem(), MenuItemsEditor(), addItem(), moveItem(), patchItem(), removeItem(), update(), uid()
-
-### Community 73 - "Mega Menu Editor"
+### Community 73 - "Module 73"
 Cohesion: 0.39
 Nodes (9): emptyMegaColumnItem(), MegaMenuEditor(), addColumn(), addColumnItem(), patchColumn(), patchColumnItem(), removeColumn(), removeColumnItem() (+1 more)
 
-### Community 74 - "API i18n/Language Docs"
+### Community 74 - "Module 74"
 Cohesion: 0.25
-Nodes (9): Category i18n follow-up (translations/multilangEnabled), getTenantLanguageSelection / setTenantLanguageSelection, i18n Phase 3/4: one-row-holds-every-language design (posts/pages), Language-switcher placement/style settings, i18n Phase 1: global language registry (languages table), i18n Phase 5: WPML-style opt-in multilangEnabled switches, PostEditorPage (language pill switcher editor), i18n Phase 2: tenant_languages per-tenant enabled subset (+1 more)
+Nodes (6): BOOKMARK_CARD_STYLE, bookmarkCardBlockSpec, bookmarkCardSchema, createBookmarkCardBlockSpec, @blocknote/core, @blocknote/react
 
-### Community 75 - "Element Style Package Manifest"
-Cohesion: 0.22
-Nodes (8): @types/node, tsx, main, name, private, type, types, version
-
-### Community 76 - "Element Schema Package Manifest"
-Cohesion: 0.22
-Nodes (8): typescript, tsx, main, name, private, type, types, version
-
-### Community 77 - "Frontend Package Dependencies"
-Cohesion: 0.22
-Nodes (9): dependencies, astro, @astrojs/node, daisyui, ioredis, swiper, tailwindcss, @tailwindcss/vite (+1 more)
-
-### Community 78 - "Monitor Static File Server"
-Cohesion: 0.25
-Nodes (8): DIST_DIR, fs, http, MIME, path, PORT, safeJoin(), server
-
-### Community 79 - "QR Code Generator Types"
+### Community 76 - "Module 76"
 Cohesion: 0.25
 Nodes (3): ErrorCorrectionLevel, QRCode, qrcode-generator
 
-### Community 80 - "Frontend HTML Cache & Middleware"
-Cohesion: 0.50
-Nodes (6): getTenantStatus(), getClient(), htmlCacheGet(), htmlCacheSet(), onRequest(), astro
-
-### Community 81 - "Frontend/Admin CLAUDE Cross-Notes"
-Cohesion: 0.29
-Nodes (7): @ucms/element-schema Shared Validator Package, @ucms/element-style Shared Sanitizer Package, Astro SSR Renderer ([...slug].astro), apps/frontend build-time/runtime env (API_URL, HOST, PORT), designer:selectedRect postMessage bridge (ResizeObserver + scroll), tag/category/author archive pages in apps/frontend, pnpm-workspace.yaml packages glob (apps/*, packages/*)
-
-### Community 82 - "Admin E2E Test Seed"
+### Community 77 - "Module 77"
 Cohesion: 0.43
 Nodes (4): extractCookieValue(), seedDesignerPage(), SeedResult, @playwright/test
 
-### Community 83 - "Admin Package Scripts"
+### Community 78 - "Module 78"
 Cohesion: 0.29
 Nodes (7): scripts, build, dev, preview, test, test:e2e, typecheck
 
-### Community 84 - "Events Panel"
+### Community 79 - "Module 79"
 Cohesion: 0.48
-Nodes (7): EventsPanel(), onCreate(), openEdit(), refresh(), remove(), save(), toLocalInput()
+Nodes (7): setColSideValue(), setElSideValue(), setFourSideValue(), langKeysOverridden(), setLangValue(), toggleLangKeys(), mutate()
 
-### Community 85 - "API Dev Dependencies"
+### Community 80 - "Module 80"
+Cohesion: 0.29
+Nodes (6): compilerOptions, lib, noEmit, extends, include, ../../tsconfig.base.json
+
+### Community 81 - "Module 81"
+Cohesion: 0.29
+Nodes (7): i18n Phase 1: Global Language Registry, i18n Phase 2: Per-Tenant Language Subset, i18n Phase 3/4: Content Translations (Corrected Design), i18n Phase 3/4: Rejected First Design, i18n Phase 5 Follow-up: Default Language, i18n Phase 5: WPML-style Opt-in Switch, Design: Language Code Immutable
+
+### Community 82 - "Module 82"
 Cohesion: 0.29
 Nodes (7): devDependencies, drizzle-kit, tsx, @types/node, @types/pg, @types/sanitize-html, typescript
 
-### Community 86 - "Frontend Dev Server"
+### Community 83 - "Module 83"
 Cohesion: 0.38
 Nodes (6): clientDir, CSP, MIME, server, serveStatic(), setSecurityHeaders()
 
-### Community 87 - "Page Blueprint Plan Docs"
-Cohesion: 0.43
-Nodes (7): BlueprintGallery Component, page_blueprints Control-Plane Table, Page Blueprint Implementation Plan, TemplatePreview Extraction, Control-Plane Not Per-Tenant-DB Rationale, Page Blueprint Design, page_blueprints Table
+### Community 84 - "Module 84"
+Cohesion: 0.62
+Nodes (5): getTenantStatus(), getClient(), htmlCacheGet(), htmlCacheSet(), onRequest()
 
-### Community 88 - "Designer Site Chrome Hook"
-Cohesion: 0.33
-Nodes (3): SiteChromeDeps, useSiteChrome(), patchChromeMeta()
-
-### Community 89 - "Roles Panel"
-Cohesion: 0.60
-Nodes (6): RolesPanel(), create(), refresh(), remove(), renameRole(), togglePermission()
-
-### Community 90 - "Admin TS Config (root)"
+### Community 85 - "Module 85"
 Cohesion: 0.33
 Nodes (5): compilerOptions, baseUrl, paths, files, references
 
-### Community 91 - "API Translation Service"
+### Community 86 - "Module 86"
+Cohesion: 0.40
+Nodes (6): Multi-tenancy: Database-per-Tenant Architecture, Control Plane Database, Database-per-Tenant Model, Single Instance Multiple Deployments, Multi-tenant Headless CMS, Tenant Identity via x-tenant-host Header
+
+### Community 87 - "Module 87"
+Cohesion: 0.33
+Nodes (6): Posts Category: Managed Taxonomy, Posts Revisions: History Snapshots, Posts Table: Body HTML Sanitization, Security: Media Upload Extension Fix, Design: Category Name Snapshot in Post Revision, Design: Tags Freeform, Categories Managed
+
+### Community 88 - "Module 88"
 Cohesion: 0.53
-Nodes (5): chunkText(), escapeHtml(), MyMemoryResponse, translateHtmlBody(), translatePlainText()
+Nodes (4): derive_tenant_url(), dump_tenant(), backup.sh script, to_dbname()
 
-### Community 92 - "Frontend Package Scripts"
-Cohesion: 0.33
-Nodes (6): scripts, build, dev, preview, start, typecheck
-
-### Community 93 - "CI/Collection Config Notes"
-Cohesion: 0.33
-Nodes (6): apps/api (Fastify + Drizzle backend), CollectionConfig registration pattern, pnpm --filter @ucms/api db:generate, pnpm --filter @ucms/api db:migrate (not for normal use), ensureTenantDatabase (tenant-pool.ts migration replay), pnpm --filter @ucms/api test step
-
-### Community 94 - "Admin UI Kit (Accordion)"
+### Community 89 - "Module 89"
 Cohesion: 0.40
-Nodes (4): AccordionContent, AccordionItem, AccordionTrigger, @radix-ui/react-accordion
+Nodes (5): DIST_DIR, MIME, PORT, safeJoin(), server
 
-### Community 95 - "Admin UI Kit (Tabs)"
-Cohesion: 0.40
-Nodes (4): TabsContent, TabsList, TabsTrigger, @radix-ui/react-tabs
+### Community 90 - "Module 90"
+Cohesion: 0.33
+Nodes (6): devDependencies, eslint, @eslint/js, eslint-plugin-react-hooks, prettier, typescript-eslint
 
-### Community 97 - "Menus Panel"
-Cohesion: 0.70
-Nodes (5): MenusPanel(), onCreate(), refresh(), remove(), rename()
-
-### Community 98 - "Posts Panel"
+### Community 91 - "Module 91"
 Cohesion: 0.60
-Nodes (4): PostsPanel(), onCreate(), refresh(), remove()
+Nodes (5): useLiveEditBridge(), enterLive(), handleFrameLoad(), postShowSlides(), toggleLive()
 
-### Community 99 - "Security Panel (MFA)"
+### Community 92 - "Module 92"
 Cohesion: 0.60
 Nodes (4): SecurityPanel(), confirmDisable(), confirmEnroll(), reload()
 
-### Community 100 - "API add-tenant Script"
+### Community 93 - "Module 93"
 Cohesion: 0.40
 Nodes (4): bootstrapSql, client, departmentName, [host, ...nameParts]
 
-### Community 101 - "Docker Compose Services"
-Cohesion: 0.40
-Nodes (5): pgbouncer service (edoburu/pgbouncer, session pool_mode), redis service (shared public-read cache), api service (blue-green release compose), frontend service (blue-green release compose), Target scalable architecture diagram (CDN, LB, PgBouncer, Redis, S3)
-
-### Community 102 - "Admin UI Kit (Radio Group)"
+### Community 94 - "Module 94"
 Cohesion: 0.50
 Nodes (3): RadioGroup, RadioGroupItem, @radix-ui/react-radio-group
 
-### Community 103 - "Admin Download/Export API"
+### Community 95 - "Module 95"
+Cohesion: 0.50
+Nodes (3): ScrollArea, ScrollBar, @radix-ui/react-scroll-area
+
+### Community 96 - "Module 96"
 Cohesion: 0.50
 Nodes (4): downloadClone(), downloadStaticExport(), downloadTenantBackup(), downloadZip()
 
-### Community 105 - "Frontend TS Config"
+### Community 97 - "Module 97"
+Cohesion: 0.50
+Nodes (4): Auth: Microsoft Entra ID SSO, Auth: Entra Login CSRF Fix, Auth: Session Cookie + CSRF Migration, Design: Never Auto-Provision from Entra
+
+### Community 99 - "Module 99"
 Cohesion: 0.50
 Nodes (3): exclude, extends, astro/tsconfigs/strict
 
-### Community 106 - "Architecture Overview Docs"
+### Community 100 - "Module 100"
 Cohesion: 0.50
-Nodes (4): Core stack: pnpm workspaces, Fastify+Drizzle, Vite+React, Multi-tenancy/JSONB layout/no-bloat token-saving constraints, USIM CMS current-state architecture summary (27 Ogos 2026), Backend engine features (multi-tenant router, generic REST, local API SDK)
+Nodes (3): Set-IfBlank(), engines, node
 
-### Community 107 - "Roadmap & Audit Docs"
-Cohesion: 0.50
-Nodes (4): Page Blueprint / starter template feature proposal, Phased feature roadmap (fasa 1-5), Page Blueprint gallery as highest-priority Designer recommendation, 4-phase engineering improvement plan (stability, query, cache/CDN, load test)
-
-### Community 108 - "Installer Hardening Design Docs"
-Cohesion: 0.50
-Nodes (4): Installer Hardening + Dev Installer Design, install-dev.mjs Local Installer, OS/Package-Manager Abstraction (apt/dnf), External Reachability Verification (2-stage)
-
-### Community 109 - "Element Schema Dev Deps"
-Cohesion: 0.50
-Nodes (4): devDependencies, tsx, @types/node, typescript
-
-### Community 110 - "Element Schema Scripts"
-Cohesion: 0.50
-Nodes (4): scripts, build, test, typecheck
-
-### Community 111 - "Element Style Dev Deps"
-Cohesion: 0.50
-Nodes (4): devDependencies, tsx, @types/node, typescript
-
-### Community 112 - "Element Style Scripts"
-Cohesion: 0.50
-Nodes (4): scripts, build, test, typecheck
-
-### Community 117 - "Admin Login Settings API"
+### Community 106 - "Module 106"
 Cohesion: 0.67
 Nodes (3): getLoginSettings(), setLoginSettings(), toLoginSettings()
 
-### Community 118 - "Admin Pages/Posts Query API"
+### Community 107 - "Module 107"
 Cohesion: 0.67
 Nodes (3): listPagesPage(), listPostsPage(), toQuery()
 
-### Community 119 - "Admin Menu Item API Types"
+### Community 108 - "Module 108"
 Cohesion: 0.67
 Nodes (3): MenuItem, MenuLinkFields, MenuMegaColumnItem
 
-### Community 120 - "Admin Upload/Media API"
+### Community 109 - "Module 109"
 Cohesion: 0.67
 Nodes (3): parseJsonBody(), uploadGlobalBranding(), uploadMedia()
 
-### Community 121 - "Overview CLAUDE Docs"
+### Community 110 - "Module 110"
 Cohesion: 0.67
-Nodes (3): apps/api/CLAUDE.md (multi-tenancy + auth hardening doc), root CLAUDE.md (repo guidance), deployment SKILL.md (deployment/ops reference)
+Nodes (3): Collections: Code-First System, Collections: Generic Query Filters, Design: RLS as Defense-in-Depth
 
-### Community 122 - "Rate Limit & Cache Notes"
+### Community 112 - "Module 112"
 Cohesion: 0.67
-Nodes (3): rate-limit.ts isTenantRateLimited (per-tenant request budget), apps/frontend html-cache.ts (rendered-HTML cache), redis service + cache.ts (public GET cache)
+Nodes (3): Database and application configuration, Blue-green zero-downtime deployment, Multi-tenant database setup
 
-### Community 126 - "Deployment Install Scripts"
+### Community 113 - "Module 113"
 Cohesion: 0.67
-Nodes (3): docker-compose.trial.yml (install.sh trial flow), install-dev.mjs (local-dev installer), install.sh (VPS installer, docker/bare-metal)
+Nodes (3): Deferred .astro linting support, ESLint ignore patterns (dist, node_modules, .astro), apps/api and apps/frontend .ts file linting
 
-### Community 127 - "Docker DB Service & CI"
+### Community 115 - "Module 115"
 Cohesion: 0.67
-Nodes (3): db service (Postgres, setup-db-role + md5 password rotation), install.sh trial mode: single-container api/frontend/admin, no Caddy, Dependabot ignore rule for postgres major-version bumps
-
-### Community 128 - "UI/UX Audit Gaps"
-Cohesion: 0.67
-Nodes (3): Inconsistent form/status accessibility (P0), 4-sprint UX implementation backlog, Admin panel not fully responsive (P0)
-
-## Ambiguous Edges - Review These
-- `Bug: Copy Style / Paste Style Non-Functional for Slider` → `Slider/Banner Element Rework (2026-09-05)`  [AMBIGUOUS]
-  docs/SliderProblem.pdf · relation: rationale_for
-- `Slider/Banner Element Rework (2026-09-05)` → `Recommendation to avoid too many carousel/animation variations early`  [AMBIGUOUS]
-  docs/laporan-audit-ui-ux.md · relation: conceptually_related_to
+Nodes (3): Drizzle ORM, Fastify Backend Framework, No Bloat Principle
 
 ## Knowledge Gaps
-- **608 isolated node(s):** `ImageMeta`, `UploadResult`, `DisplayOverride`, `LangContent`, `PostStatus` (+603 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 783 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **59 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **578 isolated node(s):** `printWidth`, `$schema`, `style`, `rsc`, `tsx` (+573 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 779 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **25 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **What is the exact relationship between `Bug: Copy Style / Paste Style Non-Functional for Slider` and `Slider/Banner Element Rework (2026-09-05)`?**
-  _Edge tagged AMBIGUOUS (relation: rationale_for) - confidence is low._
-- **What is the exact relationship between `Slider/Banner Element Rework (2026-09-05)` and `Recommendation to avoid too many carousel/animation variations early`?**
-  _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `react` connect `Admin UI Buttons/Permissions` to `Admin Categories & UI Basics`, `Designer Elements & Fields`, `Admin UI Kit (Avatar/Card)`, `Admin Nav & Category Translations`, `Designer Field Controls`, `Designer Block Path & Context`, `Admin App Shell & i18n Context`, `Categories Panel`, `Admin Package Manifest`, `Designer Page/Language Hook`, `Admin UI Kit (Checkbox/Scroll)`, `Designer Breakpoint Styling`, `Designer Clipboard`, `Designer Tree & Live-Edit API`, `Admin UI Kit (Alert Dialog)`, `Admin App Session/Impersonation`, `Admin UI Kit (Badge/Label)`, `Admin UI Kit (Sheet)`, `Admin UI Kit (Table)`, `Designer Undo/Redo`, `Designer Site Chrome Hook`, `Admin UI Kit (Accordion)`, `Admin UI Kit (Tabs)`, `Admin UI Kit (Radio Group)`, `Admin UI Kit (Popover)`, `Admin UI Kit (Progress)`, `Admin UI Kit (Separator)`, `Admin UI Kit (Switch)`?**
-  _High betweenness centrality (0.126) - this node is a cross-community bridge._
-- **Why does `lucide-react` connect `Admin UI Buttons/Permissions` to `Admin Categories & UI Basics`, `Admin UI Kit (Sheet)`, `Admin UI Kit (Radio Group)`, `Admin UI Kit (Checkbox/Scroll)`, `Admin UI Kit (Avatar/Card)`, `Designer Elements & Fields`, `Admin Nav & Category Translations`, `Designer Element Preview`, `Designer Field Controls`, `Designer Field Groups/Input`, `Admin App Shell & i18n Context`, `Categories Panel`, `Admin Package Manifest`, `Admin UI Kit (Accordion)`?**
-  _High betweenness centrality (0.089) - this node is a cross-community bridge._
-- **Why does `typescript` connect `Element Schema Package Manifest` to `Element Style Package Manifest`, `Cross-App Tailwind Deps`, `API Package Manifest`, `Admin Package Manifest`?**
-  _High betweenness centrality (0.086) - this node is a cross-community bridge._
-- **Are the 9 inferred relationships involving `Designer()` (e.g. with `bumpStructural()` and `fourSideValue()`) actually correct?**
-  _`Designer()` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `ImageMeta`, `UploadResult`, `DisplayOverride` to the rest of the system?**
-  _608 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `DangerZone()` connect `Module 20` to `Module 16`?**
+  _High betweenness centrality (0.263) - this node is a cross-community bridge._
+- **Why does `del()` connect `Module 20` to `Module 27`?**
+  _High betweenness centrality (0.263) - this node is a cross-community bridge._
+- **Why does `line()` connect `Caching Layer` to `Module 27`?**
+  _High betweenness centrality (0.230) - this node is a cross-community bridge._
+- **What connects `printWidth`, `$schema`, `style` to the rest of the system?**
+  _578 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Design Canvas & Layout` be split into smaller, more focused modules?**
+  _Cohesion score 0.0526111434672879 - nodes in this community are weakly interconnected._
+- **Should `Collection Data Models` be split into smaller, more focused modules?**
+  _Cohesion score 0.024691358024691357 - nodes in this community are weakly interconnected._
+- **Should `Multi-Tenant Database` be split into smaller, more focused modules?**
+  _Cohesion score 0.08291708291708291 - nodes in this community are weakly interconnected._

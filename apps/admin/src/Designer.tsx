@@ -22,6 +22,7 @@ import MediaPickerModal from "./MediaPickerModal";
 import { DesignerTopBar } from "./designer/DesignerTopBar";
 import { DesignerPalette } from "./designer/DesignerPalette";
 import { DesignerCanvas } from "./designer/DesignerCanvas";
+import { LiveScrollStage } from "./designer/LiveScrollStage";
 import { DesignerTemplatesModal } from "./designer/DesignerTemplatesModal";
 import { DesignerHistoryModal } from "./designer/DesignerHistoryModal";
 import { DesignerDevicePreviewModal } from "./designer/DesignerDevicePreviewModal";
@@ -816,7 +817,7 @@ export default function Designer({
           // the device's exact viewport. Double-buffered: a reload loads into
           // the hidden slot and swaps in on load, so the visible frame never
           // blinks (useLiveEditBridge's handleFrameLoad).
-          <main className="relative min-w-0 flex-1 bg-canvas p-4">
+          <LiveScrollStage activeKey={activeSlot}>
             <DeviceViewport device={bp}>
               <iframe
                 ref={frameARef}
@@ -843,7 +844,7 @@ export default function Designer({
                 </div>
               )}
             </DeviceViewport>
-          </main>
+          </LiveScrollStage>
         ) : (
         <DesignerCanvas
           ctx={designerCtx}
