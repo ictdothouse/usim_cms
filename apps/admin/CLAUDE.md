@@ -268,7 +268,11 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   with ds-entrance/ds-hover animations), registered in element-schema's LENGTH_KEYS, editable in the
   Inspector's free-position grid. No "Comment" button — there's no comment system to back it.
   **Same controls in Live Edit (2026-10-02)** — Live Edit is the primary editing surface; Blocks mode
-  is only a layout guide. `BaseLayout.astro`'s designerEdit bridge shows a selection outline and
+  is only a layout guide (2026-10-11: a real structure-only wireframe now — `DesignerCanvas.tsx`'s
+  `wire` flag, on for every kind but `siteChrome`, ignores all section/row/column/element spacing,
+  bg, border, shadow and contained max-width, uses uniform gaps, hides the header/footer iframes and
+  fills a framed box like Live; the Header/Footer Designer has no Live toggle so it keeps real
+  styling). `BaseLayout.astro`'s designerEdit bridge shows a selection outline and
   common toolbar for every nested slide child; the full set (8 handles, Rotate/Move, magenta guides,
   align) is active on free-positioned children. The overlays are `position:fixed` on the iframe's `<body>` (never
   inside the element — overflow:hidden would crop it, rotation would rotate the toolbar), re-placed
