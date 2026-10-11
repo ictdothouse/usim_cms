@@ -156,7 +156,11 @@ if (hasBp) {
       );
       break;
     case "spacer":
-      responsiveRules.push(...bpStyleRules(`${sel} .ds-spacer`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SPACE, SPACE.md)}`));
+      responsiveRules.push(
+        ...bpStyleRules(`${sel} .ds-spacer`, el.bp!, p, (mp) =>
+          [`height:${lengthValue(mp.height, SPACE, SPACE.md)}`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";"),
+        ),
+      );
       break;
     case "divider":
       responsiveRules.push(...bpStyleRules(`${sel} .ds-divider`, el.bp!, p, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
@@ -314,7 +318,13 @@ switch (el.type) {
     );
   }
   case "spacer":
-    return <div class="ds-spacer" style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} aria-hidden="true" />;
+    return (
+      <div
+        class="ds-spacer"
+        style={[`height:${lengthValue(p.height, SPACE, SPACE.md)}`, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
+        aria-hidden="true"
+      />
+    );
   case "divider":
     return (
       <hr

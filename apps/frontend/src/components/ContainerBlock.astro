@@ -241,9 +241,19 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
     case "spacer": {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
-        responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => `height:${lengthValue(mp.height, SPACE, SPACE.md)}`));
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) =>
+            [`height:${lengthValue(mp.height, SPACE, SPACE.md)}`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";"),
+          ),
+        );
       }
-      return <div data-designer-path={designerEdit ? childPath : undefined} data-vis={hasBp ? childPath : undefined} style={`height:${lengthValue(cp.height, SPACE, SPACE.md)}`} />;
+      return (
+        <div
+          data-designer-path={designerEdit ? childPath : undefined}
+          data-vis={hasBp ? childPath : undefined}
+          style={[`height:${lengthValue(cp.height, SPACE, SPACE.md)}`, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
+        />
+      );
     }
     case "divider": {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;

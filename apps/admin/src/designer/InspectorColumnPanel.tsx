@@ -147,8 +147,9 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
             }),
           ...langOverrideProps(pathKey(b, r, c), Object.values(RADIUS_CORNER_KEYS)),
         }}
+        live={ctx.liveSpacing}
         margin={{
-          labelKey: "designer-f-marginy",
+          labelKey: "designer-s-margin",
           linked: linkedMargin,
           onToggleLink: () => setLinkedMargin((v) => !v),
           getSide: (side) => sideValue(col.props, col.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),

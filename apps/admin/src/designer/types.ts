@@ -317,6 +317,15 @@ export interface Block {
 // can never import it back from Designer.tsx.
 export type Sel = number[] | null;
 
+// Live Edit selection's real rendered padding/margin px per side, reported by
+// BaseLayout.astro's spacing handles (designer:spacingValues). `path` is the
+// dotted Sel it was measured for.
+export interface LiveSpacing {
+  path: string;
+  padding: Record<"top" | "right" | "bottom" | "left", number>;
+  margin: Record<"top" | "right" | "bottom" | "left", number>;
+}
+
 // Canvas drag-in-progress descriptor (Designer()'s own `drag` ref) — moved
 // here (Layer 2, useBlockOps) since dropIntoColumn needs it and designer/
 // files can't import a type back from Designer.tsx.

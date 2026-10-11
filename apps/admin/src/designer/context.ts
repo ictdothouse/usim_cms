@@ -15,7 +15,7 @@
 import type React from "react";
 import type * as api from "@/lib/api";
 import type { Key } from "@/i18n";
-import type { Bp, Block, FieldGroupKey, PageSettings, Seo, Sel, SectionProps } from "./types";
+import type { Bp, Block, FieldGroupKey, LiveSpacing, PageSettings, Seo, Sel, SectionProps } from "./types";
 
 export type ClipLevel = "section" | "row" | "column" | "element";
 
@@ -62,6 +62,9 @@ export interface DesignerCtx {
   setLinkedRadius: (fn: (v: boolean) => boolean) => void;
   linkedMargin: boolean;
   setLinkedMargin: (fn: (v: boolean) => boolean) => void;
+  // Live Edit's measured padding/margin of the current `sel` (null when it
+  // isn't for this selection) — BoxModel's placeholder for an unset side.
+  liveSpacing: LiveSpacing | null;
 
   // Grouped Styles panel
   collapsedGroups: Set<FieldGroupKey>;

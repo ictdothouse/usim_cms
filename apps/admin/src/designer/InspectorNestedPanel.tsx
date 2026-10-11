@@ -140,7 +140,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
                 : undefined
             }
             margin={{
-              labelKey: "designer-f-marginy",
+              labelKey: "designer-s-margin",
               linked: linkedMargin,
               onToggleLink: () => setLinkedMargin((v) => !v),
               getSide: (side) => sideValue(node.props, node.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),

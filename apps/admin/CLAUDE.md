@@ -1655,10 +1655,21 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   is now the only drag-to-resize surface, Section/Column/Element only (path
   length 1/3/4), never over a selected slide child (that has its own chrome).
   The gesture runs in the iframe and posts one `designer:spacingDrag` on
-  pointerup; `useLiveEditBridge` commits via `spacingDrag.ts`. Differences from
-  the old Blocks handles, all deliberate: left/right badges sit flush INSIDE the
-  box edge (a full-bleed section's edge is the viewport edge here, so an
-  overhanging badge clipped). Hatch bands show only on hover/drag, re-checked
+  pointerup; `useLiveEditBridge` commits via `spacingDrag.ts`. Handles read and
+  write `spacingTarget()` — `visualTarget()` except an image, whose spacing
+  lives on the `<img>`, not its `.ds-img-wrap` (badges read 0px while the
+  Inspector showed the real value, 2026-10-11). Badges/bands are a
+  `position:fixed` overlay over that box, re-placed every frame — never
+  appended into it (`<img>`/`<video>`/`<iframe>`/`<hr>` render no children, a
+  contentEditable heading took the badge text into its `textContent`,
+  `overflow:hidden` clipped margin bands). One badge group per edge, margin +
+  padding side by side outer→inner, so they can't overlap: top/bottom fully
+  outside the box (flip inside near the viewport edge), left/right flush
+  inside (outside only on a box <160px wide with room). Each build also posts
+  `designer:spacingValues` (the box's computed px); `useLiveEditBridge` keeps it
+  as `liveSpacing`, Designer passes it as `ctx.liveSpacing` only while it
+  matches `sel`, and `BoxModel` shows it as an unset side's placeholder (a
+  section's default padding, an element's CSS default) instead of "0". Hatch bands show only on hover/drag, re-checked
   on pointerup so a top/left drag doesn't leave one stuck. Drag fans out to all
   4 sides only when `linkedPadding`/`linkedMargin` is on — both default to
   OFF (single side); when on, every side's band + px label updates together. A `position:fixed` lock pill above the box toggles them
@@ -1666,11 +1677,9 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   bridge re-sends `designer:selected` on change, which rebuilds the handles.
   The pill is hidden until a badge is hovered/dragged, then fades out after 3s
   idle (held while hovering the badge or pill); `spacingLockBarKeep` carries
-  its visibility across the rebuild a lock click triggers. Badges/bands are
-  appended INTO the box and tagged `data-ds-chrome` — BaseLayout's editor CSS
-  detects an empty column/container with `:not(:has(> :not([data-ds-chrome])))`
-  (not `:empty`, which the badges broke, collapsing a selected empty column to
-  0px). Same editor-only CSS draws a faint dashed guide on every
+  its visibility across the rebuild a lock click triggers. BaseLayout's editor
+  CSS detects an empty column/container with `:not(:has(> *))` (not `:empty`,
+  which whitespace text nodes defeat). Same editor-only CSS draws a faint dashed guide on every
   `.ds-section`/`.ds-col`/`.ds-container` (class added in ContainerBlock.astro);
   hover outline is solid so it reads apart from the guide.
 - **Live Edit empty-element placeholders** (BaseLayout designerEdit script, after
@@ -1683,4 +1692,14 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   instead (contentEditable needs the real element). Labels ride on
   `designer:showSlides` (sent every frame load) since placeholders exist before
   any selection; `labels` is merged, not replaced, across messages.
-  Container children (path 5+) that render null still get no placeholder.
+  Container children (path 5+) that render null still get no placeholder. The
+  element placeholder has no padding of its own: it wears the element's own
+  margin/padding (`data-ds-ph-style` on the wrapper + a
+  `[data-designer-path=…] > [data-ds-ph]` bp rule, SectionBlock.astro), so its
+  spacing badges match the Inspector.
+- **Every element type renders its margin/padding (2026-10-11)**: the Inspector
+  shows BoxModel for all types, but `announcementbar`, `googlemap`, `spacer`
+  (incl. container/symbol-master children) and a `symbol` instance silently
+  ignored it. Now applied (+ bp rules); a symbol instance's own spacing goes on
+  SymbolBlock's `.ds-symbol` wrapper (flex column, so the master node lays out
+  as before), never on the master's node.

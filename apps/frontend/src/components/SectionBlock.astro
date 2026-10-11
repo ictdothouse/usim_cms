@@ -26,6 +26,8 @@ import {
   shadowToCss,
   safeUrl,
   lengthValue,
+  marginStyle,
+  paddingStyle,
   cls,
 } from "../lib/element-render";
 
@@ -243,6 +245,7 @@ function respId(
   if (hasBp) responsiveRules.push(...bpStyleRules(selector, bp!, base!, build!));
   return id;
 }
+const spacingCss = (p: Record<string, string>) => [marginStyle(p), paddingStyle(p)].filter(Boolean).join(";");
 // Element props are author-controlled but URLs still get a scheme check so a
 // stored value can never become a javascript:/data: link or iframe source.
 // http(s)/root-relative/anchor/bare-relative (e.g. "#contact", "about") are
@@ -567,7 +570,10 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                     />
                   );
                 case "symbol":
-                  return <SymbolBlock symbolId={p.symbolId ?? ""} tenantHost={tenantHost} />;
+                  // The instance's own margin/padding (Inspector BoxModel) go
+                  // on SymbolBlock's .ds-symbol wrapper, not the master's node.
+                  if (el.bp && Object.keys(el.bp).length > 0) responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"] > .ds-symbol`, el.bp, p, spacingCss));
+                  return <SymbolBlock symbolId={p.symbolId ?? ""} tenantHost={tenantHost} box={spacingCss(p)} />;
                 case "cardgrid":
                 case "ctabanner":
                 case "announcementbar":
@@ -648,10 +654,15 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
               // check above).
               const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
               const elVisId = respId(elId, p) ?? (hasBp || el.type === "slider" ? elId : undefined);
+              // Live Edit's empty-element placeholder (BaseLayout.astro) wears
+              // the element's own margin/padding, so its spacing badges match
+              // the Inspector even before the element renders anything.
+              if (designerEdit && hasBp) responsiveRules.push(...bpStyleRules(`[data-designer-path="${blockIndex}.${r}.${c}.${e}"] > [data-ds-ph]`, el.bp!, p, spacingCss));
               return designerEdit || elVisId ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}
                   data-ds-type={designerEdit ? el.type : undefined}
+                  data-ds-ph-style={designerEdit ? spacingCss(p) || undefined : undefined}
                   data-vis={elVisId}
                   style="display:contents"
                 >

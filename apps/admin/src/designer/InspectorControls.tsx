@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { Key } from "@/i18n";
-import type { Bp, Block, El, ElType, SectionProps } from "./types";
+import type { Bp, Block, El, ElType, LiveSpacing, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
 import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
 import { ELS, CONTAINER_CHILD_TYPES } from "./elements";
@@ -290,7 +290,7 @@ function BoxModelRingHeader({ ring, icon: Icon, bp, t }: { ring: RingConfig; ico
   );
 }
 
-function BoxModelInput({ ring, side, corner }: { ring: RingConfig; side: Side; corner?: boolean }) {
+function BoxModelInput({ ring, side, corner, live }: { ring: RingConfig; side: Side; corner?: boolean; live?: Record<Side, number> }) {
   return (
     <BufferedInput
       className={
@@ -299,7 +299,9 @@ function BoxModelInput({ ring, side, corner }: { ring: RingConfig; side: Side; c
           : "w-9 rounded border border-line/30 bg-white px-0.5 py-0.5 text-center text-[10px] text-ink"
       }
       value={ring.getSide(side)}
-      placeholder="0"
+      // Unset side: show what Live Edit actually renders (a section's
+      // default padding, an element's CSS default), not a misleading "0".
+      placeholder={live ? `${live[side]}px` : "0"}
       title={side}
       onCommit={(v) => (ring.linked ? SIDES.forEach((s) => ring.setSide(s, v)) : ring.setSide(side, v))}
     />
@@ -316,31 +318,36 @@ export function BoxModel({
   padding,
   margin,
   radius,
+  live,
   bp,
   t,
 }: {
   padding: RingConfig;
   margin: RingConfig;
   radius?: RingConfig;
+  // Live Edit's measured px for this node (DesignerCtx.liveSpacing).
+  live?: LiveSpacing | null;
   bp: Bp;
   t: (k: Key) => string;
 }) {
+  const livePad = live?.padding;
+  const liveMargin = live?.margin;
   return (
     <div className="space-y-1.5">
       <div className="rounded-lg border border-dashed border-amber-300/60 bg-amber-50/40 p-1.5">
         <BoxModelRingHeader ring={margin} icon={Frame} bp={bp} t={t} />
         <div className="grid grid-cols-[2rem_1fr_2rem] grid-rows-[2rem_auto_2rem] items-center justify-items-center gap-1 pt-1">
           <div />
-          <BoxModelInput ring={margin} side="top" />
+          <BoxModelInput ring={margin} side="top" live={liveMargin} />
           <div />
-          <BoxModelInput ring={margin} side="left" />
+          <BoxModelInput ring={margin} side="left" live={liveMargin} />
           <div className="col-start-2 row-start-2 w-full rounded-lg border border-sky-300/60 bg-sky-50/50 p-1.5">
             <BoxModelRingHeader ring={padding} icon={SquareDashedBottom} bp={bp} t={t} />
             <div className="grid grid-cols-[1.75rem_1fr_1.75rem] grid-rows-[1.75rem_auto_1.75rem] items-center justify-items-center gap-1 pt-1">
               <div />
-              <BoxModelInput ring={padding} side="top" />
+              <BoxModelInput ring={padding} side="top" live={livePad} />
               <div />
-              <BoxModelInput ring={padding} side="left" />
+              <BoxModelInput ring={padding} side="left" live={livePad} />
               <div className="relative col-start-2 row-start-2 flex h-10 w-full items-center justify-center rounded bg-white text-[9px] font-medium text-sub/60">
                 {t("designer-content")}
                 {radius && (
@@ -360,15 +367,15 @@ export function BoxModel({
                   </>
                 )}
               </div>
-              <BoxModelInput ring={padding} side="right" />
+              <BoxModelInput ring={padding} side="right" live={livePad} />
               <div />
-              <BoxModelInput ring={padding} side="bottom" />
+              <BoxModelInput ring={padding} side="bottom" live={livePad} />
               <div />
             </div>
           </div>
-          <BoxModelInput ring={margin} side="right" />
+          <BoxModelInput ring={margin} side="right" live={liveMargin} />
           <div />
-          <BoxModelInput ring={margin} side="bottom" />
+          <BoxModelInput ring={margin} side="bottom" live={liveMargin} />
           <div />
         </div>
       </div>
