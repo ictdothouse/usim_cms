@@ -514,6 +514,25 @@ callouts before assuming any of this is speculative hardening.
   already did it: extension comes from a server-controlled `MEDIA_EXT_BY_MIME` map keyed on the
   ALLOWED-listed mimetypes, never the client's own filename — `ALLOWED_MEDIA_TYPES` (the old separate
   allowlist) was folded into this same map so there's one source of truth instead of two.
+- **Media location phase 1 (2026-10-11).** New uploads are stored at
+  `tenants/<tenantId>/<yyyy>/<mm>/<slug>-<8hex>.<ext>` (storage.ts's `tenantMediaPrefix`/
+  `mediaDatePath`/`mediaStem` — keyed by the tenant's immutable registry id, never its hostname)
+  and served publicly at `/uploads/<yyyy>/<mm>/<file>` on the tenant's own domain:
+  `registerMediaServeRoutes` (routes/media.ts, root app) resolves the tenant from the Host header
+  via `getTenantRecord` (the same 30s registry cache `getTenantConnection` uses), then
+  `sendFile`s locally or 302s to `s3PublicUrl` — same public URL under either driver.
+  `/uploads/` was kept (not `/media/`) on purpose: it's already routed to the api by Caddy/
+  proxy-sync/install.sh nginx, and `/media/...` would shadow a plausible university page slug.
+  A 3-segment year/month path hits this route; anything else (legacy flat
+  `/uploads/<host_folder>/<uuid>.<ext>`, `/uploads/_global/...`) falls through to the static
+  wildcard, which stays registered under both drivers. `/_tenant/<host>/uploads/...` is the
+  host-explicit form for non-tenant hosts — admin's `publicMediaBase` uses it in dev
+  (localhost:3000 has no tenant Host). `media.storage_key` (migration 0030, tenant-relative,
+  null = legacy row) drives delete. Backup zips the tree as `media/<yyyy>/<mm>/<file>` and a
+  restore re-homes it under the target tenant's id (`isValidMediaKey` = zip-slip guard);
+  cross-host restore also repoints `//<srcHost>/uploads/` since admin bakes the tenant domain
+  in front. Not yet: runtime driver choice in Settings (phase 2), local⇄S3 migration +
+  legacy-URL rewrite (phase 3); static export still only fetches assets via the frontend.
 - **Tenant-host check is now a deny-list, not an allow-list (2026-09-17, security audit finding).**
   `requireTenantAuth` (`plugins/auth.ts`) used to check `session.role === "webmaster"` before enforcing
   `allowedHosts.includes(req.tenantHost)` — a third role value (never existed yet, but nothing in the DB

@@ -8,12 +8,13 @@ export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 // it leaks infrastructure and reads as unprofessional. Pairs with the
 // tenant's own Caddy site block proxying /uploads/* straight to the api
 // container (see proxy-sync.ts's buildCaddyConfig/Caddyfile), so the tenant's
-// own domain serves the exact same files. Falls back to API_URL in dev
-// (`pnpm dev:admin` has no Caddy in front, the admin talks to the api
-// container directly there, same as every other dev-vs-prod branch in this
-// file, e.g. FRONTEND_DEV_URL below).
+// own domain serves the exact same files. In dev (`pnpm dev:admin`, no Caddy,
+// everything talks to localhost:3000) the api can't tell the tenant from the
+// Host header, so phase-1 media URLs (/uploads/<yyyy>/<mm>/<file>, tenant
+// resolved by Host — see apps/api's routes/media.ts) go through its
+// host-explicit /_tenant/<host>/ form instead.
 export function publicMediaBase(tenantHost: string): string {
-  if (import.meta.env.DEV) return API_URL;
+  if (import.meta.env.DEV) return `${API_URL}/_tenant/${tenantHost}`;
   const scheme = window.location.protocol === "https:" ? "https" : "http";
   return `${scheme}://${tenantHost}`;
 }

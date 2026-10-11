@@ -1,11 +1,11 @@
-import { readdirSync, readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, mkdirSync, writeFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import { sql } from "drizzle-orm";
-import { getTenantConnection, getTenantTheme, setTenantTheme } from "./db/tenant-pool.js";
-import { localUploadsDir, dirSizeBytes } from "./storage.js";
+import { getTenantConnection, getTenantRecord, getTenantTheme, setTenantTheme } from "./db/tenant-pool.js";
+import { localUploadsDir, dirSizeBytes, isValidMediaKey, tenantMediaPrefix } from "./storage.js";
 import * as schema from "./db/schema.js";
 
 // Tenant backup/restore/static-export. JSON dump instead of pg_dump on
@@ -77,17 +77,28 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
     ),
   };
   const dir = path.join(localUploadsDir, tenantFolder(host));
+  // Phase-1 tree (storage.ts): tenants/<id>/<yyyy>/<mm>/<file>, bundled as
+  // media/<yyyy>/<mm>/<file> — tenant-relative, so a restore re-homes it under
+  // whatever id the target tenant has.
+  const tenant = await getTenantRecord(host);
+  const mediaDir = tenant ? path.join(localUploadsDir, tenantMediaPrefix(tenant.id)) : null;
+  const mediaBytes = ((await dirSizeBytes(dir)) ?? 0) + (mediaDir ? ((await dirSizeBytes(mediaDir)) ?? 0) : 0);
+  if (mediaBytes > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
+    throw new Error(
+      `${host}'s uploads are ${(mediaBytes / 1024 / 1024).toFixed(0)} MB — too large for this zip-backup ` +
+        `path (buffers everything in memory). Use a filesystem copy (rsync/tar) of uploads/${tenantFolder(host)}/ ` +
+        `and uploads/${tenant ? tenantMediaPrefix(tenant.id) : "tenants/<id>"}/ instead; this export still covers the database rows and theme.`,
+    );
+  }
   if (existsSync(dir)) {
-    const mediaBytes = (await dirSizeBytes(dir)) ?? 0;
-    if (mediaBytes > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
-      throw new Error(
-        `${host}'s uploads folder is ${(mediaBytes / 1024 / 1024).toFixed(0)} MB — too large for this zip-backup ` +
-          `path (buffers everything in memory). Use a filesystem copy (rsync/tar) of uploads/${tenantFolder(host)}/ ` +
-          `instead; this export still covers the database rows and theme.`,
-      );
-    }
     for (const name of readdirSync(dir)) {
       files[`uploads/${name}`] = readFileSync(path.join(dir, name));
+    }
+  }
+  if (mediaDir && existsSync(mediaDir)) {
+    for (const rel of readdirSync(mediaDir, { recursive: true }) as string[]) {
+      const full = path.join(mediaDir, rel);
+      if (statSync(full).isFile()) files[`media/${rel.split(path.sep).join("/")}`] = readFileSync(full);
     }
   }
   return zipSync(files);
@@ -200,6 +211,11 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
   // layout JSON, post body HTML) in one pass on the serialized dump.
   if (sourceHost !== host) {
     raw = raw.replaceAll(`/uploads/${tenantFolder(sourceHost)}/`, `/uploads/${tenantFolder(host)}/`);
+    // Phase-1 media paths carry no tenant at all, but apps/admin bakes the
+    // tenant's own domain in front of them (publicMediaBase) — and that host
+    // is what resolves the files. Repoint it (prod form, then dev form).
+    raw = raw.replaceAll(`//${sourceHost}/uploads/`, `//${host}/uploads/`);
+    raw = raw.replaceAll(`/_tenant/${sourceHost}/uploads/`, `/_tenant/${host}/uploads/`);
   }
   const backup = JSON.parse(raw) as {
     version: number;
@@ -247,8 +263,19 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
   if (backup.theme) await setTenantTheme(host, backup.theme);
 
   const dir = path.join(localUploadsDir, tenantFolder(host));
+  const tenant = await getTenantRecord(host);
   const restored: string[] = [];
   for (const [name, data] of Object.entries(entries)) {
+    if (name.startsWith("media/") && tenant) {
+      // isValidMediaKey doubles as the zip-slip guard (no "..", fixed shape).
+      const key = name.slice("media/".length);
+      if (!isValidMediaKey(key)) continue;
+      const target = path.join(localUploadsDir, tenantMediaPrefix(tenant.id), key);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, data);
+      restored.push(name);
+      continue;
+    }
     if (!name.startsWith("uploads/") || name === "uploads/") continue;
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, path.basename(name)), data);

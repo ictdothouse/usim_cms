@@ -37,7 +37,7 @@ import { registerTenantRoutes, maybeSyncCaddyAtBoot } from "./routes/tenants.js"
 import { registerUsersRolesLanguagesRoutes } from "./routes/users-roles-languages.js";
 import { registerImpersonationRoutes } from "./routes/impersonation.js";
 import { registerBackupCloneRoutes } from "./routes/backup-clone.js";
-import { registerMediaRoutes } from "./routes/media.js";
+import { registerMediaRoutes, registerMediaServeRoutes } from "./routes/media.js";
 import { registerPublicBlueprintRoutes, registerBlueprintRoutes } from "./routes/blueprints.js";
 import {
   pagesCollection,
@@ -128,6 +128,8 @@ await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 // randomUUID() (see the upload routes below) — never reused/overwritten,
 // so a long-lived cache can never go stale.
 await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", maxAge: "1y", immutable: true });
+// /uploads/<yyyy>/<mm>/<file> — phase-1 media URLs, tenant from Host.
+registerMediaServeRoutes(app);
 
 app.get("/health", async () => ({ status: "ok" }));
 

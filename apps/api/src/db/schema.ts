@@ -260,6 +260,10 @@ export const media = pgTable("media", {
   filename: text("filename").notNull(), // stored name inside the tenant folder
   originalName: text("original_name").notNull(),
   url: text("url").notNull(),
+  // Tenant-relative storage key ("2026/10/x-1a2b3c4d.png") under
+  // tenants/<tenantId>/ — null for a legacy flat uploads/<host_folder>/ row.
+  // See migrations/0030_media_storage_key.sql.
+  storageKey: text("storage_key"),
   mimeType: text("mime_type").notNull(),
   sizeBytes: integer("size_bytes").notNull().default(0),
   // Real pixel dimensions (sharp, on upload) -- null for a pre-pipeline row
