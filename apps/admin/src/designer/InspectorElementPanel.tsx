@@ -404,7 +404,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                     : undefined
                 }
                 margin={{
-                  labelKey: "designer-f-marginy",
+                  labelKey: "designer-s-margin",
                   linked: linkedMargin,
                   onToggleLink: () => setLinkedMargin((v) => !v),
                   getSide: (side) => sideValue(childEl.props, childEl.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),
@@ -573,8 +573,9 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                   }
                 : undefined
             }
+            live={ctx.liveSpacing}
             margin={{
-              labelKey: "designer-f-marginy",
+              labelKey: "designer-s-margin",
               linked: linkedMargin,
               onToggleLink: () => setLinkedMargin((v) => !v),
               getSide: (side) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]),

@@ -145,6 +145,12 @@ if (el.bp && Object.keys(el.bp).length > 0) {
     case "ctabanner":
       responsiveRules.push(...bpStyleRules(`${sel} .ds-ctabanner`, el.bp, p, marginPad));
       break;
+    case "announcementbar":
+      responsiveRules.push(...bpStyleRules(`${sel} .ds-announcementbar`, el.bp, p, marginPad));
+      break;
+    case "googlemap":
+      responsiveRules.push(...bpStyleRules(`${sel} > .ds-map, ${sel} > .ds-map-address`, el.bp, p, marginPad));
+      break;
   }
 }
 ---
@@ -293,7 +299,7 @@ switch (el.type) {
     return (
       <div
         class={cls("ds-announcementbar", p.cssClass)}
-        style={[`background:${p.bgColor || "#111827"}`, `color:${p.textColor || "#ffffff"}`]
+        style={[`background:${p.bgColor || "#111827"}`, `color:${p.textColor || "#ffffff"}`, marginStyle(p), paddingStyle(p)]
           .filter(Boolean)
           .join(";")}
       >
@@ -312,10 +318,11 @@ switch (el.type) {
     );
   case "googlemap": {
     const embedUrl = p.embedUrl ? safeUrl(p.embedUrl) : undefined;
-    if (!embedUrl) return p.address ? <p class={cls("ds-map-address", p.cssClass)}>{p.address}</p> : null;
+    const box = [marginStyle(p), paddingStyle(p)].filter(Boolean).join(";") || undefined;
+    if (!embedUrl) return p.address ? <p class={cls("ds-map-address", p.cssClass)} style={box}>{p.address}</p> : null;
     const height = lengthValue(p.height, {}, "24rem");
     return (
-      <div class={cls("ds-map", p.cssClass)}>
+      <div class={cls("ds-map", p.cssClass)} style={box}>
         {p.requireConsent === "true" ? (
           <div class="ds-map-consent" style={`height:${height}`} data-map-src={embedUrl}>
             <button type="button" class="ds-map-consent-btn">Load map</button>

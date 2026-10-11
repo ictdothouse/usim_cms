@@ -415,6 +415,7 @@ export default function Designer({
     frameARef,
     frameBRef,
     handleFrameLoad,
+    liveSpacing,
   } = useLiveEditBridge({
     bp,
     linkedPadding,
@@ -699,6 +700,7 @@ export default function Designer({
     isSuper,
     ...stableFns,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
+    liveSpacing: mode === "live" && liveSpacing?.path === sel?.join(".") ? liveSpacing : null,
     collapsedGroups, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
     sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing,
@@ -716,6 +718,7 @@ export default function Designer({
     isSuper,
     stableFns,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
+    liveSpacing,
     collapsedGroups, inspectorTab, setInspectorTab,
     iconSearch, setIconSearch, uploading, siteTheme, sliderSlideIdx, setSliderSlideIdx,
     sliderInnerSel, setSliderInnerSel, sliderInnerEditing, setSliderInnerEditing,

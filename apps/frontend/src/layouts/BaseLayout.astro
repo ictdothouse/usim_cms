@@ -228,16 +228,16 @@ const fontsHref = allFonts.length
            the layout is visible. Inline hover/selected outlines override it.
            An empty column/container has no min-height of its own (by design,
            so a real page never shows empty space) and would collapse to 0px
-           — `:has` instead of `:empty` so the padding/margin drag badges
-           (data-ds-chrome) appended into a selected box don't count. */
+           — `:has(> *)` instead of `:empty` so stray whitespace text nodes
+           don't count as content. */
         .ds-section,
         .ds-col,
         .ds-container {
           outline: 1px dashed rgba(15, 98, 254, 0.3);
           outline-offset: -1px;
         }
-        .ds-col:not(:has(> :not([data-ds-chrome]))),
-        .ds-container:not(:has(> :not([data-ds-chrome]))) {
+        .ds-col:not(:has(> *)),
+        .ds-container:not(:has(> *)) {
           min-height: 3rem;
           outline-color: rgba(15, 98, 254, 0.5);
         }
@@ -1127,13 +1127,16 @@ const fontsHref = allFonts.length
               "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;" +
               "color:#64748b;font:500 12px/1.3 system-ui,sans-serif;text-align:center;cursor:pointer;" +
               "border:1px dashed #94a3b8;border-radius:6px;" + css;
-            ph.innerHTML = (PH_MEDIA.has(type) ? PH_IMG : PH_PLUS) + "<span></span>";
+            ph.innerHTML = (PH_MEDIA.has(type) ? PH_IMG : PH_PLUS) + '<span style="padding:0 12px"></span>';
             ph.querySelector("span").textContent = phLabel(type);
             return ph;
           }
+          // No padding of its own: the box carries the element's real margin/
+          // padding (SectionBlock.astro's data-ds-ph-style, plus its bp
+          // rules), so the spacing badges read what the Inspector shows.
           document.querySelectorAll("[data-ds-type]").forEach((node) => {
             if ([...node.children].some((c) => c.tagName !== "STYLE" && c.tagName !== "SCRIPT")) return;
-            node.prepend(makePlaceholder(node.dataset.dsType, "min-height:96px;padding:16px;background:#f8fafc"));
+            node.prepend(makePlaceholder(node.dataset.dsType, "min-height:96px;background:#f8fafc;" + (node.dataset.dsPhStyle || "")));
           });
           document.querySelectorAll(".ds-slider-box[data-designer-edit] .ds-slide").forEach((slide) => {
             if (slide.querySelector(".ds-slide-content") || slide.style.backgroundImage) return;
@@ -1157,6 +1160,12 @@ const fontsHref = allFonts.length
           // reimplementing the PAD-table/axis-fallback resolution chain a
           // third time — the browser has already resolved that into the
           // real rendered px, which is the actual source of truth here.
+          // Read off spacingTarget(), the node that actually carries the
+          // element's margin/padding, and drawn as a position:fixed overlay
+          // over it rather than appended into it: <img>/<video>/<iframe>/<hr>
+          // render no children, a contentEditable heading would take the
+          // badge text into its own textContent, and an overflow:hidden
+          // ancestor clipped the margin bands.
           const PADDING_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" };
           const MARGIN_KEYS = { top: "marginTop", right: "marginRight", bottom: "marginBottom", left: "marginLeft" };
           const MARGIN_COLOR = "#f59e0b";
@@ -1166,7 +1175,7 @@ const fontsHref = allFonts.length
           let spacing = { linkedPadding: false, linkedMargin: false };
           let spacingHandleBox = null;
           let spacingHandleEls = [];
-          let spacingRestorePosition = null;
+          let spacingRaf = 0;
           let spacingLockBar = null;
           let spacingLockBarTimer = 0;
           // A lock click rebuilds the handles (admin re-sends
@@ -1196,19 +1205,41 @@ const fontsHref = allFonts.length
           function destroySpacingHandles() {
             for (const el of spacingHandleEls) el.remove();
             spacingHandleEls = [];
-            if (spacingHandleBox && spacingRestorePosition !== null) {
-              spacingHandleBox.style.position = spacingRestorePosition;
-            }
+            cancelAnimationFrame(spacingRaf);
             spacingHandleBox = null;
-            spacingRestorePosition = null;
             spacingLockBar = null;
             clearTimeout(spacingLockBarTimer);
           }
 
-          // Fixed, not a child of the box like the badges: a section's own
-          // overflow:hidden or the viewport edge can't clip it. Sits just
-          // above the box's top-left, clamped on-screen, and follows the box
-          // off-screen once it scrolls away.
+          // The node whose computed margin/padding IS the element's own: an
+          // image renders its spacing on the <img> inside .ds-img-wrap
+          // (ElementBlock.astro), not on the wrapper visualTarget() picks.
+          function spacingTarget(node) {
+            const box = visualTarget(node);
+            return (box && box.classList.contains("ds-img-wrap") && box.querySelector("img")) || box;
+          }
+
+          // One badge group per edge, outer (margin) to inner (padding), so an
+          // edge's two badges can never overlap. Top/bottom sit fully outside
+          // the box — clear of left/right even on a ~1px divider — and flip
+          // inside near the viewport edge. Left/right sit flush inside (a
+          // full-bleed section's edge is the viewport's), and go outside only
+          // when the box is too narrow to hold both and there's room.
+          function placeSpacingGroup(group, edge, r) {
+            const out = {
+              top: r.top >= 34,
+              bottom: r.bottom <= innerHeight - 34,
+              left: r.width < 160 && r.left >= 80,
+              right: r.width < 160 && r.right <= innerWidth - 80,
+            }[edge];
+            const shift = !out ? "0" : edge === "top" || edge === "left" ? "-100%" : "100%";
+            group.style.transform = edge === "top" || edge === "bottom" ? `translate(-50%,${shift})` : `translate(${shift},-50%)`;
+          }
+
+          // Fixed like the badges: a section's own overflow:hidden or the
+          // viewport edge can't clip it. Sits just above the box's top-left,
+          // clamped on-screen, and follows the box off-screen once it
+          // scrolls away.
           function placeSpacingLockBar() {
             if (!spacingLockBar || !spacingHandleBox) return;
             const r = spacingHandleBox.getBoundingClientRect();
@@ -1218,31 +1249,26 @@ const fontsHref = allFonts.length
             spacingLockBar.style.top = `${Math.min(Math.max(r.top - h - 10, 4), r.bottom - h)}px`;
           }
 
-          function positionSpacingHandle(handle, edge, isMargin) {
-            Object.assign(handle.style, { left: "", right: "", top: "", bottom: "", transform: "" });
-            if (edge === "top") {
-              Object.assign(handle.style, isMargin ? { right: "32px", top: "-8px" } : { left: "50%", top: "0", transform: "translate(-50%,-50%)" });
-            } else if (edge === "bottom") {
-              Object.assign(handle.style, isMargin ? { right: "32px", bottom: "-8px" } : { left: "50%", bottom: "0", transform: "translate(-50%,50%)" });
-            } else if (edge === "left") {
-              // Flush inside the edge instead of straddling it like Blocks
-              // mode does — a full-bleed Section/Column's left/right edge
-              // here is the viewport's own edge (Blocks' canvas has a
-              // gutter), so an overhanging badge clips half off-screen.
-              Object.assign(handle.style, isMargin ? { top: "32px", left: "0" } : { top: "50%", left: "0", transform: "translateY(-50%)" });
-            } else {
-              Object.assign(handle.style, isMargin ? { top: "32px", right: "0" } : { top: "50%", right: "0", transform: "translateY(-50%)" });
-            }
-          }
-
           function buildSpacingHandles(node, path) {
             if (![1, 3, 4].includes(path.length)) return;
-            const box = visualTarget(node);
+            const box = spacingTarget(node);
             if (!box) return;
             spacingHandleBox = box;
-            spacingRestorePosition = getComputedStyle(box).position === "static" ? box.style.position || "" : null;
-            if (spacingRestorePosition !== null) box.style.position = "relative";
+            const frame = document.createElement("div");
+            frame.style.cssText = "position:fixed;pointer-events:none;z-index:2147481000;";
+            document.body.appendChild(frame);
+            spacingHandleEls.push(frame);
             const groups = { padding: [], margin: [] };
+            const edgeGroups = {};
+            for (const edge of ["top", "bottom", "left", "right"]) {
+              const g = document.createElement("div");
+              g.style.cssText =
+                "position:absolute;z-index:1;display:flex;gap:2px;" +
+                (edge === "top" || edge === "bottom" ? `flex-direction:column;left:50%;${edge}:0;` : `top:50%;${edge}:0;`);
+              stopBubble(g);
+              frame.appendChild(g);
+              edgeGroups[edge] = g;
+            }
 
             function addHandle(isMargin, edge) {
               const keyMap = isMargin ? MARGIN_KEYS : PADDING_KEYS;
@@ -1257,21 +1283,17 @@ const fontsHref = allFonts.length
                 : "repeating-linear-gradient(45deg,rgba(15,98,254,0.35) 0,rgba(15,98,254,0.35) 6px,rgba(15,98,254,0.12) 6px,rgba(15,98,254,0.12) 12px)";
 
               const band = document.createElement("div");
-              band.style.cssText = `position:absolute;pointer-events:none;z-index:9998;display:none;background-image:${stripe};`;
-              band.dataset.dsChrome = "";
-              box.appendChild(band);
-              spacingHandleEls.push(band);
+              band.style.cssText = `position:absolute;display:none;background-image:${stripe};`;
+              frame.appendChild(band);
 
               const handle = document.createElement("div");
               handle.style.cssText =
-                "position:absolute;z-index:9999;padding:2px 6px;border-radius:4px;color:#fff;" +
+                "pointer-events:auto;padding:2px 6px;border-radius:4px;color:#fff;white-space:nowrap;" +
                 "font:700 9px/1.2 system-ui,sans-serif;user-select:none;" +
                 `background:${isMargin ? MARGIN_COLOR : ACCENT};` +
                 `cursor:${axis === "y" ? "ns-resize" : "ew-resize"};`;
-              positionSpacingHandle(handle, edge, isMargin);
-              handle.dataset.dsChrome = "";
-              box.appendChild(handle);
-              spacingHandleEls.push(handle);
+              handle.title = `${isMargin ? "Margin" : "Padding"} ${edge}`;
+              edgeGroups[edge].appendChild(handle);
 
               function currentPx() {
                 return Math.round(parseFloat(getComputedStyle(box).getPropertyValue(prop)) || 0);
@@ -1341,8 +1363,38 @@ const fontsHref = allFonts.length
               });
             }
 
-            ["top", "bottom", "left", "right"].forEach((edge) => addHandle(false, edge));
-            ["top", "bottom", "left", "right"].forEach((edge) => addHandle(true, edge));
+            // Appended outer to inner: margin first on top/left, padding first
+            // on bottom/right (bottom/right groups read from the edge outward).
+            for (const edge of ["top", "left"]) {
+              addHandle(true, edge);
+              addHandle(false, edge);
+            }
+            for (const edge of ["bottom", "right"]) {
+              addHandle(false, edge);
+              addHandle(true, edge);
+            }
+
+            // ponytail: re-measures every frame while selected (one
+            // getBoundingClientRect), same as the slide chrome — follows
+            // scroll, a lazy image loading in, and the box resizing mid-drag.
+            const place = () => {
+              if (spacingHandleBox !== box) return;
+              const r = box.getBoundingClientRect();
+              Object.assign(frame.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+              for (const edge in edgeGroups) placeSpacingGroup(edgeGroups[edge], edge, r);
+              placeSpacingLockBar();
+              spacingRaf = requestAnimationFrame(place);
+            };
+
+            // Lets the Inspector show the real rendered px as the placeholder
+            // of an unset side (a section's default padding, an element's CSS
+            // default) instead of a bare "0".
+            const cs = getComputedStyle(box);
+            const readSides = (keys) => Object.fromEntries(Object.entries(keys).map(([s, k]) => [s, Math.round(parseFloat(cs.getPropertyValue(kebab(k))) || 0)]));
+            parent.postMessage(
+              { type: "designer:spacingValues", path: path.join("."), padding: readSides(PADDING_KEYS), margin: readSides(MARGIN_KEYS) },
+              targetOrigin,
+            );
 
             // Quick toggle for the same linkedPadding/linkedMargin state as the
             // Inspector's chain icon — admin flips it and re-sends
@@ -1372,7 +1424,7 @@ const fontsHref = allFonts.length
             document.body.appendChild(bar);
             spacingHandleEls.push(bar);
             spacingLockBar = bar;
-            placeSpacingLockBar();
+            place();
             if (spacingLockBarKeep) {
               spacingLockBarKeep = false;
               revealLockBar(false);
@@ -1412,7 +1464,6 @@ const fontsHref = allFonts.length
           // wouldn't fire).
           function reportSelectedRect() {
             if (!selectedNode) return;
-            placeSpacingLockBar();
             const r = visualTarget(selectedNode).getBoundingClientRect();
             parent.postMessage(
               { type: "designer:selectedRect", rect: { top: r.top, left: r.left, width: r.width, height: r.height } },

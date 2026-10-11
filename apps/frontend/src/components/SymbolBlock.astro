@@ -43,8 +43,11 @@ interface El {
 interface Props {
   symbolId: string;
   tenantHost: string;
+  // The instance's own margin/padding CSS (SectionBlock.astro) — lives on a
+  // .ds-symbol wrapper so it never mixes with the master node's own spacing.
+  box?: string;
 }
-const { symbolId, tenantHost } = Astro.props;
+const { symbolId, tenantHost, box } = Astro.props;
 
 const symbol = symbolId ? await getSymbol(tenantHost, symbolId) : null;
 const node = symbol?.node as El | undefined;
@@ -220,8 +223,10 @@ const renderNode = (el: El): unknown => {
     case "spacer": {
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasBp ? `sym${visIdCounter++}` : undefined;
-      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => `height:${lengthValue(mp.height, SPACE, SPACE.md)}`));
-      return <div data-vis={visId} style={`height:${lengthValue(p.height, SPACE, SPACE.md)}`} />;
+      const spacerStyle = (mp: typeof p) =>
+        [`height:${lengthValue(mp.height, SPACE, SPACE.md)}`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";");
+      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, spacerStyle));
+      return <div data-vis={visId} style={spacerStyle(p)} />;
     }
     case "divider": {
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
@@ -284,9 +289,11 @@ const renderNode = (el: El): unknown => {
   }
 };
 const rendered = renderNode(node!);
+// Flex column, same as .ds-col, so the master node lays out exactly as it did
+// as a direct column child.
 return (
   <>
-    {rendered}
+    {rendered != null && <div class="ds-symbol" style={`display:flex;flex-direction:column;${box ?? ""}`}>{rendered}</div>}
     {responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
   </>
 );
