@@ -101,10 +101,19 @@ export function DesignerCanvas({
   dropHint, setDropHint, dropIntoColumn, dropIntoNewSection, drag,
 }: DesignerCanvasProps) {
   const {
-    t, bp, bpKey, bpGetValue, bpKeysOverridden, sideValue, fourSideValue, mode, blocks, setSel,
+    t, bp, bpKey, bpGetValue, bpKeysOverridden, sideValue, fourSideValue, mode, kind, blocks, setSel,
     isSectionLocked, mutate, pageSettings, saveAsTemplate, clipHas, styleHas,
     deleteRow, deleteColumn, deleteElement,
   } = ctx;
+  // Blocks on a page/post is a structure-only wireframe (Divi's Wireframe
+  // View / Elementor's Navigator idea): no section/row/column/element
+  // spacing, bg, border, shadow or contained max-width applies here, every
+  // level gets the same uniform gaps instead, and the canvas fills a framed
+  // box like Live. Live Edit is where a page is seen and spaced for real.
+  // Header/Footer Designer (kind "siteChrome") has no Live toggle, so this
+  // canvas is its only visual and keeps the real styling.
+  const wire = kind !== "siteChrome";
+  const framed = isCanvasMode || wire;
 
   // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
   // — this is real (SectionBlock.astro renders the matching @media rule on
@@ -121,7 +130,9 @@ export function DesignerCanvas({
     return props[key] === "true";
   }
   function sectionBpStyle(sp: SectionProps): React.CSSProperties {
-    const v = (key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
+    // Top band leaves room for the hover Section pill above row 0's Row badge.
+    if (wire) return { padding: "1.5rem 0.75rem 0.75rem" };
+    const v =(key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
     const bgImage = v("bgImage");
     const border = v("border");
     const borderWidth = v("borderWidth");
@@ -155,6 +166,7 @@ export function DesignerCanvas({
     };
   }
   function bpColStyle(col: Col): React.CSSProperties {
+    if (wire) return {};
     if (bp === "desktop" || !col.bp) return colStyle(col.props);
     const merged: Record<string, string> = { ...(col.props ?? {}) };
     for (const key of [...COLUMN_FIELDS.map((f) => f.key), ...COLUMN_SPACING_KEYS]) {
@@ -164,6 +176,7 @@ export function DesignerCanvas({
     return colStyle(merged);
   }
   function bpMarginStyle(el: El): React.CSSProperties | undefined {
+    if (wire) return undefined;
     const side = (s: keyof typeof MARGIN_SIDE_KEYS) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[s], MARGIN_SIDE_FALLBACK[s]);
     const top = side("top");
     const right = side("right");
@@ -179,7 +192,7 @@ export function DesignerCanvas({
   // per-side/fallback convention as Column's padding.
   function bpPaddingStyle(el: El): React.CSSProperties | undefined {
     const has = (k: string) => bpGetValue(el.props[k], el.bp, k);
-    if (!has("padding") && !has("paddingTop") && !has("paddingRight") && !has("paddingBottom") && !has("paddingLeft")) {
+    if (wire || !has("padding") && !has("paddingTop") && !has("paddingRight") && !has("paddingBottom") && !has("paddingLeft")) {
       return undefined;
     }
     const side = (s: keyof typeof PADDING_SIDE_KEYS) => lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[s], "padding"), PAD, "0");
@@ -192,13 +205,14 @@ export function DesignerCanvas({
   // (see the rows container below) — row 0 never got a leading gap under
   // that either, so it defaults to "0" instead.
   function rowMarginStyle(row: Row, isFirst: boolean): React.CSSProperties {
+    if (wire) return { marginTop: isFirst ? 0 : "0.75rem" };
     return {
       marginTop: lengthValue(row.marginTop, SPACE, isFirst ? "0" : mode === "live" ? "2.5rem" : "1.25rem"),
       marginBottom: lengthValue(row.marginBottom, SPACE, "0"),
     };
   }
   function rowPaddingStyle(row: Row): React.CSSProperties | undefined {
-    if (!row.paddingTop && !row.paddingRight && !row.paddingBottom && !row.paddingLeft) return undefined;
+    if (wire || (!row.paddingTop && !row.paddingRight && !row.paddingBottom && !row.paddingLeft)) return undefined;
     const v = (x?: string) => lengthValue(x, PAD, "0");
     return { padding: `${v(row.paddingTop)} ${v(row.paddingRight)} ${v(row.paddingBottom)} ${v(row.paddingLeft)}` };
   }
@@ -301,7 +315,7 @@ export function DesignerCanvas({
       // reading as an accidental leftover margin ("macam island") rather
       // than a deliberate frame. Only the boxed/backdropped case gets
       // that breathing room now.
-      className={`min-w-0 flex-1 overflow-y-auto ${isCanvasMode ? "bg-canvas p-6" : ""}`}
+      className={`min-w-0 flex-1 overflow-y-auto ${framed ? "bg-canvas p-4" : ""}`}
       onClick={() => setSel(null)}
       style={
         {
@@ -319,23 +333,23 @@ export function DesignerCanvas({
           // (bg-canvas above, or pageSettings.canvasColor when the
           // author picked one in Page Settings) rather than looking
           // like unfilled/leftover theme-bg space.
-          background: isCanvasMode ? pageSettings.canvasColor || undefined : "var(--color-bg, #ffffff)",
+          background: framed ? pageSettings.canvasColor || undefined : "var(--color-bg, #ffffff)",
           color: "var(--color-text, inherit)",
           fontFamily: "var(--font-family, inherit)",
         } as React.CSSProperties
       }
     >
       <div
-        className="relative mx-auto"
+        className={`relative mx-auto ${wire ? "min-h-full" : ""}`}
         style={{
           // Same DEVICE_DIMS Preview and Live Edit frame the real page at
           // (DeviceViewport) — this bp simulation, those two, and a real
           // phone/tablet all agree on the width a free-position element's
           // fixed-px size gets judged against.
-          maxWidth: bp !== "desktop" ? `${DEVICE_DIMS[bp].w}px` : mode === "live" || !desktopBoxed ? undefined : "56rem",
+          maxWidth: bp !== "desktop" ? `${DEVICE_DIMS[bp].w}px` : wire || !desktopBoxed ? undefined : "56rem",
         }}
       >
-        {isCanvasMode && (
+        {framed && (
           // Decorative-only layer (bg/rounded corners/border/shadow), kept
           // OUT of the real content below — same split this file's own
           // per-section render already uses (see its "Split so
@@ -352,11 +366,11 @@ export function DesignerCanvas({
           // position, not z-index.
           <div
             className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem] border border-line/60 shadow-lg"
-            style={{ background: "var(--color-bg, #ffffff)" }}
+            style={{ background: wire ? "#ffffff" : "var(--color-bg, #ffffff)" }}
           />
         )}
-        <div className="relative" style={{ color: isCanvasMode ? "var(--color-text, inherit)" : undefined }}>
-        {resolvedHeaderId && (
+        <div className={`relative ${wire ? "p-4" : ""}`} style={{ color: isCanvasMode ? "var(--color-text, inherit)" : undefined }}>
+        {resolvedHeaderId && !wire && (
           // Inside the same bp-width-constrained box as the page content below
           // (was a full-width sibling of it) — the iframe's own real CSS media
           // queries only ever see this box's rendered width, so a tablet/mobile
@@ -393,13 +407,13 @@ export function DesignerCanvas({
           // single overflow-hidden div clipped those badges away entirely
           // whenever there wasn't enough padding to absorb the overhang.
           const { padding: sectionPadding, margin: sectionMargin, color: sectionColor, opacity: sectionOpacity, ...sectionBgStyle } = sectionBpStyle(sp);
-          const sectionEffectiveBg = sp.bg || effectiveTheme?.backgroundColor || "#ffffff";
+          const sectionEffectiveBg = (!wire && sp.bg) || (!wire && effectiveTheme?.backgroundColor) || "#ffffff";
           const sectionOverlay = overlayColors(sectionEffectiveBg);
           // Real stroke set (new fields or the legacy preset) already
           // draws its own border via sectionBgStyle.border — the overlay
           // tint below is only a structural guide for an unset border,
           // so it must never paint over a color the author actually chose.
-          const hasRealBorder = Boolean(sp.borderWidth || sp.border);
+          const hasRealBorder = !wire && Boolean(sp.borderWidth || sp.border);
           const sectionHiddenAtBp = hiddenAtBp(sp as unknown as Record<string, string>);
           return (
             <div
@@ -424,7 +438,7 @@ export function DesignerCanvas({
                   style={{ ...sectionBgStyle, borderColor: mode === "live" || hasRealBorder ? undefined : sectionOverlay.line }}
                 />
                 <div className="relative" style={{ padding: sectionPadding }}>
-                <div className={mode === "live" ? (contained ? "mx-auto max-w-[68rem]" : "") : contained ? "mx-auto max-w-3xl" : ""}>
+                <div className={contained && !wire ? "mx-auto max-w-3xl" : ""}>
                   {(sp.rows ?? []).map((row, r) => {
                     const rowHiddenAtBp = hiddenAtBp(row as unknown as Record<string, string>);
                     return (
@@ -478,12 +492,12 @@ export function DesignerCanvas({
                                 flexWrap: row.flexWrap ?? "wrap",
                               }
                             : { gridTemplateColumns: rowGridTemplate(row, bp) }),
-                          gap: row.gap ?? pageSettings.gap ?? (mode === "live" ? "2rem" : "1rem"),
+                          gap: wire ? "0.75rem" : row.gap ?? pageSettings.gap ?? "1rem",
                           ...rowPaddingStyle(row),
                         }}
                       >
                         {row.columns.map((col, c) => {
-                        const colBg = col.props?.bg || sectionEffectiveBg;
+                        const colBg = (!wire && col.props?.bg) || sectionEffectiveBg;
                         const colOverlay = overlayColors(colBg);
                         const colHiddenAtBp = hiddenAtBp(col.props);
                         return (
@@ -607,7 +621,7 @@ export function DesignerCanvas({
                                   <Trash2 className="h-3 w-3" />
                                 </button>
                               )}
-                              {selEq([b, r, c, e]) && mode !== "live" && el.type === "image" && (
+                              {selEq([b, r, c, e]) && !wire && el.type === "image" && (
                                 <span
                                   onMouseDown={(ev) => {
                                     const wrapper = (ev.currentTarget as HTMLElement).parentElement;
@@ -680,7 +694,7 @@ export function DesignerCanvas({
           <Plus className="h-4 w-4" /> {t("designer-add-section")}
         </button>
         </div>
-        {resolvedFooterId && (
+        {resolvedFooterId && !wire && (
           <div className="overflow-hidden border-t border-dashed border-line/40">
             <iframe
               key={resolvedFooterId}
