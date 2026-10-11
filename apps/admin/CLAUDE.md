@@ -1664,3 +1664,6 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   OFF (single side); when on, every side's band + px label updates together. A `position:fixed` lock pill above the box toggles them
   via `designer:spacingLink`, same state as the Inspector's chain icon; the
   bridge re-sends `designer:selected` on change, which rebuilds the handles.
+  The pill is hidden until a badge is hovered/dragged, then fades out after 3s
+  idle (held while hovering the badge or pill); `spacingLockBarKeep` carries
+  its visibility across the rebuild a lock click triggers.
