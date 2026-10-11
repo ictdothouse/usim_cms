@@ -1673,3 +1673,14 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   0px). Same editor-only CSS draws a faint dashed guide on every
   `.ds-section`/`.ds-col`/`.ds-container` (class added in ContainerBlock.astro);
   hover outline is solid so it reads apart from the guide.
+- **Live Edit empty-element placeholders** (BaseLayout designerEdit script, after
+  `visualTarget`): a column element wrapper (`data-ds-type`, SectionBlock.astro,
+  Live Edit only) with no child but `<style>`/`<script>` gets a prepended
+  `[data-ds-ph]` "<Type> — klik untuk edit" box, so visualTarget/outline/spacing
+  handles have something to anchor to; an empty slide (no `.ds-slide-content`, no
+  bg image) gets an inset one. Structural check on purpose — a lazy `<img>`
+  measures 0px pre-load. Empty heading/text use editor CSS `:empty::before`
+  instead (contentEditable needs the real element). Labels ride on
+  `designer:showSlides` (sent every frame load) since placeholders exist before
+  any selection; `labels` is merged, not replaced, across messages.
+  Container children (path 5+) that render null still get no placeholder.

@@ -28,6 +28,7 @@ import {
 } from "../parsers";
 import { scaledFreeFont } from "../style";
 import { writeDragSideKeys, applySectionSpacingWrite } from "../spacingDrag";
+import { ELS } from "../elements";
 import type { Block, Sel, SectionProps } from "../types";
 
 export interface LiveEditBridgeDeps {
@@ -275,7 +276,15 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   function postShowSlides(frame: HTMLIFrameElement | null, src: string | null) {
     if (!frame?.contentWindow || !src) return;
     try {
-      frame.contentWindow.postMessage({ type: "designer:showSlides", map: sliderSlideIdx }, new URL(src, window.location.href).origin);
+      // Rides along on this per-load message: the iframe's empty-element
+      // placeholders (BaseLayout.astro) exist before anything is selected,
+      // so designer:selected's labels arrive too late for them.
+      const phLabels = {
+        clickToEdit: t("designer-ph-click-edit"),
+        typeText: t("designer-ph-type-text"),
+        el: Object.fromEntries(Object.entries(ELS).map(([k, d]) => [k, t(d.labelKey)])),
+      };
+      frame.contentWindow.postMessage({ type: "designer:showSlides", map: sliderSlideIdx, labels: phLabels }, new URL(src, window.location.href).origin);
     } catch {
       /* transient cross-origin mismatch mid-navigation — next load re-sends */
     }
