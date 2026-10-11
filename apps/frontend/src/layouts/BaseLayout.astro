@@ -1145,13 +1145,13 @@ const fontsHref = allFonts.length
             } else if (edge === "bottom") {
               Object.assign(handle.style, isMargin ? { right: "32px", bottom: "-8px" } : { left: "50%", bottom: "0", transform: "translate(-50%,50%)" });
             } else if (edge === "left") {
-              // Inset instead of straddling the edge like Blocks mode does —
-              // a full-bleed Section/Column's left/right edge here is the
-              // viewport's own edge (Blocks' canvas has a gutter), so an
-              // overhanging badge clips half off-screen.
-              Object.assign(handle.style, isMargin ? { top: "32px", left: "4px" } : { top: "50%", left: "16px", transform: "translateY(-50%)" });
+              // Flush inside the edge instead of straddling it like Blocks
+              // mode does — a full-bleed Section/Column's left/right edge
+              // here is the viewport's own edge (Blocks' canvas has a
+              // gutter), so an overhanging badge clips half off-screen.
+              Object.assign(handle.style, isMargin ? { top: "32px", left: "0" } : { top: "50%", left: "0", transform: "translateY(-50%)" });
             } else {
-              Object.assign(handle.style, isMargin ? { top: "32px", right: "4px" } : { top: "50%", right: "16px", transform: "translateY(-50%)" });
+              Object.assign(handle.style, isMargin ? { top: "32px", right: "0" } : { top: "50%", right: "0", transform: "translateY(-50%)" });
             }
           }
 
@@ -1162,6 +1162,7 @@ const fontsHref = allFonts.length
             spacingHandleBox = box;
             spacingRestorePosition = getComputedStyle(box).position === "static" ? box.style.position || "" : null;
             if (spacingRestorePosition !== null) box.style.position = "relative";
+            const groups = { padding: [], margin: [] };
 
             function addHandle(isMargin, edge) {
               const keyMap = isMargin ? MARGIN_KEYS : PADDING_KEYS;
@@ -1208,10 +1209,18 @@ const fontsHref = allFonts.length
                 else Object.assign(band.style, { top: "0", bottom: "0", right: `${offset}px`, left: "", width: `${px}px`, height: "" });
               }
               render(currentPx(), false);
+              const view = { render, currentPx };
+              const group = groups[isMargin ? "margin" : "padding"];
+              group.push(view);
+              // Linked: hovering/dragging one edge shows every side's band and
+              // live px together (Blocks mode's bandKey `.*` rule), since a
+              // drag writes all four anyway.
+              const peers = () => (linked ? group : [view]);
+              const show = (on, px) => peers().forEach((v) => v.render(px ?? v.currentPx(), on));
 
-              handle.addEventListener("pointerenter", () => render(currentPx()));
+              handle.addEventListener("pointerenter", () => show(true));
               handle.addEventListener("pointerleave", () => {
-                if (handle.dataset.dragging !== "1") render(currentPx(), false);
+                if (handle.dataset.dragging !== "1") show(false);
               });
 
               handle.addEventListener("pointerdown", (e) => {
@@ -1227,14 +1236,16 @@ const fontsHref = allFonts.length
                     const pos = axis === "y" ? ev.clientY : ev.clientX;
                     lastPx = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
                     for (const k of touched) setImp(box, kebab(k), `${lastPx}px`);
-                    render(lastPx);
+                    show(true, lastPx);
                   },
                   (moved) => {
                     delete handle.dataset.dragging;
-                    if (!moved) {
-                      render(currentPx(), false);
-                      return;
-                    }
+                    // A top/left drag ends with the pointer away from its
+                    // badge (that edge doesn't move), so pointerleave was
+                    // swallowed mid-drag — re-check instead of leaving the
+                    // band stuck on until the reload.
+                    show(handle.matches(":hover"), moved ? lastPx : undefined);
+                    if (!moved) return;
                     parent.postMessage({ type: "designer:spacingDrag", path: path.join("."), fields: touched, px: lastPx }, targetOrigin);
                   },
                 );
