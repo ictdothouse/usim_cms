@@ -223,15 +223,23 @@ const fontsHref = allFonts.length
     )}
     {designerEdit && (
       <style>
-        /* A freshly dropped column/row has no elements yet — .ds-col has no
-           min-height of its own (by design, so a real published page never
-           shows empty space), which collapses it to 0px and makes it
-           impossible to see or drop into. Editor-only outline, never ships
-           to a real visitor (designerEdit never true outside Live Edit). */
-        .ds-col:empty {
-          min-height: 3rem;
-          outline: 1px dashed rgba(15, 98, 254, 0.4);
+        /* Editor-only box guides (designerEdit never true outside Live
+           Edit): every section/column/container gets a faint dashed edge so
+           the layout is visible. Inline hover/selected outlines override it.
+           An empty column/container has no min-height of its own (by design,
+           so a real page never shows empty space) and would collapse to 0px
+           — `:has` instead of `:empty` so the padding/margin drag badges
+           (data-ds-chrome) appended into a selected box don't count. */
+        .ds-section,
+        .ds-col,
+        .ds-container {
+          outline: 1px dashed rgba(15, 98, 254, 0.3);
           outline-offset: -1px;
+        }
+        .ds-col:not(:has(> :not([data-ds-chrome]))),
+        .ds-container:not(:has(> :not([data-ds-chrome]))) {
+          min-height: 3rem;
+          outline-color: rgba(15, 98, 254, 0.5);
         }
       </style>
     )}
@@ -1199,6 +1207,7 @@ const fontsHref = allFonts.length
 
               const band = document.createElement("div");
               band.style.cssText = `position:absolute;pointer-events:none;z-index:9998;display:none;background-image:${stripe};`;
+              band.dataset.dsChrome = "";
               box.appendChild(band);
               spacingHandleEls.push(band);
 
@@ -1209,6 +1218,7 @@ const fontsHref = allFonts.length
                 `background:${isMargin ? MARGIN_COLOR : ACCENT};` +
                 `cursor:${axis === "y" ? "ns-resize" : "ew-resize"};`;
               positionSpacingHandle(handle, edge, isMargin);
+              handle.dataset.dsChrome = "";
               box.appendChild(handle);
               spacingHandleEls.push(handle);
 
@@ -1332,7 +1342,9 @@ const fontsHref = allFonts.length
             if (hoveredNode && hoveredNode !== selectedNode) visualTarget(hoveredNode).style.outline = "";
             hoveredNode = node;
             if (node && node !== selectedNode && !dragState) {
-              visualTarget(node).style.outline = "1px dashed rgba(15,98,254,0.55)";
+              // Solid, not dashed — the editor CSS already draws a faint
+              // dashed guide on every section/column/container.
+              visualTarget(node).style.outline = "1px solid rgba(15,98,254,0.6)";
             }
           });
           document.addEventListener("pointerout", (e) => {
