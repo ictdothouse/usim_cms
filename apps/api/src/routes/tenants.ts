@@ -12,6 +12,7 @@ import {
   setProxyAutomationEnabled,
   setTenantCertInfo,
   insertAuditLog,
+  getTenantRecord,
 } from "../db/tenant-pool.js";
 import {
   syncCaddy,
@@ -22,7 +23,7 @@ import {
   isValidDialTargets,
   type CaddyUpstreams,
 } from "../proxy-sync.js";
-import { localUploadsDir, isLocalDriver, dirSizeBytes } from "../storage.js";
+import { localUploadsDir, isLocalDriver, dirSizeBytes, tenantMediaPrefix } from "../storage.js";
 
 // Blue-green deploy promotion (scripts/deploy.sh): once the just-started
 // color's own containers report healthy, the deploy script calls this on
@@ -62,8 +63,11 @@ export function registerTenantRoutes(app: FastifyInstance) {
       const dbSizeBytes = await getTenantDbSizeBytes(t.host);
       let diskSizeBytes: number | null = null;
       if (isLocalDriver) {
+        // Legacy flat host folder + phase-1 tenants/<id>/ tree (storage.ts).
         const tenantFolder = t.host.toLowerCase().replace(/[^a-z0-9]/g, "_");
-        diskSizeBytes = await dirSizeBytes(path.join(localUploadsDir, tenantFolder));
+        const legacy = await dirSizeBytes(path.join(localUploadsDir, tenantFolder));
+        const current = await dirSizeBytes(path.join(localUploadsDir, tenantMediaPrefix(t.id)));
+        diskSizeBytes = legacy === null && current === null ? null : (legacy ?? 0) + (current ?? 0);
       }
       usage.push({ host: t.host, dbSizeBytes, diskSizeBytes });
     }
@@ -98,10 +102,14 @@ export function registerTenantRoutes(app: FastifyInstance) {
       reply.code(400);
       return { error: "confirm must match the site's host exactly" };
     }
+    // Read before deleteTenant drops the registry row — the id names the
+    // tenant's phase-1 media folder.
+    const tenantId = (await getTenantRecord(host))?.id;
     await deleteTenant(host);
     if (isLocalDriver) {
       const tenantFolder = host.toLowerCase().replace(/[^a-z0-9]/g, "_");
       await rm(path.join(localUploadsDir, tenantFolder), { recursive: true, force: true });
+      if (tenantId) await rm(path.join(localUploadsDir, tenantMediaPrefix(tenantId)), { recursive: true, force: true });
     }
     await maybeSyncCaddy(app);
     await insertAuditLog({

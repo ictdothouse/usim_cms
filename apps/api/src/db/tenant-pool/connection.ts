@@ -501,6 +501,11 @@ async function lookupTenantCached(tenantHost: string): Promise<TenantRow | null>
   return tenant ?? null;
 }
 
+// Registry row for a host (same 30s cache as getTenantConnection) — the
+// public media route needs the tenant's immutable id to map a Host header to
+// its tenants/<id>/ storage prefix, without opening a tenant DB connection.
+export const getTenantRecord = lookupTenantCached;
+
 export async function getTenantConnection(tenantHost: string): Promise<TenantConnection> {
   // Registry lookup on the control-plane — the x-tenant-host trust boundary.
   const tenant = await lookupTenantCached(tenantHost);

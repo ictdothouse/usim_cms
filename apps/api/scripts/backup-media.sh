@@ -11,6 +11,11 @@
 # Migrate to a new server:  rsync -a BACKUP_DIR/media/<tenantFolder>/latest/ newhost:/path/to/uploads/<tenantFolder>/
 # Cron (daily 2am, all tenants):  0 2 * * * BACKUP_DIR=/var/backups/usim_cms apps/api/scripts/backup-media.sh
 #
+# Uploads since media-location phase 1 live under uploads/tenants/<tenantId>/<yyyy>/<mm>/
+# (apps/api/src/storage.ts), not uploads/<tenantFolder>/ — the no-arg run already picks up
+# that `tenants` folder as one snapshot; with explicit hosts (incl. SOURCE_HOST mode) also
+# pass the literal argument `tenants` to include it.
+#
 # Multi-VPS fleet (one instance per department VPS, small local disk): run this ON a
 # separate backup box, PULLING from each app VPS over SSH instead of writing local
 # backups back onto the same tight disk they came from — a backup that lives on the

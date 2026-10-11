@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, rm, readdir, stat } from "node:fs/promises";
 import path from "node:path";
@@ -22,6 +23,42 @@ if (s3Requested && DRIVER === "local") {
 
 // --- local disk driver (default) ---
 export const localUploadsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "uploads");
+
+// --- media location scheme (phase 1) ---
+// Storage: tenants/<tenantId>/<yyyy>/<mm>/<file> — keyed by the tenant's
+// immutable registry id, not its hostname, so nothing on disk/S3 is named
+// after a domain. Public URL: /uploads/<yyyy>/<mm>/<file> on the tenant's own
+// domain (routes/media.ts resolves the tenant from Host) — no tenant id or
+// host_folder in the URL, so a cross-host restore/clone only re-homes files,
+// never rewrites a media path. Legacy rows stay flat under
+// uploads/<host_folder>/<uuid>.<ext> and keep being served as-is.
+export const tenantMediaPrefix = (tenantId: string) => `tenants/${tenantId}`;
+
+export function mediaDatePath(d = new Date()): string {
+  return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// "Banner Utama (Final).PNG" -> "banner-utama-final-1a2b3c4d". The random
+// suffix keeps every stored name unique — the 1y immutable cache on served
+// files relies on a name never being reused for different bytes.
+export function mediaStem(originalName: string): string {
+  const slug =
+    path
+      .parse(originalName)
+      .name.normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 60)
+      .replace(/^-+|-+$/g, "") || "file";
+  return `${slug}-${randomBytes(4).toString("hex")}`;
+}
+
+// Tenant-relative key as it appears after /uploads/ — also the traversal
+// guard for the public serve route.
+export function isValidMediaKey(key: string): boolean {
+  return /^\d{4}\/\d{2}\/[a-z0-9][a-z0-9._-]*$/.test(key) && !key.includes("..");
+}
 
 // Recursively sums file sizes under `dir` — used for a tenant's uploads
 // folder. Returns null (not 0) when the folder doesn't exist at all yet
@@ -81,8 +118,12 @@ async function uploadS3(tenantFolder: string, filename: string, stream: Readable
   const key = `${tenantFolder}/${filename}`;
   const upload = new Upload({ client: getS3Client(), params: { Bucket: bucket, Key: key, Body: stream } });
   await upload.done();
-  const publicBase = process.env.S3_PUBLIC_URL_BASE ?? `${process.env.S3_ENDPOINT}/${bucket}`;
-  return { url: `${publicBase}/${key}` };
+  return { url: s3PublicUrl(key) };
+}
+
+export function s3PublicUrl(key: string): string {
+  const publicBase = process.env.S3_PUBLIC_URL_BASE ?? `${process.env.S3_ENDPOINT}/${process.env.S3_BUCKET}`;
+  return `${publicBase}/${key}`;
 }
 
 export function uploadFile(tenantFolder: string, filename: string, stream: Readable): Promise<UploadResult> {

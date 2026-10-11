@@ -21,6 +21,7 @@ export {
   deleteTenant,
   setTenantCertInfo,
   getTenantConnection,
+  getTenantRecord,
 } from "./tenant-pool/connection.js";
 
 export {

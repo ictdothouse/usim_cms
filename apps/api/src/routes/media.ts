@@ -1,15 +1,61 @@
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { buffer as streamToBuffer } from "node:stream/consumers";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
 import * as schema from "../db/schema.js";
 import { hasPermission } from "./permissions.js";
-import { getMergedStorageLimits } from "../db/tenant-pool.js";
-import { deleteFile } from "../storage.js";
+import { getMergedStorageLimits, getTenantRecord } from "../db/tenant-pool.js";
 import { generateImageVariants, deleteImageVariants } from "../image-variants.js";
-import { uploadFile } from "../storage.js";
+import {
+  uploadFile,
+  deleteFile,
+  isLocalDriver,
+  isValidMediaKey,
+  localUploadsDir,
+  mediaDatePath,
+  mediaStem,
+  s3PublicUrl,
+  tenantMediaPrefix,
+} from "../storage.js";
+
+// Public, unauthenticated serving of phase-1 media URLs
+// (/uploads/<yyyy>/<mm>/<file>, see storage.ts's scheme comment). Registered
+// on the root app next to the /uploads/ static plugin: a 3-segment path with
+// a year/month shape lands here, everything else (legacy
+// /uploads/<host_folder>/<file>, /uploads/_global/...) falls through to the
+// static wildcard. The tenant comes from the Host header (Caddy and the
+// install.sh nginx block both preserve it); /_tenant/<host>/... is the
+// host-explicit form for requests that don't arrive on a tenant domain —
+// apps/admin's publicMediaBase uses it in dev, where everything talks to
+// localhost:3000 directly.
+export function registerMediaServeRoutes(app: FastifyInstance) {
+  async function serve(host: string, key: string, reply: FastifyReply) {
+    const tenant = isValidMediaKey(key) ? await getTenantRecord(host.toLowerCase()) : null;
+    if (!tenant?.active) {
+      reply.callNotFound();
+      return reply;
+    }
+    const fullKey = `${tenantMediaPrefix(tenant.id)}/${key}`;
+    // sendFile inherits the static plugin's 1y immutable Cache-Control.
+    return isLocalDriver ? reply.sendFile(fullKey, localUploadsDir) : reply.redirect(s3PublicUrl(fullKey), 302);
+  }
+  type KeyParams = { host?: string; year: string; month: string; file: string };
+  app.get("/uploads/:year/:month/:file", (req, reply) => {
+    const { year, month, file } = req.params as KeyParams;
+    return serve(req.hostname.replace(/:\d+$/, ""), `${year}/${month}/${file}`, reply);
+  });
+  app.get("/_tenant/:host/uploads/:year/:month/:file", (req, reply) => {
+    const { host, year, month, file } = req.params as KeyParams;
+    return serve(host!, `${year}/${month}/${file}`, reply);
+  });
+  // Legacy rows through the same dev base: hand back the plain host-agnostic
+  // /uploads/... path. Only ever an uploads/ path — never an open redirect.
+  app.get("/_tenant/:host/*", (req, reply) => {
+    const rest = (req.params as { "*": string })["*"];
+    return rest.startsWith("uploads/") ? reply.redirect(`/${rest}`, 302) : reply.callNotFound();
+  });
+}
 
 // Media upload + library CRUD + folders, moved out of index.ts verbatim
 // (god-file breakup, index.ts).
@@ -73,9 +119,17 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
       reply.code(415);
       return { error: `unsupported file type ${file.mimetype} (jpeg/png/gif/webp/mp4/webm/pdf/doc(x)/xls(x)/ppt(x)/zip only)` };
     }
-    const safeTenant = tenantFolder(req.tenantHost);
-    const stem = randomUUID();
+    // tenantPlugin already confirmed this host is a live registry row.
+    const tenant = await getTenantRecord(req.tenantHost);
+    if (!tenant) {
+      reply.code(404);
+      return { error: "unknown tenant" };
+    }
+    const datePath = mediaDatePath();
+    const folder = `${tenantMediaPrefix(tenant.id)}/${datePath}`;
+    const stem = mediaStem(file.filename);
     const filename = `${stem}${ext}`;
+    const storageKey = `${datePath}/${filename}`;
     // Buffered (not streamed straight to storage) so the same bytes can also
     // feed sharp for the responsive-variant pipeline below — bounded by
     // limits.maxUploadFileSizeMb, already enforced on the multipart parser
@@ -96,7 +150,10 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
         return { error: `storage limit reached (${limits.maxTotalStorageMb} MB max for this site)` };
       }
     }
-    const { url: rawUrl } = await uploadFile(safeTenant, filename, Readable.from(fileBuffer));
+    await uploadFile(folder, filename, Readable.from(fileBuffer));
+    // Same public URL under either driver (the serve route below redirects to
+    // S3 when that's the backend) — switching drivers never changes it.
+    const rawUrl = `/uploads/${storageKey}`;
     // Responsive image pipeline: gif is skipped (animated — sharp would only
     // read its first frame, silently breaking the animation in every
     // generated variant). jpeg/png/webp get downsized WebP siblings plus
@@ -106,7 +163,7 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
     // lookup needed at render time.
     const meta =
       file.mimetype.startsWith("image/") && file.mimetype !== "image/gif"
-        ? await generateImageVariants(safeTenant, stem, fileBuffer)
+        ? await generateImageVariants(folder, stem, fileBuffer)
         : null;
     const url = meta ? `${rawUrl}?w=${meta.width}&h=${meta.height}` : rawUrl;
     const [item] = await req.db
@@ -115,6 +172,7 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
         filename,
         originalName: file.filename,
         url,
+        storageKey,
         mimeType: file.mimetype,
         sizeBytes: fileBuffer.byteLength,
         width: meta?.width ?? null,
@@ -205,9 +263,11 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
       reply.code(404);
       return { error: "not found" };
     }
-    const safeTenant = tenantFolder(req.tenantHost);
-    await deleteFile(safeTenant, row.filename);
-    await deleteImageVariants(safeTenant, path.parse(row.filename).name, row.width);
+    // Legacy rows (no storageKey) live flat under uploads/<host_folder>/.
+    const tenant = row.storageKey ? await getTenantRecord(req.tenantHost) : null;
+    const folder = row.storageKey && tenant ? `${tenantMediaPrefix(tenant.id)}/${path.posix.dirname(row.storageKey)}` : tenantFolder(req.tenantHost);
+    await deleteFile(folder, row.filename);
+    await deleteImageVariants(folder, path.parse(row.filename).name, row.width);
     return { deleted: true, id };
   });
 
