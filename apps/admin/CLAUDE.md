@@ -335,7 +335,11 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   in `bf025a2` (2026-07-25); since then the "Live" toggle only restyled the Blocks React canvas,
   which is an approximation (vw-based clamp() font sizes and `@media` rules evaluate against the
   admin window, no Swiper). `Designer.tsx` mounts the double-buffered iframes again inside the same
-  `DeviceViewport`. `useLiveEditBridge` now reloads the real page after EVERY edit; the old
+  `DeviceViewport` (2026-10-11: wrapped in `designer/LiveScrollStage.tsx` — the iframe's own
+  scrollbar is hidden under `designerEdit` and the canvas column scrolls instead, synced both ways
+  via `designer:scrollMax`/`designer:scroll`/`designer:restoreScroll`; the iframe keeps its true
+  device height on purpose, auto-height would break vh/sticky/fixed and loop on a 100vh slider).
+  `useLiveEditBridge` now reloads the real page after EVERY edit; the old
   `designer:style` shortcut posted BASE props at tablet/mobile. The one exception is typing inside the
   iframe (`skipNextReload`), which re-renders once selection moves away. Iframe free-position drags
   write `${bp}:x`-style overrides off desktop, and `designer:showSlides` keeps the edited slide

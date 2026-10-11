@@ -17,12 +17,6 @@
     "ast_hash": "e5f1efe7418e5a484d4cb164e7cff8ae",
     "semantic_hash": "e5f1efe7418e5a484d4cb164e7cff8ae"
   },
-  "apps/admin/postcss.config.js": {
-    "mtime": 1783791622.0822606,
-    "seen": 1789000620.0253077,
-    "ast_hash": "c735540bb63936a123bc867d950c9f69",
-    "semantic_hash": "c735540bb63936a123bc867d950c9f69"
-  },
   "apps/admin/src/App.tsx": {
     "mtime": 1789738195.016322,
     "seen": 1790128271.5110774,
@@ -400,12 +394,6 @@
     "seen": 1789000620.0254364,
     "ast_hash": "0352474ba2918efe13895edbc3780d94",
     "semantic_hash": "0352474ba2918efe13895edbc3780d94"
-  },
-  "apps/admin/tailwind.config.js": {
-    "mtime": 1785974029.6287007,
-    "seen": 1789000620.0254385,
-    "ast_hash": "272556bd1ec12d85133020f1f0879c61",
-    "semantic_hash": "272556bd1ec12d85133020f1f0879c61"
   },
   "apps/admin/tsconfig.app.json": {
     "mtime": 1784930934.0390263,

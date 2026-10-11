@@ -209,7 +209,9 @@ const fontsHref = allFonts.length
     )}
     {faviconUrl && <link rel="icon" href={faviconUrl} />}
     <style set:html={themeVars ? `:root{${themeVars}}` : ""} />
-    {deviceFrame && (
+    {/* designerEdit too: Live Edit scrolls this page from the Designer's
+        own canvas column (LiveScrollStage.tsx), not an inner scrollbar. */}
+    {(deviceFrame || designerEdit) && (
       <style>
         html,
         body {
@@ -1483,6 +1485,15 @@ const fontsHref = allFonts.length
             },
             true,
           );
+          // Page's scroll range, for LiveScrollStage.tsx's outer scrollbar
+          // (this page's own is hidden under designerEdit, see <head>).
+          const reportScrollMax = () =>
+            parent.postMessage(
+              { type: "designer:scrollMax", max: document.documentElement.scrollHeight - window.innerHeight, y: window.scrollY },
+              targetOrigin,
+            );
+          new ResizeObserver(reportScrollMax).observe(document.body);
+          window.addEventListener("load", reportScrollMax);
 
           let lastReportedTarget = null;
           let dropIndicatorEl = null;
