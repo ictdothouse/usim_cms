@@ -11,7 +11,14 @@ export interface UploadResult {
   url: string;
 }
 
-const DRIVER = process.env.STORAGE_DRIVER === "s3" ? "s3" : "local";
+// STORAGE_DRIVER=s3 with no bucket (e.g. install.sh's S3 prompt answered "y"
+// then left blank) used to make every upload throw "S3_BUCKET not configured"
+// AND unregister /uploads/ — falls back to local disk instead.
+const s3Requested = process.env.STORAGE_DRIVER === "s3";
+const DRIVER = s3Requested && process.env.S3_BUCKET ? "s3" : "local";
+if (s3Requested && DRIVER === "local") {
+  console.warn("[storage] STORAGE_DRIVER=s3 but S3_BUCKET is empty — using local disk uploads instead");
+}
 
 // --- local disk driver (default) ---
 export const localUploadsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "uploads");

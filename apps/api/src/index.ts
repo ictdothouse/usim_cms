@@ -27,7 +27,7 @@ import {
   getTenantMaintenanceMode,
 } from "./db/tenant-pool.js";
 import { verifySession } from "./db/auth.js";
-import { localUploadsDir, isLocalDriver } from "./storage.js";
+import { localUploadsDir } from "./storage.js";
 import { translatePlainText, translateHtmlBody } from "./translate.js";
 import { hasPermission } from "./routes/permissions.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -119,14 +119,15 @@ await app.register(cors, {
 // fetched cross-origin (by the tenant frontend, by Live Edit's iframe).
 await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: false });
 await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
-// Only serves files when STORAGE_DRIVER=local (default) — an S3-backed
-// upload returns a full external URL and doesn't need this at all.
-if (isLocalDriver) {
-  // maxAge/immutable is safe here because every uploaded filename is a fresh
-  // randomUUID() (see the upload routes below) — never reused/overwritten,
-  // so a long-lived cache can never go stale.
-  await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", maxAge: "1y", immutable: true });
-}
+// Registered under BOTH drivers: an S3-backed upload returns a full external
+// URL, but files uploaded to local disk before a switch to S3 still carry
+// /uploads/... URLs in media rows and page layouts — gating this on the
+// driver 404'd every one of them the moment STORAGE_DRIVER flipped. A
+// missing root dir (S3-only install) is just a warning in @fastify/static.
+// maxAge/immutable is safe here because every uploaded filename is a fresh
+// randomUUID() (see the upload routes below) — never reused/overwritten,
+// so a long-lived cache can never go stale.
+await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", maxAge: "1y", immutable: true });
 
 app.get("/health", async () => ({ status: "ok" }));
 
