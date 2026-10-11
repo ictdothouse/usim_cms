@@ -61,7 +61,13 @@ export function invalidateStorageConfig(): void {
 }
 
 // --- local disk driver (default) ---
-export const localUploadsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "uploads");
+// UPLOADS_DIR: bare-metal installs pointing uploads at a dedicated disk/NAS
+// mount (install.sh's media-storage prompt). Docker never sets it — the
+// container path stays /app/uploads and scripts/uploads-volume.sh decides
+// what's mounted there.
+export const localUploadsDir = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "uploads");
 
 // Pre-phase-1 flat folder name: uploads/<host_folder>/<uuid>.<ext>.
 export const legacyTenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");

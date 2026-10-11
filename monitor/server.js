@@ -299,14 +299,34 @@ function getHostStats(cb) {
   );
 }
 
+// Docker: the live api container's own /app/uploads mount — follows a
+// storage move (scripts/uploads-volume.sh gives a custom UPLOADS_PATH/
+// UPLOADS_NFS location its own volume) with no config here; the default
+// volume when no api container runs. Bare-metal: apps/api/.env's UPLOADS_DIR
+// (install.sh's media-storage prompt), read as a plain value, never sourced.
 function resolveUploadsDir(cb) {
   if (UPLOADS_DIR_ENV) return cb(UPLOADS_DIR_ENV);
-  if (DEPLOY_MODE !== "docker") return cb(path.join(REPO_DIR, "apps/api/uploads"));
+  if (DEPLOY_MODE !== "docker") {
+    let configured = "";
+    try {
+      const m = fs.readFileSync(path.join(REPO_DIR, "apps/api/.env"), "utf8").match(/^UPLOADS_DIR=(.+)$/m);
+      configured = m ? m[1].trim().replace(/^["']|["']$/g, "") : "";
+    } catch {
+      // no apps/api/.env — default location below
+    }
+    return cb(configured.startsWith("/") ? configured : path.join(REPO_DIR, "apps/api/uploads"));
+  }
   execFile(
     "docker",
-    ["volume", "inspect", "ucms-uploads", "--format", "{{ .Mountpoint }}"],
+    ["ps", "--filter", "label=com.docker.compose.service=api", "--format", "{{.Names}}"],
     { timeout: 10_000 },
-    (err, stdout) => cb(err ? null : stdout.trim()),
+    (err, stdout) => {
+      const container = err ? "" : stdout.trim().split("\n")[0];
+      const args = container
+        ? ["inspect", "--format", '{{range .Mounts}}{{if eq .Destination "/app/uploads"}}{{.Source}}{{end}}{{end}}', container]
+        : ["volume", "inspect", "ucms-uploads", "--format", "{{ .Mountpoint }}"];
+      execFile("docker", args, { timeout: 10_000 }, (err2, out) => cb(err2 ? null : out.trim() || null));
+    },
   );
 }
 

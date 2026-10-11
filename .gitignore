@@ -14,6 +14,7 @@ apps/api/uploads/
 .astro/
 .deploy-color
 .deploy.log
+.uploads-migration
 .playwright-mcp/
 .superpowers/
 slider-canvas.png
