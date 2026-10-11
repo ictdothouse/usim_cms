@@ -23,7 +23,7 @@ import {
   isValidDialTargets,
   type CaddyUpstreams,
 } from "../proxy-sync.js";
-import { localUploadsDir, isLocalDriver, dirSizeBytes, tenantMediaPrefix } from "../storage.js";
+import { localUploadsDir, dirSizeBytes, tenantMediaPrefix, legacyTenantFolder, deleteRemotePrefix } from "../storage.js";
 
 // Blue-green deploy promotion (scripts/deploy.sh): once the just-started
 // color's own containers report healthy, the deploy script calls this on
@@ -61,14 +61,11 @@ export function registerTenantRoutes(app: FastifyInstance) {
     const usage = [];
     for (const t of tenants) {
       const dbSizeBytes = await getTenantDbSizeBytes(t.host);
-      let diskSizeBytes: number | null = null;
-      if (isLocalDriver) {
-        // Legacy flat host folder + phase-1 tenants/<id>/ tree (storage.ts).
-        const tenantFolder = t.host.toLowerCase().replace(/[^a-z0-9]/g, "_");
-        const legacy = await dirSizeBytes(path.join(localUploadsDir, tenantFolder));
-        const current = await dirSizeBytes(path.join(localUploadsDir, tenantMediaPrefix(t.id)));
-        diskSizeBytes = legacy === null && current === null ? null : (legacy ?? 0) + (current ?? 0);
-      }
+      // This box's own disk only — legacy flat host folder + phase-1
+      // tenants/<id>/ tree (storage.ts). Bucket-held media isn't counted.
+      const legacy = await dirSizeBytes(path.join(localUploadsDir, legacyTenantFolder(t.host)));
+      const current = await dirSizeBytes(path.join(localUploadsDir, tenantMediaPrefix(t.id)));
+      const diskSizeBytes = legacy === null && current === null ? null : (legacy ?? 0) + (current ?? 0);
       usage.push({ host: t.host, dbSizeBytes, diskSizeBytes });
     }
     return { usage };
@@ -106,10 +103,13 @@ export function registerTenantRoutes(app: FastifyInstance) {
     // tenant's phase-1 media folder.
     const tenantId = (await getTenantRecord(host))?.id;
     await deleteTenant(host);
-    if (isLocalDriver) {
-      const tenantFolder = host.toLowerCase().replace(/[^a-z0-9]/g, "_");
-      await rm(path.join(localUploadsDir, tenantFolder), { recursive: true, force: true });
-      if (tenantId) await rm(path.join(localUploadsDir, tenantMediaPrefix(tenantId)), { recursive: true, force: true });
+    // Disk and bucket both — a site mid-migration can have files in either.
+    await rm(path.join(localUploadsDir, legacyTenantFolder(host)), { recursive: true, force: true });
+    if (tenantId) {
+      await rm(path.join(localUploadsDir, tenantMediaPrefix(tenantId)), { recursive: true, force: true });
+      await deleteRemotePrefix(tenantMediaPrefix(tenantId)).catch((err) =>
+        req.log.warn({ err, host }, "tenant delete: bucket media not removed"),
+      );
     }
     await maybeSyncCaddy(app);
     await insertAuditLog({

@@ -409,6 +409,13 @@ export const platformSettings = pgTable("platform_settings", {
   // in plaintext, same threat model as POSTGRES_APP_PASSWORD/SESSION_SECRET
   // already sitting in plaintext .env files on this same box.
   backupDestination: jsonb("backup_destination").notNull().default({ type: "local" }),
+  // Settings > Storage (media-location phase 2): runtime media driver +
+  // S3/R2 connection, null = fall back to STORAGE_DRIVER/S3_* env vars. Same
+  // plaintext-secret threat model as backupDestination above. mediaMigration
+  // is the progress row of the one background local⇄S3 / legacy-normalize
+  // job. See db/tenant-pool/media-storage.ts for both shapes.
+  mediaStorage: jsonb("media_storage"),
+  mediaMigration: jsonb("media_migration"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

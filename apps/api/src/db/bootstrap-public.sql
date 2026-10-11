@@ -62,6 +62,12 @@ ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "seo_default_d
 -- this column and db/tenant-pool/backup-destination.ts for the shape.
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "backup_destination" jsonb DEFAULT '{"type":"local"}'::jsonb NOT NULL;
 
+-- Settings > Storage (media-location phase 2) — runtime media driver + the
+-- background media-migration job's progress. NULL = env vars / no job yet.
+-- See db/tenant-pool/media-storage.ts.
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "media_storage" jsonb;
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "media_migration" jsonb;
+
 -- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
 -- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
 -- counter table.

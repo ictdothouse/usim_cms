@@ -523,16 +523,68 @@ callouts before assuming any of this is speculative hardening.
   `sendFile`s locally or 302s to `s3PublicUrl` — same public URL under either driver.
   `/uploads/` was kept (not `/media/`) on purpose: it's already routed to the api by Caddy/
   proxy-sync/install.sh nginx, and `/media/...` would shadow a plausible university page slug.
-  A 3-segment year/month path hits this route; anything else (legacy flat
-  `/uploads/<host_folder>/<uuid>.<ext>`, `/uploads/_global/...`) falls through to the static
-  wildcard, which stays registered under both drivers. `/_tenant/<host>/uploads/...` is the
+  A 3-segment year/month path hits this route; a 2-segment one (legacy flat
+  `/uploads/<host_folder>/<uuid>.<ext>`, `/uploads/_global/...`) hits the legacy route (phase 3,
+  below); anything deeper falls through to the static wildcard, which stays registered under
+  both drivers. `/_tenant/<host>/uploads/...` is the
   host-explicit form for non-tenant hosts — admin's `publicMediaBase` uses it in dev
   (localhost:3000 has no tenant Host). `media.storage_key` (migration 0030, tenant-relative,
   null = legacy row) drives delete. Backup zips the tree as `media/<yyyy>/<mm>/<file>` and a
   restore re-homes it under the target tenant's id (`isValidMediaKey` = zip-slip guard);
   cross-host restore also repoints `//<srcHost>/uploads/` since admin bakes the tenant domain
-  in front. Not yet: runtime driver choice in Settings (phase 2), local⇄S3 migration +
-  legacy-URL rewrite (phase 3); static export still only fetches assets via the frontend.
+  in front. Static export still only fetches assets via the frontend.
+- **Media location phases 2-3 (2026-10-11).**
+  - **Settings > Storage (phase 2).** `platform_settings.media_storage` (jsonb, null = never saved)
+    holds `{driver: local|s3, s3?}` (db/tenant-pool/media-storage.ts). storage.ts's
+    `getStorageConfig()` resolves the saved row, else the STORAGE_DRIVER/S3_* env vars exactly as
+    before, and caches it for 30s, so a save on one replica reaches the others with no restart.
+    `uploadFile` picks the driver per call and now sets `ContentType`; before this, S3 served
+    everything as octet-stream. Routes live in routes/media-storage.ts (superadmin) and the UI
+    in admin's `MediaStorageCard.tsx`.
+  - **Probe gate.** PUT with driver s3 runs `probeS3` first and refuses to save on any failure:
+    write a probe object, fetch it back through the PUBLIC URL, delete it. An unreadable bucket
+    is how the demo VPS lost every image. R2 needs a public dev URL or custom domain in
+    `publicUrlBase`.
+  - **s3 block kept while local.** The s3 block stays saved when the driver is local, because
+    of dual-read.
+  - **Dual-read.** The serve route prefers a local file, otherwise 302s to the bucket whenever
+    an s3 block exists, whatever the active driver. Files are therefore reachable at every point
+    of a migration in either direction.
+  - **Deletes.** `deleteFile` removes both copies, and tenant delete also clears the bucket
+    prefix (`deleteRemotePrefix`).
+  - **Background job (phase 3).** media-migration.ts runs one job at a time across every tenant.
+    Progress is stored in `platform_settings.media_migration` so any replica can show it. A run
+    whose heartbeat is older than 10 min counts as dead (process killed by a deploy). Every step
+    skips a file that already sits at the destination with the same size, so re-running finishes
+    an interrupted job.
+  - **`to-s3` / `to-local`.** These only move files under `tenants/<id>/` and never touch
+    content, because URLs are identical on disk and in the bucket. `deleteSource` is opt-in.
+    S3→local writes to a dot-temp name, then renames it into place. `isValidMediaKey` guards
+    bucket-supplied names.
+  - **`normalize`.** It also runs at the start of `to-s3`. Each tenant's legacy
+    `uploads/<host_folder>/*` moves into `tenants/<id>/<run-month>/` under the same UUID names.
+    Steps, in order:
+    1. Hardlink each file (copy only if the link fails).
+    2. Write a `.moved-to` marker containing the month.
+    3. Rewrite `/uploads/<host_folder>/` → `/uploads/<yyyy>/<mm>/` in one transaction across
+       every text/varchar/jsonb column of the tenant DB (generic, read from
+       information_schema), plus set `media.storage_key`.
+    4. Rewrite the control-plane theme row and drop the tenant's Redis caches.
+    5. Only then unlink the old names. If the rewrite fails, the new links are removed instead.
+  - **Legacy 2-segment route.** It serves the file if present; otherwise it reads the marker and
+    301s to the new URL, so cached HTML, old shared links and revisions keep working.
+  - **Normalize refusals and limits.**
+    - A tenant whose folder holds a name the new scheme can't hold is refused entirely.
+    - Suspended tenants are skipped by `to-s3`'s normalize.
+    - Dev content baked as `http://localhost:3000/uploads/<folder>/` becomes a path dev can't
+      resolve (accepted).
+    - Append-only tables with no RLS UPDATE policy (page/post revisions, design_templates)
+      silently aren't rewritten; the marker 301 covers them.
+  - **Migration 0031.** Adds the missing `media_update` RLS policy. Without it every
+    `UPDATE media` matched 0 rows under FORCE RLS: PATCH `/api/media/:id` (rename/alt
+    text/folder) 404'd on every row in prod, and normalize couldn't set storage_key.
+  - **Not covered.** Legacy S3 rows (absolute bucket URLs) stay as-is. `_global` branding files
+    are untouched. Backup zips and disk usage only count this box's disk.
 - **Tenant-host check is now a deny-list, not an allow-list (2026-09-17, security audit finding).**
   `requireTenantAuth` (`plugins/auth.ts`) used to check `session.role === "webmaster"` before enforcing
   `allowedHosts.includes(req.tenantHost)` — a third role value (never existed yet, but nothing in the DB

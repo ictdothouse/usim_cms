@@ -622,7 +622,13 @@ the failed new color — safe to re-run.
   (storage.ts, warns at boot) — the demo VPS hit this after re-running install.sh: every
   upload threw "S3_BUCKET not configured" and, since `/uploads/` static was gated on the
   local driver, every previously uploaded image 404'd too. `/uploads/` is now served under
-  both drivers so local files uploaded before a switch to S3 keep resolving.
+  both drivers so local files uploaded before a switch to S3 keep resolving. Since
+  2026-10-11 the driver + S3/R2 connection is also settable at runtime from admin
+  Settings > Storage (`platform_settings.media_storage`, wins over the env vars once
+  saved; a save is refused unless a write + public-URL read + delete probe passes), with
+  a background "move to S3/R2 / back to disk / reorganise legacy files" job on the same
+  card — see apps/api/CLAUDE.md "Media location phases 2-3". A deploy kills a running job;
+  start it again after the deploy (it skips what's already moved).
 - **This is a real, deliberate change to what the "Domain & SSL Automation" switch
   (`getProxyAutomationEnabled`) means.** That switch used to gate the ONLY way Caddy's
   config ever got pushed dynamically (tenant create/delete, `PUT /api/portal/proxy-

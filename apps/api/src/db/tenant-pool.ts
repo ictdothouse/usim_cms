@@ -106,3 +106,12 @@ export {
 
 export type { BackupDestinationType, BackupDestinationConfig, MaskedBackupDestination } from "./tenant-pool/backup-destination.js";
 export { maskBackupDestination, getBackupDestination, setBackupDestination } from "./tenant-pool/backup-destination.js";
+
+export type { S3Settings, MediaStorageConfig, MaskedMediaStorage, MediaMigrationStatus } from "./tenant-pool/media-storage.js";
+export {
+  maskMediaStorage,
+  getMediaStorageSetting,
+  setMediaStorageSetting,
+  getMediaMigrationStatus,
+  setMediaMigrationStatus,
+} from "./tenant-pool/media-storage.js";
