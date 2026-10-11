@@ -618,7 +618,11 @@ the failed new color — safe to re-run.
   this fix get the branded URL. Local-disk storage is what this fixes; `STORAGE_DRIVER=s3`
   with `S3_PUBLIC_URL_BASE` pointed at a real CDN domain (see storage.ts) is still the
   advanced-tier upgrade path and is unaffected either way, since it already returns its
-  own absolute URL.
+  own absolute URL. `STORAGE_DRIVER=s3` with an empty `S3_BUCKET` falls back to local disk
+  (storage.ts, warns at boot) — the demo VPS hit this after re-running install.sh: every
+  upload threw "S3_BUCKET not configured" and, since `/uploads/` static was gated on the
+  local driver, every previously uploaded image 404'd too. `/uploads/` is now served under
+  both drivers so local files uploaded before a switch to S3 keep resolving.
 - **This is a real, deliberate change to what the "Domain & SSL Automation" switch
   (`getProxyAutomationEnabled`) means.** That switch used to gate the ONLY way Caddy's
   config ever got pushed dynamically (tenant create/delete, `PUT /api/portal/proxy-
