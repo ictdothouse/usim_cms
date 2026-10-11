@@ -1104,10 +1104,11 @@ const fontsHref = allFonts.length
           // Set once per designer:selected message (see below) from
           // useLiveEditBridge.ts's own linkedPadding/linkedMargin — the
           // Inspector's chain-icon toggle, not duplicated here.
-          let spacing = { linkedPadding: true, linkedMargin: true };
+          let spacing = { linkedPadding: false, linkedMargin: false };
           let spacingHandleBox = null;
           let spacingHandleEls = [];
           let spacingRestorePosition = null;
+          let spacingLockBar = null;
 
           function kebab(key) {
             return key.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
@@ -1121,6 +1122,20 @@ const fontsHref = allFonts.length
             }
             spacingHandleBox = null;
             spacingRestorePosition = null;
+            spacingLockBar = null;
+          }
+
+          // Fixed, not a child of the box like the badges: a section's own
+          // overflow:hidden or the viewport edge can't clip it. Sits just
+          // above the box's top-left, clamped on-screen, and follows the box
+          // off-screen once it scrolls away.
+          function placeSpacingLockBar() {
+            if (!spacingLockBar || !spacingHandleBox) return;
+            const r = spacingHandleBox.getBoundingClientRect();
+            const w = spacingLockBar.offsetWidth;
+            const h = spacingLockBar.offsetHeight;
+            spacingLockBar.style.left = `${Math.max(4, Math.min(r.left, innerWidth - w - 4))}px`;
+            spacingLockBar.style.top = `${Math.min(Math.max(r.top - h - 10, 4), r.bottom - h)}px`;
           }
 
           function positionSpacingHandle(handle, edge, isMargin) {
@@ -1228,6 +1243,30 @@ const fontsHref = allFonts.length
 
             ["top", "bottom", "left", "right"].forEach((edge) => addHandle(false, edge));
             ["top", "bottom", "left", "right"].forEach((edge) => addHandle(true, edge));
+
+            // Quick toggle for the same linkedPadding/linkedMargin state as the
+            // Inspector's chain icon — admin flips it and re-sends
+            // designer:selected, which rebuilds these handles with the new mode.
+            const bar = document.createElement("div");
+            bar.style.cssText =
+              "position:fixed;z-index:2147482000;display:flex;gap:2px;padding:2px;background:#fff;" +
+              "border:1px solid rgba(0,0,0,.12);border-radius:999px;box-shadow:0 4px 12px rgba(0,0,0,.15);" +
+              "font:600 10px/1 system-ui,sans-serif;white-space:nowrap;";
+            stopBubble(bar);
+            for (const [kind, name, color] of [["padding", "Padding", ACCENT], ["margin", "Margin", MARGIN_COLOR]]) {
+              const on = kind === "padding" ? spacing.linkedPadding : spacing.linkedMargin;
+              const b = chromeBtn(on ? "lock" : "unlock", `${name}: ${L("linkSides", "Link all sides")}`, name);
+              b.style.height = "22px";
+              b.style.background = on ? color : "#fff";
+              b.style.color = on ? "#fff" : color;
+              b.setAttribute("aria-pressed", String(on));
+              b.addEventListener("click", () => parent.postMessage({ type: "designer:spacingLink", kind }, targetOrigin));
+              bar.appendChild(b);
+            }
+            document.body.appendChild(bar);
+            spacingHandleEls.push(bar);
+            spacingLockBar = bar;
+            placeSpacingLockBar();
           }
 
           // Puck-style hover/selected feedback: a light dashed outline under
@@ -1261,6 +1300,7 @@ const fontsHref = allFonts.length
           // wouldn't fire).
           function reportSelectedRect() {
             if (!selectedNode) return;
+            placeSpacingLockBar();
             const r = visualTarget(selectedNode).getBoundingClientRect();
             parent.postMessage(
               { type: "designer:selectedRect", rect: { top: r.top, left: r.left, width: r.width, height: r.height } },

@@ -1649,3 +1649,17 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   palette items, and throttled its `paletteDragEnd` message to the
   inside-to-outside transition instead of every frame spent outside the
   iframe.
+
+  **Live Edit padding/margin drag handles (2026-10-11)**: Blocks mode's canvas
+  handles were removed; Live Edit (`BaseLayout.astro`'s `buildSpacingHandles`)
+  is now the only drag-to-resize surface, Section/Column/Element only (path
+  length 1/3/4), never over a selected slide child (that has its own chrome).
+  The gesture runs in the iframe and posts one `designer:spacingDrag` on
+  pointerup; `useLiveEditBridge` commits via `spacingDrag.ts`. Differences from
+  the old Blocks handles, all deliberate: left/right badges sit INSIDE the box
+  (a full-bleed section's edge is the viewport edge here, so an overhanging
+  badge clipped), and hatch bands show only on hover/drag. Drag fans out to all
+  4 sides only when `linkedPadding`/`linkedMargin` is on — both default to
+  OFF (single side). A `position:fixed` lock pill above the box toggles them
+  via `designer:spacingLink`, same state as the Inspector's chain icon; the
+  bridge re-sends `designer:selected` on change, which rebuilds the handles.
