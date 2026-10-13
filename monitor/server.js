@@ -2042,7 +2042,7 @@ function handleDepsCheck(req, res) {
     );
     sendJson(res, 200, {
       ok: true,
-      message: output ? "outdated packages found — see Overview tab log for the full list" : "all dependencies already match their declared ranges",
+      message: output ? "outdated packages found — see Deployments log for the full list" : "all dependencies already match their declared ranges",
     });
   });
 }
@@ -2452,46 +2452,174 @@ const DASHBOARD_HTML = `<!doctype html>
   .container-desc { max-width: 340px; }
   .account-field { display:block; margin:0.55rem 0; }
   .account-field input { display:block; box-sizing:border-box; width:100%; max-width:380px; padding:0.45rem; border:1px solid #8886; border-radius:6px; background:transparent; color:inherit; }
+
+  /* The monitor is an operations console: navigation stays visible while
+     the work area can grow with logs, sites, and infrastructure controls. */
+  :root { color-scheme: light; --ink:#18303d; --muted:#627783; --line:#dce6ea; --paper:#f3f7f8; --surface:#fff; --nav:#102b38; --accent:#16735f; }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { max-width:none; min-height:100dvh; margin:0; padding:0; background:var(--paper); color:var(--ink); font-family:"Segoe UI Variable","Aptos","Segoe UI",system-ui,sans-serif; line-height:1.5; }
+  h1 { margin:0; font-size:clamp(1.55rem,2.5vw,2.2rem); line-height:1.14; letter-spacing:-0.045em; font-weight:700; }
+  h3 { margin:1.8rem 0 0.55rem; font-size:1.08rem; letter-spacing:-0.025em; }
+  p { max-width:72ch; }
+  button { min-height:2.35rem; padding:0.45rem 0.85rem; border:1px solid #126652; border-radius:7px; background:var(--accent); color:#fff; font-family:inherit; font-size:0.83rem; font-weight:600; line-height:1.3; transition:background .18s ease,transform .18s ease,border-color .18s ease,box-shadow .18s ease; }
+  button:hover:not(:disabled) { background:#105b4c; border-color:#105b4c; }
+  button:active:not(:disabled) { transform:translateY(1px); }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline:3px solid #7ac8ad; outline-offset:2px; }
+  button.secondary { background:#fff; color:var(--ink); border-color:#cbd9df; }
+  button.secondary:hover:not(:disabled) { background:#edf4f4; border-color:#9eb8bd; }
+  button.danger { background:#a63838; border-color:#a63838; }
+  button.danger:hover:not(:disabled) { background:#872e2e; border-color:#872e2e; }
+  .muted { color:var(--muted); opacity:1; }
+  .row { gap:0.55rem; }
+  .app-shell { display:grid; grid-template-columns:15.75rem minmax(0,1fr); min-height:100dvh; }
+  .sidebar { position:sticky; top:0; display:flex; flex-direction:column; height:100dvh; overflow-y:auto; padding:1.4rem 0.85rem 1rem; background:var(--nav); color:#c5d6dc; border-right:1px solid #214352; }
+  .brand { display:flex; align-items:center; gap:0.7rem; padding:0.25rem 0.7rem 1.45rem; color:#fff; text-decoration:none; }
+  .brand-mark { display:grid; place-items:center; width:2.3rem; height:2.3rem; border-radius:9px; background:#267e68; color:#fff; font-size:0.8rem; font-weight:800; letter-spacing:-0.08em; box-shadow:0 7px 18px #061c2755; }
+  .brand strong { display:block; font-size:0.94rem; letter-spacing:-0.025em; line-height:1.2; }
+  .brand small { display:block; margin-top:0.14rem; color:#9fb9c2; font-size:0.67rem; font-weight:600; letter-spacing:0.12em; text-transform:uppercase; }
+  .nav-label { margin:1.2rem 0 0.4rem; padding:0 0.75rem; color:#7fa0ad; font-size:0.66rem; font-weight:700; letter-spacing:0.13em; text-transform:uppercase; }
+  .tabs { display:flex; flex-direction:column; gap:0.15rem; margin:0; border:0; overflow:visible; }
+  .tab-btn { display:flex; align-items:center; gap:0.8rem; width:100%; min-height:2.8rem; margin:0; padding:0.55rem 0.75rem; border:1px solid transparent; border-radius:8px; background:transparent; color:#c9d9de; opacity:1; text-align:left; font-size:0.85rem; font-weight:500; white-space:normal; }
+  .tab-btn:hover:not(:disabled) { background:#1c4050; border-color:transparent; color:#fff; }
+  .tab-btn.active { background:#244b59; border-color:#355d68; color:#fff; box-shadow:inset 3px 0 #69c9a6; font-weight:650; }
+  .nav-index { display:grid; place-items:center; flex:none; width:1.55rem; height:1.55rem; border:1px solid #496777; border-radius:5px; color:#9bb8c0; font:600 0.67rem ui-monospace,Consolas,monospace; }
+  .tab-btn.active .nav-index { border-color:#6ac9a6; color:#a5ead3; }
+  .nav-count { display:inline-block; margin-left:auto; min-width:1.35rem; padding:0.06rem 0.32rem; border-radius:5px; background:#bd7950; color:#fff; font:700 0.68rem ui-monospace,Consolas,monospace; text-align:center; }
+  .sidebar-footer { margin-top:auto; padding:1.35rem 0.75rem 0; border-top:1px solid #32505c; font-size:0.76rem; }
+  .sidebar-footer p { margin:0.25rem 0; }
+  .sidebar-footer .muted { color:#9eb6be; }
+  .workspace { min-width:0; }
+  .workspace-header { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:1.25rem; min-height:7.2rem; padding:1.15rem clamp(1.1rem,3.2vw,3rem); border-bottom:1px solid var(--line); background:#ffffffed; backdrop-filter:blur(12px); }
+  .workspace-heading { min-width:0; flex:1; }
+  .eyebrow { display:block; margin-bottom:0.32rem; color:#4e7c78; font-size:0.66rem; font-weight:750; letter-spacing:0.16em; text-transform:uppercase; }
+  .workspace-description { margin:0.28rem 0 0; color:var(--muted); font-size:0.82rem; }
+  .header-tools { display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap; justify-content:flex-end; }
+  .mode-chip { display:inline-flex; align-items:center; gap:0.42rem; min-height:2.1rem; padding:0.35rem 0.72rem; border:1px solid #d3e4de; border-radius:6px; background:#ecf5f0; color:#225c4b; font-size:0.73rem; font-weight:650; white-space:nowrap; }
+  .mode-chip::before { content:""; width:0.42rem; height:0.42rem; border-radius:50%; background:#719d98; }
+  .sidebar-toggle { display:none; width:2.5rem; min-width:2.5rem; padding:0; font-size:1.15rem; }
+  .sidebar-backdrop { display:none; }
+  .skip-link { position:fixed; z-index:50; top:-4rem; left:1rem; padding:0.55rem 0.8rem; border-radius:6px; background:#fff; color:var(--ink); }
+  .skip-link:focus { top:0.7rem; }
+  .main-content { max-width:94rem; margin:0 auto; padding:clamp(1.15rem,2.5vw,2.25rem) clamp(1.1rem,3.2vw,3rem) 4rem; }
+  .tab-panel { display:none; padding-top:0; animation:panel-in .22s ease-out; }
+  .tab-panel.active { display:block; }
+  .tab-panel > h3:first-child { margin-top:0; }
+  .section-intro + h3 { margin-top:0.4rem; }
+  @keyframes panel-in { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+  .section-intro { margin:0 0 1.2rem; color:var(--muted); font-size:0.86rem; }
+  .section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; margin:1.7rem 0 0.7rem; }
+  .section-head h3 { margin:0; }
+  .grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr)); gap:0.8rem; margin:0 0 1.1rem; }
+  .card, .svc-card { border:1px solid #dce7e8; border-radius:11px; background:var(--surface); box-shadow:0 5px 18px #183f4b09; }
+  .card { min-height:7.2rem; padding:1rem 1.1rem; }
+  .card .label { color:#607b83; opacity:1; font-size:0.66rem; font-weight:700; letter-spacing:0.11em; }
+  .card .value { margin:0.45rem 0 0.65rem; color:var(--ink); font-size:1.25rem; font-variant-numeric:tabular-nums; }
+  .services-grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr)); gap:0.8rem; margin:0.7rem 0; }
+  .svc-card { padding:0.95rem 1rem; }
+  .svc-head { margin-bottom:0.45rem; }
+  .dot { width:9px; height:9px; }
+  .meter { height:7px; background:#e6edef; }
+  .action-panel { padding:1.1rem 1.2rem; border:1px solid #dce7e8; border-radius:11px; background:#fff; box-shadow:0 5px 18px #183f4b09; }
+  .action-panel .row { margin-top:0.75rem; }
+  .action-panel h3 { margin:0; }
+  .action-panel p { margin:0.3rem 0 0; }
+  .notice { margin:0 0 0.8rem; padding:0.85rem 1rem; border:1px solid #eadcae; border-left:4px solid #bf9253; border-radius:8px; background:#fff8e9; color:#5a442d; font-size:0.84rem; }
+  .notice code { color:inherit; }
+  .term { max-height:27rem; border-radius:9px; background:#132632; color:#d6e5e6; line-height:1.55; }
+  .progress-track { height:7px; background:#e1e8e9; }
+  .progress-fill { background:var(--accent); }
+  .progress-fill.running { width:40%; }
+  .role-badge { border-radius:5px; background:#e6f2ed; color:#236851; }
+  .account-field { color:#365360; font-size:0.8rem; font-weight:600; }
+  .account-field input { margin-top:0.25rem; min-height:2.45rem; border-color:#cddde0; background:#fff; font:inherit; }
+  .tab-panel table { margin:0.7rem 0 1.1rem; background:#fff; border-radius:8px; }
+  #panel-containers { overflow-x:auto; }
+  #containersTable { min-width:53rem; }
+  #git { margin-top:2rem; color:#8da1aa; font:0.69rem ui-monospace,Consolas,monospace; }
+  @media (max-width:860px) {
+    .app-shell { display:block; }
+    .sidebar { position:fixed; z-index:30; left:0; width:min(18rem,82vw); transform:translateX(-101%); transition:transform .24s ease; box-shadow:12px 0 28px #0b243044; }
+    body.nav-open .sidebar { transform:translateX(0); }
+    .sidebar-backdrop { position:fixed; z-index:20; inset:0; border:0; border-radius:0; background:#0b253895; }
+    body.nav-open .sidebar-backdrop { display:block; }
+    .sidebar-backdrop:hover:not(:disabled) { border:0; background:#0b253895; }
+    body.nav-open { overflow:hidden; }
+    .sidebar-toggle { display:inline-grid; place-items:center; }
+    .workspace-header { min-height:6rem; }
+  }
+  @media (max-width:620px) {
+    .workspace-header { align-items:flex-start; flex-wrap:wrap; gap:0.65rem; }
+    .workspace-heading { flex:1 1 calc(100% - 3.5rem); }
+    .header-tools { width:100%; justify-content:flex-start; padding-left:3rem; }
+    .workspace-description { font-size:0.76rem; }
+    .main-content { padding-bottom:2.5rem; }
+    .action-panel { padding:0.9rem; }
+    .tab-panel input, .tab-panel select, .tab-panel textarea { max-width:100%; min-width:0 !important; }
+    .tab-panel .row > input { flex:1 1 100%; }
+  }
+  @media (prefers-reduced-motion:reduce) {
+    *, *::before, *::after { scroll-behavior:auto !important; animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
+  }
 </style>
 </head>
 <body>
-<h1>usim_cms — server monitor</h1>
-<p class="muted" id="mode">loading…</p>
-<p class="muted" id="uptime"></p>
-
-<div id="updateBanner" style="display:none; margin: 0.8rem 0; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;"></div>
-
-<div id="alertWebhookBanner" style="display:none; margin: 0.8rem 0; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;">
-  🔕 <b>No alert webhook configured</b> — service-down and disk-space alerts this dashboard already tracks have nobody to notify.
-  Set <code>ALERT_WEBHOOK_URL</code> in <code>/etc/ucms-monitor.env</code> (or re-run <code>install.sh</code>) and restart <code>ucms-monitor</code>.
-</div>
-
-<div class="tabs" id="tabs">
-  <button class="tab-btn active" data-tab="overview">Overview</button>
-  <button class="tab-btn" data-tab="stack">Stack &amp; versions</button>
-  <button class="tab-btn" data-tab="containers">Containers</button>
-  <button class="tab-btn" data-tab="data">Database &amp; Sites</button>
-  <button class="tab-btn" data-tab="ssl">SSL</button>
-  <button class="tab-btn" data-tab="logs">Logs</button>
-  <button class="tab-btn" data-tab="accounts">Accounts</button>
-</div>
+<a class="skip-link" href="#mainContent">Skip to content</a>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="brand-mark">UC</span><span><strong>usim_cms</strong><small>Server monitor</small></span></div>
+    <nav class="tabs" id="tabs" aria-label="Monitor sections">
+      <p class="nav-label">Workspace</p>
+      <button class="tab-btn active" data-tab="overview" aria-current="page"><span class="nav-index">01</span>Overview</button>
+      <button class="tab-btn" data-tab="deploy"><span class="nav-index">02</span>Deployments<span class="nav-count" id="updateCount" style="display:none"></span></button>
+      <p class="nav-label">Infrastructure</p>
+      <button class="tab-btn" data-tab="stack"><span class="nav-index">03</span>Stack &amp; versions</button>
+      <button class="tab-btn" data-tab="containers"><span class="nav-index">04</span>Containers</button>
+      <button class="tab-btn" data-tab="data"><span class="nav-index">05</span>Database &amp; sites</button>
+      <button class="tab-btn" data-tab="storage"><span class="nav-index">06</span>Storage &amp; backups</button>
+      <button class="tab-btn" data-tab="logs"><span class="nav-index">07</span>Logs</button>
+      <p class="nav-label">Access &amp; security</p>
+      <button class="tab-btn" data-tab="ssl"><span class="nav-index">08</span>SSL certificates</button>
+      <button class="tab-btn" data-tab="accounts"><span class="nav-index">09</span>Accounts</button>
+    </nav>
+    <div class="sidebar-footer"><p>HOST RUNTIME</p><p class="muted" id="uptime">Loading…</p><p class="muted">Privileged operations console</p></div>
+  </aside>
+  <button class="sidebar-backdrop" data-action="close-sidebar" aria-label="Close navigation"></button>
+  <div class="workspace">
+    <header class="workspace-header">
+      <button class="sidebar-toggle secondary" data-action="toggle-sidebar" id="sidebarToggle" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <div class="workspace-heading"><span class="eyebrow">Operations / Monitor</span><h1 id="pageTitle">Overview</h1><p class="workspace-description" id="pageDescription">Health, capacity and service availability at a glance.</p></div>
+      <div class="header-tools"><span class="mode-chip" id="mode">Loading…</span><button class="secondary" data-action="refresh">Refresh now</button></div>
+    </header>
+    <main class="main-content" id="mainContent">
+      <div id="updateBanner" class="notice" style="display:none"></div>
+      <div id="alertWebhookBanner" class="notice" style="display:none">
+        <b>No alert webhook configured.</b> Service and disk alerts have no recipient. Set <code>ALERT_WEBHOOK_URL</code> in <code>/etc/ucms-monitor.env</code> and restart <code>ucms-monitor</code>.
+      </div>
 
 <div class="tab-panel active" id="panel-overview">
+  <p class="section-intro">Current host usage and the services answering traffic.</p>
   <div class="grid" id="hostGrid"></div>
+  <div class="section-head"><h3>Services</h3><span class="muted">Live status</span></div>
+  <div class="services-grid" id="services"></div>
+</div>
 
-  <div class="row">
-    <button data-action="pull">Pull latest &amp; deploy</button>
-    <button class="secondary" data-action="rollback">Rollback</button>
-    <button class="secondary" data-action="apply-base-tier">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
-    <button class="secondary" data-action="restart-all">Restart all</button>
-    <button class="secondary" data-action="refresh">Refresh now</button>
+<div class="tab-panel" id="panel-deploy">
+  <p class="section-intro">Promote an update, return to the previous release, or apply infrastructure changes.</p>
+  <div class="action-panel">
+    <h3>Release controls</h3>
+    <p class="muted">Deployment checks the new release before switching traffic.</p>
+    <div class="row">
+      <button data-action="pull">Pull latest &amp; deploy</button>
+      <button class="secondary" data-action="rollback">Rollback</button>
+      <button class="secondary" data-action="apply-base-tier">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
+      <button class="secondary" data-action="restart-all">Restart all</button>
+    </div>
   </div>
-  <p class="muted" id="deployState"></p>
+  <div class="section-head"><h3>Deployment activity</h3></div>
+  <p class="muted" id="deployState">No deploy run yet.</p>
   <div class="progress-track" id="deployTrack" style="display:none"><div class="progress-fill" id="deployFill"></div></div>
   <pre class="term" id="deployLog" style="display:none"></pre>
-
-  <h3>Services</h3>
-  <div class="services-grid" id="services"></div>
 </div>
 
 <div class="tab-panel" id="panel-stack">
@@ -2530,6 +2658,10 @@ const DASHBOARD_HTML = `<!doctype html>
   <h3>Sites (uploads folder size per tenant)</h3>
   <p class="muted">Folder name is the tenant's slug (lowercase, non-alphanumeric replaced with <code>_</code>), not its full hostname — this dashboard has no database access to translate it back.</p>
   <table id="sitesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
+</div>
+
+<div class="tab-panel" id="panel-storage">
+  <p class="section-intro">Docker usage, per-database size and the nightly backup destination.</p>
 
   <h3>Docker disk usage</h3>
   <p class="muted">What's actually using disk under Docker — images, stopped containers, volumes, and build cache. Build cache + dangling images now auto-prune on every deploy (see the deployment skill's disk-hygiene note); this is for checking in between, or diagnosing a spike.</p>
@@ -2633,6 +2765,10 @@ const DASHBOARD_HTML = `<!doctype html>
 
 <p id="git" style="opacity:0.35; font-size:0.7rem; margin-top:2rem;"></p>
 
+    </main>
+  </div>
+</div>
+
 <script>
 let SERVICES = [];
 let DB_MANAGED = true;
@@ -2646,13 +2782,48 @@ async function api(path, opts) {
   return body;
 }
 
-function switchTab(name) {
+const sectionMeta = {
+  overview: ["Overview", "Health, capacity and service availability at a glance."],
+  deploy: ["Deployments", "Release controls, rollback and live deployment activity."],
+  stack: ["Stack & versions", "Installed software and available upstream updates."],
+  containers: ["Containers", "Every container on this host, including older releases."],
+  data: ["Database & sites", "Database status and tenant upload folders."],
+  storage: ["Storage & backups", "Disk usage, database sizes and backup destination."],
+  logs: ["Logs", "Recent output from each managed service."],
+  ssl: ["SSL certificates", "Issue a certificate for a configured domain."],
+  accounts: ["Accounts", "Manage monitor administrators and passwords."],
+};
+
+function closeSidebar() {
+  document.body.classList.remove("nav-open");
+  const toggle = document.getElementById("sidebarToggle");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-label", "Open navigation");
+}
+
+function toggleSidebar() {
+  const open = document.body.classList.toggle("nav-open");
+  const toggle = document.getElementById("sidebarToggle");
+  toggle.setAttribute("aria-expanded", String(open));
+  toggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+}
+
+function switchTab(name, updateHash = true) {
+  if (!Object.hasOwn(sectionMeta, name)) name = "overview";
   for (const btn of document.querySelectorAll(".tab-btn")) {
-    btn.classList.toggle("active", btn.dataset.tab === name);
+    const active = btn.dataset.tab === name;
+    btn.classList.toggle("active", active);
+    if (active) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
   }
   for (const panel of document.querySelectorAll(".tab-panel")) {
     panel.classList.toggle("active", panel.id === "panel-" + name);
   }
+  document.getElementById("pageTitle").textContent = sectionMeta[name][0];
+  document.getElementById("pageDescription").textContent = sectionMeta[name][1];
+  if (updateHash) window.history.replaceState(null, "", "#" + name);
+  closeSidebar();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function pctClass(pct) {
@@ -3022,7 +3193,7 @@ async function init() {
   const cfg = await api("/api/config");
   SERVICES = cfg.services;
   DB_MANAGED = cfg.dbManaged;
-  document.getElementById("mode").textContent = "Mode: " + cfg.mode;
+  document.getElementById("mode").textContent = cfg.mode === "docker" ? "Docker mode" : "Systemd mode";
   document.getElementById("dbRestartBtn").style.display = DB_MANAGED ? "" : "none";
   document.getElementById("alertWebhookBanner").style.display = cfg.alertWebhookConfigured ? "none" : "block";
   const logButtons = document.getElementById("logButtons");
@@ -3176,11 +3347,11 @@ async function pollStackMsg(key, label) {
     try {
       const st = await api("/api/pull/status");
       if (st.running) {
-        if (msg) msg.textContent = "updating " + label + "… (see Overview tab for the live log)";
+        if (msg) msg.textContent = "updating " + label + "… (see Deployments for the live log)";
         setTimeout(tick, 2000);
       } else if (msg) {
         msg.style.color = st.exitCode === 0 ? "#2e7d32" : "#d32f2f";
-        msg.textContent = st.exitCode === 0 ? "✓ updated" : "✗ failed (exit " + st.exitCode + ") — see Overview tab log";
+        msg.textContent = st.exitCode === 0 ? "✓ updated" : "✗ failed (exit " + st.exitCode + ") — see Deployments log";
       }
     } catch (e) {
       setTimeout(tick, 2000);
@@ -3240,21 +3411,27 @@ async function refreshVersionChecks() {
 
 async function refreshUpdateCheck() {
   const el = document.getElementById("updateBanner");
+  const count = document.getElementById("updateCount");
   try {
     const info = await api("/api/update-check");
     if (info.commitsBehind > 0) {
+      count.textContent = info.commitsBehind > 99 ? "99+" : String(info.commitsBehind);
+      count.style.display = "";
       el.style.display = "block";
       el.innerHTML =
-        "🔔 <b>" + info.commitsBehind + " update" + (info.commitsBehind > 1 ? "s" : "") + " available</b> " +
-        "— click &quot;Pull latest &amp; deploy&quot; below to update (runs tests, health-checks before switching traffic, keeps the old version ready for one-click Rollback).<br>" +
+        "<b>" + info.commitsBehind + " update" + (info.commitsBehind > 1 ? "s" : "") + " available.</b> " +
+        "The deployment flow checks the new release before switching traffic. " +
+        "<button class=\\"secondary\\" data-action=\\"open-deploy\\">Open deployments</button><br>" +
         "<span style=\\"font-size:0.8rem;opacity:0.85\\">" + info.commits.slice(0, 5).map(escapeHtml).join("<br>") + "</span>";
     } else {
       el.style.display = "none";
+      count.style.display = "none";
     }
   } catch (e) {
     // git fetch failed (offline/GitHub down) — not alert-worthy on the dashboard itself,
     // pollForUpdateAlert server-side already treats this as "unknown", same here.
     el.style.display = "none";
+    count.style.display = "none";
   }
 }
 
@@ -3557,6 +3734,9 @@ async function removeAccount(button) {
 // The CSP blocks inline event attributes. Keep every action in this
 // nonce-authorized script, including buttons inserted by later refreshes.
 const dashboardActions = new Map([
+  ["toggle-sidebar", toggleSidebar],
+  ["close-sidebar", closeSidebar],
+  ["open-deploy", () => switchTab("deploy")],
   ["pull", pull],
   ["rollback", rollback],
   ["apply-base-tier", applyBaseTier],
@@ -3591,6 +3771,9 @@ document.addEventListener("click", (event) => {
   }
 });
 document.getElementById("backupDestType").addEventListener("change", onBackupDestTypeChange);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeSidebar(); });
+window.addEventListener("hashchange", () => switchTab(window.location.hash.slice(1), false));
+switchTab(window.location.hash.slice(1) || "overview", false);
 init();
 </script>
 </body>
