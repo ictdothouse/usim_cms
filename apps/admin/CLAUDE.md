@@ -42,10 +42,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   after the dashboard was already usable). Both this step and the existing Security-tab voluntary
   enrollment (`SecurityPanel`) now render the `otpauthUri` as a QR (`components/QrCode.tsx`, wrapping
   the zero-dependency `qrcode-generator` package) next to the manual-entry key, which stays as the non-
-  camera fallback. The page builder itself lives in `src/Designer.tsx`: drag-drop block canvas, **Live Edit**
-  (opens by default — the real frontend page rendered in an iframe with click-to-select/inline editing via a postMessage
-  bridge to `BaseLayout.astro`, always minted a preview token even for a published page so the bridge
-  actually activates), and a design template library. A page's slug is auto-derived from its title on
+  camera fallback. The page builder itself lives in `src/Designer.tsx`: a drag-drop Blocks canvas opens
+  by default; **Live Edit** switches to the real frontend page in an iframe with click-to-select/inline editing via a postMessage
+  bridge to `BaseLayout.astro`, using a preview token even for a published page so the bridge
+  actually activates, and a design template library. A page's slug is auto-derived from its title on
   create (`PagesPanel`'s quick-create form) and stays editable afterward via a click-to-edit field in
   Designer's header. Element types (`ELS` registry) span the basics (heading/text/image/button/spacer/
   divider/embed/icon/list/html/gallery) plus 4 richer ones for real-world department-site content:
@@ -554,17 +554,17 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   is what made it safe to actually ship. A recursive Container element built on top of this same day
   (below) — this refactor removed its main prerequisite blocker.
   **First real Designer.tsx test coverage (2026-09-11):** `@playwright/test` (devDependency) +
-  `apps/admin/playwright.config.ts` + `e2e/seed.ts`/`e2e/designer-smoke.spec.ts` — one E2E smoke test
-  (`pnpm --filter @ucms/admin test:e2e`): seeds a disposable tenant+superadmin+draft page directly
+  `apps/admin/playwright.config.ts` + `e2e/seed.ts`/`e2e/designer-smoke.spec.ts` — two E2E smoke cases
+  (`pnpm --filter @ucms/admin test:e2e`) seed a disposable tenant+superadmin+draft page directly
   against a running `apps/api` (`POST /api/setup`, idempotent), injects the resulting session cookie/CSRF
   token into the browser context (bypassing the login form), then drives the real UI — add a section,
   drag a Heading element from the palette into its column, Save draft, reload, assert the heading
   persisted. Needs a live `apps/api` + Postgres + the admin dev server running (`E2E_API_URL`/
   `E2E_ADMIN_URL` env vars override the defaults, `http://localhost:3001`/`:5173`) — not wired into the
   Dockerfile build-time test gate (`RUN pnpm --filter @ucms/admin test`, unit tests only) since a live
-  DB+browser can't run inside that step; run it manually or from a separate CI job. Not exhaustive — one
-  path (add+save+reload), not full coverage — but it's the safety net the refactor-design doc's own
-  "testing gap" section asked for before anyone attempts Layer 2 on top of this file.
+  DB+browser can't run inside that step; a separate CI job runs it against isolated PostgreSQL/API
+  services. A second smoke case checks Live Edit drag-in. These tests cover key save/render paths, not
+  the full Designer interaction surface; see the refactor-design doc for the remaining optional Layer 2.
   **Recursive Container element (2026-09-11):** `ElType` gained `"container"` and `El` gained an optional
   `children?: El[]` (`designer/types.ts`) — a flex box that can hold any other element, including another
   container, nested arbitrarily deep. `designerTree.ts`'s `childrenOf()` was extended past its old
@@ -891,20 +891,7 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   still means separately touching `ElPreview.tsx`'s render switch, the
   shared validator (below), and `SectionBlock.astro`'s own render switch; a
   single `ElementDefinition` uniting schema+canvas-render+site-render+
-  validator is a bigger, separate design question, not attempted here. No Playwright/React-
-  Testing-Library harness was added as the spec's own pre-Layer-1 "testing
-  gap" section asked for — this repo has neither installed and standing one
-  up needs a live api+db, a heavier lift than this pass's actual risk
-  warranted; verified instead via `tsc -b`/`pnpm --filter @ucms/admin test`/
-  `vite build` (per this project's established "typecheck+build is enough
-  unless live browser testing is asked for" convention) — a real Playwright
-  E2E smoke test is still the right investment before a future contributor
-  attempts Layer 2 on top of this. `Designer.tsx` itself dropped from 5,810
-  to ~3,430 lines; Layer 2 (the `useDesignerState(page)` hook consolidating
-  the remaining 50+ hooks/100+ mutate/copy/paste/duplicate/undo functions)
-  is the next layer in the same design doc, not yet started. See
-  `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md` and
-  `docs/superpowers/plans/2026-08-21-designer-layer1a-field-controls.md`.
+  validator is a bigger, separate design question, not attempted here. Browser coverage now lives in `e2e/designer-smoke.spec.ts`: CI starts an isolated PostgreSQL/API pair, then verifies block drag-in, save/reload, and Live Edit drag-in in Playwright. `Designer.tsx` is now about 930 lines and acts as the composition/orchestration point; domain hooks, canvas, palette, Inspector, element preview, and modal views live under `src/designer/`. Layer 2 (consolidating remaining component state into a `useDesignerState` hook) is still a possible follow-up, not a prerequisite for adding new domain work. See `docs/superpowers/specs/2026-08-20-designer-tsx-refactor-design.md` and `docs/superpowers/plans/2026-08-21-designer-layer1a-field-controls.md`.
   **`packages/element-schema`** (new pnpm workspace package, `pnpm-workspace.yaml` gained a
   `packages/*` glob for it) is a follow-up extraction, done separately from the Layer 1b
   work above: the `pages.layout` XSS/CSS-injection validator (`validateLayout`/`isSafeUrl`/

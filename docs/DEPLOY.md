@@ -1,7 +1,8 @@
 # Deploy ke Server Node.js — Env & Langkah
 
-Prasyarat server: **Node.js 20.6+** (perlu `--env-file`), **pnpm** (`corepack enable`),
-**PostgreSQL 14+**. Tiga proses berasingan: API (Fastify), Frontend (Astro SSR), Admin (fail statik).
+Panduan ini untuk pemasangan manual. Untuk deployment disyorkan, gunakan `install.sh` (VPS) atau
+`install-dev.mjs` (dev Docker) kerana kedua-duanya mengurus role DB, rahsia, dan Compose.
+Prasyarat semasa: **Node.js 22**, **pnpm 12** (`corepack enable`), **PostgreSQL 16+**.
 
 ## 1. apps/api (port 3000)
 
@@ -10,17 +11,25 @@ Fail env: `apps/api/.env` (salin dari `.env.example`).
 | Env | Wajib | Nilai |
 |---|---|---|
 | `DATABASE_URL` | ✅ | `postgres://usim_cms_app:<katalaluan>@<host>:5432/usim_cms` — **mesti role `usim_cms_app`**, bukan superuser (RLS jadi no-op bawah superuser) |
+| `DATABASE_PROVISIONER_URL` | ✅ untuk auto-create tenant | URL terus ke PostgreSQL sebagai `usim_cms_provisioner`; jangan halakan melalui PgBouncer. Role ini sahaja yang mempunyai `CREATEDB`. |
 | `SESSION_SECRET` | ✅ | Rentetan rawak panjang, cth. `openssl rand -hex 32`. Tanpa ini token login guna default dev yang tidak selamat |
 | `PORT` | ❌ | Default `3000` |
 | `STORAGE_DRIVER` | ❌ | `local` (default, tulis ke `apps/api/uploads/`) atau `s3` |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL_BASE` | jika `s3` | Mana-mana storan serasi S3 (AWS/MinIO/Sangfor) |
 
-Setup DB kali pertama (sekali sahaja, sambung sebagai superuser dulu):
+Setup DB kali pertama (sekali sahaja, sambung sebagai administrator PostgreSQL). Gunakan rahsia hex
+untuk elak aksara khas dalam URL dan tetapkan kedua-dua URL runtime selepas menukar kata laluan role:
 
 ```bash
-# .env sementara guna DATABASE_URL superuser
+# Jalankan setup role dengan DATABASE_URL menunjuk kepada administrator.
 pnpm --filter @ucms/api db:setup-role
-# kemudian tukar DATABASE_URL ke role usim_cms_app yang dicipta
+# Dalam sesi psql sebagai administrator, tukar kedua-dua kata laluan secara interaktif:
+#   \password usim_cms_app
+#   \password usim_cms_provisioner
+# Gunakan rahsia rawak hex, kemudian tetapkan:
+# DATABASE_URL=postgres://usim_cms_app:<app-password>@<host>:5432/usim_cms
+# DATABASE_PROVISIONER_URL=postgres://usim_cms_provisioner:<provisioner-password>@<host>:5432/usim_cms
+# DATABASE_PROVISIONER_URL mesti sambungan terus ke PostgreSQL.
 pnpm --filter @ucms/api tenant:add   # daftar host jabatan
 pnpm --filter @ucms/api user:add     # cipta superadmin/webmaster
 ```
@@ -33,7 +42,11 @@ pnpm --filter @ucms/api build   # salin migrations .sql ke dist sekali
 pnpm --filter @ucms/api start   # node --env-file=.env dist/index.js
 ```
 
-Migration tenant di-replay automatik pada permintaan pertama setiap tenant — tiada langkah migrate manual.
+Semasa request pertama tenant, API menyelaras proses melalui PostgreSQL advisory lock. Migrasi yang
+belum tercatat dalam `public.ucms_schema_migrations` digunakan satu demi satu dalam transaksi dan
+SHA-256 checksum mengesan fail migrasi yang diubah selepas digunakan. Database tenant sedia ada tanpa
+ledger membina baseline sekali dengan memainkan sejarah migrasi yang idempoten; migrasi seterusnya hanya
+fail baru. `db:migrate` Drizzle bukan runner migrasi tenant.
 
 ## 2. apps/frontend (Astro SSR, port 4321)
 
@@ -76,5 +89,5 @@ VITE_API_URL=https://api.usim.edu.my pnpm --filter @ucms/admin build
 ## Nota production
 
 - Jalankan API + frontend bawah pm2/systemd (API sengaja `process.exit(1)` pada ralat fatal — mesti auto-restart).
-- CORS API masih `origin: true` (terbuka) — kunci ke domain admin sebenar dalam `apps/api/src/index.ts` sebelum production sebenar.
+- Tetapkan `ADMIN_ORIGIN` kepada origin admin sebenar dan `NODE_ENV=production`; API memerlukan kedua-duanya untuk konfigurasi production.
 - `STORAGE_DRIVER=local`: pastikan folder `apps/api/uploads/` wujud & boleh tulis; ia dihidang pada `/uploads/`.

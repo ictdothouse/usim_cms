@@ -26,6 +26,7 @@ services:
       # (initdb.d itself) are unaffected — HOST_AUTH_METHOD only governs
       # "host" (TCP) pg_hba entries, not "local" ones.
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+      POSTGRES_PROVISIONER_PASSWORD: ${POSTGRES_PROVISIONER_PASSWORD:?set POSTGRES_PROVISIONER_PASSWORD in .env}
       POSTGRES_HOST_AUTH_METHOD: md5
     networks:
       - ucms-net
@@ -44,6 +45,7 @@ services:
       # Runs right after, same first-boot-only pass: rotates the role's
       # placeholder password to the real one — see the script's own header.
       - ./apps/api/scripts/setup-db-role-rotate.sh:/docker-entrypoint-initdb.d/02-rotate-db-role-password.sh:ro
+      - ./apps/api/scripts/setup-db-provisioner-rotate.sh:/docker-entrypoint-initdb.d/03-rotate-db-provisioner-password.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s

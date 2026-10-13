@@ -14,7 +14,9 @@ set -euo pipefail
 
 : "${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set (see .env.example)}"
 
-psql -v ON_ERROR_STOP=1 --username postgres --dbname "$POSTGRES_DB" <<-EOSQL
+psql -v ON_ERROR_STOP=1 \
+  -v app_password="$POSTGRES_APP_PASSWORD" \
+  --username postgres --dbname "$POSTGRES_DB" <<-'EOSQL'
   SET password_encryption = 'md5';
-  ALTER ROLE usim_cms_app WITH PASSWORD '${POSTGRES_APP_PASSWORD}';
+  ALTER ROLE usim_cms_app WITH PASSWORD :'app_password';
 EOSQL

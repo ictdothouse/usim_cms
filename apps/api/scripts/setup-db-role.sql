@@ -5,22 +5,31 @@
 -- Postgres superusers (and any BYPASSRLS role) ignore RLS unconditionally,
 -- even with FORCE ROW LEVEL SECURITY, so running the app as "postgres" (the
 -- common local-dev default) makes those policies a silent no-op.
--- CREATEDB: tenant-pool.ts auto-creates one database per tenant host
--- (tenant_<host>) on the control-plane server when tenants.db_url is null.
+-- Database creation uses the separate usim_cms_provisioner credential.
+-- The request-serving usim_cms_app role must remain NOCREATEDB.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'usim_cms_app') THEN
-    CREATE ROLE usim_cms_app LOGIN PASSWORD 'usim_cms_app' NOSUPERUSER NOBYPASSRLS CREATEDB NOCREATEROLE;
+    CREATE ROLE usim_cms_app LOGIN PASSWORD 'usim_cms_app' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'usim_cms_provisioner') THEN
+    CREATE ROLE usim_cms_provisioner LOGIN PASSWORD 'usim_cms_provisioner' NOSUPERUSER NOBYPASSRLS CREATEDB NOCREATEROLE NOINHERIT;
   END IF;
 END
 $$;
 
--- Upgrade path for roles created before DB-per-tenant existed.
-ALTER ROLE usim_cms_app CREATEDB;
+-- Upgrade existing installations: remove database-creation privilege from
+-- the API role and keep it only on the provisioner login. NOINHERIT prevents
+-- the provisioner from implicitly using app privileges; membership is used
+-- only for the explicit database-owner transfer during provisioning.
+ALTER ROLE usim_cms_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+ALTER ROLE usim_cms_provisioner LOGIN NOSUPERUSER NOBYPASSRLS CREATEDB NOCREATEROLE NOREPLICATION NOINHERIT;
+GRANT usim_cms_app TO usim_cms_provisioner;
 
 DO $$
 BEGIN
-  EXECUTE format('GRANT CREATE ON DATABASE %I TO usim_cms_app', current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO usim_cms_app', current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO usim_cms_provisioner', current_database());
 END
 $$;
 

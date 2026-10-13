@@ -15,4 +15,4 @@ await client.connect();
 await client.query(sql);
 await client.end();
 
-console.log("usim_cms_app role ready. Point DATABASE_URL at it (see .env.example) and restart the API.");
+console.log("usim_cms_app and usim_cms_provisioner roles are ready. Configure DATABASE_URL and DATABASE_PROVISIONER_URL in the API environment, then restart the API.");

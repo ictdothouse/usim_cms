@@ -22,3 +22,59 @@ jobs:
       - run: pnpm --filter @ucms/api test
       - run: pnpm --filter @ucms/admin test
       - run: pnpm --filter @ucms/frontend test
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: usim_cms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d usim_cms"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://usim_cms_app:usim_cms_app@127.0.0.1:5432/usim_cms
+      DATABASE_PROVISIONER_URL: postgres://usim_cms_provisioner:usim_cms_provisioner@127.0.0.1:5432/usim_cms
+      SESSION_SECRET: ci-only-session-secret
+      ADMIN_ORIGIN: http://localhost:5173
+      PORT: 3001
+      E2E_API_URL: http://localhost:3001
+      E2E_ADMIN_URL: http://localhost:5173
+      VITE_API_URL: http://localhost:3001
+      VITE_FRONTEND_URL: http://localhost:4321
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Configure isolated PostgreSQL roles
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/usim_cms
+        run: pnpm --filter @ucms/api exec tsx scripts/setup-db-role.ts
+      - name: Start API
+        run: |
+          pnpm --filter @ucms/api exec tsx src/index.ts > "$RUNNER_TEMP/ucms-api.log" 2>&1 &
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:3001/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/ucms-api.log"
+          exit 1
+      - name: Install Playwright Chromium
+        run: pnpm --filter @ucms/admin exec playwright install --with-deps chromium
+      - name: Run browser smoke tests against isolated PostgreSQL
+        run: pnpm --filter @ucms/admin test:e2e

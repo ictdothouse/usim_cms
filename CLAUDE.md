@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-See `architecture.md` for the full product spec this scaffold implements.
+See `docs/ARSITEKTUR.md` for the current implementation. `architecture.md` is the original product brief retained as historical context.
 
 ## Commands
 
@@ -16,26 +16,11 @@ Package manager is pnpm (via corepack — run `corepack enable` once if `pnpm` i
 - `pnpm typecheck` — typecheck all workspace packages
 - `pnpm --filter @ucms/api db:generate` — generate a Drizzle migration `.sql` file from
   `apps/api/src/db/schema.ts` into `src/db/migrations` (authoring only — writes the file, applies nothing)
-- `pnpm --filter @ucms/api db:migrate` — **do not run this against `DATABASE_URL` in normal use.**
-  `schema.ts` defines tenant-content tables (`pages`/`posts`/`categories`/etc), but `DATABASE_URL` is the
-  control-plane DB, which never holds those tables (see "Multi-tenancy" below) — running drizzle-kit's own
-  migrate here would create them there anyway, alongside the registry tables that actually belong. The
-  mechanism that actually applies these `.sql` files is `tenant-pool.ts`'s `ensureTenantDatabase`: every
-  file in `src/db/migrations` is replayed (idempotent, `IF NOT EXISTS`/`DROP POLICY IF EXISTS` throughout)
-  into each tenant's own database the first time that host is requested per process — no drizzle-kit
-  migration-tracking table involved on the tenant side. `db:generate` is still the right way to author a
-  new migration `.sql` file; `db:migrate` exists only because drizzle-kit requires a `migrate` command to
-  exist for `db:generate` to work, not because it's part of the real deploy flow.
+- pnpm --filter @ucms/api db:migrate is not the tenant migration runner. The API applies files from src/db/migrations under a PostgreSQL advisory lock and records each filename plus SHA-256 checksum in public.ucms_schema_migrations. Existing databases establish their baseline by replaying the idempotent history once; later deploys apply only new files. Add migrations as new files and do not edit an applied migration.
 
-`apps/api` needs a `DATABASE_URL` (see `apps/api/.env.example`) pointing at a Postgres instance before
-routes that touch the database will work — `/health` does not need one. On a fresh DB, connect as a
-superuser once and run `pnpm --filter @ucms/api db:setup-role`, then switch `DATABASE_URL` to the
-`usim_cms_app` role it creates — the `pages` RLS policies (`src/db/migrations/0002_pages_rls.sql`) are
-a silent no-op under a superuser connection. That role also needs `CREATEDB` (see the grant in
-`scripts/setup-db-role.sql`): each tenant gets its own database, auto-provisioned on first request.
+apps/api needs DATABASE_URL for control-plane access and DATABASE_PROVISIONER_URL for same-server tenant database creation. Run pnpm --filter @ucms/api db:setup-role as a PostgreSQL administrator. The usim_cms_app runtime role is NOBYPASSRLS and NOCREATEDB. Only usim_cms_provisioner has CREATEDB; keep that URL on a direct PostgreSQL connection. /health does not need either URL.
 
-See apps/api/CLAUDE.md for multi-tenancy (database-per-tenant, i18n phases 1-5) and auth hardening (rate limiting, audit log, MFA) details — loaded automatically when working in apps/api/.
-
+See apps/api/CLAUDE.md for tenant pooling, migration and auth details.
 ## Architecture
 
 pnpm workspace monorepo with three apps:
@@ -48,7 +33,7 @@ pnpm workspace monorepo with three apps:
 
 See .claude/skills/deployment/SKILL.md for deployment, docker-compose, blue-green, and ops details.
 
-## Key constraints (from architecture.md)
+## Key constraints (from the current architecture)
 
 - Single instance, not one deployment per tenant — tenant identity always comes from the
   `x-tenant-host` header, never from subdomain parsing or config at boot.
