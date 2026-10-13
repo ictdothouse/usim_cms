@@ -5,6 +5,7 @@
 // tenant-pool/internal.ts). Split by concern into tenant-pool/*.ts; this
 // file re-exports the exact same public API so none of this module's
 // importers need to change.
+export { checkControlDatabaseConnection } from "./tenant-pool/internal.js";
 export type { TenantDb, TenantConnection, SharedContentEntry } from "./tenant-pool/connection.js";
 export {
   UnknownTenantError,

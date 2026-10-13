@@ -4,6 +4,23 @@ Panduan ini untuk pemasangan manual. Untuk deployment disyorkan, gunakan `instal
 `install-dev.mjs` (dev Docker) kerana kedua-duanya mengurus role DB, rahsia, dan Compose.
 Prasyarat semasa: **Node.js 22**, **pnpm 12** (`corepack enable`), **PostgreSQL 16+**.
 
+## Docker: ralat `server login failed: wrong password type`
+
+Ralat ini berasal daripada PgBouncer ketika ia cuba log masuk ke PostgreSQL.
+Imej PgBouncer `1.25.2` yang dipakai sebelum ini mempunyai regresi SCRAM selepas
+sambungan backend dibuka semula. Compose kini menggunakan Percona PgBouncer
+`1.26.0-1`, yang mengandungi [pembaikan upstream](https://github.com/pgbouncer/pgbouncer/releases/tag/pgbouncer_1_26_0). `scripts/deploy.sh` mengesahkan
+`SELECT 1` melalui PgBouncer sebelum membina warna baharu; healthcheck API pula
+memanggil `/ready`, yang turut menjalankan query database.
+
+Selepas `git pull`, jalankan semula `bash scripts/deploy.sh`. Skrip akan mencipta
+semula servis PgBouncer bersama konfigurasi baharu. Jika semakan login masih
+gagal, lihat `docker compose logs --tail 100 pgbouncer db` untuk mesej sebenar
+daripada PgBouncer, kemudian semak bahawa `pgbouncer/userlist.txt` masih
+`root:70` mod `640` dan verifiernya sama dengan role `usim_cms_app` di PostgreSQL.
+Jangan tampal kandungan verifier atau `.env` ke dalam tiket/log awam. Jangan
+matikan semakan halaman sebenar untuk memaksa promosi.
+
 ## 1. apps/api (port 3000)
 
 Fail env: `apps/api/.env` (salin dari `.env.example`).

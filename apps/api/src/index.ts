@@ -25,6 +25,7 @@ import {
   setTenantSeoDefaults,
   insertAuditLog,
   getTenantMaintenanceMode,
+  checkControlDatabaseConnection,
 } from "./db/tenant-pool.js";
 import { verifySession } from "./db/auth.js";
 import { localUploadsDir } from "./storage.js";
@@ -130,6 +131,15 @@ await app.register(fastifyStatic, { root: localUploadsDir, prefix: "/uploads/", 
 registerMediaServeRoutes(app);
 
 app.get("/health", async () => ({ status: "ok" }));
+app.get("/ready", async (_req, reply) => {
+  try {
+    await checkControlDatabaseConnection();
+    return { status: "ok" };
+  } catch {
+    reply.code(503);
+    return { status: "unavailable" };
+  }
+});
 
 // Records every request's status class + timing for GET /metrics below —
 // reply.elapsedTime (Fastify's own ms-since-request-start) needs no extra

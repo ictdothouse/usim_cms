@@ -22,6 +22,9 @@ export const pool = new Pool({
   max: 20,
   idleTimeoutMillis: 30_000,
 });
+export async function checkControlDatabaseConnection(): Promise<void> {
+  await pool.query("SELECT 1");
+}
 pool.on("connect", (client) => {
   client.query("SET statement_timeout = 10000").catch(() => {});
 });

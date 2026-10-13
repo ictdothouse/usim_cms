@@ -201,6 +201,18 @@ do_deploy() {
   echo "-- ensuring PgBouncer, cache and proxy are up --"
   docker compose up -d pgbouncer redis proxy
 
+  # A listening pooler can still fail every backend login (for example the
+  # PgBouncer 1.25.2 SCRAM reconnect regression). Probe a real control-plane
+  # query before building an idle color; no database password enters argv or
+  # the deploy log because it stays inside the db container environment.
+  echo "-- verifying PgBouncer can log in to PostgreSQL --"
+  if ! docker compose exec -T db sh -ec \
+    'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql -h pgbouncer -p 6432 -U usim_cms_app -d usim_cms -Atq -c "SELECT 1" | grep -qx 1'; then
+    echo "PgBouncer cannot reach PostgreSQL as usim_cms_app; aborting before the idle color starts." >&2
+    docker compose logs --tail 40 pgbouncer db >&2 || true
+    exit 1
+  fi
+
   echo "-- building & starting $next --"
   docker compose -p "$project" -f "$RELEASE_FILE" build
 
