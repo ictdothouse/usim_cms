@@ -74,6 +74,24 @@ fi
 
 host="$(read_env MONITOR_HOST /etc/ucms-monitor.env)"
 port="$(read_env MONITOR_PORT /etc/ucms-monitor.env)"
+# Installations created before MONITOR_HOST was introduced only have
+# MONITOR_PORT. Migrate that one setting here so enabling HTTPS does not
+# require rerunning the full production installer (and its deploy prompts).
+if [ -z "$host" ]; then
+  gateway="$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' bridge 2>/dev/null || true)"
+  if ! [[ "$gateway" =~ ^(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3})$ ]]; then
+    echo "Could not determine a private Docker bridge gateway for MONITOR_HOST." >&2
+    exit 1
+  fi
+  if grep -q '^MONITOR_HOST=' /etc/ucms-monitor.env; then
+    sed -i "s|^MONITOR_HOST=.*|MONITOR_HOST=$gateway|" /etc/ucms-monitor.env
+  else
+    printf 'MONITOR_HOST=%s\n' "$gateway" >> /etc/ucms-monitor.env
+  fi
+  chmod 600 /etc/ucms-monitor.env
+  host="$gateway"
+  echo "Migrated legacy monitor listener to Docker bridge $host."
+fi
 if ! [[ "$host" =~ ^(127\.0\.0\.1|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3})$ ]]; then
   echo "MONITOR_HOST must be a private IPv4 address or 127.0.0.1." >&2
   exit 1
