@@ -150,7 +150,7 @@ if ! docker exec "$container" sh -c '[ -n "${MONITOR_ACCESS_CONFIG:-}" ]' >/dev/
   echo "Current API container predates persistent monitor routing. The route works now, but a later Caddy resync/restart can remove it until the next successful app deploy; rerun this command if needed." >&2
 fi
 if [ "$mode" = "public" ]; then
-  echo "Open https://${domain}/ and sign in with the monitor credentials in /etc/ucms-monitor.env."
+  echo "Open https://${domain}/ and sign in with a monitor administrator account. The initial account uses the credentials in /etc/ucms-monitor.env; later password changes are managed in Accounts."
 elif [ "$mode" = "cloud" ]; then
   echo "Caddy public route removed. Configure your identity-protected cloud tunnel for https://${domain}/ -> http://${host}:${port}/."
 else

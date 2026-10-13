@@ -13,10 +13,15 @@ name at the VPS, pull the updated code, and run:
 sudo bash scripts/monitor-access.sh public monitor.43-163-113-24.sslip.io
 ```
 
-Open `https://monitor.43-163-113-24.sslip.io/`. Sign in with `MONITOR_USER`
-and `MONITOR_PASSWORD` from `/etc/ucms-monitor.env` (root-readable only). The
-command requires a password of at least 24 characters. `install.sh` generates
-a random 32-byte hexadecimal password by default. Caddy provides HTTPS and
+Open `https://monitor.43-163-113-24.sslip.io/`. On the first restart after
+installing account management, the existing `MONITOR_USER` and
+`MONITOR_PASSWORD` from `/etc/ucms-monitor.env` are migrated to a root-only
+password-hash file at `/etc/ucms-monitor-users.json`. Sign in with the same
+credentials once, then change the human password in **Accounts**. The env
+password stays unchanged as an internal API credential for SSL issuance only;
+it cannot sign in to the public monitor after the human password changes.
+`install.sh` generates a random 32-byte hexadecimal initial password by
+default. Caddy provides HTTPS and
 forwards only this host to the monitor's private address; the monitor checks
 the Host and Origin itself. The command updates the running Caddy route
 without deploying the app tier, so a failed blue/green smoke test does not
@@ -24,6 +29,31 @@ force the current live color to restart. For older installations with no
 `MONITOR_HOST` in `/etc/ucms-monitor.env`, this command detects Docker's
 private bridge gateway and adds the missing setting before restarting the
 monitor; rerunning the full production installer is unnecessary.
+
+## Manage administrators
+
+The **Accounts** tab lists monitor administrators, changes your password, adds
+another administrator, and removes one. Every administrator can deploy code
+and control the VPS. Enter your current password for each change. Passwords
+must be at least 24 bytes. The new password takes effect immediately; close
+and reopen the browser tab to sign in again. The monitor keeps password hashes
+using scrypt with a unique salt and stores them in a root-owned mode 0600
+file. Do not copy that file into the repository. Back it up with the other
+root-only server secrets; the adjacent `.initialized` marker prevents a
+missing user file from silently restoring the old bootstrap password.
+
+If all administrators forget their passwords, use the VPS console:
+
+```bash
+cd ~/usim_cms
+sudo bash scripts/monitor-users.sh reset admin
+```
+
+Replace `admin` with the account name. This prints a new random password
+once, without putting it in shell history or command arguments. There is no
+need to restart the monitor. The recovery command requires root and an
+existing valid user file. If the user file is lost, restore it from a backup
+along with the marker; the service deliberately fails closed.
 
 Public mode requires this Caddy instance to terminate TLS. Plain HTTP gets a
 403 response before it reaches the password prompt. If another proxy owns
