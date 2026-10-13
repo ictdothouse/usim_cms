@@ -115,3 +115,6 @@ export {
   getMediaMigrationStatus,
   setMediaMigrationStatus,
 } from "./tenant-pool/media-storage.js";
+
+export type { EdgeProtectionSettings } from "./tenant-pool/edge-protection.js";
+export { DEFAULT_EDGE_PROTECTION, getEdgeProtectionSettings, setEdgeProtectionSettings } from "./tenant-pool/edge-protection.js";

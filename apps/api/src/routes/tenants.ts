@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 import path from "node:path";
 import { rm } from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
@@ -13,6 +14,9 @@ import {
   setTenantCertInfo,
   insertAuditLog,
   getTenantRecord,
+  getEdgeProtectionSettings,
+  setEdgeProtectionSettings,
+  type EdgeProtectionSettings,
 } from "../db/tenant-pool.js";
 import {
   syncCaddy,
@@ -38,6 +42,37 @@ import { localUploadsDir, dirSizeBytes, tenantMediaPrefix, legacyTenantFolder, d
 // container-to-container over the docker-internal network by deploy
 // tooling, never by a browser.
 const DEPLOY_SECRET = process.env.DEPLOY_SECRET;
+
+function edgeConfigForCaddy(settings: EdgeProtectionSettings) {
+  return { enabled: settings.enabled, trustedProxyCidrs: settings.trustedProxyCidrs };
+}
+
+function isValidCidr(value: string): boolean {
+  const [address, prefix, ...rest] = value.split("/");
+  if (!address || !prefix || rest.length) return false;
+  const family = isIP(address);
+  if (!family || !/^\d+$/.test(prefix)) return false;
+  const bits = Number(prefix);
+  return Number.isInteger(bits) && bits >= 0 && bits <= (family === 4 ? 32 : 128);
+}
+
+function validateEdgeProtection(body: unknown): EdgeProtectionSettings | string {
+  const raw = (body ?? {}) as Partial<EdgeProtectionSettings>;
+  if (typeof raw.enabled !== "boolean") return "enabled must be a boolean";
+  if (typeof raw.providerName !== "string" || raw.providerName.trim().length > 80 || /[\r\n]/.test(raw.providerName)) {
+    return "providerName must be a single line of at most 80 characters";
+  }
+  if (!Array.isArray(raw.trustedProxyCidrs) || raw.trustedProxyCidrs.some((v) => typeof v !== "string")) {
+    return "trustedProxyCidrs must be an array of CIDR ranges";
+  }
+  const cidrs = [...new Set(raw.trustedProxyCidrs.map((v) => v.trim()).filter(Boolean))];
+  if (cidrs.length > 100 || cidrs.some((cidr) => !isValidCidr(cidr))) return "trustedProxyCidrs contains an invalid CIDR range";
+  if (typeof raw.originLockdownConfirmed !== "boolean") return "originLockdownConfirmed must be a boolean";
+  if (raw.enabled && !raw.providerName.trim()) return "providerName is required when edge protection is enabled";
+  if (raw.enabled && cidrs.length === 0) return "at least one trusted proxy CIDR is required when edge protection is enabled";
+  if (raw.enabled && !raw.originLockdownConfirmed) return "confirm the origin firewall has been restricted before enabling edge protection";
+  return { enabled: raw.enabled, providerName: raw.providerName.trim(), trustedProxyCidrs: cidrs, originLockdownConfirmed: raw.originLockdownConfirmed };
+}
 
 // Multisite tenant CRUD, proxy-automation settings, SSL/cert management, and
 // the blue-green promote endpoint — moved out of index.ts verbatim (god-file
@@ -85,6 +120,43 @@ export function registerTenantRoutes(app: FastifyInstance) {
     await createTenant(host, departmentName, dbUrl || null);
     await maybeSyncCaddy(app);
     return { created: true };
+  });
+
+  // Vendor-neutral CDN/WAF edge settings. The provider itself remains under
+  // the organisation's procurement and network policy; this service only
+  // trusts forwarded client IP headers from the approved CIDR ranges.
+  app.get("/api/portal/edge-protection", async (req, reply) => {
+    if (!verifySuperadmin(req, reply)) return;
+    return await getEdgeProtectionSettings();
+  });
+
+  app.put("/api/portal/edge-protection", async (req, reply) => {
+    const session = verifySuperadmin(req, reply);
+    if (!session) return;
+    const settings = validateEdgeProtection(req.body);
+    if (typeof settings === "string") {
+      reply.code(400);
+      return { error: settings };
+    }
+    await setEdgeProtectionSettings(settings);
+    let applied = false;
+    let applyError: string | undefined;
+    try {
+      await syncCaddy(await listTenants(), {}, edgeConfigForCaddy(settings));
+      applied = true;
+    } catch (err) {
+      // Persist the approved configuration even when this installation uses
+      // another ingress today. It will apply on the next Caddy sync.
+      applyError = (err as Error).message;
+    }
+    await insertAuditLog({
+      actorUserId: session.userId,
+      actorEmail: session.email,
+      action: "platform.edge_protection",
+      meta: { enabled: settings.enabled, providerName: settings.providerName, cidrCount: settings.trustedProxyCidrs.length, applied },
+      ip: req.ip,
+    });
+    return { ...settings, applied, applyError };
   });
 
   // Danger Zone: irreversible. Requires the caller to echo the host back
@@ -148,7 +220,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
       return { error: "proxy automation is not enabled" };
     }
     try {
-      await syncCaddy(await listTenants());
+      await syncCaddy(await listTenants(), {}, edgeConfigForCaddy(await getEdgeProtectionSettings()));
       return { synced: true };
     } catch (err) {
       reply.code(502);
@@ -224,7 +296,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
       }
     }
     try {
-      await syncCaddy(await listTenants(), { admin, api, frontend });
+      await syncCaddy(await listTenants(), { admin, api, frontend }, edgeConfigForCaddy(await getEdgeProtectionSettings()));
       return { promoted: true };
     } catch (err) {
       reply.code(502);
@@ -309,10 +381,11 @@ export function registerTenantRoutes(app: FastifyInstance) {
 // Exported standalone (not nested in registerTenantRoutes) since index.ts
 // calls it once at server boot, outside any route handler.
 export async function maybeSyncCaddyAtBoot(app: FastifyInstance): Promise<void> {
-  if (!(await getProxyAutomationEnabled())) return;
+  const edge = await getEdgeProtectionSettings();
+  if (!(await getProxyAutomationEnabled()) && !edge.enabled) return;
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
-      await syncCaddy(await listTenants());
+      await syncCaddy(await listTenants(), {}, edgeConfigForCaddy(edge));
       return;
     } catch (err) {
       if (attempt === 5) {
@@ -328,8 +401,9 @@ export async function maybeSyncCaddyAtBoot(app: FastifyInstance): Promise<void> 
 // used by index.ts's own not-yet-extracted clone/backup routes.
 export async function maybeSyncCaddy(app: FastifyInstance): Promise<void> {
   try {
-    if (!(await getProxyAutomationEnabled())) return;
-    await syncCaddy(await listTenants());
+    const edge = await getEdgeProtectionSettings();
+    if (!(await getProxyAutomationEnabled()) && !edge.enabled) return;
+    await syncCaddy(await listTenants(), {}, edgeConfigForCaddy(edge));
   } catch (err) {
     app.log.warn({ err }, "Caddy proxy sync failed");
   }

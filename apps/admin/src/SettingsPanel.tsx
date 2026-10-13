@@ -128,6 +128,13 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
   const [proxyConnected, setProxyConnected] = useState(false);
   const [proxyErr, setProxyErr] = useState<string | null>(null);
   const [proxyBusy, setProxyBusy] = useState(false);
+  const [edgeEnabled, setEdgeEnabled] = useState(false);
+  const [edgeProviderName, setEdgeProviderName] = useState("");
+  const [edgeCidrs, setEdgeCidrs] = useState("");
+  const [edgeOriginLockdownConfirmed, setEdgeOriginLockdownConfirmed] = useState(false);
+  const [edgeBusy, setEdgeBusy] = useState(false);
+  const [edgeErr, setEdgeErr] = useState<string | null>(null);
+  const [edgeMsg, setEdgeMsg] = useState<string | null>(null);
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaErr, setMfaErr] = useState<string | null>(null);
@@ -231,6 +238,40 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
       setProxyErr((e as Error).message);
     } finally {
       setProxyBusy(false);
+    }
+  }
+
+  function reloadEdgeProtection() {
+    void api
+      .getEdgeProtectionSettings(token)
+      .then((settings) => {
+        setEdgeEnabled(settings.enabled);
+        setEdgeProviderName(settings.providerName);
+        setEdgeCidrs(settings.trustedProxyCidrs.join("\n"));
+        setEdgeOriginLockdownConfirmed(settings.originLockdownConfirmed);
+      })
+      .catch((e) => setEdgeErr((e as Error).message));
+  }
+  useEffect(reloadEdgeProtection, [token]);
+
+  async function saveEdgeProtection() {
+    setEdgeErr(null);
+    setEdgeMsg(null);
+    setEdgeBusy(true);
+    try {
+      const trustedProxyCidrs = edgeCidrs.split(/[\s,]+/).filter(Boolean);
+      const result = await api.setEdgeProtectionSettings(token, {
+        enabled: edgeEnabled,
+        providerName: edgeProviderName,
+        trustedProxyCidrs,
+        originLockdownConfirmed: edgeOriginLockdownConfirmed,
+      });
+      setEdgeMsg(result.applied ? "Saved and applied to the bundled proxy." : `Saved. Proxy update pending: ${result.applyError ?? "no bundled proxy is reachable"}`);
+      reloadEdgeProtection();
+    } catch (e) {
+      setEdgeErr((e as Error).message);
+    } finally {
+      setEdgeBusy(false);
     }
   }
 
@@ -705,6 +746,51 @@ export default function SettingsPanel({ token, tenants }: { token: string; tenan
             </label>
             <p className="text-xs text-sub">{t("settings-proxy-dns-reminder")}</p>
             {!proxyEnabled && <p className="text-xs text-sub">{t("settings-proxy-manual-hint")}</p>}
+          </div>
+          <div className={`${card} space-y-3 p-5`}>
+            <h3 className="flex items-center gap-2 text-xs font-bold text-ink">
+              <ShieldCheck className="h-3.5 w-3.5 text-accent" /> CDN / WAF edge protection
+            </h3>
+            <p className="text-xs text-sub">
+              Optional and provider-neutral. Enter the approved provider's egress CIDRs so visitor IP, login controls and audit logs remain accurate behind its proxy.
+            </p>
+            {edgeErr && <p className="text-xs text-red-600">{edgeErr}</p>}
+            {edgeMsg && <p className="text-xs text-green-700">{edgeMsg}</p>}
+            <label className="flex items-center gap-2 text-xs font-medium text-ink">
+              <input type="checkbox" checked={edgeEnabled} disabled={edgeBusy} onChange={(e) => setEdgeEnabled(e.target.checked)} />
+              Enable CDN / WAF edge mode
+            </label>
+            <input
+              className={inputCls}
+              placeholder="Approved provider name"
+              value={edgeProviderName}
+              disabled={edgeBusy}
+              onChange={(e) => setEdgeProviderName(e.target.value)}
+            />
+            <label className="block text-xs text-ink">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-sub">Trusted proxy CIDRs</span>
+              <textarea
+                className={`${inputCls} min-h-24 font-mono text-[11px]`}
+                placeholder={"203.0.113.0/24\n2001:db8::/32"}
+                value={edgeCidrs}
+                disabled={edgeBusy}
+                onChange={(e) => setEdgeCidrs(e.target.value)}
+              />
+            </label>
+            <label className="flex items-start gap-2 text-xs text-ink">
+              <input
+                className="mt-0.5"
+                type="checkbox"
+                checked={edgeOriginLockdownConfirmed}
+                disabled={edgeBusy}
+                onChange={(e) => setEdgeOriginLockdownConfirmed(e.target.checked)}
+              />
+              <span>I have restricted the origin firewall to this provider's published networks.</span>
+            </label>
+            <p className="text-[11px] text-sub">This checkbox records the network change; configure the firewall at the hosting or network layer before enabling it.</p>
+            <button onClick={() => void saveEdgeProtection()} disabled={edgeBusy} className={btnPrimary}>
+              {edgeBusy ? t("settings-busy") : "Save edge protection"}
+            </button>
           </div>
           <div className={`${card} space-y-3 p-5`}>
             <h3 className="flex items-center gap-2 text-xs font-bold text-ink">

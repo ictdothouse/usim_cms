@@ -416,6 +416,9 @@ export const platformSettings = pgTable("platform_settings", {
   // job. See db/tenant-pool/media-storage.ts for both shapes.
   mediaStorage: jsonb("media_storage"),
   mediaMigration: jsonb("media_migration"),
+  // Optional CDN/WAF edge. The provider name and its published egress CIDRs
+  // are vendor-neutral so an organization can use its approved service.
+  edgeProtection: jsonb("edge_protection"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
