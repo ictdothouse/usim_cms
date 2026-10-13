@@ -91,3 +91,11 @@ VITE_API_URL=https://api.usim.edu.my pnpm --filter @ucms/admin build
 - Jalankan API + frontend bawah pm2/systemd (API sengaja `process.exit(1)` pada ralat fatal — mesti auto-restart).
 - Tetapkan `ADMIN_ORIGIN` kepada origin admin sebenar dan `NODE_ENV=production`; API memerlukan kedua-duanya untuk konfigurasi production.
 - `STORAGE_DRIVER=local`: pastikan folder `apps/api/uploads/` wujud & boleh tulis; ia dihidang pada `/uploads/`.
+
+## CDN / WAF pilihan
+
+Sistem tidak mengikat organisasi kepada produk CDN atau WAF tertentu. Selepas penyedia yang mematuhi polisi organisasi dipilih, Superadmin boleh membuka **Settings > CDN / WAF edge protection** dan mengisi nama penyedia serta senarai CIDR egress/proxy rasminya.
+
+Sebelum mengaktifkan mod ini, pasukan rangkaian perlu mengehadkan firewall origin pada port 80/443 kepada rangkaian penyedia tersebut. CMS menyimpan audit perubahan dan menolak CIDR kepada Caddy supaya hanya proxy yang diluluskan boleh membekalkan IP pelawat kepada rate limit dan audit log. Sistem tidak mengubah firewall hos secara automatik.
+
+Jika tiada CDN/WAF dibenarkan, biarkan mod ini dimatikan dan Caddy menggunakan IP sambungan terus seperti biasa.

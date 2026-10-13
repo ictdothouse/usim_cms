@@ -68,6 +68,10 @@ ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "backup_destin
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "media_storage" jsonb;
 ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "media_migration" jsonb;
 
+-- Optional CDN/WAF edge configuration. No vendor credential is stored here;
+-- Caddy only uses the provider's published CIDRs to trust client-IP headers.
+ALTER TABLE "public"."platform_settings" ADD COLUMN IF NOT EXISTS "edge_protection" jsonb;
+
 -- Rate-limiting for POST /api/auth/login (see isLoginRateLimited,
 -- tenant-pool.ts) — one row per attempt, pruned lazily, never a per-user
 -- counter table.

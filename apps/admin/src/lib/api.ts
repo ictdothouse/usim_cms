@@ -1006,6 +1006,26 @@ export const resyncProxy = (token: string) =>
     error?: string;
   }>;
 
+export interface EdgeProtectionSettings {
+  enabled: boolean;
+  providerName: string;
+  trustedProxyCidrs: string[];
+  originLockdownConfirmed: boolean;
+}
+
+export interface EdgeProtectionSaveResult extends EdgeProtectionSettings {
+  applied: boolean;
+  applyError?: string;
+}
+
+// Provider-neutral: enter the CIDRs published by the CDN/WAF approved by the
+// organisation. The API applies these to Caddy's trusted-proxy list.
+export const getEdgeProtectionSettings = (token: string) =>
+  request("/api/portal/edge-protection", null, token) as Promise<EdgeProtectionSettings>;
+
+export const setEdgeProtectionSettings = (token: string, settings: EdgeProtectionSettings) =>
+  request("/api/portal/edge-protection", null, token, { method: "PUT", body: JSON.stringify(settings) }) as Promise<EdgeProtectionSaveResult>;
+
 // cert/key are PEM files (USIM's paid certificate) — forwarded to apps/api,
 // which forwards them straight to Caddy without ever writing the key to
 // its own disk or DB (see apps/api/src/proxy-sync.ts).

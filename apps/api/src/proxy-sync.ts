@@ -88,6 +88,14 @@ export interface CaddyUpstreams {
   frontend?: string[];
 }
 
+// The CMS stores this vendor-neutral shape in platform_settings. Keeping it
+// separate from CaddyUpstreams preserves buildCaddyConfig as a pure function
+// and lets deployments still use the legacy env-based Cloudflare switch.
+export interface EdgeProxyConfig {
+  enabled: boolean;
+  trustedProxyCidrs: string[];
+}
+
 // These strings land straight in Caddy's reverse_proxy `dial` config — the
 // one real trust boundary CaddyUpstreams crosses, since /internal/deploy/
 // promote (index.ts) accepts them over the network (shared-secret
@@ -122,6 +130,7 @@ function dials(hosts: string[] | undefined, fallback: string): { dial: string }[
 export function buildCaddyConfig(
   tenants: TenantRouteInfo[],
   upstreams: CaddyUpstreams = {},
+  edge: EdgeProxyConfig | undefined = undefined,
 ): Record<string, unknown> {
   const adminUpstreams = dials(upstreams.admin, DEFAULT_ADMIN_UPSTREAM);
   const apiUpstreams = dials(upstreams.api, DEFAULT_API_UPSTREAM);
@@ -181,6 +190,12 @@ export function buildCaddyConfig(
     },
   ];
 
+  const trustedProxyCidrs = edge?.enabled
+    ? edge.trustedProxyCidrs
+    : TRUSTED_PROXY_MODE === "cloudflare"
+      ? CLOUDFLARE_IP_RANGES
+      : [];
+
   return {
     // Must be repeated on every /load push: POSTing a config replaces the
     // ENTIRE active config, so omitting `admin` here would reset Caddy's
@@ -198,8 +213,8 @@ export function buildCaddyConfig(
             // cloudflare mode — Caddy's own no-trusted-proxies default is
             // exactly the safe, correct behavior for a direct-connection
             // (no CDN) deployment, so there's nothing to configure there.
-            ...(TRUSTED_PROXY_MODE === "cloudflare"
-              ? { trusted_proxies: { source: "static", ranges: CLOUDFLARE_IP_RANGES } }
+            ...(trustedProxyCidrs.length > 0
+              ? { trusted_proxies: { source: "static", ranges: trustedProxyCidrs } }
               : {}),
           },
         },
@@ -281,8 +296,12 @@ export async function pingCaddy(): Promise<boolean> {
 // (passed in by the caller), never whatever Caddy happened to have before —
 // safe to call repeatedly, and safe as a self-heal after the proxy
 // container is recreated or loses its volume.
-export async function syncCaddy(tenants: TenantRouteInfo[], upstreams: CaddyUpstreams = {}): Promise<void> {
-  const config = buildCaddyConfig(tenants, upstreams);
+export async function syncCaddy(
+  tenants: TenantRouteInfo[],
+  upstreams: CaddyUpstreams = {},
+  edge: EdgeProxyConfig | undefined = undefined,
+): Promise<void> {
+  const config = buildCaddyConfig(tenants, upstreams, edge);
   const res = await caddyRequest("/load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
