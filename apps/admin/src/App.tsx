@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
   ChevronRight,
@@ -537,6 +537,25 @@ function Shell({
 
 const IMPERSONATOR_KEY = "usim_cms_impersonator";
 
+type ShellSessionContext = {
+  session: Session;
+  onLogout: () => void;
+  onImpersonate: (session: Session) => void;
+  impersonating: boolean;
+  onExitImpersonation: () => void;
+};
+const ShellSessionCtx = createContext<ShellSessionContext | null>(null);
+
+function AuthenticatedShell() {
+  const state = useContext(ShellSessionCtx);
+  if (!state) return null;
+  return <Shell key={state.session.token} {...state} />;
+}
+
+// A data router lets the article editor block internal navigation while a
+// draft is unsaved. One router instance keeps browser history across sessions.
+const authenticatedRouter = createBrowserRouter([{ path: "/*", element: <AuthenticatedShell /> }]);
+
 export default function App() {
   const [lang, setLang] = useState<Lang>(() => localStorage.getItem("usim_cms_lang") === "en" ? "en" : "ms");
   useEffect(() => {
@@ -632,27 +651,9 @@ export default function App() {
   }
   return (
     <I18nCtx.Provider value={i18n}>
-    <BrowserRouter>
-      <Routes>
-        <Route
-          path="/*"
-          element={
-            <Shell
-              // Forces a full remount on every session swap (login/impersonate/exit)
-              // — Shell's siteHost/tab state only initializes from session on mount,
-              // and without this a same-instance prop swap leaves both stuck on
-              // whatever the previous session had (wrong x-tenant-host, dead tabs).
-              key={session.token}
-              session={session}
-              onLogout={logout}
-              onImpersonate={impersonate}
-              impersonating={impersonating}
-              onExitImpersonation={exitImpersonation}
-            />
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+      <ShellSessionCtx.Provider value={{ session, onLogout: logout, onImpersonate: impersonate, impersonating, onExitImpersonation: exitImpersonation }}>
+        <RouterProvider router={authenticatedRouter} />
+      </ShellSessionCtx.Provider>
     </I18nCtx.Provider>
   );
 }

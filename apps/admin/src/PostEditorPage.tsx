@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useBlocker, useNavigate, useParams } from "react-router-dom";
 import { SuggestionMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import { bookmarkCardSchema } from "./blocknote/bookmarkCard";
@@ -266,6 +266,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [newCategoryName, setNewCategoryName] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const blocker = useBlocker(dirty);
   const hydratingEditor = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -276,8 +277,18 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  async function closeEditor() {
-    if (dirty && !(await confirm(t("posts-unsaved-confirm")))) return;
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    let active = true;
+    void confirm(t("posts-unsaved-confirm")).then((leave) => {
+      if (!active) return;
+      if (leave) blocker.proceed();
+      else blocker.reset();
+    });
+    return () => { active = false; };
+  }, [blocker, confirm, t]);
+
+  function closeEditor() {
     navigate("/content/posts");
   }
 
@@ -574,7 +585,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-white" onChangeCapture={() => setDirty(true)}>
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line/40 px-3 py-2 sm:px-6 sm:py-3">
-        <button onClick={() => void closeEditor()} aria-label={t("posts-close")} className="flex min-h-10 items-center gap-1 rounded px-2 text-sm font-semibold text-body hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">{t("posts-close")}</span></button>
+        <button onClick={closeEditor} aria-label={t("posts-close")} className="flex min-h-10 items-center gap-1 rounded px-2 text-sm font-semibold text-body hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">{t("posts-close")}</span></button>
         <span className={`rounded-full px-2 py-0.5 text-sm font-bold ${statusBadge[status]}`}>{t(`posts-${status}` as Key)}</span>
         <span className={`min-w-0 flex-1 text-sm font-medium ${dirty ? "text-warn" : "text-sub"}`} role="status">{dirty ? t("posts-unsaved") : t("posts-saved")}</span>
         {error && <p className="text-sm text-red-600">{error}</p>}
