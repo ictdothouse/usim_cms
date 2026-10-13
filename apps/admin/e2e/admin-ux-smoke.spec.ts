@@ -35,3 +35,39 @@ test("unknown route and mobile navigation stay usable", async ({ page }, testInf
   await page.getByRole("button", { name: "Kembali ke papan pemuka" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 });
+
+test("browser Back asks before discarding an unsaved article", async ({ page }) => {
+  const post = {
+    id: "11111111-1111-4111-8111-111111111111", slug: "draft-article", title: "Draft article",
+    body: "<p>Existing content</p>", excerpt: "", status: "draft", tags: [], seo: {},
+    translations: {}, language: null, multilangEnabled: false,
+  };
+  await page.addInitScript(() => {
+    localStorage.setItem("usim_cms_session", JSON.stringify({
+      token: "ux-smoke-csrf", role: "webmaster", tenantHost: "example.test", tenantHosts: ["example.test"],
+    }));
+  });
+  await page.route("**/api/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const response = path === "/api/posts" ? { items: [post], total: 1 }
+      : path === "/api/categories" ? { items: [] }
+        : path === "/api/theme" ? { theme: {} }
+          : path === "/api/tenant-languages" ? { allEnabled: [], multilangEnabled: false, defaultLanguage: null }
+            : path.endsWith("/preview-token") ? { token: "preview" } : {};
+    return route.fulfill({ json: response });
+  });
+  await page.goto("/content/posts");
+  await page.getByRole("button", { name: "Edit" }).click();
+  const title = page.locator("textarea").first();
+  await expect(title).toHaveValue("Draft article");
+  await title.fill("Changed draft article");
+  await expect(page.getByText("Perubahan belum disimpan")).toBeVisible();
+  await page.evaluate(() => history.back());
+  await expect(page.getByRole("alertdialog")).toContainText("Ada perubahan belum disimpan");
+  await page.getByRole("button", { name: "Batal" }).click();
+  await expect(title).toHaveValue("Changed draft article");
+  await expect(page).toHaveURL(/\/content\/posts\/11111111-1111-4111-8111-111111111111$/);
+  await page.evaluate(() => history.back());
+  await page.getByRole("button", { name: "Sahkan" }).click();
+  await expect(page).toHaveURL(/\/content\/posts$/);
+});
