@@ -1,7 +1,7 @@
 import { useState } from "react";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
-import { useT, inputCls, btnPrimary, FormError, SESSION_KEY } from "./App";
+import { useT, inputCls, btnPrimary, FormError, SESSION_KEY, LanguageSwitcher } from "./App";
 
 // ---------- Setup wizard (first-run only, see /api/setup) ----------
 export default function SetupWizard({ onDone }: { onDone: (s: Session) => void }) {
@@ -34,18 +34,19 @@ export default function SetupWizard({ onDone }: { onDone: (s: Session) => void }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas font-sans text-ink antialiased">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 font-sans text-ink antialiased">
+      <div className="absolute right-4 top-4"><LanguageSwitcher /></div>
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-line/30 bg-white p-8 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-accent to-[#00c6ff] text-sm font-bold text-white shadow-sm">
             U
           </div>
           <div>
-            <h1 className="font-display text-sm font-bold tracking-tight">{t("setup-title")}</h1>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
+            <h1 className="font-display text-xl font-bold tracking-tight">{t("setup-title")}</h1>
+            <p className="text-sm font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
           </div>
         </div>
-        <p className="text-xs text-sub">{t("setup-desc")}</p>
+        <p className="text-sm text-sub">{t("setup-desc")}</p>
         <label className="sr-only" htmlFor="setup-email">{t("login-email")}</label>
         <input
           id="setup-email"

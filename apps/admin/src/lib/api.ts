@@ -446,6 +446,9 @@ export const sharePage = (tenantHost: string, token: string, id: string) =>
 export const updatePage = (tenantHost: string, token: string, id: string, data: Record<string, unknown>) =>
   request(`/api/pages/${id}`, tenantHost, token, { method: "PATCH", body: JSON.stringify(data) });
 
+export const setHomepage = (tenantHost: string, token: string, id: string) =>
+  request(`/api/pages/${id}/set-home`, tenantHost, token, { method: "POST" });
+
 export const deletePage = (tenantHost: string, token: string, id: string) =>
   request(`/api/pages/${id}`, tenantHost, token, { method: "DELETE" });
 

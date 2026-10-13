@@ -42,6 +42,7 @@ import { registerMediaRoutes, registerMediaServeRoutes } from "./routes/media.js
 import { registerMediaStorageRoutes } from "./routes/media-storage.js";
 import { registerPublicBlueprintRoutes, registerBlueprintRoutes } from "./routes/blueprints.js";
 import { registerPublicEventRoutes } from "./routes/public-events.js";
+import { registerHomepageRoute } from "./routes/pages-home.js";
 import {
   pagesCollection,
   postsCollection,
@@ -280,6 +281,7 @@ await app.register(async (protectedScope) => {
   await tenantPlugin(protectedScope);
   await requireTenantAuth(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, pagesCollection);
+  registerHomepageRoute(protectedScope);
   registerProtectedCollectionRoutes(protectedScope, postsCollection);
   registerProtectedCollectionRoutes(protectedScope, categoriesCollection);
   registerProtectedCollectionRoutes(protectedScope, menusCollection);

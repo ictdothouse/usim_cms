@@ -21,8 +21,8 @@ type PagesCreateForm = z.infer<typeof pagesCreateSchema>;
 // Sprint 4 UX audit: cheap pre-publish check — true once at least one
 // element exists anywhere in the section/row/column tree.
 function pageHasContent(p: Record<string, unknown>): boolean {
-  const layout = (p.layout as Array<{ rows?: Array<{ columns?: Array<{ elements?: unknown[] }> }> }>) ?? [];
-  return layout.some((s) => s.rows?.some((r) => r.columns?.some((c) => (c.elements?.length ?? 0) > 0)));
+  const layout = (p.layout as Array<{ rows?: Array<{ columns?: Array<{ elements?: unknown[] }> }>; props?: { rows?: Array<{ columns?: Array<{ elements?: unknown[] }> }> } }>) ?? [];
+  return layout.some((s) => (s.props?.rows ?? s.rows)?.some((r) => r.columns?.some((c) => (c.elements?.length ?? 0) > 0)));
 }
 
 // Same one-liner id generator Designer.tsx/MenuItemsEditor.tsx already each
@@ -68,6 +68,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
   const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showBlueprintPicker, setShowBlueprintPicker] = useState(false);
+  const [changingHome, setChangingHome] = useState(false);
   const navigate = useNavigate();
   const form = useForm<PagesCreateForm>({ resolver: zodResolver(pagesCreateSchema), defaultValues: { title: "" } });
 
@@ -208,15 +209,20 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
   // force-publishes the new home page: RLS hides drafts from anonymous
   // visitors, so a draft home page would 404 the whole site.
   async function setHome(id: string) {
+    const selected = pages.find((p) => p.id === id);
+    if (!selected || !pageHasContent(selected)) {
+      setError(t("pages-set-home-empty"));
+      return;
+    }
+    if (!(await confirm(t("pages-set-home-confirm")))) return;
+    setChangingHome(true);
     try {
-      const prevHome = pages.find((x) => x.slug === "home" && x.id !== id);
-      if (prevHome) {
-        await api.updatePage(tenantHost, token, prevHome.id as string, { slug: `home-${(prevHome.id as string).slice(0, 8)}` });
-      }
-      await api.updatePage(tenantHost, token, id, { slug: "home", status: "published", publishedAt: new Date().toISOString() });
+      await api.setHomepage(tenantHost, token, id);
       await refresh();
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setChangingHome(false);
     }
   }
 
@@ -230,7 +236,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
       <Card>
         <CardContent className="p-4">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onCreate)} className="flex gap-2">
+            <form onSubmit={form.handleSubmit(onCreate)} className="flex flex-col gap-2 sm:flex-row">
               <FormField
                 control={form.control}
                 name="title"
@@ -249,7 +255,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
               <button
                 type="button"
                 onClick={() => setShowBlueprintPicker(true)}
-                className="rounded-full border border-line/40 px-3 py-1.5 text-xs font-semibold text-ink hover:bg-canvas"
+                className="rounded-full border border-line/40 px-3 py-1.5 text-sm font-semibold text-ink hover:bg-canvas"
               >
                 {t("blueprints-choose")}
               </button>
@@ -261,6 +267,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sub" />
           <input
+            aria-label={t("pages-search-placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("pages-search-placeholder")}
@@ -268,7 +275,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
           />
         </div>
         <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : (v as "draft" | "published"))}>
-          <SelectTrigger className="w-40 text-xs">
+          <SelectTrigger aria-label={t("status-filter-all")} className="w-full text-sm sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -287,23 +294,23 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
         {pages.map((p) => {
           const published = p.status === "published";
           return (
-          <li key={p.id as string} className="px-4 py-3 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
+          <li key={p.id as string} className="px-4 py-3 text-sm">
+             <div className="flex flex-col items-start gap-2 sm:flex-row sm:justify-between">
+               <span className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="font-semibold text-ink">{p.title as string}</span>
                 <span className="font-mono text-sub">/{p.slug as string}</span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  className={`rounded-full px-2 py-0.5 text-sm font-bold ${
                     published ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
                   }`}
                 >
                   {published ? t("pages-published") : t("pages-draft")}
                 </span>
                 {p.slug === "home" && (
-                  <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">{t("pages-is-home")}</span>
+                  <span className="rounded-full bg-accent/10 px-2 py-0.5 text-sm font-bold text-accent">{t("pages-is-home")}</span>
                 )}
               </span>
-              <span className="flex items-center gap-3">
+               <span className="flex flex-wrap items-center gap-3">
                 {published ? (
                   <a
                     href={api.previewUrl(tenantHost, p.slug as string)}
@@ -322,7 +329,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
                   </button>
                 )}
                 {p.slug !== "home" && (
-                  <button onClick={() => setHome(p.id as string)} className="font-semibold text-body hover:underline">
+                  <button onClick={() => void setHome(p.id as string)} disabled={changingHome} className="font-semibold text-body hover:underline disabled:opacity-50">
                     {t("pages-set-home")}
                   </button>
                 )}
@@ -359,7 +366,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
       </ul>
       )}
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-xs text-sub">
+        <div className="flex items-center justify-between text-sm text-sub">
           <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className={`${btnGhost} disabled:opacity-40`}>
             {t("pagination-prev")}
           </button>
@@ -380,7 +387,7 @@ export default function PagesPanel({ tenantHost, token }: { tenantHost: string; 
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowBlueprintPicker(false)}>
         <div className="max-h-[85vh] w-[min(90vw,60rem)] overflow-y-auto rounded-xl bg-white p-4 shadow-xl" onClick={(ev) => ev.stopPropagation()}>
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-bold text-ink">{t("blueprints-choose")}</p>
+            <p className="text-sm font-bold text-ink">{t("blueprints-choose")}</p>
             <button onClick={() => setShowBlueprintPicker(false)} aria-label={t("designer-close")}>
               <X className="h-4 w-4" />
             </button>

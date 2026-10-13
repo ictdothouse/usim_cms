@@ -119,13 +119,13 @@ export default function PostsPanel({ tenantHost, token }: { tenantHost: string; 
         <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
           <Newspaper className="h-4 w-4 text-accent" /> {t("posts-title")}
         </h2>
-        <Link to="categories" className="text-xs font-semibold text-accent hover:underline">{t("categories-title")}</Link>
+        <Link to="categories" className="text-sm font-semibold text-accent hover:underline">{t("categories-title")}</Link>
       </div>
       <FormError>{error}</FormError>
       <Card>
         <CardContent className="p-4">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onCreate)} className="flex gap-2">
+            <form onSubmit={form.handleSubmit(onCreate)} className="flex flex-col gap-2 sm:flex-row">
               <FormField
                 control={form.control}
                 name="title"
@@ -149,6 +149,7 @@ export default function PostsPanel({ tenantHost, token }: { tenantHost: string; 
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sub" />
           <input
+            aria-label={t("posts-search-placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t("posts-search-placeholder")}
@@ -156,7 +157,7 @@ export default function PostsPanel({ tenantHost, token }: { tenantHost: string; 
           />
         </div>
         <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : (v as PostStatus))}>
-          <SelectTrigger className="w-40 text-xs">
+          <SelectTrigger aria-label={t("status-filter-all")} className="w-full text-sm sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -176,21 +177,21 @@ export default function PostsPanel({ tenantHost, token }: { tenantHost: string; 
         {posts.map((p) => {
           const status = (p.status as PostStatus) || "draft";
           return (
-            <li key={p.id as string} className="px-4 py-3 text-xs">
-              <div className="flex items-center justify-between">
+            <li key={p.id as string} className="px-4 py-3 text-sm">
+               <div className="flex flex-col items-start gap-2 sm:flex-row sm:justify-between">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-ink">{p.title as string}</span>
                   <span className="font-mono text-sub">/posts/{p.slug as string}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[status]}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-sm font-bold ${statusBadge[status]}`}>
                     {t(statusLabelKey[status])}
                   </span>
                   {categoryName(p.categoryId as string | null) && (
-                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
+                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-sm font-bold text-accent">
                       {categoryName(p.categoryId as string | null)}
                     </span>
                   )}
                 </span>
-                <span className="flex items-center gap-3">
+                 <span className="flex flex-wrap items-center gap-3">
                   <button onClick={() => navigate(p.id as string)} className="font-semibold text-accent hover:underline">
                     {t("posts-edit")}
                   </button>
@@ -210,7 +211,7 @@ export default function PostsPanel({ tenantHost, token }: { tenantHost: string; 
       </ul>
       )}
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-xs text-sub">
+        <div className="flex items-center justify-between text-sm text-sub">
           <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className={`${btnGhost} disabled:opacity-40`}>
             {t("pagination-prev")}
           </button>

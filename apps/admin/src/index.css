@@ -25,14 +25,14 @@
   --font-display: Space Grotesk, sans-serif;
 
   --color-ink: #1d1d1f;
-  --color-sub: #86868b;
+  --color-sub: #5f6068;
   --color-body: #515154;
   --color-line: #d2d2d7;
   --color-canvas: #f5f5f7;
   --color-accent: #0071e3;
   --color-accent-foreground: #ffffff;
-  --color-ok: #34c759;
-  --color-warn: #ff9500;
+  --color-ok: #15763c;
+  --color-warn: #9a5900;
 }
 
 /* inline: these tokens reference OTHER custom properties (the :root/.dark

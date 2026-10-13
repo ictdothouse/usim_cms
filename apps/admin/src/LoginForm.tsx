@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
 import { QrCode } from "@/components/QrCode";
-import { useT, inputCls, btnPrimary, FormError, SESSION_KEY } from "./App";
+import { useT, inputCls, btnPrimary, FormError, SESSION_KEY, LanguageSwitcher } from "./App";
 
 // ---------- Login ----------
 export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Session) => void; entraError?: string | null }) {
@@ -93,10 +93,11 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
   const passwordFormVisible = !loginMethods?.entraOnly || pendingToken || setupEnrollment || showPasswordForm;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas font-sans text-ink antialiased">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 font-sans text-ink antialiased">
+      <div className="absolute right-4 top-4"><LanguageSwitcher /></div>
       <div className="w-full max-w-sm space-y-3">
         {entraError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {entraError === "account_not_found"
               ? t("login-entra-error-account-not-found")
               : entraError === "identity_not_linked"
@@ -112,7 +113,7 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
         {loginMethods?.entraOnly && !pendingToken && !setupEnrollment && !showPasswordForm && (
           <button
             type="button"
-            className="w-full text-center text-xs text-sub underline"
+            className="w-full text-center text-sm text-sub underline"
             onClick={() => setShowPasswordForm(true)}
           >
             {t("login-password-toggle")}
@@ -128,18 +129,18 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
             U
           </div>
           <div>
-            <h1 className="font-display text-sm font-bold tracking-tight">{t("login-title")}</h1>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
+            <h1 className="font-display text-xl font-bold tracking-tight">{t("login-title")}</h1>
+            <p className="text-sm font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
           </div>
         </div>
         {setupEnrollment ? (
           <>
-            <p className="text-xs text-sub">{t("login-mfa-setup-desc")}</p>
+            <p className="text-sm text-sub">{t("login-mfa-setup-desc")}</p>
             <div className="flex justify-center">
               <QrCode value={setupEnrollment.otpauthUri} />
             </div>
-            <p className="text-xs text-sub">{t("security-mfa-scan-hint")}</p>
-            <p className="rounded-lg border border-line/40 bg-canvas p-2 font-mono text-[11px] break-all">
+            <p className="text-sm text-sub">{t("security-mfa-scan-hint")}</p>
+            <p className="rounded-lg border border-line/40 bg-canvas p-2 font-mono text-sm break-all">
               {setupEnrollment.secret}
             </p>
             <label className="sr-only" htmlFor="login-mfa-setup-code">{t("login-mfa-code")}</label>
@@ -163,7 +164,7 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
           </>
         ) : pendingToken ? (
           <>
-            <p className="text-xs text-sub">{t("login-mfa-desc")}</p>
+            <p className="text-sm text-sub">{t("login-mfa-desc")}</p>
             <label className="sr-only" htmlFor="login-mfa-code">{t("login-mfa-code")}</label>
             <input
               id="login-mfa-code"
@@ -184,7 +185,7 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
             </button>
             <button
               type="button"
-              className="w-full text-center text-xs text-sub underline"
+              className="w-full text-center text-sm text-sub underline"
               onClick={() => {
                 setPendingToken(null);
                 setCode("");
@@ -196,7 +197,7 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
           </>
         ) : (
           <>
-            <p className="text-xs text-sub">{t("login-desc")}</p>
+            <p className="text-sm text-sub">{t("login-desc")}</p>
             <label className="sr-only" htmlFor="login-email">{t("login-email")}</label>
             <input
               id="login-email"

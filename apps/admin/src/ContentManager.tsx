@@ -15,7 +15,7 @@ import {
 import * as api from "@/lib/api";
 import type { Key } from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useT, ListLoading, BlueprintGallery, NAV_GROUP_ORDER, NAV_GROUP_LABEL, type NavGroup } from "./App";
+import { useT, ListLoading, BlueprintGallery, NAV_GROUP_ORDER, NAV_GROUP_LABEL, NotFound, type NavGroup } from "./App";
 import { ThemeForm } from "./ThemeForm";
 import { PageDesignerRoute, BlueprintDesignerRoute, SymbolDesignerRoute, HeaderFooterDesignerRoute } from "./DesignerRoutes";
 import CategoriesPanel from "./CategoriesPanel";
@@ -92,7 +92,7 @@ export default function ContentManager({
     <div className="space-y-6">
       {showSitePicker && (
         <div className="max-w-sm space-y-1">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("content-site")}</label>
+          <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("content-site")}</label>
           <Select value={siteHost} onValueChange={setSiteHost}>
             <SelectTrigger className="w-full">
               <SelectValue placeholder={t("content-pick")} />
@@ -105,22 +105,24 @@ export default function ContentManager({
               ))}
             </SelectContent>
           </Select>
+          {!siteHost && <p className="text-sm text-sub">{t("content-pick-hint")}</p>}
         </div>
       )}
       {siteHost && (
         <div className="flex flex-col gap-6 md:flex-row md:items-start">
-          <nav className="flex flex-col gap-4 md:w-48 md:shrink-0 md:border-r md:border-line/30 md:pr-4">
+          <nav aria-label={t("nav-content")} className="flex gap-2 overflow-x-auto pb-2 md:w-48 md:shrink-0 md:flex-col md:gap-4 md:overflow-visible md:border-r md:border-line/30 md:pb-0 md:pr-4">
             {NAV_GROUP_ORDER.map((group) => {
               const items = subTabs.filter((st) => CONTENT_SUBTAB_GROUP[st.id] === group);
               if (items.length === 0) return null;
               return (
-                <div key={group} className="space-y-0.5">
-                  <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-sub">{t(NAV_GROUP_LABEL[group])}</div>
+                <div key={group} className="flex shrink-0 gap-1 md:block md:space-y-0.5">
+                  <div className="hidden px-3 text-sm font-bold uppercase tracking-wider text-sub md:block">{t(NAV_GROUP_LABEL[group])}</div>
                   {items.map(({ id, labelKey, icon: Icon }) => (
                     <button
                       key={id}
                       onClick={() => navigate(id)}
-                      className={`flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      aria-current={activeSubTab === id ? "page" : undefined}
+                      className={`flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:w-full ${
                         activeSubTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
                       }`}
                     >
@@ -135,11 +137,11 @@ export default function ContentManager({
           <Suspense fallback={<ListLoading />}>
           <Routes>
             <Route index element={<Navigate to="pages" replace />} />
-            <Route path="pages" element={<PagesPanel tenantHost={siteHost} token={token} />} />
+            <Route path="pages" element={<PagesPanel key={siteHost} tenantHost={siteHost} token={token} />} />
             <Route path="pages/:id" element={<PageDesignerRoute tenantHost={siteHost} token={token} isSuper={isSuper} />} />
             <Route path="posts" element={<PostsPanel key={`posts-${siteHost}`} tenantHost={siteHost} token={token} />} />
             <Route path="posts/categories" element={<CategoriesPanel tenantHost={siteHost} token={token} />} />
-            <Route path="posts/:id" element={<PostEditorPage tenantHost={siteHost} token={token} />} />
+            <Route path="posts/:id" element={<PostEditorPage key={siteHost} tenantHost={siteHost} token={token} />} />
             <Route path="media" element={<MediaManager key={`media-${siteHost}`} tenantHost={siteHost} token={token} />} />
             <Route path="menus" element={<MenusPanel tenantHost={siteHost} token={token} />} />
             <Route path="header-footer" element={<HeaderFooterPanel key={siteHost} tenantHost={siteHost} token={token} />} />
@@ -168,6 +170,7 @@ export default function ContentManager({
             {isSuper && (
               <Route path="events" element={<EventsPanel key={`events-${siteHost}`} tenantHost={siteHost} token={token} />} />
             )}
+            <Route path="*" element={<NotFound />} />
           </Routes>
           </Suspense>
           </div>
