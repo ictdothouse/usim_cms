@@ -217,6 +217,13 @@ async function provisionTenantDatabase(tenantHost: string, dbUrl: string | null,
       // transaction and prevents the pooled client leaking an unlimited
       // timeout into application queries.
       await client.query("SET LOCAL statement_timeout = 0");
+      // Migrations are trusted schema-maintenance work, not tenant requests.
+      // Some migrations backfill rows in FORCE-RLS tables (for example the
+      // event slug backfill); without this, UPDATE silently sees zero rows
+      // and a following NOT NULL/index change can fail on existing content.
+      // LOCAL is reset at COMMIT/ROLLBACK, so it cannot authorize later
+      // requests on this pooled connection.
+      await client.query("SET LOCAL app.authenticated = 'true'");
       await client.query(`
         CREATE TABLE IF NOT EXISTS public.ucms_schema_migrations (
           migration_id text PRIMARY KEY,
