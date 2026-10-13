@@ -20,7 +20,7 @@ import { BoxModel, ContainerChildrenPanel, VisibilityToggle } from "./InspectorC
 
 export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
   const {
-    t, bp, sel, setSel, blocks, mutate,
+    t, confirmAction, bp, sel, setSel, blocks, mutate,
     bpKey, bpGetValue, bpKeysOverridden, toggleBpKeys, sideValue, setElSideValue,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
     collapsedGroups, toggleGroup, inspectorTab, setInspectorTab,
@@ -57,7 +57,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
     if (sel.length >= 3) crumbs.push({ label: t("designer-column"), path: sel.slice(0, 3) });
     if (sel.length >= 4) crumbs.push({ label: t("designer-element"), path: sel.slice(0, 4) });
     return (
-      <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-sub">
+      <div className="flex flex-wrap items-center gap-1 text-sm font-medium text-sub">
         {crumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1">
             {i > 0 && <span className="text-line">/</span>}
@@ -143,6 +143,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         toggleGroup,
         bp,
         t,
+        confirmAction,
         iconSearch,
         setIconSearch,
         uploading,
@@ -172,7 +173,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
             <p className="text-xs font-bold text-ink">{t(childDef.labelKey)}</p>
             <button
               onClick={() => setSliderInnerSel((m) => ({ ...m, [el.id]: null }))}
-              className="text-[10px] font-semibold text-accent"
+              className="text-xs font-semibold text-accent"
             >
               {t("designer-slide-back")}
             </button>
@@ -183,7 +184,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                 <button
                   key={tab}
                   onClick={() => setInspectorTab(tab)}
-                  className={`flex-1 rounded-full py-1 text-[11px] font-semibold ${
+                  className={`flex-1 rounded-full py-1 text-sm font-semibold ${
                     inspectorTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
                   }`}
                 >
@@ -195,7 +196,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
           {(!childHasContent || inspectorTab === "style") && (
             <>
               <div className="space-y-1.5 rounded-lg border border-line/20 bg-canvas/40 p-2">
-                <div className="flex items-center justify-between text-[11px] font-medium text-body">
+                <div className="flex items-center justify-between text-sm font-medium text-body">
                   <span className="flex items-center gap-1.5">
                     <Move className="h-3.5 w-3.5" /> {t("designer-slide-free-position")}
                   </span>
@@ -282,7 +283,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                       }
                       childSetValues({ position: "custom", x, y, posWidth, posHeight });
                     }}
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                       childIsFree ? "bg-accent text-white" : "bg-white text-sub"
                     }`}
                   >
@@ -292,7 +293,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                 {childIsFree && (
                   <div className="grid grid-cols-2 gap-1.5">
                     {(["x", "y", "posWidth", "posHeight", "rotate"] as const).map((key) => (
-                      <label key={key} className="space-y-0.5 text-[10px] text-sub">
+                      <label key={key} className="space-y-0.5 text-xs text-sub">
                         <span className="inline-flex items-center gap-1">
                           {key === "x"
                             ? "X %"
@@ -302,7 +303,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                           <BpToggle active={bpKeysOverridden(childEl.bp, [key])} onToggle={() => childToggleOverride([key])} bp={bp} t={t} />
                         </span>
                         <BufferedInput
-                          className="w-full rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
+                          className="w-full rounded-lg border border-line/30 bg-white px-2 py-1 text-sm"
                           value={bpGetValue(childEl.props[key], childEl.bp, key)}
                           placeholder={key === "x" || key === "y" ? "50" : key === "rotate" ? "0" : "auto"}
                           onCommit={(v) => childSetValue(key, v)}
@@ -330,7 +331,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                             : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:zIndex`]: z });
                         })
                       }
-                      className="flex-1 rounded-lg border border-line/30 bg-white py-1 text-[10px] font-semibold text-body"
+                      className="flex-1 rounded-lg border border-line/30 bg-white py-1 text-xs font-semibold text-body"
                     >
                       {t("designer-slide-bring-front")}
                     </button>
@@ -351,7 +352,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                             : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:zIndex`]: z });
                         })
                       }
-                      className="flex-1 rounded-lg border border-line/30 bg-white py-1 text-[10px] font-semibold text-body"
+                      className="flex-1 rounded-lg border border-line/30 bg-white py-1 text-xs font-semibold text-body"
                     >
                       {t("designer-slide-send-back")}
                     </button>
@@ -371,13 +372,13 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                         }),
                       )
                     }
-                    className="w-full rounded-lg border border-dashed border-line/40 py-1 text-[10px] font-semibold text-accent"
+                    className="w-full rounded-lg border border-dashed border-line/40 py-1 text-xs font-semibold text-accent"
                   >
                     {t("designer-slide-copy-desktop-pos")}
                   </button>
                 )}
                 {childIsFree && (
-                  <p className="text-[10px] italic text-sub/70">{t("designer-align-inert-free")}</p>
+                  <p className="text-xs italic text-sub/70">{t("designer-align-inert-free")}</p>
                 )}
               </div>
               <BoxModel
@@ -489,6 +490,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
     toggleGroup,
     bp,
     t,
+    confirmAction,
     iconSearch,
     setIconSearch,
     uploading,
@@ -529,7 +531,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
             <button
               key={tab}
               onClick={() => setInspectorTab(tab)}
-              className={`flex-1 rounded-full py-1 text-[11px] font-semibold ${
+              className={`flex-1 rounded-full py-1 text-sm font-semibold ${
                 inspectorTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
               }`}
             >
@@ -603,7 +605,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         <button
           onClick={() => moveElement(b, r, c, e, -1)}
           disabled={e === 0}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
           aria-label={t("designer-move-element-up")}
           title={t("designer-move-element-up")}
         >
@@ -612,7 +614,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         <button
           onClick={() => moveElement(b, r, c, e, 1)}
           disabled={e === sp.rows[r].columns[c].elements.length - 1}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
           aria-label={t("designer-move-element-down")}
           title={t("designer-move-element-down")}
         >
@@ -620,25 +622,25 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         </button>
       </div>
       <div className="flex flex-wrap gap-3">
-        <button onClick={() => copyElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => copyElement(b, r, c, e)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
         </button>
         <button
           onClick={() => pasteElement(b, r, c, e)}
           disabled={!clipHas("element")}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
         >
           <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
         </button>
         {el.type !== "slider" && (
           <>
-            <button onClick={() => copyStyleElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+            <button onClick={() => copyStyleElement(b, r, c, e)} className="flex items-center gap-1 text-sm font-semibold text-accent">
               <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
             </button>
             <button
               onClick={() => pasteStyleElement(b, r, c, e)}
               disabled={!styleHas("element")}
-              className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+              className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
             >
               <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
             </button>
@@ -646,10 +648,10 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         )}
       </div>
       <div className="flex gap-3">
-        <button onClick={() => duplicateElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => duplicateElement(b, r, c, e)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
         </button>
-        <button onClick={() => deleteElement(b, r, c, e)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
+        <button onClick={() => deleteElement(b, r, c, e)} className="flex items-center gap-1 text-sm font-semibold text-red-500">
           <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
         </button>
       </div>

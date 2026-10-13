@@ -313,6 +313,9 @@ export const pagesCollection: CollectionConfig = {
         layout: (row.layout as unknown[]) ?? [],
         settings: (row.settings as Record<string, unknown>) ?? {},
         seo: (row.seo as Record<string, unknown>) ?? {},
+        translations: (row.translations as Record<string, unknown>) ?? {},
+        language: (row.language as string | null) ?? null,
+        multilangEnabled: Boolean(row.multilangEnabled),
         bannerImageUrl: row.bannerImageUrl as string | null,
         status: row.status as string,
         publishedAt: row.publishedAt as Date | null,
@@ -322,7 +325,12 @@ export const pagesCollection: CollectionConfig = {
       title: revision.title,
       layout: revision.layout,
       settings: revision.settings,
-      seo: revision.seo,
+      // Older revisions predate these snapshot columns. Preserve the current
+      // value for fields their historical row never captured.
+      seo: revision.seo ?? undefined,
+      translations: revision.translations ?? undefined,
+      language: revision.multilangEnabled == null ? undefined : revision.language,
+      multilangEnabled: revision.multilangEnabled ?? undefined,
       bannerImageUrl: revision.bannerImageUrl,
       // A pending unpublished draft was made against the version being
       // replaced — keeping it would make Designer reopen onto that stale

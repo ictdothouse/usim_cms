@@ -51,8 +51,8 @@ export interface LiveEditBridgeDeps {
   pageSlug: string;
   kind: "page" | "blueprint" | "siteChrome" | "symbol";
   dirty: boolean;
-  save: () => Promise<unknown>;
-  saveBlueprint: () => Promise<unknown>;
+  save: () => Promise<boolean>;
+  saveBlueprint: () => Promise<boolean>;
   setError: (msg: string | null) => void;
   // Skeleton-overlay flag shown during any iframe (re)load — Designer()'s
   // own residual UI state (see reloading's own comment there), set here.
@@ -151,7 +151,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   // data-designer-path attributes never activated, so clicks in Live Edit
   // silently did nothing.
   async function enterLive(cold = false) {
-    if (dirty) await (kind === "blueprint" ? saveBlueprint() : save());
+    if (dirty && !(await (kind === "blueprint" ? saveBlueprint() : save()))) return;
     const previewToken =
       kind === "blueprint"
         ? await api.getBlueprintPreviewToken(tenantHost, token, pageId)

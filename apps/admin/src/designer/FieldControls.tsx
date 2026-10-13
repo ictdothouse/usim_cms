@@ -161,7 +161,7 @@ export function NumberStepper({
   const n = Number(value) || 0;
   const round = (x: number) => Math.round(x * 100) / 100;
   return (
-    <label className="block text-[10px] font-medium text-sub">
+    <label className="block text-xs font-medium text-sub">
       {label}
       <div className="mt-0.5 flex items-center rounded-lg border border-line/30 bg-canvas">
         <button
@@ -176,7 +176,7 @@ export function NumberStepper({
           step={step}
           value={value}
           onCommit={onCommit}
-          className="w-full border-0 bg-transparent px-1 py-1 text-center text-[11px] outline-none"
+          className="w-full border-0 bg-transparent px-1 py-1 text-center text-sm outline-none"
         />
         <button type="button" onClick={() => onCommit(String(round(n + step)))} className="px-2 py-1 text-sub hover:text-ink">
           +
@@ -231,9 +231,9 @@ export function DragNumber({
         step={step}
         value={value}
         onCommit={onCommit}
-        className="w-14 shrink-0 rounded-lg border border-line/30 bg-canvas px-1 py-1 text-center text-[11px] outline-none focus:border-line"
+        className="w-14 shrink-0 rounded-lg border border-line/30 bg-canvas px-1 py-1 text-center text-sm outline-none focus:border-line"
       />
-      {unit && <span className="w-5 shrink-0 text-[10px] text-sub">{unit}</span>}
+      {unit && <span className="w-5 shrink-0 text-xs text-sub">{unit}</span>}
     </div>
   );
 }

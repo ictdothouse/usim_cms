@@ -77,6 +77,7 @@ export interface FieldInputProps {
   ) => void;
   bp: Bp;
   t: (k: Key) => string;
+  confirmAction?: (message: string) => Promise<boolean>;
   uploadImage: (file: File, setValue: (v: string) => void) => Promise<void>;
   openMediaPicker: (onSelect: (url: string) => void) => void;
   bpGetValue: (
@@ -113,6 +114,7 @@ export function FieldInput({
   setSliderInnerSel,
   bp,
   t,
+  confirmAction,
   uploadImage,
   openMediaPicker,
   bpGetValue,
@@ -145,6 +147,7 @@ export function FieldInput({
     setSliderInnerSel,
     bp,
     t,
+    confirmAction,
     uploadImage,
     openMediaPicker,
     bpGetValue,
@@ -249,7 +252,7 @@ export function FieldInput({
         {value && (
           <button
             onClick={() => onChange("")}
-            className="text-[10px] font-semibold text-sub hover:text-red-500"
+            className="text-xs font-semibold text-sub hover:text-red-500"
           >
             ✕
           </button>
@@ -261,7 +264,7 @@ export function FieldInput({
       <div className="space-y-1.5">
         <BufferedInput className={base} value={value} placeholder="https://" onCommit={onChange} />
         <div className="flex flex-wrap gap-1.5">
-          <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+          <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-ink hover:bg-[#e8e8ed]">
             {uploading ? t("designer-uploading") : t("designer-upload")}
             <input
               type="file"
@@ -276,7 +279,7 @@ export function FieldInput({
           <button
             type="button"
             onClick={() => openMediaPicker(onChange)}
-            className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+            className="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-ink hover:bg-[#e8e8ed]"
           >
             {t("designer-media-browse")}
           </button>
@@ -288,7 +291,7 @@ export function FieldInput({
             <button
               type="button"
               onClick={() => onChange(siteTheme.logoUrl!)}
-              className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+              className="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-ink hover:bg-[#e8e8ed]"
             >
               {t("designer-use-site-logo")}
             </button>
@@ -297,7 +300,7 @@ export function FieldInput({
             <button
               type="button"
               onClick={() => onChange(siteTheme.faviconUrl!)}
-              className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+              className="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-ink hover:bg-[#e8e8ed]"
             >
               {t("designer-use-site-favicon")}
             </button>
@@ -310,7 +313,7 @@ export function FieldInput({
     return (
       <div className="space-y-1.5">
         <BufferedInput className={base} value={value} placeholder="https://" onCommit={onChange} />
-        <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]">
+        <label className="inline-block cursor-pointer rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-ink hover:bg-[#e8e8ed]">
           {uploading ? t("designer-uploading") : t("designer-upload")}
           <input
             type="file"
@@ -419,7 +422,7 @@ export function FieldInput({
         />
         <div className="grid max-h-52 grid-cols-4 gap-1.5 overflow-y-auto rounded-lg border border-line/30 bg-canvas p-1.5">
           {options.length === 0 && (
-            <p className="col-span-4 py-2 text-center text-[10px] text-sub">{t("designer-icon-none")}</p>
+            <p className="col-span-4 py-2 text-center text-xs text-sub">{t("designer-icon-none")}</p>
           )}
           {options.map((name) => {
             const Icon = ICONS[name] ?? Check;
@@ -456,7 +459,7 @@ export function FieldInput({
               placeholder="https://"
               onCommit={(v) => setUrls(urls.map((x, j) => (j === i ? v : x)))}
             />
-            <label className="cursor-pointer text-[10px] font-semibold text-accent">
+            <label className="cursor-pointer text-xs font-semibold text-accent">
               {uploading ? t("designer-uploading") : t("designer-upload")}
               <input
                 type="file"
@@ -470,13 +473,13 @@ export function FieldInput({
             </label>
             <button
               onClick={() => setUrls(urls.filter((_, j) => j !== i))}
-              className="text-[10px] font-semibold text-red-500"
+              className="text-xs font-semibold text-red-500"
             >
               {t("designer-gallery-remove")}
             </button>
           </div>
         ))}
-        <button onClick={() => setUrls([...urls, ""])} className="text-[11px] font-semibold text-accent">
+        <button onClick={() => setUrls([...urls, ""])} className="text-sm font-semibold text-accent">
           {t("designer-gallery-add-image")}
         </button>
       </div>
@@ -495,10 +498,10 @@ export function FieldInput({
         {items.map((it, i) => (
           <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+              <span className="text-xs font-semibold text-sub">#{i + 1}</span>
               <button
                 onClick={() => setItems(items.filter((_, j) => j !== i))}
-                className="text-[10px] font-semibold text-red-500"
+                className="text-xs font-semibold text-red-500"
               >
                 {t("designer-gallery-remove")}
               </button>
@@ -520,7 +523,7 @@ export function FieldInput({
         ))}
         <button
           onClick={() => setItems([...items, { a: "", b: "" }])}
-          className="text-[11px] font-semibold text-accent"
+          className="text-sm font-semibold text-accent"
         >
           {t("designer-pairs-add")}
         </button>
@@ -535,10 +538,10 @@ export function FieldInput({
         {cards.map((c, i) => (
           <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+              <span className="text-xs font-semibold text-sub">#{i + 1}</span>
               <button
                 onClick={() => setCards(cards.filter((_, j) => j !== i))}
-                className="text-[10px] font-semibold text-red-500"
+                className="text-xs font-semibold text-red-500"
               >
                 {t("designer-gallery-remove")}
               </button>
@@ -576,7 +579,7 @@ export function FieldInput({
             />
           </div>
         ))}
-        <button onClick={() => setCards([...cards, { ...CARD_DEFAULTS }])} className="text-[11px] font-semibold text-accent">
+        <button onClick={() => setCards([...cards, { ...CARD_DEFAULTS }])} className="text-sm font-semibold text-accent">
           {t("designer-pairs-add")}
         </button>
       </div>
@@ -591,10 +594,10 @@ export function FieldInput({
         {items.map((it, i) => (
           <div key={i} className="space-y-1.5 rounded-lg border border-line/30 p-2">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-sub">#{i + 1}</span>
+              <span className="text-xs font-semibold text-sub">#{i + 1}</span>
               <button
                 onClick={() => setItems(items.filter((_, j) => j !== i))}
-                className="text-[10px] font-semibold text-red-500"
+                className="text-xs font-semibold text-red-500"
               >
                 {t("designer-gallery-remove")}
               </button>
@@ -607,7 +610,7 @@ export function FieldInput({
                   <div key={f.key} className="flex items-center gap-2">
                     {v && <img src={v} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />}
                     <BufferedInput className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />
-                    <label className="shrink-0 cursor-pointer text-[10px] font-semibold text-accent">
+                    <label className="shrink-0 cursor-pointer text-xs font-semibold text-accent">
                       {uploading ? t("designer-uploading") : t("designer-upload")}
                       <input
                         type="file"
@@ -635,7 +638,7 @@ export function FieldInput({
                 return (
                   <div key={f.key} className="flex items-center gap-2">
                     <BufferedInput className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />
-                    <label className="shrink-0 cursor-pointer text-[10px] font-semibold text-accent">
+                    <label className="shrink-0 cursor-pointer text-xs font-semibold text-accent">
                       {uploading ? t("designer-uploading") : t("designer-upload")}
                       <input
                         type="file"
@@ -688,7 +691,7 @@ export function FieldInput({
         ))}
         <button
           onClick={() => setItems([...items, Object.fromEntries(itemFields.map((f) => [f.key, ""]))])}
-          className="text-[11px] font-semibold text-accent"
+          className="text-sm font-semibold text-accent"
         >
           {t("designer-pairs-add")}
         </button>
@@ -738,23 +741,23 @@ export function FieldInput({
               onFocus={() => previewSlide(i)}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-sub">
+                <span className="text-xs font-semibold text-sub">
                   #{i + 1} {isPreviewing ? `· ${t("designer-slide-previewing")}` : ""}
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={() => { void (async () => {
                     // Unlike every other repeater's "Remove" (gallery image,
                     // pairs, cards — a single flat value), a slide can carry a
                     // whole nested row/column/element tree an author spent
                     // real time building — one misclick here loses more than
                     // Ctrl+Z's usual undo depth reliably covers, so this one
                     // gets a confirm the others don't need.
-                    if (!confirm(t("designer-slide-remove-confirm"))) return;
+                    if (!confirmAction || !(await confirmAction(t("designer-slide-remove-confirm")))) return;
                     setItems(items.filter((_, j) => j !== i));
                     clearInner();
-                  }}
-                  className="text-[10px] font-semibold text-red-500"
+                  })(); }}
+                  className="text-xs font-semibold text-red-500"
                 >
                   {t("designer-gallery-remove")}
                 </button>
@@ -767,7 +770,7 @@ export function FieldInput({
                   placeholder={t("designer-f-slider-image")}
                   onCommit={(v) => patchSlide(i, { imageUrl: v })}
                 />
-                <label className="shrink-0 cursor-pointer text-[10px] font-semibold text-accent">
+                <label className="shrink-0 cursor-pointer text-xs font-semibold text-accent">
                   {uploading ? t("designer-uploading") : t("designer-upload")}
                   <input
                     type="file"
@@ -782,13 +785,13 @@ export function FieldInput({
                 <button
                   type="button"
                   onClick={() => openMediaPicker((v) => patchSlide(i, { imageUrl: v }))}
-                  className="shrink-0 text-[10px] font-semibold text-accent"
+                  className="shrink-0 text-xs font-semibold text-accent"
                 >
                   {t("designer-media-browse")}
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <label className="flex w-fit items-center gap-1 text-[10px] text-sub" title={t("designer-f-slider-bgcolor")}>
+                <label className="flex w-fit items-center gap-1 text-xs text-sub" title={t("designer-f-slider-bgcolor")}>
                   <input
                     type="color"
                     value={s.bgColor || "#ffffff"}
@@ -830,7 +833,7 @@ export function FieldInput({
                 ))}
               </select>
               <div className="flex items-center gap-2">
-                <label className="flex w-fit items-center gap-1 text-[10px] text-sub">
+                <label className="flex w-fit items-center gap-1 text-xs text-sub">
                   <input
                     type="color"
                     value={s.overlayColor || "#000000"}
@@ -839,7 +842,7 @@ export function FieldInput({
                   />
                   {t("designer-f-slider-overlaycolor")}
                 </label>
-                <label className="flex flex-1 items-center gap-1 text-[10px] text-sub">
+                <label className="flex flex-1 items-center gap-1 text-xs text-sub">
                   {t("designer-f-slider-overlayopacity")}
                   <BufferedInput
                     type="number"
@@ -859,19 +862,19 @@ export function FieldInput({
               <div className="space-y-1 rounded-lg border border-line/20 p-1.5">
                 {s.rows.length === 0 ? (
                   <div className="space-y-1 px-1 py-2 text-center">
-                    <p className="text-[10px] italic text-sub">{t("designer-slide-empty")}</p>
+                    <p className="text-xs italic text-sub">{t("designer-slide-empty")}</p>
                     <div className="flex flex-wrap justify-center gap-2">
                       <button
                         type="button"
                         onClick={() => replaceSlide(i, applySlidePreset(s, "stack"))}
-                        className="rounded border border-accent/40 px-2 py-1 text-[10px] font-semibold text-accent"
+                        className="rounded border border-accent/40 px-2 py-1 text-xs font-semibold text-accent"
                       >
                         {t("designer-slide-preset-stack")}
                       </button>
                       <button
                         type="button"
                         onClick={() => replaceSlide(i, applySlidePreset(s, "split"))}
-                        className="rounded border border-accent/40 px-2 py-1 text-[10px] font-semibold text-accent"
+                        className="rounded border border-accent/40 px-2 py-1 text-xs font-semibold text-accent"
                       >
                         {t("designer-slide-preset-split")}
                       </button>
@@ -904,7 +907,7 @@ export function FieldInput({
                             <div
                               key={el.id}
                               onClick={() => selectInner(i, r, c, e)}
-                              className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[10px] ${
+                              className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-xs ${
                                 selected ? "bg-accent/10 text-accent" : "hover:bg-canvas"
                               }`}
                             >
@@ -944,7 +947,7 @@ export function FieldInput({
                           }),
                         )
                       }
-                      className="text-[10px] font-semibold text-accent"
+                      className="text-xs font-semibold text-accent"
                     >
                       {t(
                         t2 === "heading"
@@ -957,7 +960,7 @@ export function FieldInput({
                       )}
                     </button>
                   ))}
-                  <button onClick={() => replaceSlide(i, addSlideRow(s))} className="text-[10px] font-semibold text-accent">
+                  <button onClick={() => replaceSlide(i, addSlideRow(s))} className="text-xs font-semibold text-accent">
                     {t("designer-slide-add-row")}
                   </button>
                 </div>
@@ -965,7 +968,7 @@ export function FieldInput({
             </div>
           );
         })}
-        <button onClick={() => setItems([...items, newSlide()])} className="text-[11px] font-semibold text-accent">
+        <button onClick={() => setItems([...items, newSlide()])} className="text-sm font-semibold text-accent">
           {t("designer-slides-add")}
         </button>
       </div>
@@ -979,7 +982,7 @@ export function FieldInput({
         <button
           type="button"
           onClick={() => onChange(SHADOW_DEFAULT_PARTS.join("|"))}
-          className="w-full rounded-lg border border-dashed border-line/40 py-1.5 text-[11px] font-semibold text-accent"
+          className="w-full rounded-lg border border-dashed border-line/40 py-1.5 text-sm font-semibold text-accent"
         >
           {t("designer-shadow-add")}
         </button>
@@ -1024,7 +1027,7 @@ export function FieldInput({
         <button
           type="button"
           onClick={() => onChange("")}
-          className="text-[10px] font-semibold text-sub hover:text-red-500"
+          className="text-xs font-semibold text-sub hover:text-red-500"
         >
           {t("designer-shadow-remove")}
         </button>

@@ -60,7 +60,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
   return (
     <div className="space-y-3">
       <p className="text-xs font-bold text-ink">{t("designer-page-settings")}</p>
-      <label className="block text-[11px] font-medium text-body">
+      <label className="block text-sm font-medium text-body">
         {t("designer-page-gap")}
         <BufferedInput
           type="number"
@@ -70,22 +70,22 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
           className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
         />
       </label>
-      <label className="block text-[11px] font-medium text-body">
+      <label className="block text-sm font-medium text-body">
         {t("designer-page-content-width")}
         <select
           value={pageSettings.contentWidth ?? "contained"}
           onChange={(e) => setPageContentWidth(e.target.value === "full" ? "full" : undefined)}
           className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
         >
-          <option value="contained">contained</option>
-          <option value="full">full</option>
+          <option value="contained">{t("designer-page-content-contained")}</option>
+          <option value="full">{t("designer-page-content-full")}</option>
         </select>
       </label>
       {(pageSettings.contentWidth ?? "contained") !== "full" && (
         // Only meaningful once the page is boxed (desktop included) —
         // "full" width has no canvas backdrop to color at all (see
         // Designer.tsx's isCanvasMode).
-        <label className="block text-[11px] font-medium text-body">
+        <label className="block text-sm font-medium text-body">
           {t("designer-page-canvas-color")}
           <input
             type="color"
@@ -95,7 +95,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
           />
         </label>
       )}
-      <label className="block text-[11px] font-medium text-body">
+      <label className="block text-sm font-medium text-body">
         {t("designer-page-padding-x")}
         <BufferedInput
           type="number"
@@ -105,7 +105,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
           className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
         />
       </label>
-      <label className="block text-[11px] font-medium text-body">
+      <label className="block text-sm font-medium text-body">
         {t("designer-page-theme")}
         <select
           value={pageSettings.themePresetName ?? ""}
@@ -120,8 +120,8 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
       </label>
       {kind === "page" && (
         <div className="space-y-2 border-t border-line/30 pt-3">
-          <p className="text-[11px] font-bold text-ink">{t("header-footer-page-assignment")}</p>
-          <label className="block text-[11px] font-medium text-body">
+          <p className="text-sm font-bold text-ink">{t("header-footer-page-assignment")}</p>
+          <label className="block text-sm font-medium text-body">
             {t("designer-page-header")}
             <select
               value={pageHeaderId}
@@ -135,11 +135,11 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+          <label className="flex items-center gap-2 text-sm font-medium text-body">
             <input type="checkbox" checked={pageHideHeader} onChange={(e) => void patchPageChrome({ hideHeader: e.target.checked })} />
             {t("designer-page-hide-header")}
           </label>
-          <label className="block text-[11px] font-medium text-body">
+          <label className="block text-sm font-medium text-body">
             {t("designer-page-footer")}
             <select
               value={pageFooterId}
@@ -153,7 +153,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+          <label className="flex items-center gap-2 text-sm font-medium text-body">
             <input type="checkbox" checked={pageHideFooter} onChange={(e) => void patchPageChrome({ hideFooter: e.target.checked })} />
             {t("designer-page-hide-footer")}
           </label>
@@ -161,8 +161,8 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
       )}
       {siteMultilangEnabled && (
       <div className="space-y-1.5">
-        <label className="block text-[11px] font-medium text-body">{t("designer-page-language")}</label>
-        <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+        <label className="block text-sm font-medium text-body">{t("designer-page-language")}</label>
+        <label className="flex items-center gap-2 text-sm font-medium text-body">
           <input
             type="checkbox"
             checked={pageMultilangEnabled}
@@ -187,7 +187,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
                     disabled={isCurrent || translating}
                     onClick={() => clickPageLanguagePill(l.code)}
                     title={isBase ? t("posts-language-default-badge") : !pageLanguage || hasContent ? undefined : t("posts-translate-btn")}
-                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+                    className={`rounded-full px-2.5 py-1 text-sm font-semibold disabled:opacity-50 ${
                       isBase ? "ring-2 ring-amber-400 ring-offset-1" : ""
                     } ${
                       isCurrent
@@ -233,8 +233,8 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
       )}
       {kind === "page" && (
         <div className="space-y-2 border-t border-line/30 pt-3">
-          <p className="text-[11px] font-bold text-ink">{t("designer-page-seo-heading")}</p>
-          <label className="block text-[11px] font-medium text-body">
+          <p className="text-sm font-bold text-ink">{t("designer-page-seo-heading")}</p>
+          <label className="block text-sm font-medium text-body">
             {t("designer-page-seo-title")}
             <BufferedInput
               value={pageSeo.title ?? ""}
@@ -243,7 +243,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
               className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
             />
           </label>
-          <label className="block text-[11px] font-medium text-body">
+          <label className="block text-sm font-medium text-body">
             {t("designer-page-seo-description")}
             <textarea
               rows={3}
@@ -258,17 +258,17 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
             <button
               type="button"
               onClick={() => openMediaPicker((v) => setPageSeo({ ogImage: v }))}
-              className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink hover:bg-[#e8e8ed]"
+              className="rounded-full bg-canvas px-3 py-1 text-sm font-semibold text-ink hover:bg-[#e8e8ed]"
             >
               {t("designer-page-seo-ogimage")}
             </button>
             {pageSeo.ogImage && (
-              <button type="button" onClick={() => setPageSeo({ ogImage: undefined })} className="text-[11px] text-sub hover:text-ink">
+              <button type="button" onClick={() => setPageSeo({ ogImage: undefined })} className="text-sm text-sub hover:text-ink">
                 {t("designer-page-seo-ogimage-remove")}
               </button>
             )}
           </div>
-          <label className="block text-[11px] font-medium text-body">
+          <label className="block text-sm font-medium text-body">
             {t("designer-page-seo-canonical")}
             <BufferedInput
               value={pageSeo.canonicalUrl ?? ""}
@@ -276,7 +276,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
               className="mt-1 w-full rounded-md border border-line/30 px-2 py-1 text-xs"
             />
           </label>
-          <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+          <label className="flex items-center gap-2 text-sm font-medium text-body">
             <input type="checkbox" checked={pageSeo.noindex ?? false} onChange={(e) => setPageSeo({ noindex: e.target.checked || undefined })} />
             {t("designer-page-seo-noindex")}
           </label>
@@ -287,7 +287,7 @@ export function InspectorPageSettings({ ctx }: { ctx: DesignerCtx }) {
           />
         </div>
       )}
-      <p className="text-[10px] text-sub">{t("designer-none-selected")}</p>
+      <p className="text-xs text-sub">{t("designer-none-selected")}</p>
     </div>
   );
 }

@@ -51,7 +51,7 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
     if (sel.length >= 3) crumbs.push({ label: t("designer-column"), path: sel.slice(0, 3) });
     if (sel.length >= 4) crumbs.push({ label: t("designer-element"), path: sel.slice(0, 4) });
     return (
-      <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-sub">
+      <div className="flex flex-wrap items-center gap-1 text-sm font-medium text-sub">
         {crumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1">
             {i > 0 && <span className="text-line">/</span>}
@@ -88,7 +88,7 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
           })
         }
       />
-      <label className="block text-[11px] font-medium text-body">
+      <label className="block text-sm font-medium text-body">
         <span className="inline-flex items-center gap-1">
           {FieldLabel("designer-col-span", t)}: {bpGetValue(String(col.span), col.bp, "span")}
           <BpToggle
@@ -222,7 +222,7 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
         <button
           onClick={() => nudgeColumn(b, r, c, -1)}
           disabled={c === 0}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
           aria-label={t("designer-move-column-up")}
           title={t("designer-move-column-up")}
         >
@@ -231,7 +231,7 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
         <button
           onClick={() => nudgeColumn(b, r, c, 1)}
           disabled={c === sp.rows[r].columns.length - 1}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
           aria-label={t("designer-move-column-down")}
           title={t("designer-move-column-down")}
         >
@@ -239,34 +239,34 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
         </button>
       </div>
       <div className="flex gap-3">
-        <button onClick={() => copyColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => copyColumn(b, r, c)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
         </button>
         <button
           onClick={() => pasteColumn(b, r, c)}
           disabled={!clipHas("column")}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
         >
           <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
         </button>
-        <button onClick={() => copyStyleColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => copyStyleColumn(b, r, c)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
         </button>
         <button
           onClick={() => pasteStyleColumn(b, r, c)}
           disabled={!styleHas("column")}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
         >
           <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
         </button>
       </div>
       <button
         onClick={() => saveAsTemplate([b, r, c])}
-        className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+        className="flex items-center gap-1 text-sm font-semibold text-accent"
       >
         <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
       </button>
-      <button onClick={() => deleteColumn(b, r, c)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
+      <button onClick={() => deleteColumn(b, r, c)} className="flex items-center gap-1 text-sm font-semibold text-red-500">
         <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
       </button>
       </div>

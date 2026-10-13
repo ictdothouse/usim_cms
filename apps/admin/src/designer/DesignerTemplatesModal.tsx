@@ -13,6 +13,7 @@ import type * as api from "@/lib/api";
 import type { Key } from "@/i18n";
 import { TemplatePreview } from "./TemplatePreview";
 import type { useTemplateLibrary } from "./hooks/useTemplateLibrary";
+import { DesignerDialog } from "./DesignerDialog";
 
 export type DesignerTemplatesModalProps = ReturnType<typeof useTemplateLibrary> & {
   t: (k: Key) => string;
@@ -27,8 +28,8 @@ export type DesignerTemplatesModalProps = ReturnType<typeof useTemplateLibrary> 
 export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
   const {
     t, isSuper, availableSymbols,
-    showTemplates, setShowTemplates, templates, templatesBusy,
-    templateKind, saveAsTemplate, confirmSaveTemplate, insertTemplate, deleteTemplateHandler,
+    showTemplates, setShowTemplates, templates, templatesBusy, templatesLoading, templatesLoadError,
+    openTemplates, templateKind, saveAsTemplate, confirmSaveTemplate, insertTemplate, deleteTemplateHandler,
     templateFilter, setTemplateFilter, templateSearch, setTemplateSearch, templateKindLabel, templateRows,
     pendingTemplate, setPendingTemplate, templateName, setTemplateName,
     pendingSymbolEl, setPendingSymbolEl, symbolName, setSymbolName, symbolsBusy,
@@ -50,9 +51,9 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
             return true;
           });
           return (
-            <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
-              onClick={() => {
+            <DesignerDialog
+              title={t("designer-templates")}
+              onClose={() => {
                 setShowTemplates(false);
                 setPendingTemplate(null);
                 setPendingSymbolEl(null);
@@ -63,11 +64,12 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                 onClick={(ev) => ev.stopPropagation()}
               >
                 <div className="mb-3 flex items-center justify-between">
-                  <p className="text-xs font-bold text-ink">{t("designer-templates")}</p>
+                  <p className="text-sm font-bold text-ink">{t("designer-templates")}</p>
                   <button
                     onClick={() => {
                       setShowTemplates(false);
                       setPendingTemplate(null);
+                      setPendingSymbolEl(null);
                     }}
                     className="text-body hover:text-ink"
                     aria-label={t("designer-close")}
@@ -89,12 +91,12 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                       value={symbolName}
                       onChange={(ev) => setSymbolName(ev.target.value)}
                       placeholder={t("designer-symbols-make-prompt")}
-                      className="min-w-0 flex-1 rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                      className="min-w-0 flex-1 rounded-full border border-line/30 px-3 py-1.5 text-sm outline-none focus:border-accent"
                     />
                     <button
                       type="submit"
                       disabled={!symbolName.trim() || symbolsBusy}
-                      className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                      className="rounded-full bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
                     >
                       {t("designer-symbols-make")}
                     </button>
@@ -121,12 +123,12 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                       value={templateName}
                       onChange={(ev) => setTemplateName(ev.target.value)}
                       placeholder={t("designer-templates-save-prompt")}
-                      className="min-w-0 flex-1 rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                      className="min-w-0 flex-1 rounded-full border border-line/30 px-3 py-1.5 text-sm outline-none focus:border-accent"
                     />
                     <button
                       type="submit"
                       disabled={!templateName.trim() || templatesBusy}
-                      className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                      className="rounded-full bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
                     >
                       {t("designer-templates-save")}
                     </button>
@@ -144,30 +146,37 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                   <button
                     onClick={() => saveAsTemplate()}
                     disabled={!templateKind() || templatesBusy}
-                    className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-xs font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
+                    className="mb-3 flex w-full items-center justify-center gap-1 rounded-full bg-canvas px-3 py-2 text-sm font-semibold text-ink hover:bg-[#e8e8ed] disabled:opacity-40"
                   >
                     <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates-save")}
                   </button>
                 )}
                 {!pendingTemplate && !templateKind() && !templatesBusy && (
-                  <p className="-mt-2 mb-3 text-[10px] text-sub">{t("designer-templates-need-selection")}</p>
+                  <p className="-mt-2 mb-3 text-sm text-sub">{t("designer-templates-need-selection")}</p>
                 )}
-                {templates.length === 0 ? (
-                  <p className="text-xs text-sub">{t("designer-templates-empty")}</p>
+                {templatesLoading ? (
+                  <p role="status" className="text-sm text-sub">{t("list-loading")}</p>
+                ) : templatesLoadError ? (
+                  <div role="alert" className="flex items-center gap-3 text-sm text-red-700">
+                    <span>{templatesLoadError}</span>
+                    <button type="button" onClick={() => void openTemplates()} className="font-semibold underline">{t("list-retry")}</button>
+                  </div>
+                ) : templates.length === 0 ? (
+                  <p className="text-sm text-sub">{t("designer-templates-empty")}</p>
                 ) : (
                   <>
                     <input
                       value={templateSearch}
                       onChange={(ev) => setTemplateSearch(ev.target.value)}
                       placeholder={t("designer-templates-search-placeholder")}
-                      className="mb-2 w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                      className="mb-2 w-full rounded-full border border-line/30 px-3 py-1.5 text-sm outline-none focus:border-accent"
                     />
                     <div className="mb-3 flex flex-wrap gap-1.5">
                       {(["all", "section", "row", "column", "element"] as const).map((k) => (
                         <button
                           key={k}
                           onClick={() => setTemplateFilter(k)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                          className={`rounded-full px-2.5 py-1 text-sm font-semibold ${
                             templateFilter === k ? "bg-accent text-white" : "bg-canvas text-body hover:bg-[#e8e8ed]"
                           }`}
                         >
@@ -177,21 +186,21 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto">
                       {filteredTemplates.length === 0 ? (
-                        <p className="text-xs text-sub">{t("designer-templates-no-match")}</p>
+                        <p className="text-sm text-sub">{t("designer-templates-no-match")}</p>
                       ) : (
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
                           {filteredTemplates.map((tpl) => {
                             const kind = (tpl.data?.kind as string | undefined) ?? "section";
                             return (
                               <div key={tpl.id} className="flex flex-col gap-1.5 rounded-lg border border-line/30 p-2">
                                 <TemplatePreview rows={templateRows(tpl)} />
-                                <span className="truncate text-[11px] font-medium text-ink" title={tpl.name}>
+                                <span className="truncate text-sm font-medium text-ink" title={tpl.name}>
                                   {tpl.name}
                                 </span>
                                 <div className="flex items-center justify-between">
-                                  <span className="text-[10px] text-sub">{templateKindLabel(kind)}</span>
+                                  <span className="text-sm text-sub">{templateKindLabel(kind)}</span>
                                   <span className="flex items-center gap-2">
-                                    <button onClick={() => insertTemplate(tpl)} className="text-[11px] font-semibold text-accent">
+                                    <button onClick={() => insertTemplate(tpl)} className="text-sm font-semibold text-accent">
                                       {t("designer-templates-insert")}
                                     </button>
                                     <button
@@ -213,18 +222,18 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                   </>
                 )}
                 <div className="mt-4 border-t border-line/20 pt-3">
-                  <p className="mb-2 text-xs font-bold text-ink">{t("designer-symbols-title")}</p>
+                  <p className="mb-2 text-sm font-bold text-ink">{t("designer-symbols-title")}</p>
                   {availableSymbols.length === 0 ? (
-                    <p className="text-xs text-sub">{t("designer-symbols-empty")}</p>
+                    <p className="text-sm text-sub">{t("designer-symbols-empty")}</p>
                   ) : (
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
                       {availableSymbols.map((sym) => (
                         <div key={sym.id} className="flex flex-col gap-1.5 rounded-lg border border-line/30 p-2">
-                          <span className="truncate text-[11px] font-medium text-ink" title={sym.name}>
+                          <span className="truncate text-sm font-medium text-ink" title={sym.name}>
                             {sym.name}
                           </span>
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => insertSymbol(sym)} className="text-[11px] font-semibold text-accent">
+                            <button onClick={() => insertSymbol(sym)} className="text-sm font-semibold text-accent">
                               {t("designer-templates-insert")}
                             </button>
                             <button
@@ -242,15 +251,15 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                   )}
                 </div>
               </div>
-            </div>
+            </DesignerDialog>
           );
         })()}
 
       {showSaveBlueprint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowSaveBlueprint(false)}>
+        <DesignerDialog title={t("blueprints-save-as")} onClose={() => setShowSaveBlueprint(false)}>
           <div className="w-[min(90vw,28rem)] rounded-xl bg-white p-4 shadow-xl" onClick={(ev) => ev.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-bold text-ink">{t("blueprints-save-as")}</p>
+              <p className="text-sm font-bold text-ink">{t("blueprints-save-as")}</p>
               <button onClick={() => setShowSaveBlueprint(false)} aria-label={t("designer-close")}>
                 <X className="h-4 w-4" />
               </button>
@@ -267,25 +276,25 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
                 value={blueprintName}
                 onChange={(ev) => setBlueprintName(ev.target.value)}
                 placeholder={t("blueprints-name-placeholder")}
-                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
               <input
                 value={blueprintDescription}
                 onChange={(ev) => setBlueprintDescription(ev.target.value)}
                 placeholder={t("blueprints-description-placeholder")}
-                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
               <input
                 value={blueprintCategory}
                 onChange={(ev) => setBlueprintCategory(ev.target.value)}
                 placeholder={t("blueprints-category-placeholder")}
-                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs outline-none focus:border-accent"
+                className="w-full rounded-full border border-line/30 px-3 py-1.5 text-sm outline-none focus:border-accent"
               />
               {isSuper && (
                 <select
                   value={blueprintScope}
                   onChange={(ev) => setBlueprintScope(ev.target.value as "system" | "tenant")}
-                  className="w-full rounded-full border border-line/30 px-3 py-1.5 text-xs"
+                  className="w-full rounded-full border border-line/30 px-3 py-1.5 text-sm"
                 >
                   <option value="tenant">{t("blueprints-scope-tenant")}</option>
                   <option value="system">{t("blueprints-scope-system")}</option>
@@ -294,13 +303,13 @@ export function DesignerTemplatesModal(props: DesignerTemplatesModalProps) {
               <button
                 type="submit"
                 disabled={!blueprintName.trim() || blueprintBusy}
-                className="w-full rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                className="w-full rounded-full bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
               >
                 {t("blueprints-save-as")}
               </button>
             </form>
           </div>
-        </div>
+        </DesignerDialog>
       )}
     </>
   );

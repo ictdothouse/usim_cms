@@ -25,6 +25,7 @@ export interface TemplateLibraryDeps {
   bumpStructural: () => void;
   isSectionLocked: (b: number) => boolean;
   t: (k: Key) => string;
+  confirmAction: (message: string) => Promise<boolean>;
   tenantHost: string;
   token: string;
   pageSettings: PageSettings;
@@ -34,11 +35,13 @@ export interface TemplateLibraryDeps {
 }
 
 export function useTemplateLibrary(deps: TemplateLibraryDeps) {
-  const { blocks, mutate, sel, bumpStructural, isSectionLocked, t, tenantHost, token, pageSettings, availableSymbols, setAvailableSymbols, setError } = deps;
+  const { blocks, mutate, sel, bumpStructural, isSectionLocked, t, confirmAction, tenantHost, token, pageSettings, availableSymbols, setAvailableSymbols, setError } = deps;
 
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<api.DesignTemplate[]>([]);
   const [templatesBusy, setTemplatesBusy] = useState(false);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesLoadError, setTemplatesLoadError] = useState<string | null>(null);
   // Naming step for "Save as template" — an in-app field, not window.prompt():
   // Chrome/Firefox silently suppress repeated JS dialogs in one tab ("prevent
   // this page from creating additional dialogs"), after which prompt() just
@@ -63,12 +66,16 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
   async function openTemplates() {
     setShowTemplates(true);
     setTemplatesBusy(true);
+    setTemplatesLoading(true);
+    setTemplatesLoadError(null);
     try {
       setTemplates(await api.listTemplates(tenantHost, token));
     } catch (err) {
+      setTemplatesLoadError((err as Error).message);
       setError((err as Error).message);
     } finally {
       setTemplatesBusy(false);
+      setTemplatesLoading(false);
     }
   }
 
@@ -122,6 +129,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
     try {
       await api.createTemplate(tenantHost, token, name, pendingTemplate as unknown as Record<string, unknown>);
       setTemplates(await api.listTemplates(tenantHost, token));
+      setTemplatesLoadError(null);
       setPendingTemplate(null);
       setTemplateName("");
     } catch (err) {
@@ -172,7 +180,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
   // just a thin reference (see the symbols table's own comment for why).
   function insertSymbol(sym: api.Symbol) {
     if (!sel || sel.length < 3) {
-      alert(t("designer-templates-need-column"));
+      toast.error(t("designer-templates-need-column"));
       return;
     }
     const [b, r, c] = sel;
@@ -186,7 +194,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
   }
 
   async function deleteSymbolHandler(id: string) {
-    if (!confirm(t("designer-symbols-delete-confirm"))) return;
+    if (!(await confirmAction(t("designer-symbols-delete-confirm")))) return;
     await api.deleteSymbol(tenantHost, token, id);
     setAvailableSymbols(await api.listSymbols(tenantHost, token));
   }
@@ -234,7 +242,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
     const value = kind ? tpl.data.value : tpl.data;
     if (kind === "row") {
       if (!sel || sel.length < 1) {
-        alert(t("designer-templates-need-column"));
+        toast.error(t("designer-templates-need-column"));
         return;
       }
       const b = sel[0];
@@ -246,7 +254,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
       mutate((bs) => section(bs, b).rows.splice(index, 0, clone(value) as Row));
     } else if (kind === "column" || kind === "element") {
       if (!sel || sel.length < 3) {
-        alert(t("designer-templates-need-column"));
+        toast.error(t("designer-templates-need-column"));
         return;
       }
       const [b, r, c, e] = sel;
@@ -268,7 +276,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
   }
 
   async function deleteTemplateHandler(id: string) {
-    if (!confirm(t("designer-templates-delete-confirm"))) return;
+    if (!(await confirmAction(t("designer-templates-delete-confirm")))) return;
     try {
       await api.deleteTemplate(tenantHost, token, id);
       setTemplates((ts) => ts.filter((x) => x.id !== id));
@@ -304,7 +312,7 @@ export function useTemplateLibrary(deps: TemplateLibraryDeps) {
   }
 
   return {
-    showTemplates, setShowTemplates, templates, templatesBusy,
+    showTemplates, setShowTemplates, templates, templatesBusy, templatesLoading, templatesLoadError,
     openTemplates, templateKind, saveAsTemplate, confirmSaveTemplate, insertTemplate, deleteTemplateHandler,
     templateFilter, setTemplateFilter, templateSearch, setTemplateSearch, templateKindLabel, templateRows,
     pendingTemplate, setPendingTemplate, templateName, setTemplateName,

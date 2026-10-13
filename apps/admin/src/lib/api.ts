@@ -505,6 +505,10 @@ export interface PageRevision {
   title: string;
   layout: unknown[];
   settings: Record<string, unknown>;
+  seo?: Record<string, unknown> | null;
+  translations?: Record<string, unknown> | null;
+  language?: string | null;
+  multilangEnabled?: boolean | null;
   bannerImageUrl: string | null;
   status: string;
   publishedAt: string | null;

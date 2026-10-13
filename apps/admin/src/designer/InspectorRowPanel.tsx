@@ -47,7 +47,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
     if (sel.length >= 3) crumbs.push({ label: t("designer-column"), path: sel.slice(0, 3) });
     if (sel.length >= 4) crumbs.push({ label: t("designer-element"), path: sel.slice(0, 4) });
     return (
-      <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-sub">
+      <div className="flex flex-wrap items-center gap-1 text-sm font-medium text-sub">
         {crumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1">
             {i > 0 && <span className="text-line">/</span>}
@@ -84,7 +84,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
         set={(k, v) => setRowSide(k, v ? "true" : "")}
       />
       <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-sub">{t("designer-row-layout")}</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-sub">{t("designer-row-layout")}</p>
         <FlexIconGroup
           value={row.layoutMode === "flex" ? "flex" : "grid"}
           onChange={(v) => setRowSide("layoutMode", v)}
@@ -95,7 +95,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
         />
         {row.layoutMode === "flex" && (
           <>
-            <label className="block text-[11px] font-medium text-body">
+            <label className="block text-sm font-medium text-body">
               <span className="inline-flex items-center gap-1">
                 {t("designer-row-direction")}
                 <BpToggle
@@ -129,7 +129,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
                 />
               </div>
             </label>
-            <label className="block text-[11px] font-medium text-body">
+            <label className="block text-sm font-medium text-body">
               {t("designer-row-justify")}
               <div className="mt-1">
                 <FlexIconGroup
@@ -145,7 +145,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
                 />
               </div>
             </label>
-            <label className="block text-[11px] font-medium text-body">
+            <label className="block text-sm font-medium text-body">
               {t("designer-row-align")}
               <div className="mt-1">
                 <FlexIconGroup
@@ -160,7 +160,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
                 />
               </div>
             </label>
-            <label className="block text-[11px] font-medium text-body">
+            <label className="block text-sm font-medium text-body">
               {t("designer-row-wrap")}
               <div className="mt-1 flex gap-1">
                 {(["nowrap", "wrap"] as const).map((w) => (
@@ -168,7 +168,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
                     key={w}
                     type="button"
                     onClick={() => setRowSide("flexWrap", w)}
-                    className={`flex-1 rounded-lg border px-2 py-1 text-[11px] font-medium ${
+                    className={`flex-1 rounded-lg border px-2 py-1 text-sm font-medium ${
                       (row.flexWrap ?? "wrap") === w
                         ? "border-accent bg-accent/10 text-accent"
                         : "border-line/30 text-sub hover:border-accent/40"
@@ -182,7 +182,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
           </>
         )}
       </div>
-      <label className="block text-[11px] font-medium text-body">
+      <label className="block text-sm font-medium text-body">
         {t("designer-row-gap")}
         <BufferedInput
           type="number"
@@ -218,7 +218,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
         <button
           onClick={() => moveRow(b, r, -1)}
           disabled={r === 0}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
           aria-label={t("designer-move-row-up")}
           title={t("designer-move-row-up")}
         >
@@ -227,7 +227,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
         <button
           onClick={() => moveRow(b, r, 1)}
           disabled={r === sp.rows.length - 1}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
           aria-label={t("designer-move-row-down")}
           title={t("designer-move-row-down")}
         >
@@ -235,33 +235,33 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
         </button>
       </div>
       <div className="flex gap-3">
-        <button onClick={() => duplicateRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => duplicateRow(b, r)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
         </button>
-        <button onClick={() => copyRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => copyRow(b, r)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Clipboard className="h-3.5 w-3.5" /> {t("designer-copy")}
         </button>
         <button
           onClick={() => pasteRow(b, r)}
           disabled={!clipHas("row")}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
         >
           <ClipboardPaste className="h-3.5 w-3.5" /> {t("designer-paste")}
         </button>
       </div>
       <div className="flex gap-3">
-        <button onClick={() => copyStyleRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-accent">
+        <button onClick={() => copyStyleRow(b, r)} className="flex items-center gap-1 text-sm font-semibold text-accent">
           <Paintbrush className="h-3.5 w-3.5" /> {t("designer-copy-style")}
         </button>
         <button
           onClick={() => pasteStyleRow(b, r)}
           disabled={!styleHas("row")}
-          className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+          className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
         >
           <Paintbrush className="h-3.5 w-3.5 opacity-50" /> {t("designer-paste-style")}
         </button>
       </div>
-      <button onClick={() => deleteRow(b, r)} className="flex items-center gap-1 text-[11px] font-semibold text-red-500">
+      <button onClick={() => deleteRow(b, r)} className="flex items-center gap-1 text-sm font-semibold text-red-500">
         <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete-row")}
       </button>
       </div>

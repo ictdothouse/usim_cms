@@ -87,6 +87,31 @@ export function usePageAndLanguage(deps: PageAndLanguageDeps) {
   const [activeLang, setActiveLang] = useState(BASE_LANG);
   const [translating, setTranslating] = useState(false);
 
+  // A revision restore replaces the whole editable document, including SEO
+  // and language state. Keep this separate from normal setters that mark an
+  // author edit dirty; the restored row is already saved as a draft by API.
+  function loadRestoredPage(restored: Record<string, unknown>) {
+    const layout = clone((restored.layout as Block[] | undefined) ?? []);
+    const raw = (restored.translations as Record<string, { layout?: Block[]; overrides?: Record<string, Record<string, string>> }> | null) ?? {};
+    const overrides: Record<string, Record<string, Record<string, string>>> = {};
+    for (const [code, value] of Object.entries(raw)) {
+      if (value?.overrides) overrides[code] = value.overrides;
+      else if (value?.layout) overrides[code] = migrateOldTranslation(layout, value.layout);
+    }
+    const settings = (restored.settings as PageSettings) ?? {};
+    const seo = (restored.seo as Seo) ?? {};
+    const language = (restored.language as string | null) ?? "";
+    const multilangEnabled = Boolean(restored.multilangEnabled);
+    setPageSettings(settings);
+    setPageSeoState(seo);
+    setPageLanguage(language);
+    setPageMultilangEnabled(multilangEnabled);
+    setLangOverrides(overrides);
+    setActiveLang(BASE_LANG);
+    setSel(null);
+    return { pageSettings: settings, pageSeo: seo, pageLanguage: language, pageMultilangEnabled: multilangEnabled, langOverrides: overrides };
+  }
+
   // The canvas/Inspector's actual driving view: the shared base tree
   // (rawBlocks) as-is while editing the default language, or that same tree
   // with the active language's own overrides layered on top otherwise.
@@ -366,7 +391,7 @@ export function usePageAndLanguage(deps: PageAndLanguageDeps) {
   return {
     blocks,
     pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
-    pageSeo, setPageSeo,
+    pageSeo, setPageSeo, loadRestoredPage,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
     siteLanguages, pageLanguage, setPageLanguage,
     activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,

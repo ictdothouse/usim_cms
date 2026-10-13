@@ -26,7 +26,13 @@ export interface PersistDeps {
   rawBlocks: Block[];
   setRawBlocksDirectly: (next: Block[]) => void;
   pageSettings: PageSettings;
-  setPageSettings: (s: PageSettings) => void;
+  loadRestoredPage: (restored: Record<string, unknown>) => {
+    pageSettings: PageSettings;
+    pageSeo: Seo;
+    pageLanguage: string;
+    pageMultilangEnabled: boolean;
+    langOverrides: Record<string, Record<string, Record<string, string>>>;
+  };
   pageSeo: Seo;
   pageLanguage: string;
   pageMultilangEnabled: boolean;
@@ -45,16 +51,17 @@ export interface PersistDeps {
   previewModal: PreviewModalState;
   setPreviewModal: Dispatch<SetStateAction<PreviewModalState>>;
   t: (k: Key) => string;
+  confirmAction: (message: string) => Promise<boolean>;
 }
 
 export function usePersist(deps: PersistDeps) {
   const {
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
-    rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings, pageSeo,
+    rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny, setMsg,
-    previewModal, setPreviewModal, t,
+    previewModal, setPreviewModal, t, confirmAction,
   } = deps;
 
   // Latest-render mirror of the editable state — a save captures what it
@@ -109,6 +116,7 @@ export function usePersist(deps: PersistDeps) {
   const [showHistory, setShowHistory] = useState(false);
   const [revisions, setRevisions] = useState<api.PageRevision[]>([]);
   const [revisionsLoaded, setRevisionsLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
 
   // Quick-create (App.tsx's PagesPanel) only auto-derives the slug up
@@ -179,8 +187,10 @@ export function usePersist(deps: PersistDeps) {
         markSaved();
         setMsg(status ? t("designer-published") : t("designer-saved"));
         setTimeout(() => setMsg(null), 2500);
+        return true;
       } catch (err) {
         setError((err as Error).message);
+        return false;
       } finally {
         setBusy(false);
       }
@@ -206,8 +216,10 @@ export function usePersist(deps: PersistDeps) {
         if (unchangedSince(sent)) setDirty(false);
         setSavedAny(true);
         markSaved();
+        return true;
       } catch (err) {
         setError((err as Error).message);
+        return false;
       } finally {
         setBusy(false);
       }
@@ -216,13 +228,13 @@ export function usePersist(deps: PersistDeps) {
 
   async function loadHistory() {
     setShowHistory(true);
-    if (revisionsLoaded) return;
+    if (revisionsLoaded && !historyError) return;
+    setHistoryError(null);
     try {
       setRevisions(await api.listPageRevisions(tenantHost, token, page.id as string));
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
       setRevisionsLoaded(true);
+    } catch (err) {
+      setHistoryError((err as Error).message);
     }
   }
 
@@ -231,29 +243,43 @@ export function usePersist(deps: PersistDeps) {
   // from the restored row so the canvas reflects it immediately, same as
   // PostEditorPage's bodyVersion-bump reload after a post restore.
   async function restoreRevision(revisionId: string) {
-    if (!confirm(t("designer-restore-confirm"))) return;
+    if (!(await confirmAction(t("designer-restore-confirm")))) return;
     setRestoring(true);
     setError(null);
     try {
-      const restored = await api.restorePageRevision(tenantHost, token, page.id as string, revisionId);
-      setRawBlocksDirectly(clone((restored.layout as Block[] | undefined) ?? []));
-      setPageSettings((restored.settings as PageSettings) ?? {});
-      page.status = restored.status as string;
-      (page as { layout?: unknown }).layout = restored.layout;
-      (page as { settings?: unknown }).settings = restored.settings;
-      (page as { bannerImageUrl?: unknown }).bannerImageUrl = restored.bannerImageUrl;
-      // apps/api's restore also clears pages.draft (see pagesCollection's
-      // revisions.restore) — mirror it so the badge/Update state agrees.
-      page.draft = null;
-      setHasDraft(false);
-      setDirty(false);
-      setShowHistory(false);
-      setMsg(t("designer-saved"));
-      setTimeout(() => setMsg(null), 2500);
+      await queued(async () => {
+        setBusy(true);
+        const restored = await api.restorePageRevision(tenantHost, token, page.id as string, revisionId);
+        const nextBlocks = clone((restored.layout as Block[] | undefined) ?? []);
+        const restoredState = loadRestoredPage(restored);
+        // A save already queued behind this restore must read the restored
+        // document even before React has rendered the new state.
+        latest.current = { rawBlocks: nextBlocks, ...restoredState };
+        setRawBlocksDirectly(nextBlocks);
+        (page as { title?: unknown }).title = restored.title;
+        (page as { seo?: unknown }).seo = restored.seo;
+        (page as { translations?: unknown }).translations = restored.translations;
+        (page as { language?: unknown }).language = restored.language;
+        (page as { multilangEnabled?: unknown }).multilangEnabled = restored.multilangEnabled;
+        page.status = restored.status as string;
+        (page as { layout?: unknown }).layout = restored.layout;
+        (page as { settings?: unknown }).settings = restored.settings;
+        (page as { bannerImageUrl?: unknown }).bannerImageUrl = restored.bannerImageUrl;
+        // apps/api's restore also clears pages.draft (see pagesCollection's
+        // revisions.restore) — mirror it so the badge/Update state agrees.
+        page.draft = null;
+        setHasDraft(false);
+        setDirty(false);
+        markSaved();
+        setShowHistory(false);
+        setMsg(t("designer-saved"));
+        setTimeout(() => setMsg(null), 2500);
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setRestoring(false);
+      setBusy(false);
     }
   }
 
@@ -275,8 +301,10 @@ export function usePersist(deps: PersistDeps) {
         markSaved();
         setMsg(t("designer-saved"));
         setTimeout(() => setMsg(null), 2500);
+        return true;
       } catch (err) {
         setError((err as Error).message);
+        return false;
       } finally {
         setBusy(false);
       }
@@ -289,22 +317,27 @@ export function usePersist(deps: PersistDeps) {
   // PATCHing, since that's all `symbols.node` actually stores. Live (no
   // sync/propagate step needed): every page instance resolves this same row
   // at render time, see ElPreview.tsx/SectionBlock.astro's "symbol" case.
-  async function saveSymbol() {
+  function saveSymbol() {
+    return queued(async () => {
+    const sent = latest.current;
     setBusy(true);
     setError(null);
     try {
-      const wrapped = rawBlocks[0] as unknown as { props: SectionProps };
+      const wrapped = sent.rawBlocks[0] as unknown as { props: SectionProps };
       const node = wrapped.props.rows[0].columns[0].elements[0];
       await api.updateSymbol(tenantHost, token, page.id as string, { node: node as unknown as Record<string, unknown> });
-      setDirty(false);
+      if (unchangedSince(sent)) setDirty(false);
       setSavedAny(true);
       setMsg(t("designer-saved"));
       setTimeout(() => setMsg(null), 2500);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
+    });
   }
 
   // Header/Footer's own save path — same shape as saveBlueprint, just the
@@ -312,24 +345,29 @@ export function usePersist(deps: PersistDeps) {
   // edited via the small standalone panel below the canvas (immediate PATCH
   // through api.updateSiteChrome, same pattern the Header & Footer list's
   // own "Set default" star already uses) — not part of this dirty/Save flow.
-  async function saveSiteChrome(status?: "draft" | "published") {
+  function saveSiteChrome(status?: "draft" | "published") {
+    return queued(async () => {
+    const sent = latest.current;
     setBusy(true);
     setError(null);
     try {
       await api.updateSiteChrome(tenantHost, token, page.id as string, {
-        layout: clone(rawBlocks),
+        layout: clone(sent.rawBlocks),
         ...(status ? { status } : {}),
       });
       if (status) setChromeStatus(status);
-      setDirty(false);
+      if (unchangedSince(sent)) setDirty(false);
       setSavedAny(true);
       setMsg(status === "published" ? t("designer-published") : status === "draft" ? t("header-footer-unpublished") : t("designer-saved"));
       setTimeout(() => setMsg(null), 2500);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
+    });
   }
 
   // `translations` payload shape save()/saveDraft() PATCH.
@@ -393,7 +431,7 @@ export function usePersist(deps: PersistDeps) {
         tick: savedTickRef.current,
       };
     }
-    if (dirtyRef.current) await autosave();
+    if (dirtyRef.current && !(await autosave())) throw new Error(t("designer-preview-save-failed"));
     const tick = savedTickRef.current;
     const previewToken =
       kind === "blueprint"
@@ -441,10 +479,8 @@ export function usePersist(deps: PersistDeps) {
             lastMintedTick.current = tick;
             setPreviewModal((m) => (m ? { ...m, src: withDeviceFrame(src, m.device) } : m));
           })
-          .catch(() => {
-            // Best-effort — a failed background refresh just leaves the
-            // modal showing its last-good render rather than surfacing an
-            // error over a still-open, still-usable preview.
+          .catch((err) => {
+            setError((err as Error).message);
           });
       },
       kind === "siteChrome" ? 900 : 0,
@@ -454,7 +490,7 @@ export function usePersist(deps: PersistDeps) {
   }, [savedTick, kind === "siteChrome" ? rawBlocks : null]);
 
   return {
-    showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
+    showHistory, setShowHistory, revisions, revisionsLoaded, historyError, restoring,
     renameSlug, save, saveDraft, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
     currentTranslationsPayload, openDevicePreview, withDeviceFrame,
   };

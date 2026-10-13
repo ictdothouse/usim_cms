@@ -99,6 +99,8 @@ export function __testOnly_undoRedoFns(getRawBlocks: () => Block[], setRawBlocks
 
 export interface UndoRedoApi {
   rawBlocks: Block[];
+  canUndo: boolean;
+  canRedo: boolean;
   mutate: (fn: (next: Block[]) => void) => void;
   // A non-undoable direct set — used by restoreRevision (loading a past
   // revision isn't an edit, so it must bypass mutate()/history entirely)
@@ -149,6 +151,8 @@ export function useUndoRedo(
   );
 
   function setRawBlocksDirectly(next: Block[]) {
+    history.current = [];
+    future.current = [];
     setRawBlocks(next);
   }
 
@@ -193,5 +197,5 @@ export function useUndoRedo(
     window.addEventListener("mouseup", onUp);
   }
 
-  return { rawBlocks, mutate, setRawBlocksDirectly, startSpacingDrag, undo, redo, draggingBand };
+  return { rawBlocks, canUndo: history.current.length > 0, canRedo: future.current.length > 0, mutate, setRawBlocksDirectly, startSpacingDrag, undo, redo, draggingBand };
 }

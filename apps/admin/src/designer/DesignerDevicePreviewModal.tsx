@@ -29,6 +29,7 @@ import {
   Unlink,
   X,
 } from "lucide-react";
+import { useLayoutEffect, useRef } from "react";
 import type { Key } from "@/i18n";
 import { section } from "./blockPath";
 import type { DesignerCtx } from "./context";
@@ -36,6 +37,7 @@ import type { usePersist } from "./hooks/usePersist";
 import type { useTemplateLibrary } from "./hooks/useTemplateLibrary";
 import type { useBlockOps } from "./hooks/useBlockOps";
 import { DeviceViewport } from "./DeviceViewport";
+import { DesignerDialog } from "./DesignerDialog";
 
 type PreviewModalState = { src: string; device: "desktop" | "tablet" | "mobile"; orientation: "portrait" | "landscape" } | null;
 type CtxMenuState = { path: number[]; x: number; y: number } | null;
@@ -65,6 +67,17 @@ export function DesignerDevicePreviewModal({
   ctxMenu, setCtxMenu, ctx, templateKind, makeComponent, detachSymbolInstance,
   duplicateSection, copySection, pasteSection, copyStyleSection, pasteStyleSection, deleteSection, duplicateColumn,
 }: DesignerDevicePreviewModalProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!ctxMenu || !menuRef.current) return;
+    const node = menuRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const bounds = node.getBoundingClientRect();
+    node.style.left = `${Math.max(8, Math.min(ctxMenu.x, window.innerWidth - bounds.width - 8))}px`;
+    node.style.top = `${Math.max(8, Math.min(ctxMenu.y, window.innerHeight - bounds.height - 8))}px`;
+    node.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    return () => previousFocus?.focus();
+  }, [ctxMenu]);
   const {
     isSuper, blocks, setSel, saveAsTemplate,
     duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, deleteRow,
@@ -79,16 +92,13 @@ export function DesignerDevicePreviewModal({
         (() => {
           const landscape = previewModal.orientation === "landscape";
           return (
-            <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4"
-              onClick={() => setPreviewModal(null)}
-            >
+            <DesignerDialog title={t("designer-preview")} onClose={() => setPreviewModal(null)}>
               <div
                 className="flex h-[95vh] w-[min(97vw,120rem)] flex-col overflow-hidden rounded-xl bg-white shadow-xl"
                 onClick={(ev) => ev.stopPropagation()}
               >
-                <div className="flex items-center justify-between border-b border-line/30 px-4 py-2.5">
-                  <p className="text-xs font-bold text-ink">{t("designer-preview")}</p>
+                <div className="flex items-center justify-between border-b border-line/30 px-3 py-2.5 sm:px-4">
+                  <p className="text-sm font-bold text-ink">{t("designer-preview")}</p>
                   <div className="flex items-center gap-1.5">
                     <div className="flex items-center gap-0.5 rounded-full bg-canvas p-0.5">
                       {(
@@ -107,7 +117,9 @@ export function DesignerDevicePreviewModal({
                             )
                           }
                           title={t(labelKey)}
-                          className={`rounded-full p-1.5 ${
+                          aria-label={t(labelKey)}
+                          aria-pressed={previewModal.device === key}
+                          className={`min-h-10 min-w-10 rounded-full p-1.5 ${
                             previewModal.device === key ? "bg-white text-accent shadow-sm" : "text-sub hover:text-body"
                           }`}
                         >
@@ -124,7 +136,8 @@ export function DesignerDevicePreviewModal({
                           )
                         }
                         title={t("designer-bp-rotate")}
-                        className="rounded-full p-1.5 text-sub hover:bg-canvas hover:text-body"
+                        aria-label={t("designer-bp-rotate")}
+                        className="min-h-10 min-w-10 rounded-full p-1.5 text-sub hover:bg-canvas hover:text-body"
                       >
                         <RotateCw className="h-3.5 w-3.5" />
                       </button>
@@ -132,8 +145,9 @@ export function DesignerDevicePreviewModal({
                   </div>
                   <button
                     onClick={() => setPreviewModal(null)}
-                    className="rounded-full p-1.5 text-body hover:bg-canvas"
+                    className="min-h-10 min-w-10 rounded-full p-1.5 text-body hover:bg-canvas"
                     title={t("designer-close")}
+                    aria-label={t("designer-close")}
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -152,7 +166,7 @@ export function DesignerDevicePreviewModal({
                   </DeviceViewport>
                 </div>
               </div>
-            </div>
+            </DesignerDialog>
           );
         })()}
 
@@ -168,7 +182,7 @@ export function DesignerDevicePreviewModal({
                 setCtxMenu(null);
               }}
               disabled={disabled}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-ink hover:bg-canvas disabled:opacity-30"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm font-semibold text-ink hover:bg-canvas disabled:opacity-30"
             >
               {icon}
               {label}
@@ -180,7 +194,7 @@ export function DesignerDevicePreviewModal({
                 onClick();
                 setCtxMenu(null);
               }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-red-500 hover:bg-canvas"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm font-semibold text-red-500 hover:bg-canvas"
             >
               <Trash2 className="h-3.5 w-3.5" />
               {label}
@@ -278,9 +292,20 @@ export function DesignerDevicePreviewModal({
           }
           return (
             <div
-              className="fixed z-[70] w-44 overflow-hidden rounded-lg border border-line/30 bg-white py-1 shadow-xl"
+              ref={menuRef}
+              role="group"
+              aria-label={t("designer-context-actions")}
+              className="fixed z-[70] max-h-[calc(100vh-1rem)] w-44 overflow-y-auto rounded-lg border border-line/30 bg-white py-1 shadow-xl"
               style={{ left: ctxMenu.x, top: ctxMenu.y }}
               onClick={(ev) => ev.stopPropagation()}
+              onKeyDown={(ev) => {
+                if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+                const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+                const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                const next = (current + (ev.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+                ev.preventDefault();
+                buttons[next]?.focus();
+              }}
             >
               {body}
             </div>

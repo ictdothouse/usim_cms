@@ -40,6 +40,7 @@ test("Designer: add element, save, reload, layout persists", async ({ page, cont
   });
   await page.addInitScript((json) => {
     window.localStorage.setItem("usim_cms_session", json);
+    window.localStorage.setItem("usim_cms_lang", "en");
   }, session);
 
   await page.goto(`/content/pages/${pageId}`);
@@ -53,11 +54,8 @@ test("Designer: add element, save, reload, layout persists", async ({ page, cont
   await expect(addSection).toBeVisible();
   await addSection.click();
 
-  // Designer.tsx's own canvas <main> is nested inside App.tsx's Shell
-  // <main> (two <main> tags in the DOM) — scope to the inner one specifically
-  // (its p-6 padding class is unique to it) so canvas-only assertions below
-  // can't accidentally match the palette/Shell chrome in the outer <main>.
-  const canvas = page.locator("main.p-6");
+  // Target the Designer canvas directly; App's shell has its own main landmark.
+  const canvas = page.getByTestId("designer-canvas");
   await expect(canvas).toBeVisible();
 
   const column = canvas.locator(".grid > div").first();
@@ -71,12 +69,11 @@ test("Designer: add element, save, reload, layout persists", async ({ page, cont
   const canvasHeading = canvas.getByText("Heading", { exact: true });
   await expect(canvasHeading).toBeVisible();
 
-  await page.getByRole("button", { name: /^save draft$/i }).click();
-  await expect(page.getByText(/draft saved/i)).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole("status").filter({ hasText: /draf disimpan|draft saved/i }).first()).toBeVisible({ timeout: 8000 });
 
   await page.reload();
 
-  await expect(page.locator("main.p-6").getByText("Heading", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("designer-canvas").getByText("Heading", { exact: true })).toBeVisible();
 });
 
 test("Designer: Live Edit drag-to-add creates a new section with the dropped element", async ({ page, context }) => {
@@ -101,6 +98,7 @@ test("Designer: Live Edit drag-to-add creates a new section with the dropped ele
   });
   await page.addInitScript((json) => {
     window.localStorage.setItem("usim_cms_session", json);
+    window.localStorage.setItem("usim_cms_lang", "en");
   }, session);
 
   await page.goto(`/content/pages/${pageId}`);

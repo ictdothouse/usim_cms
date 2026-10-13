@@ -1,4 +1,4 @@
-import { lazy, useEffect, useState } from "react";
+import { lazy, useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as api from "@/lib/api";
 import { useT } from "./App";
@@ -7,16 +7,41 @@ import { useT } from "./App";
 // a session that only ever opens Media/Menus/etc never downloads it.
 const Designer = lazy(() => import("@/Designer"));
 
+function useDesignerRecord<T>(load: () => Promise<T | null>) {
+  const [item, setItem] = useState<T | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setItem(undefined);
+    setError(null);
+    void load().then((value) => { if (active) setItem(value); }).catch((err) => {
+      if (active) setError((err as Error).message);
+    });
+    return () => { active = false; };
+  }, [load, retryKey]);
+  return { item, error, retry: () => setRetryKey((n) => n + 1) };
+}
+
+function RouteFeedback({ error, missing, retry, back }: { error?: string | null; missing?: boolean; retry: () => void; back: () => void }) {
+  const { t } = useT();
+  return <div className="mx-auto max-w-xl rounded-xl border border-line/40 bg-white p-6 text-sm text-body" role={error ? "alert" : "status"}>
+    <p>{error ? `${t("list-load-error")}: ${error}` : missing ? t("nav-not-found") : t("list-loading")}</p>
+    {(error || missing) && <div className="mt-4 flex gap-4">
+      {error && <button type="button" onClick={retry} className="font-semibold text-accent underline">{t("list-retry")}</button>}
+      <button type="button" onClick={back} className="font-semibold text-body underline">{t("designer-close")}</button>
+    </div>}
+  </div>;
+}
+
 export function PageDesignerRoute({ tenantHost, token, isSuper }: { tenantHost: string; token: string; isSuper: boolean }) {
   const { t } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const [page, setPage] = useState<Record<string, unknown> | null | undefined>(undefined);
-  useEffect(() => {
-    void api.getPages(tenantHost, token).then((pages) => setPage(pages.find((p) => p.id === id) ?? null));
-  }, [tenantHost, id]);
-  if (page === undefined) return null;
-  if (page === null) return <p className="text-xs text-sub">{t("pages-empty")}</p>;
+  const load = useCallback(async () => (await api.getPages(tenantHost, token)).find((p) => p.id === id) ?? null, [tenantHost, token, id]);
+  const { item: page, error, retry } = useDesignerRecord(load);
+  if (page === undefined || error) return <RouteFeedback error={error} retry={retry} back={() => navigate("/content/pages")} />;
+  if (page === null) return <RouteFeedback missing retry={retry} back={() => navigate("/content/pages")} />;
   return (
     <Designer
       page={page}
@@ -39,12 +64,10 @@ export function BlueprintDesignerRoute({ tenantHost, token, isSuper, backTo }: {
   const { t } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const [bp, setBp] = useState<api.PageBlueprint | null | undefined>(undefined);
-  useEffect(() => {
-    void api.listBlueprints(tenantHost, token).then((items) => setBp(items.find((b) => b.id === id) ?? null));
-  }, [tenantHost, id]);
-  if (bp === undefined) return null;
-  if (bp === null) return <p className="text-xs text-sub">{t("blueprints-empty")}</p>;
+  const load = useCallback(async () => (await api.listBlueprints(tenantHost, token)).find((b) => b.id === id) ?? null, [tenantHost, token, id]);
+  const { item: bp, error, retry } = useDesignerRecord(load);
+  if (bp === undefined || error) return <RouteFeedback error={error} retry={retry} back={() => navigate(backTo)} />;
+  if (bp === null) return <RouteFeedback missing retry={retry} back={() => navigate(backTo)} />;
   return (
     <Designer
       page={{ id: bp.id, title: bp.name, layout: bp.layout, settings: bp.settings }}
@@ -68,15 +91,10 @@ export function BlueprintDesignerRoute({ tenantHost, token, isSuper, backTo }: {
 export function SymbolDesignerRoute({ tenantHost, token, isSuper }: { tenantHost: string; token: string; isSuper: boolean }) {
   const { t } = useT();
   const { id } = useParams();
-  const [sym, setSym] = useState<api.Symbol | null | undefined>(undefined);
-  useEffect(() => {
-    void api
-      .getSymbol(tenantHost, token, id as string)
-      .then(setSym)
-      .catch(() => setSym(null));
-  }, [tenantHost, id]);
-  if (sym === undefined) return null;
-  if (sym === null) return <p className="text-xs text-sub">{t("designer-symbols-missing")}</p>;
+  const load = useCallback(() => api.getSymbol(tenantHost, token, id as string), [tenantHost, token, id]);
+  const { item: sym, error, retry } = useDesignerRecord(load);
+  if (sym === undefined || error) return <RouteFeedback error={error} retry={retry} back={() => window.close()} />;
+  if (sym === null) return <RouteFeedback missing retry={retry} back={() => window.close()} />;
   return (
     <Designer
       page={{
@@ -104,12 +122,10 @@ export function HeaderFooterDesignerRoute({ tenantHost, token, isSuper, backTo }
   const { t } = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const [item, setItem] = useState<api.SiteChrome | null | undefined>(undefined);
-  useEffect(() => {
-    void api.listSiteChrome(tenantHost, token).then((items) => setItem(items.find((i) => i.id === id) ?? null));
-  }, [tenantHost, id]);
-  if (item === undefined) return null;
-  if (item === null) return <p className="text-xs text-sub">{t("header-footer-empty")}</p>;
+  const load = useCallback(async () => (await api.listSiteChrome(tenantHost, token)).find((i) => i.id === id) ?? null, [tenantHost, token, id]);
+  const { item, error, retry } = useDesignerRecord(load);
+  if (item === undefined || error) return <RouteFeedback error={error} retry={retry} back={() => navigate(backTo)} />;
+  if (item === null) return <RouteFeedback missing retry={retry} back={() => navigate(backTo)} />;
   return (
     <Designer
       page={{ id: item.id, title: item.name, layout: item.layout, settings: item.settings, kind: item.kind, isDefault: item.isDefault, status: item.status }}
