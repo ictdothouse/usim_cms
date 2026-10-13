@@ -19,12 +19,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import process from "node:process";
 import console from "node:console";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
 import { setInterval } from "node:timers";
+import { initializeUsers, authenticate, listUsers, changePassword, addUser, removeUser } from "./users.js";
 
 const PORT = Number(process.env.MONITOR_PORT || 5555);
 // The monitor runs as root and can operate the deployment. Bind it to a
@@ -35,6 +37,7 @@ const MONITOR_HOST = process.env.MONITOR_HOST || "127.0.0.1";
 const REPO_DIR = process.env.REPO_DIR || process.cwd();
 const MONITOR_USER = process.env.MONITOR_USER || "admin";
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "";
+const MACHINE_PRINCIPAL = Symbol("monitor-api");
 let monitorAccess = {
   mode: process.env.MONITOR_ACCESS_MODE || "ssh",
   domain: process.env.MONITOR_PUBLIC_DOMAIN || "",
@@ -165,6 +168,12 @@ if (MONITOR_ACCESS_MODE !== "ssh" &&
   console.error("Public/cloud monitor requires a valid MONITOR_PUBLIC_DOMAIN and a password of at least 24 bytes.");
   process.exit(1);
 }
+try {
+  initializeUsers(MONITOR_USER, MONITOR_PASSWORD);
+} catch (error) {
+  console.error("Monitor user store unavailable:", error.message);
+  process.exit(1);
+}
 
 let deployState = { running: false, exitCode: null, startedAt: null, finishedAt: null };
 
@@ -180,20 +189,30 @@ function timingSafeEqualStr(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function checkAuth(req) {
+async function checkAuth(req) {
   const header = req.headers.authorization || "";
-  if (!header.startsWith("Basic ")) return false;
+  if (header.length > 2048 || !header.startsWith("Basic ")) return null;
   let decoded;
   try {
     decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
   } catch {
-    return false;
+    return null;
   }
   const sep = decoded.indexOf(":");
-  if (sep === -1) return false;
+  if (sep === -1) return null;
   const user = decoded.slice(0, sep);
   const pass = decoded.slice(sep + 1);
-  return timingSafeEqualStr(user, MONITOR_USER) && timingSafeEqualStr(pass, MONITOR_PASSWORD);
+  if (await authenticate(user, pass, header)) return user;
+  // The API container still uses the existing env credential for SSL issuance.
+  // It is accepted only on the internal Host for this one endpoint; a changed
+  // human password therefore never breaks tenant certificate issuance.
+  const internalHost = new URL(`http://${req.headers.host}`).hostname.toLowerCase();
+  if (req.method === "POST" && req.url?.split("?")[0] === "/api/ssl/issue" &&
+      ["host.docker.internal", "localhost", "127.0.0.1", "[::1]"].includes(internalHost) &&
+      timingSafeEqualStr(user, MONITOR_USER) && timingSafeEqualStr(pass, MONITOR_PASSWORD)) {
+    return MACHINE_PRINCIPAL;
+  }
+  return null;
 }
 
 const AUTH_FAILURE_LIMIT = 8;
@@ -201,34 +220,44 @@ const AUTH_WINDOW_MS = 10 * 60_000;
 const AUTH_BLOCK_MS = 15 * 60_000;
 const AUTH_MAX_CLIENTS = 4096;
 const authFailures = new Map();
+const sensitiveFailures = new Map();
 
 function authClientKey(req) {
+  // Caddy is the only public entry point. It appends the real client address
+  // to X-Forwarded-For; the final address prevents one failed login from
+  // locking out everyone behind Caddy's shared Docker source address.
+  const hostname = new URL(`http://${req.headers.host}`).hostname.toLowerCase();
+  if (hostname === MONITOR_PUBLIC_DOMAIN) {
+    const forwarded = req.headers["x-forwarded-for"];
+    const client = typeof forwarded === "string" ? forwarded.split(",").at(-1).trim() : "";
+    if (net.isIP(client)) return client;
+  }
   return req.socket.remoteAddress || "unknown";
 }
 
-function authBlockRemaining(key, now = Date.now()) {
-  const state = authFailures.get(key);
+function authBlockRemaining(key, now = Date.now(), failures = authFailures) {
+  const state = failures.get(key);
   if (!state) return 0;
   if (state.blockedUntil > now) return state.blockedUntil - now;
   if (now - state.windowStartedAt >= AUTH_WINDOW_MS || state.blockedUntil) {
-    authFailures.delete(key);
+    failures.delete(key);
     return 0;
   }
   return 0;
 }
 
-function recordAuthFailure(key, now = Date.now()) {
-  let state = authFailures.get(key);
+function recordAuthFailure(key, now = Date.now(), failures = authFailures) {
+  let state = failures.get(key);
   if (!state || now - state.windowStartedAt >= AUTH_WINDOW_MS) {
     state = { failures: 0, windowStartedAt: now, blockedUntil: 0 };
   }
   state.failures++;
   if (state.failures >= AUTH_FAILURE_LIMIT) state.blockedUntil = now + AUTH_BLOCK_MS;
-  authFailures.delete(key);
-  authFailures.set(key, state);
-  if (authFailures.size > AUTH_MAX_CLIENTS) {
-    const oldestKey = authFailures.keys().next().value;
-    if (oldestKey !== undefined) authFailures.delete(oldestKey);
+  failures.delete(key);
+  failures.set(key, state);
+  if (failures.size > AUTH_MAX_CLIENTS) {
+    const oldestKey = failures.keys().next().value;
+    if (oldestKey !== undefined) failures.delete(oldestKey);
   }
 }
 
@@ -270,6 +299,30 @@ function readJsonBody(req, res, maxBytes, onValue) {
   });
   req.on("error", () => {
     if (!res.headersSent) sendJson(res, 400, { error: "request body could not be read" });
+  });
+}
+
+function handleUserMutation(req, res, operation, audit) {
+  readJsonBody(req, res, 4096, (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return sendJson(res, 400, { error: "invalid request body" });
+    }
+    Promise.resolve().then(() => operation(value)).then(() => {
+      sensitiveFailures.delete(authClientKey(req));
+      console.info(JSON.stringify({ event: "monitor_account_change", actor: audit.actor,
+        action: audit.action, target: audit.target(value), ip: authClientKey(req) }));
+      sendJson(res, 200, { ok: true });
+    }).catch((error) => {
+      if (error.message === "Current password is incorrect.") {
+        recordAuthFailure(authClientKey(req), Date.now(), sensitiveFailures);
+      }
+      if (error.code) {
+        console.error("Monitor user update failed:", error);
+        sendJson(res, 500, { error: "User store could not be updated." });
+      } else {
+        sendJson(res, 400, { error: error.message });
+      }
+    });
   });
 }
 
@@ -2397,6 +2450,8 @@ const DASHBOARD_HTML = `<!doctype html>
 
   .role-badge { display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 0.12rem 0.5rem; border-radius: 999px; background: #0071e322; color: #0071e3; white-space: nowrap; }
   .container-desc { max-width: 340px; }
+  .account-field { display:block; margin:0.55rem 0; }
+  .account-field input { display:block; box-sizing:border-box; width:100%; max-width:380px; padding:0.45rem; border:1px solid #8886; border-radius:6px; background:transparent; color:inherit; }
 </style>
 </head>
 <body>
@@ -2418,6 +2473,7 @@ const DASHBOARD_HTML = `<!doctype html>
   <button class="tab-btn" data-tab="data">Database &amp; Sites</button>
   <button class="tab-btn" data-tab="ssl">SSL</button>
   <button class="tab-btn" data-tab="logs">Logs</button>
+  <button class="tab-btn" data-tab="accounts">Accounts</button>
 </div>
 
 <div class="tab-panel active" id="panel-overview">
@@ -2555,6 +2611,24 @@ const DASHBOARD_HTML = `<!doctype html>
   <h3>Logs</h3>
   <div class="row" id="logButtons"></div>
   <pre class="term" id="logs">Pick a service above to view its logs.</pre>
+</div>
+
+<div class="tab-panel" id="panel-accounts">
+  <h3>Monitor administrators</h3>
+  <p class="muted">Every account can deploy code and control this server. Only add people you trust with full server access. Passwords must be at least 24 bytes.</p>
+  <p id="accountsCurrent"></p>
+  <div id="accountsList"></div>
+  <label class="account-field">Your current password<input id="accountCurrentPassword" type="password" autocomplete="current-password" maxlength="1024" /></label>
+  <h3>Change your password</h3>
+  <label class="account-field">New password<input id="accountNewPassword" type="password" autocomplete="new-password" maxlength="1024" /></label>
+  <label class="account-field">Confirm new password<input id="accountNewConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label>
+  <button data-action="change-account-password">Change password</button>
+  <h3>Add an administrator</h3>
+  <label class="account-field">Username<input id="accountAddUsername" type="text" autocomplete="off" maxlength="32" /></label>
+  <label class="account-field">New user's password<input id="accountAddPassword" type="password" autocomplete="new-password" maxlength="1024" /></label>
+  <label class="account-field">Confirm password<input id="accountAddConfirm" type="password" autocomplete="new-password" maxlength="1024" /></label>
+  <button data-action="add-account">Add administrator</button>
+  <p id="accountsMsg" role="status"></p>
 </div>
 
 <p id="git" style="opacity:0.35; font-size:0.7rem; margin-top:2rem;"></p>
@@ -2965,6 +3039,7 @@ async function init() {
   refreshDiskUsage();
   refreshDbSizes();
   refreshBackupDestination();
+  refreshAccounts();
   refreshBackupCronStatus();
   refreshUpdateCheck();
   refreshVersions();
@@ -3393,6 +3468,92 @@ async function showLogs(name) {
   }
 }
 
+let accountUsername = "";
+async function refreshAccounts() {
+  const list = document.getElementById("accountsList");
+  try {
+    const data = await api("/api/users");
+    accountUsername = data.currentUser;
+    document.getElementById("accountsCurrent").textContent = "Signed in as " + accountUsername;
+    list.replaceChildren();
+    for (const user of data.users) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("span");
+      label.textContent = user.name + (user.name === accountUsername ? " (you)" : "");
+      row.appendChild(label);
+      if (user.name !== accountUsername) {
+        const button = document.createElement("button");
+        button.className = "secondary";
+        button.textContent = "Remove";
+        button.dataset.action = "remove-account";
+        button.dataset.username = user.name;
+        row.appendChild(button);
+      }
+      list.appendChild(row);
+    }
+  } catch (error) {
+    list.textContent = "Could not load accounts: " + error.message;
+  }
+}
+
+function accountStatus(message) {
+  document.getElementById("accountsMsg").textContent = message;
+}
+
+function accountInput(id) {
+  return document.getElementById(id).value;
+}
+
+async function changeAccountPassword() {
+  const currentPassword = accountInput("accountCurrentPassword");
+  const newPassword = accountInput("accountNewPassword");
+  if (newPassword !== accountInput("accountNewConfirm")) return accountStatus("New passwords do not match.");
+  try {
+    await api("/api/users/password", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    document.getElementById("accountCurrentPassword").value = "";
+    document.getElementById("accountNewPassword").value = "";
+    document.getElementById("accountNewConfirm").value = "";
+    accountStatus("Password changed. Close this tab and reopen the monitor to sign in with the new password.");
+  } catch (error) { accountStatus("Password change failed: " + error.message); }
+}
+
+async function addAccount() {
+  const currentPassword = accountInput("accountCurrentPassword");
+  const username = accountInput("accountAddUsername").trim();
+  const password = accountInput("accountAddPassword");
+  if (password !== accountInput("accountAddConfirm")) return accountStatus("New passwords do not match.");
+  try {
+    await api("/api/users", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, username, password }),
+    });
+    document.getElementById("accountCurrentPassword").value = "";
+    document.getElementById("accountAddUsername").value = "";
+    document.getElementById("accountAddPassword").value = "";
+    document.getElementById("accountAddConfirm").value = "";
+    accountStatus("Administrator added. Share the password through a secure channel.");
+    refreshAccounts();
+  } catch (error) { accountStatus("Could not add administrator: " + error.message); }
+}
+
+async function removeAccount(button) {
+  const username = button.dataset.username;
+  if (!confirm("Remove monitor administrator " + username + "?")) return;
+  try {
+    await api("/api/users/remove", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, currentPassword: accountInput("accountCurrentPassword") }),
+    });
+    document.getElementById("accountCurrentPassword").value = "";
+    accountStatus("Administrator removed.");
+    refreshAccounts();
+  } catch (error) { accountStatus("Could not remove administrator: " + error.message); }
+}
+
 // The CSP blocks inline event attributes. Keep every action in this
 // nonce-authorized script, including buttons inserted by later refreshes.
 const dashboardActions = new Map([
@@ -3408,6 +3569,9 @@ const dashboardActions = new Map([
   ["save-backup-destination", saveBackupDestination],
   ["apply-backup-cron-update", applyBackupCronUpdate],
   ["issue-ssl", issueSsl],
+  ["change-account-password", changeAccountPassword],
+  ["add-account", addAccount],
+  ["remove-account", removeAccount],
 ]);
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element)) return;
@@ -3432,7 +3596,7 @@ init();
 </body>
 </html>`;
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   if (!isAllowedHost(req.headers.host)) {
     res.writeHead(421, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
     res.end("Misdirected request");
@@ -3445,9 +3609,10 @@ const server = http.createServer((req, res) => {
   }
   const authKey = authClientKey(req);
   const retryMs = authBlockRemaining(authKey);
-  if (retryMs > 0) {
+  const sensitiveRetryMs = authBlockRemaining(authKey, Date.now(), sensitiveFailures);
+  if (retryMs > 0 || sensitiveRetryMs > 0) {
     res.writeHead(429, {
-      "Retry-After": String(Math.ceil(retryMs / 1000)),
+      "Retry-After": String(Math.ceil(Math.max(retryMs, sensitiveRetryMs) / 1000)),
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
@@ -3457,10 +3622,18 @@ const server = http.createServer((req, res) => {
     res.end("Too many failed authentication attempts");
     return;
   }
-  if (!checkAuth(req)) {
+  let principal;
+  try {
+    principal = await checkAuth(req);
+  } catch (error) {
+    console.error("Monitor authentication failed:", error);
+    sendJson(res, 503, { error: "Monitor user store unavailable." });
+    return;
+  }
+  if (!principal) {
     recordAuthFailure(authKey);
     res.writeHead(401, {
-      "WWW-Authenticate": 'Basic realm="usim_cms monitor"',
+      "WWW-Authenticate": 'Basic realm="usim_cms monitor", charset="UTF-8"',
       "Content-Type": "text/plain",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
@@ -3474,6 +3647,10 @@ const server = http.createServer((req, res) => {
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const parts = url.pathname.split("/").filter(Boolean);
+  if (principal === MACHINE_PRINCIPAL && (req.method !== "POST" || url.pathname !== "/api/ssl/issue")) {
+    sendJson(res, 403, { error: "Machine credential is limited to SSL issuance." });
+    return;
+  }
 
   try {
     if (req.method === "GET" && url.pathname === "/") {
@@ -3490,6 +3667,17 @@ const server = http.createServer((req, res) => {
       res.end(dashboardHtml);
     } else if (req.method === "GET" && url.pathname === "/api/config") {
       handleConfig(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/users") {
+      sendJson(res, 200, { currentUser: principal, users: listUsers() });
+    } else if (req.method === "POST" && url.pathname === "/api/users/password") {
+      handleUserMutation(req, res, (body) => changePassword(principal, body.currentPassword, body.newPassword),
+        { actor: principal, action: "change_password", target: () => principal });
+    } else if (req.method === "POST" && url.pathname === "/api/users") {
+      handleUserMutation(req, res, (body) => addUser(principal, body.currentPassword, body.username, body.password),
+        { actor: principal, action: "add_user", target: (body) => body.username });
+    } else if (req.method === "POST" && url.pathname === "/api/users/remove") {
+      handleUserMutation(req, res, (body) => removeUser(principal, body.currentPassword, body.username),
+        { actor: principal, action: "remove_user", target: (body) => body.username });
     } else if (req.method === "GET" && url.pathname === "/api/status") {
       handleStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/sites") {
