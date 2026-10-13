@@ -20,7 +20,10 @@ a random 32-byte hexadecimal password by default. Caddy provides HTTPS and
 forwards only this host to the monitor's private address; the monitor checks
 the Host and Origin itself. The command updates the running Caddy route
 without deploying the app tier, so a failed blue/green smoke test does not
-force the current live color to restart.
+force the current live color to restart. For older installations with no
+`MONITOR_HOST` in `/etc/ucms-monitor.env`, this command detects Docker's
+private bridge gateway and adds the missing setting before restarting the
+monitor; rerunning the full production installer is unnecessary.
 
 Public mode requires this Caddy instance to terminate TLS. Plain HTTP gets a
 403 response before it reaches the password prompt. If another proxy owns
