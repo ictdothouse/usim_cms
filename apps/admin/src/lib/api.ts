@@ -632,11 +632,18 @@ export const deleteSymbol = (tenantHost: string, token: string, id: string) =>
 
 export interface EventItem {
   id: string;
+  slug: string;
   title: string;
   description: string;
   startDate: string;
   endDate: string | null;
+  timezone: string;
+  eventState: "scheduled" | "cancelled" | "postponed";
+  locationType: "physical" | "online" | "hybrid";
   location: string | null;
+  venue: string | null;
+  organizer: string | null;
+  mapUrl: string | null;
   imageUrl: string | null;
   registrationUrl: string | null;
   status: "draft" | "published";

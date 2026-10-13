@@ -40,6 +40,7 @@ import { registerBackupCloneRoutes } from "./routes/backup-clone.js";
 import { registerMediaRoutes, registerMediaServeRoutes } from "./routes/media.js";
 import { registerMediaStorageRoutes } from "./routes/media-storage.js";
 import { registerPublicBlueprintRoutes, registerBlueprintRoutes } from "./routes/blueprints.js";
+import { registerPublicEventRoutes } from "./routes/public-events.js";
 import {
   pagesCollection,
   postsCollection,
@@ -199,6 +200,7 @@ registerBackupCloneRoutes(app);
 // routes live here; never put a write route in this scope.
 await app.register(async (publicScope) => {
   await tenantPlugin(publicScope);
+  registerPublicEventRoutes(publicScope);
   registerPublicCollectionRoutes(publicScope, pagesCollection);
   registerPublicCollectionRoutes(publicScope, postsCollection);
   registerPublicCollectionRoutes(publicScope, categoriesCollection);

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, boolean, unique, integer } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, jsonb, timestamp, boolean, unique, uniqueIndex, index, integer } from "drizzle-orm/pg-core";
 
 export const pages = pgTable("pages", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -123,11 +123,18 @@ export const menus = pgTable("menus", {
 // safe text node, not raw HTML — no sanitizeHtml pipeline needed for it.
 export const events = pgTable("events", {
   id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull(),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
-  startDate: timestamp("start_date").notNull(),
-  endDate: timestamp("end_date"),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  endDate: timestamp("end_date", { withTimezone: true }),
+  timezone: text("timezone").notNull().default("Asia/Kuala_Lumpur"),
+  eventState: text("event_state").notNull().default("scheduled"), // "scheduled" | "cancelled" | "postponed"
+  locationType: text("location_type").notNull().default("physical"), // "physical" | "online" | "hybrid"
   location: text("location"),
+  venue: text("venue"),
+  organizer: text("organizer"),
+  mapUrl: text("map_url"),
   imageUrl: text("image_url"),
   // Scheme-checked in eventsBeforeChange (isSafeUrl) — rendered as a real
   // <a href>, so a javascript: value would execute on click same as any
@@ -136,7 +143,10 @@ export const events = pgTable("events", {
   status: text("status").notNull().default("draft"), // "draft" | "published"
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("events_slug_unique_idx").on(table.slug),
+  index("events_status_start_date_idx").on(table.status, table.startDate),
+]);
 
 // Post/Article content per tenant. body is sanitized HTML from the admin
 // rich-text editor (see the posts collection's beforeChange hook). Public

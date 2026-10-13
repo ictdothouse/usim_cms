@@ -522,7 +522,7 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     fields: [
       { key: "count", labelKey: "designer-f-eventlist-count", kind: "select", options: ["3", "4", "6", "9"] },
       { key: "columns", labelKey: "designer-f-gallery-columns", kind: "select", options: ["2", "3", "4"] },
-      { key: "eventLayout", labelKey: "designer-f-eventlist-layout", kind: "select", options: ["grid", "list"] },
+      { key: "eventLayout", labelKey: "designer-f-eventlist-layout", kind: "select", options: ["grid", "list", "calendar"] },
     ],
   },
   // Batch of simple, no-backend elements (audit report 5.2/5.7) — each a

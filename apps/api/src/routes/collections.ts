@@ -632,13 +632,78 @@ export const menusCollection: CollectionConfig = {
 // concern. registrationUrl/imageUrl are scheme-checked the same way any
 // other author-supplied URL in this codebase is (isSafeUrl) since both
 // render as a real href/src, not sanitized HTML.
-const eventsBeforeChange = (data: unknown) => {
+const eventSlug = (value: string): string =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 140) || "event";
+
+const eventsBeforeChange = async (data: unknown, _args: AccessArgs, req: FastifyRequest) => {
   const record = data as Record<string, unknown>;
-  if (typeof record.registrationUrl === "string" && record.registrationUrl !== "" && !isSafeUrl(record.registrationUrl)) {
-    throw Object.assign(new Error("registrationUrl has an unsafe URL scheme"), { statusCode: 400 });
+  for (const key of ["registrationUrl", "imageUrl", "mapUrl"] as const) {
+    if (typeof record[key] === "string" && record[key] !== "" && !isSafeUrl(record[key] as string)) {
+      throw Object.assign(new Error(`${key} has an unsafe URL scheme`), { statusCode: 400 });
+    }
   }
-  if (typeof record.imageUrl === "string" && record.imageUrl !== "" && !isSafeUrl(record.imageUrl)) {
-    throw Object.assign(new Error("imageUrl has an unsafe URL scheme"), { statusCode: 400 });
+
+  if (record.slug !== undefined) {
+    if (typeof record.slug !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(record.slug) || record.slug.length > 160) {
+      throw Object.assign(new Error("slug must contain lowercase letters, numbers and single hyphens"), { statusCode: 400 });
+    }
+  } else if (req.method === "POST" && typeof record.title === "string") {
+    record.slug = eventSlug(record.title);
+  }
+
+  const timezone = record.timezone ?? "Asia/Kuala_Lumpur";
+  if (typeof timezone !== "string" || timezone.length > 80) {
+    throw Object.assign(new Error("timezone must be a valid IANA timezone"), { statusCode: 400 });
+  }
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone });
+  } catch {
+    throw Object.assign(new Error("timezone must be a valid IANA timezone"), { statusCode: 400 });
+  }
+
+  if (record.eventState !== undefined && !["scheduled", "cancelled", "postponed"].includes(record.eventState as string)) {
+    throw Object.assign(new Error("eventState must be scheduled, cancelled or postponed"), { statusCode: 400 });
+  }
+  if (record.locationType !== undefined && !["physical", "online", "hybrid"].includes(record.locationType as string)) {
+    throw Object.assign(new Error("locationType must be physical, online or hybrid"), { statusCode: 400 });
+  }
+
+  let existingStart: Date | undefined;
+  let existingEnd: Date | null | undefined;
+  if (req.method === "PATCH" && (record.startDate === undefined || record.endDate === undefined)) {
+    const { id } = req.params as { id: string };
+    const [existing] = await req.db
+      .select({ startDate: schema.events.startDate, endDate: schema.events.endDate })
+      .from(schema.events)
+      .where(eq(schema.events.id, id));
+    existingStart = existing?.startDate;
+    existingEnd = existing?.endDate;
+  }
+
+  if (record.startDate !== undefined && typeof record.startDate !== "string" && !(record.startDate instanceof Date)) {
+    throw Object.assign(new Error("startDate must be a valid date"), { statusCode: 400 });
+  }
+  if (record.endDate !== undefined && record.endDate !== null && typeof record.endDate !== "string" && !(record.endDate instanceof Date)) {
+    throw Object.assign(new Error("endDate must be a valid date or null"), { statusCode: 400 });
+  }
+  const start = record.startDate !== undefined ? new Date(record.startDate as string | Date) : existingStart;
+  const end = record.endDate !== undefined
+    ? (record.endDate === null ? null : new Date(record.endDate as string | Date))
+    : existingEnd;
+  if (record.startDate !== undefined && (!start || !Number.isFinite(start.getTime()))) {
+    throw Object.assign(new Error("startDate must be a valid date"), { statusCode: 400 });
+  }
+  if (record.endDate !== undefined && end && !Number.isFinite(end.getTime())) {
+    throw Object.assign(new Error("endDate must be a valid date"), { statusCode: 400 });
+  }
+  if (start && end && end < start) {
+    throw Object.assign(new Error("endDate cannot be before startDate"), { statusCode: 400 });
   }
   if (typeof record.startDate === "string") record.startDate = new Date(record.startDate);
   if (typeof record.endDate === "string") record.endDate = new Date(record.endDate);
@@ -648,6 +713,7 @@ const eventsBeforeChange = (data: unknown) => {
 
 export const eventsCollection: CollectionConfig = {
   slug: "events",
+  defaultOrderBy: "startDate",
   table: schema.events,
   createSchema: {
     type: "object",
@@ -655,17 +721,24 @@ export const eventsCollection: CollectionConfig = {
     additionalProperties: false,
     properties: {
       title: { type: "string", minLength: 1 },
+      slug: { type: "string", minLength: 1, maxLength: 160 },
       description: { type: "string" },
       startDate: { type: "string" },
       endDate: { type: ["string", "null"] },
+      timezone: { type: "string", maxLength: 80 },
+      eventState: { type: "string", enum: ["scheduled", "cancelled", "postponed"] },
+      locationType: { type: "string", enum: ["physical", "online", "hybrid"] },
       location: { type: ["string", "null"] },
+      venue: { type: ["string", "null"] },
+      organizer: { type: ["string", "null"] },
+      mapUrl: { type: ["string", "null"] },
       imageUrl: { type: ["string", "null"] },
       registrationUrl: { type: ["string", "null"] },
       status: { type: "string", enum: ["draft", "published"] },
     },
   },
-  // No `shareable` — events have no dedicated public detail page to link to
-  // (unlike posts/pages), so "Share to portal" wouldn't have a real URL.
+  // Events are not configured for portal sharing; their public calendar and
+  // detail pages are surfaced directly on each tenant site.
   access: {
     read: () => true,
     create: (a) => hasPermission(a, "events.write"),
