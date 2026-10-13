@@ -26,6 +26,7 @@ import {
   cls,
   headingTag,
 } from "../lib/element-render";
+import { sanitizeCustomHtml } from "../lib/sanitize-custom-html";
 
 // Local, not imported from SectionBlock.astro's frontmatter — see that
 // file's top comment on the outage caused by sharing frontmatter bindings
@@ -392,14 +393,13 @@ switch (el.type) {
     );
   }
   case "html":
-    // Same trust tier as bgImage/embed src: only an authenticated webmaster/
-    // superadmin can write page layout, so this isn't a public-input XSS
-    // surface.
+    // Static markup only; sanitize again at render time to protect content
+    // that predates API validation or was written outside the API.
     return p.html ? (
       <div
         class={cls("ds-html", p.cssClass)}
         style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";") || undefined}
-        set:html={p.html}
+        set:html={sanitizeCustomHtml(p.html)}
       />
     ) : null;
   case "gallery": {

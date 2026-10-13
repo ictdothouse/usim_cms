@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- test-only deep-indexing into Caddy's generated JSON config, no local type modeled for it */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { buildCaddyConfig, parseCertExpiry, isValidDialTargets } from "./proxy-sync.js";
 
 test("buildCaddyConfig includes one route per active tenant", () => {
@@ -28,11 +31,48 @@ test("buildCaddyConfig always includes the static admin/api routes", () => {
   assert.equal(hosts.length, 2); // admin domain + api domain, no tenants
 });
 
+test("monitor access config publishes only public mode and preserves other routes", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ucms-monitor-access-"));
+  const file = path.join(dir, "config.json");
+  const previous = process.env.MONITOR_ACCESS_CONFIG;
+  process.env.MONITOR_ACCESS_CONFIG = file;
+  try {
+    const mod = await import(`./proxy-sync.js?monitor-access=${Date.now()}`);
+    const tenants = [{ host: "faculty.example.org", active: true }];
+    const monitorRoutes = () => ((mod.buildCaddyConfig(tenants) as any).apps.http.servers.srv0.routes as any[])
+      .filter((route) => route["@id"] === "ucms-monitor-route");
+
+    fs.writeFileSync(file, JSON.stringify({ mode: "public", domain: "monitor.example.org", upstream: "172.17.0.1:5555" }));
+    assert.equal(monitorRoutes().length, 1);
+    const publicRoutes = (mod.buildCaddyConfig(tenants) as any).apps.http.servers.srv0.routes as any[];
+    assert.equal(publicRoutes.find((route) => route["@id"] === "ucms-monitor-http-deny").match[0].protocol, "http");
+    assert.equal(monitorRoutes()[0].match[0].protocol, "https");
+    assert.deepEqual(monitorRoutes()[0].handle[1].upstreams, [{ dial: "172.17.0.1:5555" }]);
+
+    fs.writeFileSync(file, JSON.stringify({ mode: "cloud", domain: "monitor.example.org", upstream: "172.17.0.1:5555" }));
+    assert.equal(monitorRoutes().length, 0);
+    fs.writeFileSync(file, JSON.stringify({ mode: "ssh", domain: "", upstream: "172.17.0.1:5555" }));
+    assert.equal(monitorRoutes().length, 0);
+    fs.writeFileSync(file, JSON.stringify({ mode: "public", domain: "faculty.example.org", upstream: "172.17.0.1:5555" }));
+    assert.equal(monitorRoutes().length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.MONITOR_ACCESS_CONFIG;
+    else process.env.MONITOR_ACCESS_CONFIG = previous;
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    fs.rmdirSync(dir);
+  }
+});
+
 test("buildCaddyConfig defaults to one dial target per service when no upstreams given", () => {
   const config = buildCaddyConfig([{ host: "dept-a.usim.edu.my", active: true }]);
   const servers = (config as any).apps.http.servers.srv0;
   const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
-  assert.deepEqual(apiRoute.handle[0].upstreams, [{ dial: "api:3000" }]);
+  const adminRoute = servers.routes.find((r: any) => r.match[0].host[0] === "admin.localhost");
+  const adminProxy = adminRoute.handle.find((handler: any) => handler.handler === "reverse_proxy");
+  assert.deepEqual(adminProxy.upstreams, [{ dial: "admin:8080" }]);
+  const apiProxy = apiRoute.handle.find((handler: any) => handler.handler === "reverse_proxy");
+  assert.deepEqual(apiProxy.upstreams, [{ dial: "api:3000" }]);
+  assert.ok(apiRoute.handle.some((handler: any) => handler.handler === "headers"));
   const tenantRoutes = servers.routes.filter((r: any) => r.match[0].host[0] === "dept-a.usim.edu.my");
   const frontendRoute = tenantRoutes.find((r: any) => !r.match[0].path);
   const frontendProxy = frontendRoute.handle.find((h: any) => h.handler === "reverse_proxy");
@@ -51,7 +91,7 @@ test("buildCaddyConfig enables response compression on tenant routes but not adm
     assert.equal(route.handle[0].handler, "encode");
   }
   const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
-  assert.equal(apiRoute.handle[0].handler, "reverse_proxy");
+  assert.ok(apiRoute.handle.some((handler: any) => handler.handler === "reverse_proxy"));
 });
 
 test("buildCaddyConfig proxies a tenant's own /uploads/* to the api upstream, not the frontend", () => {
@@ -74,13 +114,14 @@ test("buildCaddyConfig proxies a tenant's own /uploads/* to the api upstream, no
 
 test("buildCaddyConfig fans out to every replica dial target for a blue-green/scaled deploy", () => {
   const config = buildCaddyConfig([{ host: "dept-a.usim.edu.my", active: true }], {
-    admin: ["ucms-green-admin-1:80"],
+    admin: ["ucms-green-admin-1:8080"],
     api: ["ucms-green-api-1:3000", "ucms-green-api-2:3000"],
     frontend: ["ucms-green-frontend-1:4321", "ucms-green-frontend-2:4321"],
   });
   const servers = (config as any).apps.http.servers.srv0;
   const apiRoute = servers.routes.find((r: any) => r.match[0].host[0] === "api.localhost");
-  assert.deepEqual(apiRoute.handle[0].upstreams, [
+  const apiProxy = apiRoute.handle.find((handler: any) => handler.handler === "reverse_proxy");
+  assert.deepEqual(apiProxy.upstreams, [
     { dial: "ucms-green-api-1:3000" },
     { dial: "ucms-green-api-2:3000" },
   ]);

@@ -18,16 +18,14 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
       POSTGRES_DB: usim_cms
-      # usim_cms_app's real password (used by 02-rotate-db-role-password.sh
-      # below) and the pg_hba auth method Postgres demands for it over the
-      # network — md5, not the image's scram-sha-256 default, so pgbouncer's
-      # userlist.txt (also md5, generated from this same env var by
-      # install.sh) can authenticate both legs. Local/socket connections
-      # (initdb.d itself) are unaffected — HOST_AUTH_METHOD only governs
-      # "host" (TCP) pg_hba entries, not "local" ones.
+      # Existing .env files without POSTGRES_HOST_AUTH_METHOD retain their
+      # prior initdb setting; SCRAM role verifiers still negotiate SCRAM under
+      # an md5 HBA entry. New installs set this explicitly to SCRAM in
+      # .env.example. Existing role verifiers are migrated by
+      # configure-docker-db-roles.sh without recreating the DB container.
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
       POSTGRES_PROVISIONER_PASSWORD: ${POSTGRES_PROVISIONER_PASSWORD:?set POSTGRES_PROVISIONER_PASSWORD in .env}
-      POSTGRES_HOST_AUTH_METHOD: md5
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD:-md5}
     networks:
       - ucms-net
     # Bounded so a spike elsewhere on the box can't trigger Linux's
@@ -74,12 +72,15 @@ services:
       - ucms-net
     environment:
       # Only used by the healthcheck below (real client auth against
-      # pgbouncer now goes through auth_type=md5 + userlist.txt, not this
+      # pgbouncer now goes through auth_type=scram-sha-256 + userlist.txt, not this
       # env var) — pgbouncer.ini itself no longer embeds a password.
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
     volumes:
       - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+      # Writable only so the root helper can refresh the SCRAM
+      # verifier during role migration. PgBouncer runs as UID/GID 70 and the
+      # file remains root:70 mode 640.
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
     healthcheck:
       test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_APP_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U usim_cms_app -d pgbouncer -c 'SHOW VERSION' >/dev/null 2>&1"]
       interval: 5s
@@ -144,6 +145,9 @@ services:
     mem_limit: ${PROXY_MEM_LIMIT:-256m}
     networks:
       - ucms-net
+    # Caddy can reach the host-level monitor on Docker's private bridge only.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${PROXY_BIND_HTTP:-80:80}"
       - "${PROXY_BIND_HTTPS:-443:443}"
@@ -153,6 +157,7 @@ services:
       TENANT_DOMAINS: ${TENANT_DOMAINS:-tenant.localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./monitor/access:/etc/caddy/monitor-access:ro
       - caddy-data:/data
       - caddy-config:/config
       # - ./certs:/etc/caddy/certs:ro

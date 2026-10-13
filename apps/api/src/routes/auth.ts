@@ -1,13 +1,15 @@
-import { randomBytes } from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { verifyAnyUser } from "../plugins/auth.js";
 import { mergePermissions } from "./permissions.js";
 import {
   findUserByEmail,
-  createUser,
+  findUserByEntraObjectId,
+  createInitialSuperadmin,
   createTenant,
   listUsers,
   findUserById,
+  updateUserPassword,
   getRolePermissions,
   isLoginRateLimited,
   recordLoginAttempt,
@@ -19,7 +21,7 @@ import {
   insertAuditLog,
 } from "../db/tenant-pool.js";
 import {
-  verifyPassword,
+  verifyPasswordOrDummy,
   hashPassword,
   signSession,
   verifySession,
@@ -29,6 +31,10 @@ import {
   totpAuthUri,
   generateCsrfToken,
   isMfaSetupRequired,
+  createAuthStamp,
+  matchesAuthStamp,
+  validatePasswordInput,
+  type SessionPayload,
 } from "../db/auth.js";
 import { setSessionCookie, clearSessionCookie, setEntraStateCookie, getEntraStateCookie, clearEntraStateCookie } from "../lib/cookies.js";
 import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "../entra.js";
@@ -44,6 +50,11 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
   // adminOrigins fallback in index.ts, which allows any origin in dev instead).
   const entraRedirectAdminOrigin = adminOrigins?.[0] ?? "http://localhost:5173";
 
+  function reissueCurrentSession(reply: FastifyReply, session: SessionPayload, user: NonNullable<Awaited<ReturnType<typeof findUserById>>>) {
+    const token = signSession({ ...session, authStamp: createAuthStamp(user), exp: Date.now() + SESSION_TTL_MS });
+    setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
+  }
+
   // First-run bootstrap: creates the very first superadmin (chicken-and-egg —
   // every other user-management route requires an existing superadmin token).
   // Self-disabling: once any user row exists, both routes permanently refuse,
@@ -54,37 +65,57 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
   });
 
   app.post("/api/setup", async (req, reply) => {
-    const users = await listUsers();
-    if (users.length > 0) {
-      reply.code(403);
-      return { error: "Setup already completed" };
+    if (process.env.NODE_ENV === "production") {
+      const supplied = Buffer.from(typeof req.headers["x-setup-secret"] === "string" ? req.headers["x-setup-secret"] : "");
+      const expected = Buffer.from(process.env.SETUP_SECRET ?? "");
+      const matches = supplied.length === expected.length && timingSafeEqual(supplied, expected);
+      if (!expected.length || !matches) {
+        reply.code(403);
+        return { error: "setup is installer-only in production" };
+      }
     }
-    const { email, password, host, departmentName } = req.body as {
+    const { email, password, host, departmentName } = (req.body && typeof req.body === "object" ? req.body : {}) as {
       email?: string;
       password?: string;
       host?: string;
       departmentName?: string;
     };
-    if (!email || !password) {
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       reply.code(400);
-      return { error: "email and password required" };
+      return { error: "valid email required" };
+    }
+    const passwordError = validatePasswordInput(password);
+    if (passwordError) {
+      reply.code(400);
+      return { error: passwordError };
     }
     if (host && !departmentName) {
       reply.code(400);
       return { error: "departmentName required when host is set" };
     }
-    await createUser(email, hashPassword(password), "superadmin", null, null);
+    const userId = await createInitialSuperadmin(normalizedEmail, await hashPassword(password!));
+    if (!userId) {
+      reply.code(403);
+      return { error: "Setup already completed" };
+    }
     if (host) {
       await createTenant(host, departmentName!, null);
     }
+    const user = await findUserById(userId);
+    if (!user) {
+      reply.code(500);
+      return { error: "Initial account could not be loaded" };
+    }
     const csrfToken = generateCsrfToken();
     const token = signSession({
-      userId: (await findUserByEmail(email))!.id,
-      email,
+      userId,
+      email: normalizedEmail,
       role: "superadmin",
       tenantHost: null,
       permissions: [],
       csrfToken,
+      authStamp: createAuthStamp(user),
       exp: Date.now() + SESSION_TTL_MS,
     });
     setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
@@ -92,20 +123,21 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
   });
 
   app.post("/api/auth/login", async (req, reply) => {
-    const { email, password } = req.body as { email?: string; password?: string };
-    if (!email || !password) {
+    const { email, password } = (req.body && typeof req.body === "object" ? req.body : {}) as { email?: string; password?: string };
+    if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password || Buffer.byteLength(password, "utf8") > 1024) {
       reply.code(400);
-      return { error: "email and password required" };
+      return { error: "valid email and password required (maximum 1024 bytes)" };
     }
     // Checked BEFORE the password is even compared, so a locked-out caller
     // never gets a fresh timing oracle on top of the lockout itself.
-    if (await isLoginRateLimited(email, req.ip)) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (await isLoginRateLimited(normalizedEmail, req.ip)) {
       reply.code(429);
       return { error: "Too many failed attempts — try again later" };
     }
-    const user = await findUserByEmail(email);
-    const valid = !!user && verifyPassword(password, user.passwordHash);
-    await recordLoginAttempt(email, req.ip, valid);
+    let user = await findUserByEmail(normalizedEmail);
+    const valid = await verifyPasswordOrDummy(password, user?.passwordHash);
+    await recordLoginAttempt(normalizedEmail, req.ip, valid);
     if (!user || !valid) {
       reply.code(401);
       return { error: "invalid credentials" };
@@ -118,6 +150,17 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       reply.code(403);
       return { error: "Password login is disabled — use Microsoft Entra ID to sign in" };
     }
+    // Transparently upgrade password hashes created with the older scrypt
+    // work factor after a successful authentication. This increments the
+    // auth revision and reloads the user before creating the new session.
+    if (!user.passwordHash.startsWith("scrypt$")) {
+      await updateUserPassword(user.id, await hashPassword(password));
+      user = await findUserById(user.id);
+      if (!user) {
+        reply.code(401);
+        return { error: "account no longer exists" };
+      }
+    }
     const basePayload = {
       userId: user.id,
       email: user.email,
@@ -128,18 +171,25 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
         await getRolePermissions(user.roleId as string | null),
         user.extraPermissions as string[] | null,
       ),
+      authStamp: createAuthStamp(user),
     };
-    // Mandatory-MFA mode (platformSettings.mfaRequired, superadmin exempt) and
-    // this account hasn't enrolled TOTP yet — force enrollment as part of
+    // Superadmins always require MFA; other users follow the platform's
+    // mandatory-MFA setting. An account without TOTP must enroll as part of
     // login itself instead of letting them dismiss the Security-tab prompt
     // indefinitely (which is exactly how an account can go a long time
     // "protected" on paper but not actually enrolled). Re-uses the same
     // pendingMfa flag/rejection as the challenge branch below — see
     // POST /api/auth/totp-setup-verify, its one exchange point.
-    if (isMfaSetupRequired(user.role as "superadmin" | "webmaster", user.totpEnabled, await getMfaRequired())) {
+    const mfaRequired = user.role === "superadmin" || process.env.NODE_ENV === "production" || await getMfaRequired();
+    if (isMfaSetupRequired(user.totpEnabled, mfaRequired)) {
       const secret = generateTotpSecret();
       await setUserTotpSecret(user.id, secret);
-      const pendingToken = signSession({ ...basePayload, pendingMfa: true, exp: Date.now() + 5 * 60 * 1000 });
+      const pendingUser = await findUserById(user.id);
+      if (!pendingUser) {
+        reply.code(500);
+        return { error: "Account could not be loaded" };
+      }
+      const pendingToken = signSession({ ...basePayload, authStamp: createAuthStamp(pendingUser), pendingMfa: true, exp: Date.now() + 5 * 60 * 1000 });
       return { mfaSetupRequired: true, pendingToken, secret, otpauthUri: totpAuthUri(secret, user.email) };
     }
     // Second factor required — issue a short-lived pending token instead of a
@@ -151,7 +201,7 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       return { mfaRequired: true, pendingToken };
     }
     const csrfToken = generateCsrfToken();
-    const token = signSession({ ...basePayload, csrfToken, exp: Date.now() + SESSION_TTL_MS });
+    const token = signSession({ ...basePayload, csrfToken, mfaVerified: true, exp: Date.now() + SESSION_TTL_MS });
     setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
     return { csrfToken, role: user.role, tenantHost: user.tenantHost, tenantHosts: (user.tenantHosts as string[] | null) ?? [] };
   });
@@ -160,7 +210,7 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
   // show before anyone has signed in.
   app.get("/api/auth/login-methods", async () => {
     const { entraEnabled, entraOnly } = await getEntraSettings();
-    return { mfaEnabled: await getMfaEnabled(), entraEnabled, entraOnly };
+    return { mfaEnabled: process.env.NODE_ENV === "production" || await getMfaEnabled(), entraEnabled, entraOnly };
   });
 
   app.get("/api/auth/entra/login", async (req, reply) => {
@@ -185,7 +235,7 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       entraNonce,
       exp: Date.now() + 10 * 60 * 1000,
     });
-    reply.redirect(getEntraAuthorizeUrl(entraTenantId, entraClientId, redirectUri, state));
+    reply.redirect(getEntraAuthorizeUrl(entraTenantId, entraClientId, redirectUri, state, entraNonce));
   });
 
   app.get("/api/auth/entra/callback", async (req, reply) => {
@@ -206,27 +256,29 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
     if (await isLoginRateLimited(`entra:${entraTenantId}`, req.ip)) {
       return reply.redirect(`${loginPageUrl}?entraError=rate_limited`);
     }
-    let email: string;
+    let entraObjectId: string;
     try {
       const { idToken } = await exchangeEntraCode(entraTenantId, entraClientId, clientSecret, redirectUri, code);
-      const claims = await verifyEntraIdToken(idToken, entraTenantId, entraClientId);
-      email = claims.email.toLowerCase();
+      const claims = await verifyEntraIdToken(
+        idToken,
+        entraTenantId,
+        entraClientId,
+        statePayload!.entraNonce!,
+        process.env.NODE_ENV === "production",
+      );
+      entraObjectId = claims.oid;
     } catch (err) {
       req.log.error({ err }, "entra callback failed");
       await recordLoginAttempt("entra:unknown", req.ip, false);
       return reply.redirect(`${loginPageUrl}?entraError=verification_failed`);
     }
-    // No account is ever auto-created here — the users table (control-plane,
-    // ~40 rows for USIM) IS the allowlist. Entra only proves "this email
-    // really is who they say", never grants an account by itself; anyone else
-    // in the org's Entra tenant hits this branch and is turned away.
-    const user = await findUserByEmail(email);
-    await recordLoginAttempt(email, req.ip, !!user);
+    // Only an administrator-prebound immutable object ID authorizes this account.
+    const user = await findUserByEntraObjectId(entraObjectId);
+    await recordLoginAttempt(user?.email ?? "entra:unlinked", req.ip, !!user);
     if (!user) {
-      return reply.redirect(`${loginPageUrl}?entraError=account_not_found`);
+      return reply.redirect(`${loginPageUrl}?entraError=identity_not_linked`);
     }
-    // Entra login skips the app's own TOTP MFA gate deliberately — this is
-    // already a real IdP authentication event, not a bare password.
+    // Production accepts an Entra session only after signed amr=mfa evidence.
     const csrfToken = generateCsrfToken();
     const token = signSession({
       userId: user.id,
@@ -235,6 +287,8 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       tenantHost: user.tenantHost as string | null,
       tenantHosts: (user.tenantHosts as string[] | null) ?? [],
       permissions: mergePermissions(await getRolePermissions(user.roleId as string | null), user.extraPermissions as string[] | null),
+      authStamp: createAuthStamp(user),
+      mfaVerified: true,
       csrfToken,
       exp: Date.now() + SESSION_TTL_MS,
     });
@@ -284,6 +338,10 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       return { error: "Too many failed attempts — try again later" };
     }
     const user = await findUserById(pending.userId);
+    if (!user || !matchesAuthStamp(pending.authStamp, user)) {
+      reply.code(401);
+      return { error: "credentials or MFA settings changed; sign in again" };
+    }
     const valid = !!user?.totpEnabled && !!user.totpSecret && verifyTotpCode(user.totpSecret, code);
     await recordLoginAttempt(pending.email, req.ip, valid);
     if (!user?.totpEnabled || !user.totpSecret) {
@@ -303,7 +361,9 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       tenantHost: pending.tenantHost,
       tenantHosts,
       permissions: pending.permissions,
+      authStamp: createAuthStamp(user),
       csrfToken,
+      mfaVerified: true,
       exp: Date.now() + SESSION_TTL_MS,
     });
     setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
@@ -330,6 +390,10 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       return { error: "Too many failed attempts — try again later" };
     }
     const user = await findUserById(pending.userId);
+    if (!user || !matchesAuthStamp(pending.authStamp, user)) {
+      reply.code(401);
+      return { error: "credentials or MFA settings changed; sign in again" };
+    }
     const valid = !!user?.totpSecret && verifyTotpCode(user.totpSecret, code);
     await recordLoginAttempt(pending.email, req.ip, valid);
     if (!user?.totpSecret) {
@@ -342,6 +406,11 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
     }
     await setUserTotpEnabled(pending.userId, true);
     await insertAuditLog({ actorUserId: pending.userId, actorEmail: pending.email, action: "mfa.enabled_self", ip: req.ip });
+    const enrolledUser = await findUserById(pending.userId);
+    if (!enrolledUser) {
+      reply.code(401);
+      return { error: "account no longer exists" };
+    }
     const tenantHosts = pending.tenantHosts ?? [];
     const csrfToken = generateCsrfToken();
     const token = signSession({
@@ -351,7 +420,9 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       tenantHost: pending.tenantHost,
       tenantHosts,
       permissions: pending.permissions,
+      authStamp: createAuthStamp(enrolledUser),
       csrfToken,
+      mfaVerified: true,
       exp: Date.now() + SESSION_TTL_MS,
     });
     setSessionCookie(reply, token, SESSION_TTL_MS / 1000);
@@ -392,13 +463,25 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
     // it's ever confirmed, with no proof they still hold the original device.
     if (user?.totpEnabled) {
       const { code } = req.body as { code?: string };
-      if (!user.totpSecret || !code || !verifyTotpCode(user.totpSecret, code)) {
+      if (await isLoginRateLimited(session.email, req.ip)) {
+        reply.code(429);
+        return { error: "Too many failed attempts — try again later" };
+      }
+      const valid = !!user.totpSecret && !!code && verifyTotpCode(user.totpSecret, code);
+      await recordLoginAttempt(session.email, req.ip, valid);
+      if (!valid) {
         reply.code(401);
         return { error: "current MFA code required to re-enroll" };
       }
     }
     const secret = generateTotpSecret();
     await setUserTotpSecret(session.userId, secret);
+    const updatedUser = await findUserById(session.userId);
+    if (!updatedUser) {
+      reply.code(401);
+      return { error: "account no longer exists" };
+    }
+    reissueCurrentSession(reply, session, updatedUser);
     return { secret, otpauthUri: totpAuthUri(secret, session.email) };
   });
 
@@ -411,18 +494,34 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       reply.code(400);
       return { error: "call /api/auth/totp-setup first" };
     }
-    if (!code || !verifyTotpCode(user.totpSecret, code)) {
+    if (await isLoginRateLimited(session.email, req.ip)) {
+      reply.code(429);
+      return { error: "Too many failed attempts — try again later" };
+    }
+    const valid = !!code && verifyTotpCode(user.totpSecret, code);
+    await recordLoginAttempt(session.email, req.ip, valid);
+    if (!valid) {
       reply.code(401);
       return { error: "invalid code" };
     }
     await setUserTotpEnabled(session.userId, true);
     await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.enabled_self", ip: req.ip });
+    const updatedUser = await findUserById(session.userId);
+    if (!updatedUser) {
+      reply.code(401);
+      return { error: "account no longer exists" };
+    }
+    reissueCurrentSession(reply, session, updatedUser);
     return { enabled: true };
   });
 
   app.post("/api/auth/totp-disable", async (req, reply) => {
     const session = verifyAnyUser(req, reply);
     if (!session) return;
+    if (process.env.NODE_ENV === "production") {
+      reply.code(403);
+      return { error: "MFA cannot be disabled in production; contact your administrator for account recovery" };
+    }
     const user = await findUserById(session.userId);
     if (!user?.totpEnabled) {
       return { disabled: true };
@@ -432,12 +531,24 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
     // a second factor is that possessing the token isn't sufficient by
     // itself, so removing it requires proving the second factor too.
     const { code } = req.body as { code?: string };
-    if (!user.totpSecret || !code || !verifyTotpCode(user.totpSecret, code)) {
+    if (await isLoginRateLimited(session.email, req.ip)) {
+      reply.code(429);
+      return { error: "Too many failed attempts — try again later" };
+    }
+    const valid = !!user.totpSecret && !!code && verifyTotpCode(user.totpSecret, code);
+    await recordLoginAttempt(session.email, req.ip, valid);
+    if (!valid) {
       reply.code(401);
       return { error: "current MFA code required to disable" };
     }
     await setUserTotpEnabled(session.userId, false);
     await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.disabled_self", ip: req.ip });
+    const updatedUser = await findUserById(session.userId);
+    if (!updatedUser) {
+      reply.code(401);
+      return { error: "account no longer exists" };
+    }
+    reissueCurrentSession(reply, session, updatedUser);
     return { disabled: true };
   });
 }

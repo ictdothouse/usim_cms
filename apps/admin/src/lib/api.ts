@@ -1075,6 +1075,7 @@ export const createPortalUser = (
     tenantHosts?: string[];
     roleId?: string | null;
     extraPermissions?: string[];
+    entraObjectId?: string;
   },
 ) => request("/api/portal/users", null, token, { method: "POST", body: JSON.stringify(data) });
 
@@ -1094,6 +1095,12 @@ export const updatePortalUserPassword = (token: string, id: string, password: st
 
 export const updatePortalUserTenantHosts = (token: string, id: string, tenantHosts: string[]) =>
   request(`/api/portal/users/${id}`, null, token, { method: "PATCH", body: JSON.stringify({ tenantHosts }) });
+
+export const updatePortalUserEntraObjectId = (token: string, id: string, entraObjectId: string | null) =>
+  request(`/api/portal/users/${id}`, null, token, { method: "PATCH", body: JSON.stringify({ entraObjectId }) });
+
+export const resetPortalUserMfa = (token: string, id: string, reason: string) =>
+  request(`/api/portal/users/${id}/mfa-reset`, null, token, { method: "POST", body: JSON.stringify({ reason }) });
 
 export const deletePortalUser = (token: string, id: string) =>
   request(`/api/portal/users/${id}`, null, token, { method: "DELETE" });

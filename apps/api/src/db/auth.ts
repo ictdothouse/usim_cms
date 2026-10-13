@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual, createHmac } from "node:crypto";
+import { randomBytes, scrypt, timingSafeEqual, createHmac } from "node:crypto";
 
 // --- TOTP (RFC 6238), stdlib-only — no otplib/speakeasy dependency needed
 // for a standard 6-digit/30s HMAC-SHA1 code. ---
@@ -57,20 +57,14 @@ export function totpAuthUri(secretBase32: string, email: string): string {
   return `otpauth://totp/${label}?secret=${secretBase32}&issuer=UCMS&algorithm=SHA1&digits=6&period=30`;
 }
 
-// The mandatory-MFA break-glass rule, pulled out as a pure function so it has
-// its own direct unit test — same convention as entra.ts's
-// isPasswordLoginAllowed. superadmin is exempt (the person who flips
-// platformSettings.mfaRequired on must still be able to get back in); every
-// other role without TOTP enrolled yet must finish enrollment at login once
-// mfaRequired is on. Already-enrolled accounts (totpEnabled) always go
-// through the normal challenge instead, regardless of this flag — see
-// index.ts's POST /api/auth/login, the one call site.
-export function isMfaSetupRequired(role: "superadmin" | "webmaster", totpEnabled: boolean, mfaRequired: boolean): boolean {
-  return mfaRequired && !totpEnabled && role !== "superadmin";
+// Non-superadmin roles may use the platform's mandatory-MFA switch. The
+// password-login route always requires TOTP enrollment for superadmins.
+export function isMfaSetupRequired(totpEnabled: boolean, mfaRequired: boolean): boolean {
+  return mfaRequired && !totpEnabled;
 }
 
-if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
-  throw new Error("SESSION_SECRET must be set in production — refusing to boot with the insecure dev default.");
+if (process.env.NODE_ENV === "production" && Buffer.byteLength(process.env.SESSION_SECRET ?? "") < 32) {
+  throw new Error("SESSION_SECRET must contain at least 32 bytes in production — refusing to boot with an insecure secret.");
 }
 const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret-change-me";
 
@@ -78,18 +72,105 @@ const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret-c
 // theme-preview tokens set their own, much shorter exp already.
 export const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
+const SCRYPT_KEY_LENGTH = 64;
+type ScryptOptions = { N: number; r: number; p: number; maxmem: number };
+const SCRYPT_CURRENT: ScryptOptions = { N: 1 << 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+const SCRYPT_LEGACY: ScryptOptions = { N: 1 << 14, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
+const MAX_ACTIVE_SCRYPT_JOBS = 1;
+const MAX_QUEUED_SCRYPT_JOBS = 64;
+let activeScryptJobs = 0;
+const queuedScryptJobs: Array<() => void> = [];
+
+async function acquireScryptSlot(): Promise<void> {
+  if (activeScryptJobs < MAX_ACTIVE_SCRYPT_JOBS) {
+    activeScryptJobs++;
+    return;
+  }
+  if (queuedScryptJobs.length >= MAX_QUEUED_SCRYPT_JOBS) {
+    throw new Error("password verification capacity reached");
+  }
+  await new Promise<void>((resolve) => queuedScryptJobs.push(resolve));
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
-  const [salt, hash] = stored.split(":");
-  if (!salt || !hash) return false;
-  const candidate = scryptSync(password, salt, 64);
+function releaseScryptSlot(): void {
+  const next = queuedScryptJobs.shift();
+  if (next) next();
+  else activeScryptJobs--;
+}
+
+async function derivePasswordKey(password: string, salt: string, options: ScryptOptions): Promise<Buffer> {
+  await acquireScryptSlot();
+  try {
+    return await new Promise<Buffer>((resolve, reject) => {
+      scrypt(password, salt, SCRYPT_KEY_LENGTH, options, (error, derivedKey) => {
+        if (error) reject(error);
+        else resolve(derivedKey);
+      });
+    });
+  } finally {
+    releaseScryptSlot();
+  }
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const hash = await derivePasswordKey(password, salt, SCRYPT_CURRENT);
+  return `scrypt$${SCRYPT_CURRENT.N}$${SCRYPT_CURRENT.r}$${SCRYPT_CURRENT.p}$${salt}$${hash.toString("hex")}`;
+}
+
+async function hashLegacyPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const hash = await derivePasswordKey(password, salt, SCRYPT_LEGACY);
+  return `${salt}:${hash.toString("hex")}`;
+}
+
+// Keep the password-check cost similar for known and unknown emails so the
+// login endpoint does not expose an account-existence timing oracle.
+const DUMMY_PASSWORD = randomBytes(32).toString("hex");
+const DUMMY_PASSWORD_HASH_CURRENT = hashPassword(DUMMY_PASSWORD);
+const DUMMY_PASSWORD_HASH_LEGACY = hashLegacyPassword(DUMMY_PASSWORD);
+
+export async function verifyPasswordOrDummy(password: string, stored: string | undefined): Promise<boolean> {
+  if (!stored) {
+    await verifyPassword(password, await DUMMY_PASSWORD_HASH_CURRENT);
+    await verifyPassword(password, await DUMMY_PASSWORD_HASH_LEGACY);
+    return false;
+  }
+  const valid = await verifyPassword(password, stored);
+  // Every attempt performs one current-cost and one legacy-cost KDF, whether
+  // the record is absent or uses either supported hash format.
+  if (stored.startsWith("scrypt$")) await verifyPassword(password, await DUMMY_PASSWORD_HASH_LEGACY);
+  else await verifyPassword(password, await DUMMY_PASSWORD_HASH_CURRENT);
+  return valid;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  let salt: string;
+  let hash: string;
+  let options: typeof SCRYPT_CURRENT;
+  const parts = stored.split("$");
+  if (parts.length === 6 && parts[0] === "scrypt") {
+    if (parts[1] !== String(SCRYPT_CURRENT.N) || parts[2] !== String(SCRYPT_CURRENT.r) || parts[3] !== String(SCRYPT_CURRENT.p)) return false;
+    [, , , , salt, hash] = parts;
+    options = SCRYPT_CURRENT;
+  } else {
+    const legacyParts = stored.split(":");
+    if (legacyParts.length !== 2) return false;
+    [salt, hash] = legacyParts;
+    options = SCRYPT_LEGACY;
+  }
+  if (!/^[0-9a-f]{32}$/.test(salt) || !/^[0-9a-f]{128}$/.test(hash)) return false;
+  const candidate = await derivePasswordKey(password, salt, options);
   const expected = Buffer.from(hash, "hex");
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
+export function validatePasswordInput(password: unknown): string | null {
+  if (typeof password !== "string") return "password is required";
+  const byteLength = Buffer.byteLength(password, "utf8");
+  if (Array.from(password).length < 15) return "password must be at least 15 characters";
+  if (byteLength > 1024) return "password must be no more than 1024 bytes";
+  return null;
 }
 
 export interface SessionPayload {
@@ -162,6 +243,29 @@ export interface SessionPayload {
   // the browser and proves nothing about which site's JS actually initiated
   // the request. See plugins/auth.ts's CSRF check.
   csrfToken?: string;
+  // HMAC fingerprint of the user's password and MFA state. It lets each
+  // authenticated request revoke old sessions immediately after either
+  // changes without storing bearer tokens in a session table.
+  authStamp?: string;
+  // Only set after app TOTP or an Entra token whose signed amr claim proves
+  // MFA. Production middleware rejects sessions without this claim.
+  mfaVerified?: true;
+}
+
+export function createAuthStamp(user: { passwordHash: string; totpSecret: string | null; totpEnabled: boolean; authVersion: number }): string {
+  return createHmac("sha256", SESSION_SECRET)
+    .update(JSON.stringify([user.passwordHash, user.totpEnabled ? user.totpSecret : null, user.totpEnabled, user.authVersion]))
+    .digest("base64url");
+}
+
+export function matchesAuthStamp(
+  stamp: string | undefined,
+  user: { passwordHash: string; totpSecret: string | null; totpEnabled: boolean; authVersion: number },
+): boolean {
+  if (!stamp) return false;
+  const expected = Buffer.from(createAuthStamp(user));
+  const actual = Buffer.from(stamp);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 export function generateCsrfToken(): string {
@@ -186,7 +290,9 @@ export function verifySession(token: string): SessionPayload | null {
   }
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionPayload;
-    if (payload.exp !== undefined && Date.now() > payload.exp) return null;
+    // Every app, preview, Entra-state and pending-MFA token is short lived.
+    // Reject old non-expiring tokens rather than keeping an unsafe legacy path.
+    if (!Number.isSafeInteger(payload.exp) || Date.now() > payload.exp!) return null;
     return payload;
   } catch {
     return null;

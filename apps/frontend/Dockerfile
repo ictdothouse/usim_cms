@@ -36,7 +36,7 @@ FROM base AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/deploy/frontend ./
-RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app
+RUN addgroup -S app && adduser -S app -G app
 USER app
 EXPOSE 4321
 CMD ["node", "server.mjs"]

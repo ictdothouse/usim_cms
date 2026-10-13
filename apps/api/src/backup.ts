@@ -20,6 +20,66 @@ import * as schema from "./db/schema.js";
 const BACKUP_VERSION = 1;
 const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
+type BackupTables = {
+  pages: Record<string, unknown>[];
+  posts: Record<string, unknown>[];
+  media: Record<string, unknown>[];
+  mediaFolders?: Record<string, unknown>[];
+  siteChrome?: Record<string, unknown>[];
+  categories?: Record<string, unknown>[];
+};
+
+type TenantBackup = {
+  version: number;
+  sourceHost: string;
+  exportedAt?: string;
+  tables: BackupTables;
+  theme: Record<string, unknown> | null;
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** Validate the complete manifest before a restore is allowed to modify a tenant. */
+export function parseTenantBackupManifest(raw: string): TenantBackup {
+  const backup: unknown = JSON.parse(raw);
+  if (!isPlainRecord(backup)) throw new Error("Invalid backup manifest");
+  if (backup.version !== BACKUP_VERSION) throw new Error(`Unsupported backup version ${String(backup.version)}`);
+  if (typeof backup.sourceHost !== "string" || !backup.sourceHost.trim() || backup.sourceHost.length > 253 || /[\s/\\]/.test(backup.sourceHost)) {
+    throw new Error("Invalid backup source host");
+  }
+  if (!isPlainRecord(backup.tables)) throw new Error("Backup tables are missing or invalid");
+  for (const table of ["pages", "posts", "media", "mediaFolders", "siteChrome", "categories"] as const) {
+    const rows = backup.tables[table];
+    if (rows === undefined && ["mediaFolders", "siteChrome", "categories"].includes(table)) continue;
+    if (!Array.isArray(rows) || rows.some((row) => !isPlainRecord(row))) {
+      throw new Error(`Backup table '${table}' must be an array of records`);
+    }
+  }
+  if (backup.theme !== null && backup.theme !== undefined && !isPlainRecord(backup.theme)) {
+    throw new Error("Backup theme is invalid");
+  }
+  return backup as unknown as TenantBackup;
+}
+
+function rewriteBackupStrings(value: unknown, replacements: Array<[string, string]>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) rewriteBackupStrings(item, replacements);
+    return;
+  }
+  if (!isPlainRecord(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (typeof child === "string") {
+      value[key] = replacements.reduce((text, [from, to]) => text.replaceAll(from, to), child);
+    } else {
+      rewriteBackupStrings(child, replacements);
+    }
+  }
+}
+
 // Shared by export (guards the in-memory zip build below) and restore
 // (guards decompression further down) — this whole pipeline buffers a
 // tenant's uploads fully in RAM via fflate's sync zipSync/unzipSync, fine
@@ -29,7 +89,12 @@ const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, 
 // uploads/<tenantFolder>/ directly instead — streaming this pipeline
 // properly is a real rewrite, not warranted while the practical answer for
 // "large media, single shared process" is "don't put it through this path".
-const MAX_LOCAL_MEDIA_BACKUP_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+// The API container defaults to 512 MiB. Bound ZIP restore well below that
+// because the compressed input, decompressed entries and parsed manifest are
+// simultaneously resident in memory. Larger libraries need filesystem-level
+// migration until this path is replaced with streaming archive I/O.
+const MAX_LOCAL_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024; // 128 MiB
+const MAX_BACKUP_ARCHIVE_BYTES = 64 * 1024 * 1024; // 64 MiB compressed upload
 
 const DATE_KEYS = new Set(["createdAt", "updatedAt", "publishedAt"]);
 function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -45,23 +110,24 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   const { db, release } = await getTenantConnection(host);
   let pages, posts, media, mediaFolders, siteChrome, categories;
   try {
-    // This root-scope call never goes through tenantPlugin/requireTenantAuth
-    // (see plugins/auth.ts), so nothing else sets the RLS flag draft rows
-    // and writes need — set it directly on this connection.
-    await db.execute(sql`SET SESSION app.authenticated = 'true'`);
-    [pages, posts, media, mediaFolders, siteChrome, categories] = await Promise.all([
-      db.select().from(schema.pages),
-      db.select().from(schema.posts),
-      db.select().from(schema.media),
-      db.select().from(schema.mediaFolders),
-      // pages.headerId/footerId are real FKs into site_chrome — without this
-      // table in the dump, restoring into a fresh tenant (clone/promote) 400s
-      // on the very first page insert since those ids don't exist yet there.
-      db.select().from(schema.siteChrome),
-      // posts.categoryId is a real FK into categories — same failure mode as
-      // site_chrome above, just surfaces on the posts insert instead.
-      db.select().from(schema.categories),
-    ]);
+    [pages, posts, media, mediaFolders, siteChrome, categories] = await db.transaction(async (tx) => {
+      // LOCAL scopes privileged RLS access to this transaction and cannot
+      // survive when the pooled connection is returned to another request.
+      await tx.execute(sql`SET LOCAL app.authenticated = 'true'`);
+      return Promise.all([
+        tx.select().from(schema.pages),
+        tx.select().from(schema.posts),
+        tx.select().from(schema.media),
+        tx.select().from(schema.mediaFolders),
+        // pages.headerId/footerId are real FKs into site_chrome — without this
+        // table in the dump, restoring into a fresh tenant (clone/promote) 400s
+        // on the very first page insert since those ids don't exist yet there.
+        tx.select().from(schema.siteChrome),
+        // posts.categoryId is a real FK into categories — same failure mode as
+        // site_chrome above, just surfaces on the posts insert instead.
+        tx.select().from(schema.categories),
+      ]);
+    });
   } finally {
     release();
   }
@@ -113,8 +179,10 @@ export async function exportTenantDesignClone(host: string): Promise<Uint8Array>
   const { db, release } = await getTenantConnection(host);
   let pages, siteChrome;
   try {
-    await db.execute(sql`SET SESSION app.authenticated = 'true'`);
-    [pages, siteChrome] = await Promise.all([db.select().from(schema.pages), db.select().from(schema.siteChrome)]);
+    [pages, siteChrome] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL app.authenticated = 'true'`);
+      return Promise.all([tx.select().from(schema.pages), tx.select().from(schema.siteChrome)]);
+    });
   } finally {
     release();
   }
@@ -192,71 +260,67 @@ export function deleteClone(id: string): boolean {
 }
 
 export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[] }> {
+  if (zip.byteLength > MAX_BACKUP_ARCHIVE_BYTES) {
+    throw new Error(`backup archive exceeds ${MAX_BACKUP_ARCHIVE_BYTES} bytes — refusing to restore`);
+  }
   let decompressedTotal = 0;
+  let entryCount = 0;
   const entries = unzipSync(zip, {
     filter(file) {
+      entryCount += 1;
+      if (entryCount > 20_000) throw new Error("Backup contains too many files");
       decompressedTotal += file.originalSize;
       if (decompressedTotal > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
         throw new Error(`backup decompresses to more than ${MAX_LOCAL_MEDIA_BACKUP_BYTES} bytes — refusing to restore`);
+      }
+      if (file.name === "backup.json" && file.originalSize > 64 * 1024 * 1024) {
+        throw new Error("Backup manifest is too large");
       }
       return true;
     },
   });
   const manifest = entries["backup.json"];
   if (!manifest) throw new Error("Not a backup zip: backup.json missing");
-  let raw = strFromU8(manifest);
-  const sourceHost = (JSON.parse(raw) as { sourceHost: string }).sourceHost;
+  const backup = parseTenantBackupManifest(strFromU8(manifest));
+  const sourceHost = backup.sourceHost;
   // Cross-host restore (= migration): media URLs embed the tenant folder —
   // rewrite them to the target host's folder everywhere (media.url, page
   // layout JSON, post body HTML) in one pass on the serialized dump.
   if (sourceHost !== host) {
-    raw = raw.replaceAll(`/uploads/${tenantFolder(sourceHost)}/`, `/uploads/${tenantFolder(host)}/`);
-    // Phase-1 media paths carry no tenant at all, but apps/admin bakes the
-    // tenant's own domain in front of them (publicMediaBase) — and that host
-    // is what resolves the files. Repoint it (prod form, then dev form).
-    raw = raw.replaceAll(`//${sourceHost}/uploads/`, `//${host}/uploads/`);
-    raw = raw.replaceAll(`/_tenant/${sourceHost}/uploads/`, `/_tenant/${host}/uploads/`);
+    rewriteBackupStrings(backup, [
+      [`/uploads/${tenantFolder(sourceHost)}/`, `/uploads/${tenantFolder(host)}/`],
+      // Phase-1 media paths carry no tenant at all, but apps/admin bakes the
+      // tenant's own domain in front of them (publicMediaBase) — and that host
+      // is what resolves the files. Repoint it (prod form, then dev form).
+      [`//${sourceHost}/uploads/`, `//${host}/uploads/`],
+      [`/_tenant/${sourceHost}/uploads/`, `/_tenant/${host}/uploads/`],
+    ]);
   }
-  const backup = JSON.parse(raw) as {
-    version: number;
-    tables: {
-      pages: Record<string, unknown>[];
-      posts: Record<string, unknown>[];
-      media: Record<string, unknown>[];
-      // Older backups (pre-media-folders / pre-site-chrome / pre-categories) won't have these keys.
-      mediaFolders?: Record<string, unknown>[];
-      siteChrome?: Record<string, unknown>[];
-      categories?: Record<string, unknown>[];
-    };
-    theme: Record<string, unknown> | null;
-  };
-  if (backup.version !== BACKUP_VERSION) throw new Error(`Unsupported backup version ${backup.version}`);
 
   const { db, release } = await getTenantConnection(host);
   try {
-    await db.execute(sql`SET SESSION app.authenticated = 'true'`);
-    // Full replace, not merge — a restore means "make the tenant look like
-    // the backup". Wipe in FK-safe order: media references media_folders,
-    // pages references site_chrome (headerId/footerId), posts references
-    // categories (onDelete: "restrict" — can't delete a category while a
-    // post still points at it) — delete posts before categories, insert
-    // categories before posts.
-    await db.delete(schema.media);
-    await db.delete(schema.posts);
-    await db.delete(schema.pages);
-    await db.delete(schema.mediaFolders);
-    await db.delete(schema.siteChrome);
-    await db.delete(schema.categories);
-    const { pages, posts, media, mediaFolders = [], siteChrome = [], categories = [] } = backup.tables;
-    if (siteChrome.length)
-      await db.insert(schema.siteChrome).values(reviveDates(siteChrome) as (typeof schema.siteChrome.$inferInsert)[]);
-    if (mediaFolders.length)
-      await db.insert(schema.mediaFolders).values(reviveDates(mediaFolders) as (typeof schema.mediaFolders.$inferInsert)[]);
-    if (categories.length)
-      await db.insert(schema.categories).values(reviveDates(categories) as (typeof schema.categories.$inferInsert)[]);
-    if (pages.length) await db.insert(schema.pages).values(reviveDates(pages) as (typeof schema.pages.$inferInsert)[]);
-    if (posts.length) await db.insert(schema.posts).values(reviveDates(posts) as (typeof schema.posts.$inferInsert)[]);
-    if (media.length) await db.insert(schema.media).values(reviveDates(media) as (typeof schema.media.$inferInsert)[]);
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL app.authenticated = 'true'`);
+      // Full replace, not merge — a restore means "make the tenant look like
+      // the backup". Keep the delete and insert phases atomic so a malformed
+      // row/FK error cannot leave a tenant empty or only partly restored.
+      await tx.delete(schema.media);
+      await tx.delete(schema.posts);
+      await tx.delete(schema.pages);
+      await tx.delete(schema.mediaFolders);
+      await tx.delete(schema.siteChrome);
+      await tx.delete(schema.categories);
+      const { pages, posts, media, mediaFolders = [], siteChrome = [], categories = [] } = backup.tables;
+      if (siteChrome.length)
+        await tx.insert(schema.siteChrome).values(reviveDates(siteChrome) as (typeof schema.siteChrome.$inferInsert)[]);
+      if (mediaFolders.length)
+        await tx.insert(schema.mediaFolders).values(reviveDates(mediaFolders) as (typeof schema.mediaFolders.$inferInsert)[]);
+      if (categories.length)
+        await tx.insert(schema.categories).values(reviveDates(categories) as (typeof schema.categories.$inferInsert)[]);
+      if (pages.length) await tx.insert(schema.pages).values(reviveDates(pages) as (typeof schema.pages.$inferInsert)[]);
+      if (posts.length) await tx.insert(schema.posts).values(reviveDates(posts) as (typeof schema.posts.$inferInsert)[]);
+      if (media.length) await tx.insert(schema.media).values(reviveDates(media) as (typeof schema.media.$inferInsert)[]);
+    });
   } finally {
     release();
   }

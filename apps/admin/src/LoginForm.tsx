@@ -97,7 +97,11 @@ export default function LoginForm({ onLogin, entraError }: { onLogin: (s: Sessio
       <div className="w-full max-w-sm space-y-3">
         {entraError && (
           <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-            {entraError === "account_not_found" ? t("login-entra-error-account-not-found") : t("login-entra-error-generic")}
+            {entraError === "account_not_found"
+              ? t("login-entra-error-account-not-found")
+              : entraError === "identity_not_linked"
+                ? t("login-entra-error-identity-not-linked")
+                : t("login-entra-error-generic")}
           </p>
         )}
         {loginMethods?.entraEnabled && !pendingToken && !setupEnrollment && (

@@ -8,6 +8,6 @@ set -euo pipefail
 psql -v ON_ERROR_STOP=1 \
   -v provisioner_password="$POSTGRES_PROVISIONER_PASSWORD" \
   --username postgres --dbname "$POSTGRES_DB" <<-'EOSQL'
-  SET password_encryption = 'md5';
+  SET password_encryption = 'scram-sha-256';
   ALTER ROLE usim_cms_provisioner WITH PASSWORD :'provisioner_password';
 EOSQL

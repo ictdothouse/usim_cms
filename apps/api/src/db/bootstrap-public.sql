@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS "public"."login_attempts" (
 	"success" boolean NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
+CREATE INDEX IF NOT EXISTS "login_attempts_created_at_idx" ON "public"."login_attempts" ("created_at");
+CREATE INDEX IF NOT EXISTS "login_attempts_ip_created_at_idx" ON "public"."login_attempts" ("ip", "created_at");
+CREATE INDEX IF NOT EXISTS "login_attempts_email_ip_created_at_idx" ON "public"."login_attempts" ("email", "ip", "created_at");
 
 -- Control-plane audit trail for superadmin-level mutations (tenant/role/
 -- user changes, the mfa_enabled toggle itself) — see insertAuditLog.
@@ -177,6 +180,9 @@ ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "tenant_hosts" text[] DEFA
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "extra_permissions" text[] DEFAULT '{}' NOT NULL;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_secret" text;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_enabled" boolean DEFAULT false NOT NULL;
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "auth_version" integer DEFAULT 1 NOT NULL;
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "entra_object_id" text;
+CREATE UNIQUE INDEX IF NOT EXISTS "users_entra_object_id_uidx" ON "public"."users" ("entra_object_id") WHERE "entra_object_id" IS NOT NULL;
 UPDATE "public"."users" SET "tenant_hosts" = ARRAY["tenant_host"] WHERE "tenant_host" IS NOT NULL AND cardinality("tenant_hosts") = 0;
 
 -- A user's personal saved theme presets ("my collection" in the Theme

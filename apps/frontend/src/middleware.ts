@@ -102,11 +102,13 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
     !context.url.searchParams.has("themeToken") &&
     !context.url.searchParams.has("designerEdit");
   const cacheKey = cacheEligible ? `ucms:htmlcache:${tenantHost}:${context.url.pathname}${context.url.search}` : null;
+  const cspNonce = context.request.headers.get("x-ucms-csp-nonce");
 
   if (cacheKey) {
     const cached = await htmlCacheGet(cacheKey);
     if (cached !== undefined) {
-      return new Response(cached, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "x-ucms-cache": "hit" } });
+      const html = cspNonce ? cached.replaceAll('nonce="__UCMS_CSP_NONCE__"', `nonce="${cspNonce}"`) : cached;
+      return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "x-ucms-cache": "hit" } });
     }
   }
 
@@ -122,7 +124,9 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
     // Fire-and-forget-shaped but awaited (best-effort write, cacheGet-style
     // try/catch inside htmlCacheSet already swallows a failure) — clone
     // first so the real response body is still readable by the caller.
-    await htmlCacheSet(cacheKey, await response.clone().text());
+    const html = await response.clone().text();
+    const cacheableHtml = cspNonce ? html.replaceAll(`nonce="${cspNonce}"`, 'nonce="__UCMS_CSP_NONCE__"') : html;
+    await htmlCacheSet(cacheKey, cacheableHtml);
   }
   return response;
 };

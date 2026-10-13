@@ -1,6 +1,7 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import HeroBlock from "../../components/HeroBlock.astro";
+import { sanitizeCustomHtml } from "../../lib/sanitize-custom-html";
 import { getPostBySlug, getTheme, getLanguages, getSeoDefaults, resolvePostContent, resolveCategoryName, resolveDefaultHeaderFooter } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro (see its comment for why this
@@ -145,8 +146,8 @@ const jsonLd = post
             ))}
           </p>
         )}
-        {/* body is sanitized server-side on every write (apps/api posts beforeChange) */}
-        <div set:html={content.body} />
+        {/* Sanitize at render too, so old rows and restored backups stay inert. */}
+        <div set:html={sanitizeCustomHtml(content.body)} />
       </article>
     </>
   )}

@@ -34,7 +34,7 @@ export function registerBackupCloneRoutes(app: FastifyInstance) {
     const { host } = req.params as { host: string };
     // Per-call limit override: backups carry a tenant's whole media library,
     // so the global 5 MB multipart cap is far too small here.
-    const file = await req.file({ limits: { fileSize: 500 * 1024 * 1024 } });
+    const file = await req.file({ limits: { fileSize: 64 * 1024 * 1024 } });
     if (!file) {
       reply.code(400);
       return { error: "backup zip required (multipart/form-data, field name 'file')" };

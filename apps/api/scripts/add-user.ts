@@ -23,7 +23,7 @@ await client.query(bootstrapSql);
 await client.query(
   `INSERT INTO "public"."users" (email, password_hash, role, tenant_host) VALUES ($1, $2, $3, $4)
    ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, tenant_host = EXCLUDED.tenant_host`,
-  [email, hashPassword(password), role, tenantHost ?? null],
+  [email, await hashPassword(password), role, tenantHost ?? null],
 );
 await client.end();
 

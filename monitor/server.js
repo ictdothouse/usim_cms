@@ -27,9 +27,31 @@ import { URL } from "node:url";
 import { setInterval } from "node:timers";
 
 const PORT = Number(process.env.MONITOR_PORT || 5555);
+// The monitor runs as root and can operate the deployment. Bind it to a
+// private host interface only; never expose Basic Auth over the public NIC.
+// Docker installs set this to the bridge gateway so the API container can
+// reach it through host.docker.internal. Bare-metal installs keep loopback.
+const MONITOR_HOST = process.env.MONITOR_HOST || "127.0.0.1";
 const REPO_DIR = process.env.REPO_DIR || process.cwd();
 const MONITOR_USER = process.env.MONITOR_USER || "admin";
 const MONITOR_PASSWORD = process.env.MONITOR_PASSWORD || "";
+let monitorAccess = {
+  mode: process.env.MONITOR_ACCESS_MODE || "ssh",
+  domain: process.env.MONITOR_PUBLIC_DOMAIN || "",
+};
+try {
+  monitorAccess = JSON.parse(fs.readFileSync(path.join(REPO_DIR, "monitor/access/config.json"), "utf8"));
+} catch (error) {
+  if (error.code !== "ENOENT") {
+    console.error("Invalid monitor/access/config.json:", error.message);
+    process.exit(1);
+  }
+}
+const MONITOR_ACCESS_MODE = monitorAccess.mode;
+const MONITOR_PUBLIC_DOMAIN = typeof monitorAccess.domain === "string" ? monitorAccess.domain.toLowerCase() : "";
+const validPublicDomain = MONITOR_PUBLIC_DOMAIN.length <= 253 && MONITOR_PUBLIC_DOMAIN.includes(".") &&
+  !MONITOR_PUBLIC_DOMAIN.endsWith(".localhost") &&
+  MONITOR_PUBLIC_DOMAIN.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
 const DEPLOY_LOG = path.join(REPO_DIR, ".deploy.log");
 const DEPLOY_MODE = process.env.DEPLOY_MODE === "systemd" ? "systemd" : "docker";
 const DB_MANAGED = process.env.DB_MANAGED !== "false";
@@ -134,6 +156,15 @@ if (!MONITOR_PASSWORD) {
   console.error("MONITOR_PASSWORD is not set — refusing to start with no auth.");
   process.exit(1);
 }
+if (!["ssh", "public", "cloud"].includes(MONITOR_ACCESS_MODE)) {
+  console.error("MONITOR_ACCESS_MODE must be ssh, public or cloud.");
+  process.exit(1);
+}
+if (MONITOR_ACCESS_MODE !== "ssh" &&
+    (!validPublicDomain || Buffer.byteLength(MONITOR_PASSWORD) < 24)) {
+  console.error("Public/cloud monitor requires a valid MONITOR_PUBLIC_DOMAIN and a password of at least 24 bytes.");
+  process.exit(1);
+}
 
 let deployState = { running: false, exitCode: null, startedAt: null, finishedAt: null };
 
@@ -165,13 +196,112 @@ function checkAuth(req) {
   return timingSafeEqualStr(user, MONITOR_USER) && timingSafeEqualStr(pass, MONITOR_PASSWORD);
 }
 
+const AUTH_FAILURE_LIMIT = 8;
+const AUTH_WINDOW_MS = 10 * 60_000;
+const AUTH_BLOCK_MS = 15 * 60_000;
+const AUTH_MAX_CLIENTS = 4096;
+const authFailures = new Map();
+
+function authClientKey(req) {
+  return req.socket.remoteAddress || "unknown";
+}
+
+function authBlockRemaining(key, now = Date.now()) {
+  const state = authFailures.get(key);
+  if (!state) return 0;
+  if (state.blockedUntil > now) return state.blockedUntil - now;
+  if (now - state.windowStartedAt >= AUTH_WINDOW_MS || state.blockedUntil) {
+    authFailures.delete(key);
+    return 0;
+  }
+  return 0;
+}
+
+function recordAuthFailure(key, now = Date.now()) {
+  let state = authFailures.get(key);
+  if (!state || now - state.windowStartedAt >= AUTH_WINDOW_MS) {
+    state = { failures: 0, windowStartedAt: now, blockedUntil: 0 };
+  }
+  state.failures++;
+  if (state.failures >= AUTH_FAILURE_LIMIT) state.blockedUntil = now + AUTH_BLOCK_MS;
+  authFailures.delete(key);
+  authFailures.set(key, state);
+  if (authFailures.size > AUTH_MAX_CLIENTS) {
+    const oldestKey = authFailures.keys().next().value;
+    if (oldestKey !== undefined) authFailures.delete(oldestKey);
+  }
+}
+
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(data),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
   });
   res.end(data);
+}
+
+function readJsonBody(req, res, maxBytes, onValue) {
+  let body = "";
+  let bytes = 0;
+  let tooLarge = false;
+  req.on("data", (chunk) => {
+    bytes += chunk.length;
+    if (bytes > maxBytes) {
+      tooLarge = true;
+      body = "";
+    } else if (!tooLarge) {
+      body += chunk.toString("utf8");
+    }
+  });
+  req.on("end", () => {
+    if (tooLarge) return sendJson(res, 413, { error: "request body too large" });
+    let parsed;
+    try {
+      parsed = JSON.parse(body || "{}");
+    } catch {
+      return sendJson(res, 400, { error: "invalid JSON body" });
+    }
+    onValue(parsed);
+  });
+  req.on("error", () => {
+    if (!res.headersSent) sendJson(res, 400, { error: "request body could not be read" });
+  });
+}
+
+function isAllowedHost(header) {
+  if (typeof header !== "string" || header.length > 255) return false;
+  if (/[\/@?#\\\s]/.test(header)) return false;
+  let hostname;
+  try {
+    const parsed = new URL(`http://${header}`);
+    hostname = parsed.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" ||
+    hostname === "host.docker.internal" ||
+    (MONITOR_ACCESS_MODE !== "ssh" && hostname === MONITOR_PUBLIC_DOMAIN);
+}
+
+function isAllowedOrigin(req) {
+  const origin = req.headers.origin;
+  // Non-browser callers (the API container and SSH-local automation) do not
+  // send Origin. Browsers always do for state-changing requests.
+  if (origin === undefined) return true;
+  try {
+    const parsed = new URL(origin);
+    const publicHost = MONITOR_ACCESS_MODE !== "ssh" &&
+      new URL(`http://${req.headers.host}`).hostname.toLowerCase() === MONITOR_PUBLIC_DOMAIN;
+    const expected = new URL(`${publicHost ? "https" : "http"}://${req.headers.host}`).origin;
+    return origin === parsed.origin && parsed.origin === expected;
+  } catch {
+    return false;
+  }
 }
 
 function runCompose(args, cb) {
@@ -1741,6 +1871,12 @@ function handlePnpmUpdate(req, res) {
   if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
   getUpstreamLatest((latest) => {
     if (!latest.pnpm) return sendJson(res, 502, { error: "couldn't resolve latest pnpm version" });
+    // This value is interpolated into the source-bump shell script below.
+    // Treat registry metadata as untrusted input even though it arrived over
+    // HTTPS; only a plain release version is valid in these command arguments.
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(latest.pnpm)) {
+      return sendJson(res, 502, { error: "npm registry returned an invalid pnpm version" });
+    }
     const full = path.join(REPO_DIR, "package.json");
     const content = fs.readFileSync(full, "utf8");
     const re = /"packageManager":\s*"pnpm@[^"]+"/;
@@ -1903,15 +2039,7 @@ const HOSTNAME_RE =
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function handleSslIssue(req, res) {
-  let body = "";
-  req.on("data", (chunk) => (body += chunk));
-  req.on("end", () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(body || "{}");
-    } catch {
-      return sendJson(res, 400, { error: "invalid JSON body" });
-    }
+  readJsonBody(req, res, 16 * 1024, (parsed) => {
     const domain = String(parsed.domain || "").trim();
     const email = String(parsed.email || "").trim();
     if (!HOSTNAME_RE.test(domain)) return sendJson(res, 400, { error: "invalid domain" });
@@ -2101,15 +2229,7 @@ function handleGetBackupDestination(req, res) {
 }
 
 function handleSetBackupDestination(req, res) {
-  let body = "";
-  req.on("data", (chunk) => (body += chunk));
-  req.on("end", async () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(body || "{}");
-    } catch {
-      return sendJson(res, 400, { error: "invalid JSON body" });
-    }
+  readJsonBody(req, res, 32 * 1024, async (parsed) => {
     try {
       const existing = await getBackupDestinationRow();
       const { error, merged } = validateBackupDestinationPatch(parsed, existing);
@@ -3249,22 +3369,61 @@ init();
 </html>`;
 
 const server = http.createServer((req, res) => {
+  if (!isAllowedHost(req.headers.host)) {
+    res.writeHead(421, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    res.end("Misdirected request");
+    return;
+  }
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method) && !isAllowedOrigin(req)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    res.end("Cross-origin request denied");
+    return;
+  }
+  const authKey = authClientKey(req);
+  const retryMs = authBlockRemaining(authKey);
+  if (retryMs > 0) {
+    res.writeHead(429, {
+      "Retry-After": String(Math.ceil(retryMs / 1000)),
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY",
+    });
+    res.end("Too many failed authentication attempts");
+    return;
+  }
   if (!checkAuth(req)) {
+    recordAuthFailure(authKey);
     res.writeHead(401, {
       "WWW-Authenticate": 'Basic realm="usim_cms monitor"',
       "Content-Type": "text/plain",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY",
     });
     res.end("Auth required");
     return;
   }
+  authFailures.delete(authKey);
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const parts = url.pathname.split("/").filter(Boolean);
 
   try {
     if (req.method === "GET" && url.pathname === "/") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(DASHBOARD_HTML);
+      const nonce = crypto.randomBytes(18).toString("base64");
+      const dashboardHtml = DASHBOARD_HTML.replace(/<script(?=[\s>])/g, `<script nonce="${nonce}"`);
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
+        "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; script-src-attr 'none'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+      });
+      res.end(dashboardHtml);
     } else if (req.method === "GET" && url.pathname === "/api/config") {
       handleConfig(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/status") {
@@ -3327,8 +3486,8 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`usim_cms monitor listening on :${PORT} (repo: ${REPO_DIR}, mode: ${DEPLOY_MODE})`);
+server.listen(PORT, MONITOR_HOST, () => {
+  console.log(`usim_cms monitor listening on ${MONITOR_HOST}:${PORT} (repo: ${REPO_DIR}, mode: ${DEPLOY_MODE})`);
 });
 
 if (ALERT_WEBHOOK_URL) {

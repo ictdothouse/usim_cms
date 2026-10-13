@@ -8,7 +8,7 @@
 # or (if neither is set and this is an interactive terminal) a prompt:
 #
 #   docker      Trial/quick-test stack: db+api+frontend+admin in containers,
-#               published on auto-picked host ports (http://<ip>:<port>), no
+#               bound to private localhost ports (use an SSH tunnel), no
 #               Caddy, no zero-downtime deploys. Good for kicking the tires;
 #               not the production topology — see "production" below.
 #
@@ -18,8 +18,8 @@
 #               deploy.sh, routed by real domains through Caddy (auto-HTTPS
 #               unless port 80/443 already belongs to another app on this
 #               VPS, detected automatically — see ensure_caddy_bind_ports).
-#               Nothing except 80/443 (or nothing at all, if those are
-#               shared) and the monitor port ever gets published to the host.
+#               Only the selected edge ports and monitor port are host-published;
+#               API, admin, frontend, database and cache stay on private networks.
 #
 #   bare-metal  Native Node processes + a native/reused PostgreSQL cluster,
 #               for orgs that don't want Docker at all. Still fully
@@ -31,28 +31,17 @@
 #               inside it — this is exactly the same "one Postgres server,
 #               many databases" model apps/api already uses per tenant).
 #
-# All modes: detect the public IP so the admin build's baked-in API URL is
-# actually reachable from a browser, and install the ops monitor
-# (monitor/server.js) as a systemd service. All also ask for a superadmin
-# email/password up front and create that account directly against the
-# running API's own /api/setup route (the same self-disabling first-run
-# endpoint the admin's Setup Wizard uses) once the stack is healthy — so
-# login works without ever depending on the admin UI reaching the API from a
-# browser first.
+# All modes detect the public IP for SSH tunnel instructions and install the ops monitor as a systemd service. The installer creates a superadmin using the API bootstrap route after the stack is healthy.
 #
-# All modes also verify the stack is reachable from OUTSIDE its own
-# container/process — not just "healthy" from its own internal healthcheck —
-# before declaring success: a container can report itself perfectly healthy
-# while its published port is unreachable from a real browser (see
-# diagnose_reachability below for the two ways this actually happened).
-#
+# All modes verify the relevant route before success: localhost ports in trial/bare-metal, or Caddy Host routing in production. A healthy container alone does not prove the real page works.
+
 # Run: sudo ./install.sh [--mode=docker|production|bare-metal]
 #      [--admin-email=<email>] [--admin-password=<password>]
 #      [--admin-only]   Skip the install entirely — just (re)run the
 #                        superadmin-creation step against an already-running
 #                        stack (e.g. everything's installed, you only need
 #                        the first account created).
-#      [--diagnose]     Skip the install entirely — just re-run the external-
+#      [--diagnose]     Skip the install entirely — just re-run the host-local
 #                        reachability check + diagnostic report against an
 #                        already-running stack. Use this first any time
 #                        "admin can't reach the API" gets reported, instead
@@ -127,7 +116,7 @@ if [ -z "$MODE" ]; then
   fi
   if [ -t 0 ]; then
     echo "How should this be installed?"
-    echo "  1) Docker trial — quick test, containers, host-published ports, no Caddy"
+    echo "  1) Docker trial — quick test, private localhost ports, SSH tunnel, no Caddy"
     echo "  2) Production (recommended) — blue-green + Caddy, real domains, zero-downtime deploys"
     echo "  3) Bare-metal — native Node + Postgres, no Docker"
     read -r -p "Choose [1/2/3] (default 2): " choice
@@ -168,7 +157,7 @@ if [ "$DIAGNOSE_ONLY" != "true" ] && [ "$REAPPLY_BACKUP_CRON" != "true" ]; then
     read -r -p "Superadmin email: " SUPERADMIN_EMAIL
   fi
   if [ -z "$SUPERADMIN_PASSWORD" ] && [ -t 0 ]; then
-    read -r -s -p "Superadmin password: " SUPERADMIN_PASSWORD
+    read -r -s -p "Superadmin password (minimum 15 characters): " SUPERADMIN_PASSWORD
     echo ""
   fi
   if [ -z "$SUPERADMIN_EMAIL" ] || [ -z "$SUPERADMIN_PASSWORD" ]; then
@@ -259,6 +248,18 @@ find_free_port() {
   echo "$port"
 }
 
+find_monitor_port() {
+  local existing=""
+  if [ -f /etc/ucms-monitor.env ] && systemctl is-active --quiet ucms-monitor; then
+    existing="$(grep -m1 '^MONITOR_PORT=' /etc/ucms-monitor.env | cut -d= -f2-)"
+    if [[ "$existing" =~ ^[0-9]+$ ]] && [ "$existing" -ge 1 ] && [ "$existing" -le 65535 ]; then
+      echo "$existing"
+      return
+    fi
+  fi
+  find_free_port 5555
+}
+
 detect_public_host() {
   local host=""
   host=$(curl -fs -4 --max-time 5 ifconfig.me 2>/dev/null || true)
@@ -281,7 +282,7 @@ fill_env_if_blank() {
   local file="$1" key="$2"
   if grep -qE "^${key}=\s*$" "$file" 2>/dev/null; then
     local value
-    value=$(openssl rand -hex 24)
+    value=$(openssl rand -hex 32)
     sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file" && rm -f "${file}.bak"
     echo "Generated a random ${key} in ${file}."
   fi
@@ -296,31 +297,6 @@ set_env_kv() {
     echo "${key}=${value}" >> "$file"
   fi
 }
-write_pgbouncer_userlist() {
-  # Regenerates pgbouncer/userlist.txt (git-ignored — see
-  # pgbouncer/userlist.txt.example) from .env's POSTGRES_APP_PASSWORD.
-  # Always safe to re-run: deterministic from the current value, so a
-  # redeploy on an unchanged .env writes the identical file. Only used by
-  # production mode — trial mode's api talks straight to db:5432, no
-  # pgbouncer involved (see docker-compose.trial.yml's own header).
-  local password
-  password=$(grep -E '^POSTGRES_APP_PASSWORD=' .env | cut -d= -f2-)
-  if [ -z "$password" ]; then
-    echo "POSTGRES_APP_PASSWORD is blank in .env — run fill_env_if_blank first." >&2
-    exit 1
-  fi
-  local hash
-  hash=$(printf '%s' "${password}usim_cms_app" | md5sum | cut -d' ' -f1)
-  printf '"usim_cms_app" "md5%s"\n' "$hash" > pgbouncer/userlist.txt
-  # edoburu/pgbouncer's entrypoint runs as uid:gid 70:70 ("postgres" in
-  # its own /etc/passwd, unrelated to any host user) — chown to that gid
-  # and restrict to group-read, not chmod 644/world-readable. install.sh
-  # itself requires sudo (see its own top-of-file check), so chown here
-  # never fails for lack of privilege.
-  chown 0:70 pgbouncer/userlist.txt
-  chmod 640 pgbouncer/userlist.txt
-}
-
 # ---------------------------------------------------------------------------
 # Optional integrations (shared across docker/production/bare-metal modes) —
 # every one of these is unset-means-off in the app code itself (entra.ts/
@@ -1123,6 +1099,37 @@ install_monitor() {
   # isTrialModeActive()/.deploy-color); this just gates the trial-specific
   # api-recreate step below so it never runs for a blue-green install.
   local node_bin="$1" deploy_mode="$2" monitor_port="$3" topology="${4:-trial}"
+  local old_monitor_port="" monitor_access_mode="ssh" monitor_public_domain=""
+  if [ "$topology" = "production" ]; then
+    monitor_access_mode="$(grep -m1 '^MONITOR_ACCESS_MODE=' .env 2>/dev/null | cut -d= -f2-)"
+    monitor_access_mode="${monitor_access_mode:-ssh}"
+    monitor_public_domain="$(grep -m1 '^MONITOR_PUBLIC_DOMAIN=' .env 2>/dev/null | cut -d= -f2-)"
+  fi
+  if [ "$monitor_access_mode" != "ssh" ] && [ "$monitor_access_mode" != "public" ] && [ "$monitor_access_mode" != "cloud" ]; then
+    echo "MONITOR_ACCESS_MODE must be ssh, public or cloud." >&2
+    return 1
+  fi
+  if [ "$monitor_access_mode" != "ssh" ] && [ -z "$monitor_public_domain" ]; then
+    echo "MONITOR_PUBLIC_DOMAIN is required in public/cloud mode." >&2
+    return 1
+  fi
+  MONITOR_BIND_HOST="127.0.0.1"
+  if [ -f /etc/ucms-monitor.env ]; then
+    old_monitor_port="$(grep -m1 '^MONITOR_PORT=' /etc/ucms-monitor.env 2>/dev/null | cut -d= -f2-)"
+  fi
+  if [ "$deploy_mode" = "docker" ]; then
+    # host-gateway in the API container resolves to Docker's bridge gateway.
+    # Listening on that private interface keeps the monitor reachable from
+    # containers and SSH forwarding without binding the public NIC.
+    MONITOR_BIND_HOST="$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' bridge 2>/dev/null || true)"
+    if [ -z "$MONITOR_BIND_HOST" ]; then
+      echo "Could not determine Docker's private bridge gateway for the monitor." >&2
+      return 1
+    fi
+  fi
+  if [ -n "$old_monitor_port" ] && [ "$old_monitor_port" != "$monitor_port" ]; then
+    close_firewall_port "$old_monitor_port"
+  fi
   echo ""
   echo "Setting up the ops monitor..."
   if [ ! -f /etc/ucms-monitor.env ]; then
@@ -1130,6 +1137,7 @@ install_monitor() {
     monitor_password="$(openssl rand -hex 16)"
     cat > /etc/ucms-monitor.env <<EOF
 MONITOR_PORT=${monitor_port}
+MONITOR_HOST=${MONITOR_BIND_HOST}
 REPO_DIR=${REPO_DIR}
 MONITOR_USER=admin
 MONITOR_PASSWORD=${monitor_password}
@@ -1140,6 +1148,7 @@ EOF
   else
     sed -i.bak \
       -e "s|^MONITOR_PORT=.*|MONITOR_PORT=${monitor_port}|" \
+      -e "s|^MONITOR_HOST=.*|MONITOR_HOST=${MONITOR_BIND_HOST}|" \
       -e "s|^REPO_DIR=.*|REPO_DIR=${REPO_DIR}|" \
       -e "s|^DEPLOY_MODE=.*|DEPLOY_MODE=${deploy_mode}|" \
       /etc/ucms-monitor.env
@@ -1174,6 +1183,9 @@ EOF
 
   sed -e "s|__NODE_BIN__|${node_bin}|g" -e "s|__REPO_DIR__|${REPO_DIR}|g" \
     monitor/ucms-monitor.service.template > /etc/systemd/system/ucms-monitor.service
+  set_env_kv /etc/ucms-monitor.env MONITOR_HOST "$MONITOR_BIND_HOST"
+  set_env_kv /etc/ucms-monitor.env MONITOR_ACCESS_MODE "$monitor_access_mode"
+  set_env_kv /etc/ucms-monitor.env MONITOR_PUBLIC_DOMAIN "$monitor_public_domain"
   systemctl daemon-reload
   systemctl enable --now ucms-monitor
   systemctl restart ucms-monitor
@@ -1188,6 +1200,7 @@ EOF
   # container reaches this host-level monitor port; in systemd mode api runs
   # directly on the host, so plain loopback works.
   if [ "$deploy_mode" = "docker" ]; then
+    set_env_kv .env MONITOR_UPSTREAM "host.docker.internal:${monitor_port}"
     set_env_kv .env MONITOR_URL "http://host.docker.internal:${monitor_port}"
     set_env_kv .env MONITOR_USER "admin"
     set_env_kv .env MONITOR_PASSWORD "${MONITOR_PASSWORD}"
@@ -1230,6 +1243,21 @@ open_firewall_ports() {
   fi
 }
 
+close_firewall_port() {
+  local port="$1"
+  [ -n "$port" ] || return 0
+  if [ "$FIREWALL_TOOL" = "ufw" ]; then
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+      ufw --force delete allow "${port}/tcp" >/dev/null 2>&1 || true
+    fi
+  else
+    if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld; then
+      firewall-cmd --permanent --remove-port="${port}/tcp" >/dev/null 2>&1 || true
+      firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -1239,7 +1267,7 @@ json_escape() {
 # if setup was already completed (by this call or the admin's Setup Wizard),
 # it just skips instead of erroring.
 create_superadmin() {
-  local api_port="$1" status status_rc resp
+  local api_port="$1" setup_secret="$2" status status_rc resp secret_config
   echo ""
   echo "Creating superadmin account..."
   status=$(curl -fs "http://localhost:${api_port}/api/setup/status" 2>/dev/null)
@@ -1256,18 +1284,23 @@ create_superadmin() {
   # JSON body goes over stdin, never as a curl argv — a password passed via
   # -d "..." would sit in this process's command line, readable by any local
   # user via `ps` for as long as the request is in flight.
+  secret_config=$(mktemp)
+  chmod 600 "$secret_config"
+  printf 'header = "x-setup-secret: %s"\n' "$setup_secret" > "$secret_config"
   resp=$(printf '{"email":"%s","password":"%s"}' \
       "$(json_escape "$SUPERADMIN_EMAIL")" "$(json_escape "$SUPERADMIN_PASSWORD")" \
     | curl -fs -X POST "http://localhost:${api_port}/api/setup" \
+        --config "$secret_config" \
         -H "Content-Type: application/json" --data-binary @- \
         2>/dev/null || true)
+  rm -f "$secret_config"
   # -i: /api/setup's success response carries a "csrfToken" field (the
   # cookie+CSRF session migration renamed the old bare "token"), and a
   # case-sensitive match here was reporting a real success as a failure.
   if echo "$resp" | grep -qi 'token'; then
     echo "Superadmin created: ${SUPERADMIN_EMAIL}"
   else
-    echo "Warning: superadmin creation failed — create one later from the admin's Setup Wizard." >&2
+    echo "Warning: superadmin creation failed — re-run install.sh with --admin-only after checking API health." >&2
     echo "  Response: ${resp:-<no response>}" >&2
   fi
 }
@@ -1293,18 +1326,11 @@ curl_reachable() {
   [ -n "$code" ] && [ "$code" != "000" ]
 }
 
-# The check this whole round of hardening exists for: a container/service can
-# report itself perfectly "healthy" via its OWN internal healthcheck (which
-# only ever proves 127.0.0.1-inside-the-same-namespace works) while the
-# published port is completely unreachable from outside — exactly what
-# happened this session, twice, for two unrelated reasons (an app bound to
-# 127.0.0.1 instead of 0.0.0.0; Docker's own iptables chains resetting
-# forwarded connections). This hits the ports the same way a real browser
-# would: from the host, through whatever NAT/proxy sits in front of them.
-verify_external_reachability() {
+# A container healthcheck only proves its internal endpoint works. Check the host-local route as well without exposing application ports.
+verify_host_local_reachability() {
   local api_port="$1" admin_port="$2" frontend_port="$3" ok="true"
   echo ""
-  echo "Verifying the stack is reachable from outside (not just healthy inside its own container)..."
+  echo "Verifying the stack responds on its private localhost ports..."
   if wait_for_api_health "$api_port" 30; then
     echo "  API (:${api_port})      — reachable"
   else
@@ -1358,7 +1384,7 @@ diagnose_reachability() {
 # once more before giving up. Never claims success it didn't re-check.
 ensure_reachable_or_selfheal() {
   local api_port="$1" admin_port="$2" frontend_port="$3" mode="$4"
-  if verify_external_reachability "$api_port" "$admin_port" "$frontend_port"; then
+  if verify_host_local_reachability "$api_port" "$admin_port" "$frontend_port"; then
     return 0
   fi
   echo "" >&2
@@ -1383,15 +1409,15 @@ ensure_reachable_or_selfheal() {
     echo "Restarting the app services..." >&2
     systemctl restart ucms-api ucms-frontend ucms-admin
   fi
-  if verify_external_reachability "$api_port" "$admin_port" "$frontend_port"; then
+  if verify_host_local_reachability "$api_port" "$admin_port" "$frontend_port"; then
     echo "Self-heal worked — stack is reachable now." >&2
     return 0
   fi
   echo "" >&2
-  echo "Still not reachable after one self-heal attempt. This box's own firewall" >&2
-  echo "and Docker's/systemd's own networking both look fine from here (see the" >&2
-  echo "diagnostic above) — if this is a cloud VPS, check that provider's own" >&2
-  echo "security group/firewall console for these ports next. Re-run any time" >&2
+  echo "Still not reachable after one self-heal attempt. Review the service and" >&2
+  echo "container logs in the diagnostic report, then check local bind settings." >&2
+  echo "Application ports are private in trial mode. Re-run any time" >&2
+  echo "with --diagnose to repeat just this check without reinstalling." >&2
   echo "with --diagnose to repeat just this check without reinstalling." >&2
   diagnose_reachability "$api_port"
   return 1
@@ -1461,11 +1487,16 @@ install_docker_mode() {
     exit 1
   fi
 
-  local api_port frontend_port admin_port monitor_port public_host
+  local api_port frontend_port admin_port monitor_port public_host old_api_port="" old_frontend_port="" old_admin_port=""
+  if [ -f .env ]; then
+    old_api_port="$(grep -m1 '^API_PORT=' .env | cut -d= -f2-)"
+    old_frontend_port="$(grep -m1 '^FRONTEND_PORT=' .env | cut -d= -f2-)"
+    old_admin_port="$(grep -m1 '^ADMIN_PORT=' .env | cut -d= -f2-)"
+  fi
   api_port=$(find_free_port 3000)
   frontend_port=$(find_free_port 4321)
   admin_port=$(find_free_port 5173)
-  monitor_port=$(find_free_port 5555)
+  monitor_port=$(find_monitor_port)
   echo ""
   echo "Ports chosen (auto-picked next free one if the default was taken):"
   echo "  api      -> $api_port"
@@ -1484,18 +1515,20 @@ install_docker_mode() {
   # MONITOR_PASSWORD — same treatment /etc/ucms-monitor.env already gets
   # right after it's written, so no other local account on the box can read it.
   chmod 600 .env
+  set_env_kv .env MONITOR_UPSTREAM "host.docker.internal:${monitor_port}"
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
   fill_env_if_blank .env POSTGRES_APP_PASSWORD
   fill_env_if_blank .env POSTGRES_PROVISIONER_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
-  set_env_kv .env VITE_API_URL "http://${public_host}:${api_port}"
-  set_env_kv .env VITE_FRONTEND_URL "http://${public_host}:${frontend_port}"
+  fill_env_if_blank .env SETUP_SECRET
+  set_env_kv .env VITE_API_URL "http://localhost:${api_port}"
+  set_env_kv .env VITE_FRONTEND_URL "http://localhost:${frontend_port}"
   # Without this, docker-compose.yml's own ADMIN_ORIGIN fallback
   # (http://localhost:${ADMIN_PORT}) never matches a real VPS's public
   # IP/domain — every admin request gets CORS-blocked. Whatever origin the
   # admin panel actually gets served from (this same public_host:admin_port)
   # must be the allowed one.
-  set_env_kv .env ADMIN_ORIGIN "http://${public_host}:${admin_port}"
+  set_env_kv .env ADMIN_ORIGIN "http://localhost:${admin_port}"
   # Host-side port remapping goes through .env (API_PORT/FRONTEND_PORT/
   # ADMIN_PORT, read by docker-compose.yml's `${VAR:-default}` port entries)
   # rather than a docker-compose.override.yml: Compose concatenates
@@ -1504,8 +1537,14 @@ install_docker_mode() {
   # exactly the bug that made api still fail to bind :3000 even after this
   # script correctly picked a free 3001 elsewhere on a port-conflicted box.
   set_env_kv .env API_PORT "$api_port"
+  set_env_kv .env API_BIND_ADDRESS "127.0.0.1"
   set_env_kv .env FRONTEND_PORT "$frontend_port"
+  set_env_kv .env FRONTEND_BIND_ADDRESS "127.0.0.1"
   set_env_kv .env ADMIN_PORT "$admin_port"
+  set_env_kv .env ADMIN_BIND_ADDRESS "127.0.0.1"
+  close_firewall_port "$old_api_port"
+  close_firewall_port "$old_frontend_port"
+  close_firewall_port "$old_admin_port"
   configure_optional_integrations .env
   install_backup_cron "docker"
   # Remove a stale override from a previous run of this script (pre-fix
@@ -1515,7 +1554,7 @@ install_docker_mode() {
 
   echo ""
   echo "Building and starting containers (first run can take a few minutes)..."
-  # docker-compose.trial.yml adds api/frontend/admin on host-published ports
+  # docker-compose.trial.yml adds api/frontend/admin on private localhost ports
   # (no Caddy) on top of this file's db+proxy — see that file's own header
   # for why docker-compose.yml alone no longer has those 3 services.
   docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d db
@@ -1529,27 +1568,27 @@ install_docker_mode() {
     exit 1
   fi
 
-  create_superadmin "$api_port"
+  create_superadmin "$api_port" "$(grep -m1 '^SETUP_SECRET=' .env | cut -d= -f2-)"
 
   local node_bin
   node_bin=$(ensure_private_node)
   install_monitor "$node_bin" "docker" "$monitor_port"
   finish_backup_destination_setup "docker"
-  open_firewall_ports "$api_port" "$frontend_port" "$admin_port" "$monitor_port"
 
   echo ""
   echo "================================================================"
   echo " Done (docker mode)."
-  echo "   Admin panel:  http://${public_host}:${admin_port}"
-  echo "   Public site:  http://${public_host}:${frontend_port}"
-  echo "   API:          http://${public_host}:${api_port}"
-  echo "   Ops monitor:  http://${public_host}:${monitor_port}"
-  echo "     user: admin"
-  echo "     pass: ${MONITOR_PASSWORD}"
-  echo "     (also saved in /etc/ucms-monitor.env on this VPS)"
+  echo "   Admin panel:  http://localhost:${admin_port} (after SSH tunnel)"
+  echo "   Site preview: http://localhost:${frontend_port} (after SSH tunnel)"
+  echo "   API:          http://localhost:${api_port} (after SSH tunnel)"
+  echo "   SSH tunnel:   ssh -L ${admin_port}:127.0.0.1:${admin_port} -L ${frontend_port}:127.0.0.1:${frontend_port} -L ${api_port}:127.0.0.1:${api_port} user@${public_host}"
+  echo "   Ops monitor:  private listener (${MONITOR_BIND_HOST}:${monitor_port})"
+  echo "     SSH tunnel: ssh -L ${monitor_port}:${MONITOR_BIND_HOST}:${monitor_port} user@${public_host}"
+  echo "     Then open:  http://localhost:${monitor_port}"
+  echo "     Credentials are stored in /etc/ucms-monitor.env (root-only)."
   echo ""
-  echo " First time here? Open the admin panel URL above — with zero users"
-  echo " in the database it shows a setup wizard automatically."
+  echo " First time here? Open the admin URL through the tunnel. Trial services"
+  echo " stay private; use production mode for public access with TLS."
   echo "================================================================"
 }
 
@@ -1627,6 +1666,7 @@ server {
     listen 80;
     listen 443 ssl;
     server_name ${domain};
+    add_header Strict-Transport-Security "max-age=31536000" always;
     # ... your existing ssl_certificate/ssl_certificate_key lines for this domain ...
     location / {
         proxy_pass http://127.0.0.1:${CADDY_HTTP_PORT};
@@ -1681,7 +1721,7 @@ process.stdin.on("end", () => {
       if (!status.needsSetup) { console.log("ALREADY_SETUP"); return; }
       return fetch("http://127.0.0.1:3000/api/setup", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-setup-secret": process.env.SETUP_SECRET || "" },
         body,
       }).then((r) => r.text()).then((t) => console.log(t.toLowerCase().includes("token") ? "CREATED" : "FAILED:" + t));
     })
@@ -1697,19 +1737,19 @@ create_superadmin_production() {
       "$(json_escape "$SUPERADMIN_EMAIL")" "$(json_escape "$SUPERADMIN_PASSWORD")" \
     | docker compose -p "ucms-${color}" -f docker-compose.release.yml exec -T api node -e "$SETUP_SCRIPT_PRODUCTION" 2>&1); then
     echo "Warning: could not reach the API container to create superadmin —" >&2
-    echo "  create one later from the admin's Setup Wizard, or re-run with --admin-only." >&2
+    echo "  re-run install.sh with --admin-only after checking API health." >&2
     return
   fi
   case "$resp" in
     *ALREADY_SETUP*) echo "Setup already completed — skipping (log in with the existing account)." ;;
     *CREATED*) echo "Superadmin created: ${SUPERADMIN_EMAIL}" ;;
-    *) echo "Warning: superadmin creation failed — create one later from the admin's Setup Wizard." >&2
+    *) echo "Warning: superadmin creation failed — re-run install.sh with --admin-only after checking API health." >&2
        echo "  Response: ${resp}" >&2 ;;
   esac
 }
 
 # Caddy routes by Host header, so this checks routing works — not just "port
-# 80 accepts connections" — the same reasoning verify_external_reachability
+# 80 accepts connections" — the same reasoning verify_host_local_reachability
 # (trial mode) already applies to raw ports. Doesn't depend on public DNS
 # actually pointing here yet, unlike hitting the real domain would.
 verify_production_reachability() {
@@ -1749,7 +1789,7 @@ install_production_mode() {
   fi
 
   local monitor_port public_host
-  monitor_port=$(find_free_port 5555)
+  monitor_port=$(find_monitor_port)
   public_host=$(detect_public_host)
   echo "Public host: $public_host"
 
@@ -1763,11 +1803,20 @@ install_production_mode() {
   chmod 600 .env
   ensure_caddy_bind_ports
   prompt_domains
+  if grep -q '^MONITOR_ACCESS_MODE=public$' .env &&
+    { grep -q '^PROXY_BIND_HTTP=127\.0\.0\.1:' .env || grep -q '^PROXY_BIND_HTTPS=127\.0\.0\.1:' .env; }; then
+    echo "Public monitor mode requires Caddy to own public TLS. Use cloud mode with an identity-protected edge instead." >&2
+    exit 1
+  fi
+  # Caddy's first dynamic config is built during the deploy below; its
+  # monitor upstream must match the port selected above before that happens.
+  set_env_kv .env MONITOR_UPSTREAM "host.docker.internal:${monitor_port}"
 
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
   fill_env_if_blank .env POSTGRES_APP_PASSWORD
   fill_env_if_blank .env POSTGRES_PROVISIONER_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
+  fill_env_if_blank .env SETUP_SECRET
   fill_env_if_blank .env DEPLOY_SECRET
   set_env_kv .env ADMIN_DOMAIN "$ADMIN_DOMAIN"
   set_env_kv .env API_DOMAIN "$API_DOMAIN"
@@ -1797,12 +1846,11 @@ install_production_mode() {
   configure_media_storage docker .env
   install_backup_cron "docker"
 
-  write_pgbouncer_userlist
-
   echo ""
-  echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
-  docker compose up -d db pgbouncer redis proxy
+  echo "-- ensuring PostgreSQL is up before configuring SCRAM credentials --"
+  docker compose up -d db
   bash scripts/configure-docker-db-roles.sh
+  docker compose up -d pgbouncer redis proxy
 
   echo ""
   echo "-- first deploy (build+test+health-check+promote, see scripts/deploy.sh) --"
@@ -1821,6 +1869,12 @@ install_production_mode() {
   # confusing "Permission denied" on .deploy-color specifically.
   if [ -n "$ORIG_OWNER" ] && [ "$ORIG_OWNER" != "root:root" ]; then
     chown -R "$ORIG_OWNER" "$REPO_DIR"
+    # Keep PgBouncer's verifier readable by container gid 70 after the broad
+    # ownership hand-back above; the deploy user remains the file owner.
+    if [ -f "${REPO_DIR}/pgbouncer/userlist.txt" ]; then
+      chown "${ORIG_OWNER%:*}:70" "${REPO_DIR}/pgbouncer/userlist.txt"
+      chmod 640 "${REPO_DIR}/pgbouncer/userlist.txt"
+    fi
   fi
 
   verify_production_reachability || echo "  (continuing anyway — deploy.sh's own health-check already gated success; see above for what's not reachable yet)" >&2
@@ -1833,9 +1887,9 @@ install_production_mode() {
   finish_backup_destination_setup "docker"
 
   if [ "$NEEDS_NGINX_SNIPPET" = "true" ]; then
-    open_firewall_ports "$monitor_port"
+    : # The monitor is private and is deliberately not opened in the firewall.
   else
-    open_firewall_ports "80" "443" "$monitor_port"
+    open_firewall_ports "80" "443"
   fi
 
   echo ""
@@ -1844,10 +1898,14 @@ install_production_mode() {
   echo "   Admin panel:  https://${ADMIN_DOMAIN}"
   echo "   Public site:  https://${TENANT_DOMAINS%% *}"
   echo "   API:          https://${API_DOMAIN}"
-  echo "   Ops monitor:  http://${public_host}:${monitor_port}"
-  echo "     user: admin"
-  echo "     pass: ${MONITOR_PASSWORD}"
-  echo "     (also saved in /etc/ucms-monitor.env on this VPS)"
+  if grep -q '^MONITOR_ACCESS_MODE=public$' .env; then
+    echo "   Ops monitor:  https://$(grep -m1 '^MONITOR_PUBLIC_DOMAIN=' .env | cut -d= -f2-)/"
+  else
+    echo "   Ops monitor:  private interface (${MONITOR_BIND_HOST}:${monitor_port})"
+  fi
+  echo "     SSH tunnel: ssh -L ${monitor_port}:${MONITOR_BIND_HOST}:${monitor_port} user@${public_host}"
+  echo "     Then open:  http://localhost:${monitor_port}"
+  echo "     Credentials are stored in /etc/ucms-monitor.env (root-only)."
   if [ "$NEEDS_NGINX_SNIPPET" = "true" ]; then
     print_nginx_snippet
     echo ""
@@ -1859,8 +1917,7 @@ install_production_mode() {
     echo "   sudo ./install.sh --mode=production"
   fi
   echo ""
-  echo " First time here? Open the admin panel URL above — with zero users"
-  echo " in the database it shows a setup wizard automatically."
+  echo " Sign in with the superadmin account created by this installer."
   echo " Future deploys: bash scripts/deploy.sh (zero-downtime) or the Monitor's"
   echo " own 'Pull latest & rebuild' button."
   echo "================================================================"
@@ -1910,9 +1967,9 @@ ensure_app_database() {
     local provisioner_password
     provisioner_password="$(openssl rand -hex 24)"
     sudo -u postgres psql -d usim_cms <<-EOSQL >/dev/null
-      SET password_encryption = 'md5';
+      SET password_encryption = 'scram-sha-256';
       ALTER ROLE usim_cms_provisioner WITH PASSWORD '${provisioner_password}';
-    EOSQL
+EOSQL
     set_env_kv apps/api/.env DATABASE_PROVISIONER_URL "postgres://usim_cms_provisioner:${provisioner_password}@127.0.0.1:5432/usim_cms"
     echo "Created a separate usim_cms_provisioner credential."
   else
@@ -1940,11 +1997,16 @@ install_baremetal_mode() {
   chmod 600 apps/api/.env
   ensure_app_database
 
-  local api_port frontend_port admin_port monitor_port public_host
+  local api_port frontend_port admin_port monitor_port public_host old_api_port="" old_frontend_port="" old_admin_port=""
+  if [ -f /etc/ucms-monitor.env ]; then
+    old_api_port="$(grep -m1 '^API_PORT=' /etc/ucms-monitor.env | cut -d= -f2-)"
+    old_frontend_port="$(grep -m1 '^FRONTEND_PORT=' /etc/ucms-monitor.env | cut -d= -f2-)"
+    old_admin_port="$(grep -m1 '^ADMIN_PORT=' /etc/ucms-monitor.env | cut -d= -f2-)"
+  fi
   api_port=$(find_free_port 3000)
   frontend_port=$(find_free_port 4321)
   admin_port=$(find_free_port 5173)
-  monitor_port=$(find_free_port 5555)
+  monitor_port=$(find_monitor_port)
   echo ""
   echo "Ports chosen (auto-picked next free one if the default was taken):"
   echo "  api      -> $api_port"
@@ -1969,9 +2031,14 @@ install_baremetal_mode() {
   # this gets set, and it must match wherever the admin panel actually gets
   # served from (this same public_host:admin_port), same reasoning as the
   # docker-mode .env above.
-  set_env_kv apps/api/.env ADMIN_ORIGIN "http://${public_host}:${admin_port}"
+  set_env_kv apps/api/.env ADMIN_ORIGIN "http://localhost:${admin_port}"
+  set_env_kv apps/api/.env HOST "127.0.0.1"
   grep -q '^SESSION_SECRET=' apps/api/.env || echo "SESSION_SECRET=" >> apps/api/.env
   fill_env_if_blank apps/api/.env SESSION_SECRET
+  fill_env_if_blank apps/api/.env SETUP_SECRET
+  close_firewall_port "$old_api_port"
+  close_firewall_port "$old_frontend_port"
+  close_firewall_port "$old_admin_port"
   configure_optional_integrations apps/api/.env
   configure_media_storage baremetal apps/api/.env
   install_backup_cron "baremetal"
@@ -2013,13 +2080,13 @@ install_baremetal_mode() {
   echo "Building api..."
   pnpm --filter @ucms/api build
 
-  echo "Building admin (VITE_API_URL=http://${public_host}:${api_port})..."
-  VITE_API_URL="http://${public_host}:${api_port}" \
-  VITE_FRONTEND_URL="http://${public_host}:${frontend_port}" \
+  echo "Building admin (VITE_API_URL=http://localhost:${api_port})..."
+  VITE_API_URL="http://localhost:${api_port}" \
+  VITE_FRONTEND_URL="http://localhost:${frontend_port}" \
   pnpm --filter @ucms/admin build
 
   echo "Building frontend (API_URL=http://127.0.0.1:${api_port})..."
-  API_URL="http://127.0.0.1:${api_port}" pnpm --filter @ucms/frontend build
+  API_URL="http://localhost:${api_port}" pnpm --filter @ucms/frontend build
 
   # ---- systemd units for the 3 app processes ----
   cat > /etc/systemd/system/ucms-api.service <<EOF
@@ -2049,6 +2116,7 @@ Type=simple
 ExecStart=${node_bin} server.mjs
 WorkingDirectory=${REPO_DIR}/apps/frontend
 Environment=PORT=${frontend_port}
+Environment=HOST=127.0.0.1
 Restart=on-failure
 RestartSec=3
 
@@ -2063,8 +2131,9 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${node_bin} ${REPO_DIR}/monitor/static-server.js ${REPO_DIR}/apps/admin/dist ${admin_port}
+ExecStart=${node_bin} ${REPO_DIR}/monitor/static-server.js ${REPO_DIR}/apps/admin/dist ${admin_port} http://localhost:${api_port}
 WorkingDirectory=${REPO_DIR}
+Environment=HOST=127.0.0.1
 Restart=on-failure
 RestartSec=3
 
@@ -2083,7 +2152,7 @@ EOF
     exit 1
   fi
 
-  create_superadmin "$api_port"
+  create_superadmin "$api_port" "$(grep -m1 '^SETUP_SECRET=' apps/api/.env | cut -d= -f2-)"
 
   install_monitor "$node_bin" "systemd" "$monitor_port"
   finish_backup_destination_setup "baremetal"
@@ -2098,22 +2167,20 @@ EOF
   set_env_kv /etc/ucms-monitor.env ADMIN_PORT "$admin_port"
   set_env_kv /etc/ucms-monitor.env PUBLIC_HOST "$public_host"
   systemctl restart ucms-monitor
-  open_firewall_ports "$api_port" "$frontend_port" "$admin_port" "$monitor_port"
 
   echo ""
   echo "================================================================"
   echo " Done (bare-metal mode)."
-  echo "   Admin panel:  http://${public_host}:${admin_port}"
-  echo "   Public site:  http://${public_host}:${frontend_port}"
-  echo "   API:          http://${public_host}:${api_port}"
-  echo "   Ops monitor:  http://${public_host}:${monitor_port}"
-  echo "     user: admin"
-  echo "     pass: ${MONITOR_PASSWORD}"
-  echo "     (also saved in /etc/ucms-monitor.env on this VPS)"
+  echo "   Admin panel:  http://localhost:${admin_port} (after SSH tunnel)"
+  echo "   Site preview: http://localhost:${frontend_port} (after SSH tunnel)"
+  echo "   API:          http://localhost:${api_port} (after SSH tunnel)"
+  echo "   SSH tunnel:   ssh -L ${admin_port}:127.0.0.1:${admin_port} -L ${frontend_port}:127.0.0.1:${frontend_port} -L ${api_port}:127.0.0.1:${api_port} user@${public_host}"
+  echo "   Ops monitor:  http://127.0.0.1:${monitor_port} (localhost only)"
+  echo "     SSH tunnel: ssh -L ${monitor_port}:127.0.0.1:${monitor_port} user@${public_host}"
+  echo "     Credentials are stored in /etc/ucms-monitor.env (root-only)."
   echo "   PostgreSQL:   $([ "$DB_MANAGED" = "true" ] && echo "installed by this script" || echo "reusing your existing cluster")"
   echo ""
-  echo " First time here? Open the admin panel URL above — with zero users"
-  echo " in the database it shows a setup wizard automatically."
+  echo " Sign in with the superadmin account created by this installer."
   echo "================================================================"
 }
 
@@ -2160,15 +2227,15 @@ if [ "$DIAGNOSE_ONLY" = "true" ]; then
     resolve_production_env
     if verify_production_reachability; then
       echo ""
-      echo "Everything's reachable from outside — no problem found."
+      echo "Caddy host routing is responding — no local routing problem found."
       exit 0
     fi
     exit 1
   fi
   resolve_running_ports
-  if verify_external_reachability "$API_PORT_VAL" "$ADMIN_PORT_VAL" "$FRONTEND_PORT_VAL"; then
+  if verify_host_local_reachability "$API_PORT_VAL" "$ADMIN_PORT_VAL" "$FRONTEND_PORT_VAL"; then
     echo ""
-    echo "Everything's reachable from outside — no problem found."
+    echo "Private localhost ports are responding — no local reachability problem found."
     exit 0
   fi
   diagnose_reachability "$API_PORT_VAL"
@@ -2190,7 +2257,11 @@ if [ "$ADMIN_ONLY" = "true" ]; then
   resolve_running_ports
   echo "Waiting for the API to become healthy..."
   wait_for_api_health "$API_PORT_VAL" 30 || true
-  create_superadmin "$API_PORT_VAL"
+  if [ "$MODE" = "docker" ]; then
+    create_superadmin "$API_PORT_VAL" "$(grep -m1 '^SETUP_SECRET=' .env | cut -d= -f2-)"
+  else
+    create_superadmin "$API_PORT_VAL" "$(grep -m1 '^SETUP_SECRET=' apps/api/.env | cut -d= -f2-)"
+  fi
   exit 0
 fi
 

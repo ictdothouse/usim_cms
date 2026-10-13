@@ -6,7 +6,7 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { sql } from "drizzle-orm";
 import { tenantPlugin } from "./plugins/tenant.js";
-import { requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
+import { registerSessionRefresh, requireTenantAuth, verifySuperadmin } from "./plugins/auth.js";
 import { registerPublicCollectionRoutes, registerProtectedCollectionRoutes } from "./plugins/generic-crud.js";
 import { cacheGet, cacheInvalidate, cacheSet } from "./cache.js";
 import { recordRequest, renderMetrics } from "./metrics.js";
@@ -57,18 +57,10 @@ import {
 const SWITCHER_POSITIONS = ["header", "topbar", "float", "footer"] as const;
 const SWITCHER_STYLES = ["text", "flag", "shortform"] as const;
 
-// trustProxy: true — safe ONLY because this container publishes no host
-// port (docker-compose.release.yml's api service has no `ports:`); the sole
-// way anything reaches Fastify is through Caddy (or another same-network
-// container) over ucms-net, so the immediate connecting peer can never be an
-// external attacker forging X-Forwarded-For directly. Without this, req.ip
-// (isLoginRateLimited/recordLoginAttempt/insertAuditLog's `ip` field) always
-// resolved to Caddy's own docker-internal IP instead of the real visitor —
-// silently defeating both the login rate limit and the audit log's "who did
-// this" value for every deployment, with or without a CDN in front. Caddy
-// itself is the other half of getting this right when a CDN (Cloudflare) is
-// added later — see proxy-sync.ts's TRUSTED_PROXY_MODE.
-const app = Fastify({ logger: true, trustProxy: true });
+// Trust forwarded client IP headers only in the private blue-green network
+// behind Caddy. Trial/local mode publishes the API directly, so proxy headers
+// there are attacker-controlled and must not influence rate limits or logs.
+const app = Fastify({ logger: true, trustProxy: process.env.TRUST_PROXY === "true" });
 
 // Without this, one uncaught error anywhere takes down all 50 tenants at
 // once. Log and exit fast instead of continuing in a possibly-corrupt
@@ -104,6 +96,9 @@ const adminOrigins = process.env.ADMIN_ORIGIN?.split(",").map((o) => o.trim()).f
 if (process.env.NODE_ENV === "production" && !adminOrigins?.length) {
   throw new Error("ADMIN_ORIGIN must be set in production — refusing to boot with CORS open to any origin.");
 }
+if (process.env.NODE_ENV === "production" && Buffer.byteLength(process.env.SETUP_SECRET ?? "") < 32) {
+  throw new Error("SETUP_SECRET must be set in production — refusing to expose first-account setup.");
+}
 await app.register(cors, {
   origin: adminOrigins?.length ? adminOrigins : true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
@@ -113,11 +108,7 @@ await app.register(cors, {
   credentials: true,
 });
 // contentSecurityPolicy off: this API only ever returns JSON, never HTML it
-// renders itself, so a CSP here has nothing to protect — apps/frontend's
-// own response headers are the real CSP surface (out of scope for this
-// change) and already need their own frame-ancestors allowance for Live
-// Edit's iframe, which a generic CSP added here would have no bearing on
-// anyway. crossOriginResourcePolicy off: media/uploads are deliberately
+// renders itself, so a CSP here has nothing to protect. crossOriginResourcePolicy off: media/uploads are deliberately
 // fetched cross-origin (by the tenant frontend, by Live Edit's iframe).
 await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: false });
 await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
@@ -172,6 +163,9 @@ app.get("/metrics", async (req, reply) => {
   return renderMetrics();
 });
 
+// Cookie sessions are re-resolved against the current user and permission
+// records before any authenticated route runs.
+registerSessionRefresh(app);
 registerAuthRoutes(app, adminOrigins);
 
 registerPortalSettingsRoutes(app);
@@ -507,10 +501,11 @@ await app.register(async (protectedScope) => {
 });
 
 const port = Number(process.env.PORT ?? 3000);
-// Fastify defaults to binding 127.0.0.1 — inside a container that's the
-// container's OWN loopback, unreachable from the host's docker-proxy/NAT
-// even though an in-container healthcheck hitting 127.0.0.1 looks healthy.
-app.listen({ port, host: "0.0.0.0" }, (err) => {
+// Containers bind all interfaces inside their namespace; bare-metal installs
+// set HOST=127.0.0.1 so the HTTP API is reachable only through an SSH tunnel
+// or an operator-managed local reverse proxy.
+const host = process.env.HOST ?? "0.0.0.0";
+app.listen({ port, host }, (err) => {
   if (err) {
     app.log.error(err);
     process.exit(1);

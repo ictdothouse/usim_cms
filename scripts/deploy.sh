@@ -34,6 +34,7 @@ REPO_DIR="$(pwd)"
 # Older .env files predate the dedicated database-provisioner role. Create its
 # secret before Compose interpolates the new required DB/API settings.
 bash scripts/ensure-provisioner-secret.sh
+bash scripts/ensure-setup-secret.sh
 
 if [ -f .env ]; then
   set -a
@@ -194,9 +195,11 @@ do_deploy() {
 
   echo "== usim_cms deploy: ${CURRENT:-<none yet>} -> $next =="
 
-  echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
-  docker compose up -d db pgbouncer redis proxy
+  echo "-- ensuring PostgreSQL is up before SCRAM role migration --"
+  docker compose up -d db
   bash scripts/configure-docker-db-roles.sh
+  echo "-- ensuring PgBouncer, cache and proxy are up --"
+  docker compose up -d pgbouncer redis proxy
 
   echo "-- building & starting $next --"
   docker compose -p "$project" -f "$RELEASE_FILE" build
@@ -242,7 +245,7 @@ do_deploy() {
 
   local body
   body=$(printf '{"admin":%s,"api":%s,"frontend":%s}' \
-    "$(dial_json 80 "${admin_names[@]}")" \
+    "$(dial_json 8080 "${admin_names[@]}")" \
     "$(dial_json 3000 "${api_names[@]}")" \
     "$(dial_json 4321 "${frontend_names[@]}")")
 
@@ -318,7 +321,7 @@ do_rollback() {
 
   local body
   body=$(printf '{"admin":%s,"api":%s,"frontend":%s}' \
-    "$(dial_json 80 "${admin_names[@]}")" \
+    "$(dial_json 8080 "${admin_names[@]}")" \
     "$(dial_json 3000 "${api_names[@]}")" \
     "$(dial_json 4321 "${frontend_names[@]}")")
 

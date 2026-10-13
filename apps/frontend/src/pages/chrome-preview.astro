@@ -4,6 +4,8 @@ import HeroBlock from "../components/HeroBlock.astro";
 import { getTheme, getSiteChromeById, getLivePreviewOverride } from "../lib/api";
 import { collectFonts } from "../lib/collectFonts";
 
+const cspNonce = Astro.request.headers.get("x-ucms-csp-nonce") ?? undefined;
+
 // Designer's Header/Footer device-preview modal — renders one siteChrome row
 // standalone inside BaseLayout, with placeholder body content so the
 // header/footer alone can be judged in context without needing a real page.
@@ -72,7 +74,7 @@ const fonts = collectFonts(chrome?.layout ?? []);
   </style>
 )}
 {embed && (
-  <script is:inline define:vars={{ kind }}>
+  <script is:inline nonce={cspNonce} define:vars={{ kind }}>
     function reportHeight() {
       const el = document.querySelector(kind);
       const height = el ? el.getBoundingClientRect().height : 0;
