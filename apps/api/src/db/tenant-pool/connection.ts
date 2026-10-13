@@ -1,4 +1,5 @@
 import { resolve as dnsResolve } from "node:dns/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -33,6 +34,16 @@ function deriveTenantDbUrl(tenantHost: string): string {
 // below. Small max per pool: 50 tenants must share the server's connection
 // budget (PgBouncer in front caps the global total in deploys).
 const tenantPools = new Map<string, Pool>();
+
+// Database creation needs CREATEDB, so it uses a separate, narrowly scoped
+// credential. The request-serving role (DATABASE_URL) remains NOCREATEDB.
+// This pool is used only for same-server tenant database provisioning.
+const provisionerPool = process.env.DATABASE_PROVISIONER_URL
+  ? new Pool({ connectionString: process.env.DATABASE_PROVISIONER_URL, max: 2, idleTimeoutMillis: 30_000 })
+  : undefined;
+provisionerPool?.on("error", (err) => {
+  console.error("tenant provisioner pool: idle client error", err);
+});
 
 // Architecture audit finding: without this, a tenant pool (up to 5 held
 // connections each) lived for the whole process lifetime once provisioned,
@@ -110,16 +121,32 @@ function getTenantPool(connectionString: string): Pool {
   return tp;
 }
 
-// Tracks which tenant databases this process has already provisioned (or is
-// currently provisioning), so CREATE DATABASE + the migration replay aren't
-// re-run — or run concurrently — on every request. A brand-new tenant's
-// first page load fires several requests in parallel (e.g. the admin's Media
-// Library loads folders+items via Promise.all), and without single-flighting
-// this, two requests would race into `CREATE DATABASE` at once — one throws
-// a Postgres "already exists" error mid-response, which was surfacing to the
-// browser as a truncated body ("Unexpected end of JSON input"). Same
-// single-flight-a-promise pattern as internal.ts's own `publicSchemaReady`.
+// Tracks work within one process. PostgreSQL advisory locks below extend the
+// same serialization across API replicas and blue/green colors.
 const provisionedDbs = new Map<string, Promise<void>>();
+
+async function withTenantProvisioningLock<T>(connectionString: string, work: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `ucms:tenant-provisioning:${connectionString}`;
+  let locked = false;
+  try {
+    // Provisioning can include a large one-time backfill/index build. Do not
+    // let the normal 10s request-query timeout cancel the cross-replica lock
+    // wait; restore the pool's normal timeout before returning this client.
+    await client.query("SET statement_timeout = 0");
+    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+    locked = true;
+    return await work();
+  } finally {
+    // A session-level lock is paired with the same checked-out control-plane
+    // client. If work throws or the connection drops, PostgreSQL releases it.
+    if (locked) {
+      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]).catch(() => {});
+    }
+    await client.query("SET statement_timeout = 10000").catch(() => {});
+    client.release();
+  }
+}
 
 // ponytail: provisions the tenant database (+ runs all migrations into it)
 // on first request per process, once the host is confirmed in the registry.
@@ -130,7 +157,9 @@ async function ensureTenantDatabase(tenantHost: string, dbUrl: string | null): P
   const connectionString = dbUrl ?? deriveTenantDbUrl(tenantHost);
   let provisioning = provisionedDbs.get(connectionString);
   if (!provisioning) {
-    provisioning = provisionTenantDatabase(tenantHost, dbUrl, connectionString);
+    provisioning = withTenantProvisioningLock(connectionString, () =>
+      provisionTenantDatabase(tenantHost, dbUrl, connectionString),
+    );
     // A failed attempt must not permanently poison the cache — let the next
     // request retry instead of every future request 500ing forever.
     provisioning.catch(() => provisionedDbs.delete(connectionString));
@@ -142,43 +171,78 @@ async function ensureTenantDatabase(tenantHost: string, dbUrl: string | null): P
 
 async function provisionTenantDatabase(tenantHost: string, dbUrl: string | null, connectionString: string): Promise<void> {
   if (!dbUrl) {
-    // Same-server case: create the database via the control-plane connection.
-    const client = await pool.connect();
+    // Check using the runtime role first so existing deployments continue to
+    // serve tenants without requiring the provisioning credential on every
+    // read. Only a missing database needs the CREATEDB role.
+    const check = await pool.connect();
     try {
       const dbName = tenantDbName(tenantHost);
-      const { rows } = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbName]);
+      const { rows } = await check.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbName]);
       if (rows.length === 0) {
-        // dbName is sanitizer output ([a-z0-9_] only) — safe to interpolate;
-        // CREATE DATABASE cannot be parameterized.
-        await client.query(`CREATE DATABASE "${dbName}"`).catch((err: { code?: string }) => {
-          if (err.code === "42501") {
-            throw new Error(
-              `Role lacks CREATEDB — run once as superuser: ALTER ROLE usim_cms_app CREATEDB; (see scripts/setup-db-role.sql)`,
-            );
-          }
-          throw err;
-        });
+        if (!provisionerPool) {
+          throw new Error(
+            "DATABASE_PROVISIONER_URL is required to create tenant databases; configure the usim_cms_provisioner role (see .env.example)",
+          );
+        }
+        const provisioner = await provisionerPool.connect();
+        try {
+          // dbName is sanitizer output ([a-z0-9_] only); CREATE DATABASE and
+          // ALTER DATABASE identifiers cannot be parameterized.
+          await provisioner.query(`CREATE DATABASE "${dbName}"`);
+          // Keep app as owner so its NOCREATEDB role can create tenant tables
+          // and later remove that tenant's database. The provisioner role is
+          // explicitly a member of the app role for this ownership transfer.
+          await provisioner.query(`GRANT CONNECT, CREATE ON DATABASE "${dbName}" TO usim_cms_app`);
+          await provisioner.query(`ALTER DATABASE "${dbName}" OWNER TO usim_cms_app`);
+        } finally {
+          provisioner.release();
+        }
       }
     } finally {
-      client.release();
+      check.release();
     }
   }
 
-  // Replay every migration into the tenant DB's own public schema. Idempotent
-  // (IF NOT EXISTS / DROP POLICY IF EXISTS throughout), same replay the old
-  // schema-per-tenant provisioning did. Wrapped in one transaction (audit
-  // finding, 2026-09-23) — a crash mid-replay used to leave whichever
-  // migration file was in flight only partially applied; none of the files
-  // use CREATE INDEX CONCURRENTLY (checked — Postgres refuses that inside a
-  // transaction), so BEGIN/COMMIT around the whole loop is safe and makes a
-  // retry always start from either "nothing applied yet" or "fully applied".
+  // Apply only migrations missing from the tenant-local ledger. Existing
+  // databases have no ledger yet, so the current idempotent history is
+  // replayed once to establish a baseline. Future deploys apply only new
+  // files. The transaction makes schema changes and ledger entries atomic.
   const tp = getTenantPool(connectionString);
   const client = await tp.connect();
   try {
     await client.query("BEGIN");
     try {
+      // Schema upgrades and one-time indexes may exceed the ordinary request
+      // query budget. LOCAL keeps this exception scoped to the migration
+      // transaction and prevents the pooled client leaking an unlimited
+      // timeout into application queries.
+      await client.query("SET LOCAL statement_timeout = 0");
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS public.ucms_schema_migrations (
+          migration_id text PRIMARY KEY,
+          checksum text NOT NULL,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      const { rows: appliedRows } = await client.query<{ migration_id: string; checksum: string }>(
+        "SELECT migration_id, checksum FROM public.ucms_schema_migrations",
+      );
+      const applied = new Map(appliedRows.map((row) => [row.migration_id, row.checksum]));
       for (const file of migrationFiles) {
-        await client.query(readFileSync(path.join(dbDir, "migrations", file), "utf8"));
+        const migration = readFileSync(path.join(dbDir, "migrations", file), "utf8");
+        const checksum = createHash("sha256").update(migration).digest("hex");
+        const existingChecksum = applied.get(file);
+        if (existingChecksum) {
+          if (existingChecksum !== checksum) {
+            throw new Error(`Applied tenant migration ${file} was modified; add a new migration instead.`);
+          }
+          continue;
+        }
+        await client.query(migration);
+        await client.query(
+          "INSERT INTO public.ucms_schema_migrations (migration_id, checksum) VALUES ($1, $2)",
+          [file, checksum],
+        );
       }
       await client.query("COMMIT");
     } catch (err) {
@@ -192,7 +256,11 @@ async function provisionTenantDatabase(tenantHost: string, dbUrl: string | null,
 
 export async function closePool(): Promise<void> {
   clearInterval(idleSweepTimer);
-  await Promise.all([pool.end(), ...[...tenantPools.values()].map((p) => p.end())]);
+  await Promise.all([
+    pool.end(),
+    provisionerPool?.end(),
+    ...[...tenantPools.values()].map((p) => p.end()),
+  ]);
   tenantPools.clear();
   poolLastUsed.clear();
 }

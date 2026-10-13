@@ -6,21 +6,31 @@ CREATE TABLE IF NOT EXISTS "categories" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 
--- Backfill: one category row per distinct existing posts.category value.
-INSERT INTO "categories" ("name", "slug")
-SELECT DISTINCT "category",
-  trim(both '-' from regexp_replace(lower("category"), '[^a-z0-9]+', '-', 'g'))
-FROM "posts"
-WHERE "category" IS NOT NULL AND "category" != ''
-ON CONFLICT ("name") DO NOTHING;
-
 ALTER TABLE "posts" ADD COLUMN IF NOT EXISTS "category_id" uuid REFERENCES "categories"("id") ON DELETE RESTRICT;
 
-UPDATE "posts" SET "category_id" = "categories"."id"
-FROM "categories"
-WHERE "posts"."category" = "categories"."name" AND "posts"."category_id" IS NULL;
+-- This migration is also used to establish the ledger on existing tenant
+-- databases, so it must be safe to replay after its old category column has
+-- already been removed.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'posts' AND column_name = 'category'
+  ) THEN
+    INSERT INTO "categories" ("name", "slug")
+    SELECT DISTINCT "category",
+      trim(both '-' from regexp_replace(lower("category"), '[^a-z0-9]+', '-', 'g'))
+    FROM "posts"
+    WHERE "category" IS NOT NULL AND "category" != ''
+    ON CONFLICT ("name") DO NOTHING;
 
-ALTER TABLE "posts" DROP COLUMN IF EXISTS "category";
+    UPDATE "posts" SET "category_id" = "categories"."id"
+    FROM "categories"
+    WHERE "posts"."category" = "categories"."name" AND "posts"."category_id" IS NULL;
+
+    ALTER TABLE "posts" DROP COLUMN "category";
+  END IF;
+END $$;
 
 -- Public reference data — unrestricted SELECT; writes follow the same
 -- defense-in-depth pattern as every other tenant table.

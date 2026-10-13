@@ -1,11 +1,6 @@
-# Arkitektur & Tech Stack — USIM CMS
+# Arkitektur & Tech Stack - USIM CMS
 
-> Dokumen ini menerangkan **keadaan sebenar sistem pada 27 Ogos 2026** — bukan spec/cita-cita awal.
-> Menggantikan versi lama (13 Julai 2026) yang sudah lapuk pada perkara asas (contohnya model
-> multi-tenancy telah berubah daripada schema-per-tenant kepada **database-per-tenant**, dan hampir
-> semua ciri di bawah dibina selepas versi lama itu ditulis). Rujukan sumber kebenaran teknikal harian
-> ialah `CLAUDE.md` di root repo — dokumen ini ialah versi ringkas/tersusun untuk pembentangan dan
-> onboarding.
+> Dikemas kini pada 13 Oktober 2026. Dokumen ini menerangkan seni bina yang dilaksanakan. architecture.md ialah product brief asal dan disimpan sebagai konteks sejarah; CLAUDE.md menerangkan workflow repo.
 
 ---
 
@@ -24,7 +19,7 @@ Monorepo pnpm, tiga aplikasi:
 | App | Peranan | Stack teras |
 |-----|---------|-------------|
 | `apps/api` | *Engine* backend — API, multi-tenancy, auth, storage, i18n, backup | Fastify 5 + Drizzle ORM + PostgreSQL |
-| `apps/admin` | Dashboard pengurusan kandungan + Page Designer (untuk staf/webmaster/superadmin) | React 18 + Vite + Tailwind + Radix/shadcn |
+| `apps/admin` | Dashboard pengurusan kandungan + Page Designer (untuk staf/webmaster/superadmin) | React 19 + Vite + Tailwind + Radix/shadcn |
 | `apps/frontend` | Tapak awam yang dilihat pelawat | Astro 7 (SSR, `@astrojs/node`) |
 
 Identiti tenant **sentiasa** datang dari header `x-tenant-host` pada setiap request — tidak pernah
@@ -39,17 +34,17 @@ semua tapak jabatan serentak.
 
 | Teknologi | Versi | Kegunaan | Kenapa |
 |-----------|-------|----------|--------|
-| **Fastify** | ^5.1 | HTTP server / routing | Laju, JSON-schema validation terbina-dalam, sistem plugin/encapsulation sesuai untuk scope tenant (public vs protected). |
-| **Drizzle ORM** | ^0.36 | Query builder + schema | Type-safe, *thin* — bukan ORM berat (tiada engine binari/generate step macam Prisma). SQL kekal dekat. |
-| **pg** | ^8.13 | Driver Postgres mentah | Operasi luar liputan Drizzle: `CREATE DATABASE`, replay migration mentah, session variable RLS. |
-| **TypeScript** | ^5.7, ESM/NodeNext | Bahasa + jenis | `strict: true` di seluruh repo. |
-| **tsx** | ^4.19 | Jalan TS terus | Dev watch mode + semua CLI script tanpa build step. |
+| **Fastify** | ^5.12 | HTTP server / routing | Plugin Fastify memisahkan skop tenant dan route awam/terlindung. |
+| **Drizzle ORM** | ^0.45 | Query builder + schema | Type-safe dan dekat dengan SQL PostgreSQL. |
+| **pg** | ^8.23 | Driver PostgreSQL | Digunakan untuk operasi database, advisory lock dan migrasi tenant. |
+| **TypeScript** | ^5.9 | Bahasa + jenis | Strict mode di seluruh workspace. |
+| **tsx** | ^4.23 | Jalan TS terus | Dev watch mode + semua CLI script tanpa build step. |
 | **@fastify/helmet** | ^13 | Security headers | `contentSecurityPolicy: false` (API JSON sahaja, bukan penghasil HTML). |
 | **@fastify/cors, @fastify/multipart, @fastify/static** | — | CORS, upload fail, hidang `/uploads/` | — |
-| **sanitize-html** | ^2.17 | Nyah-cemar HTML body post/page | Trust boundary untuk kandungan editor kaya (BlockNote) sebelum simpan. |
-| **@aws-sdk/client-s3 + lib-storage** | ^3.10 | Storage S3-compatible (pilihan) | Hanya dimuat bila `STORAGE_DRIVER=s3`. |
+| **sanitize-html** | ^2.18 | Nyah-cemar HTML body post/page | Trust boundary untuk kandungan editor kaya (BlockNote) sebelum simpan. |
+| **@aws-sdk/client-s3 + lib-storage** | ^3.1148 | Storage S3-compatible (pilihan) | Hanya dimuat bila `STORAGE_DRIVER=s3`. |
 | **fflate** | ^0.8 | Zip/unzip | Backup/restore tenant (JSON + uploads dizip). |
-| **drizzle-kit** | ^0.28 | Jana fail migration `.sql` daripada schema | *Authoring* sahaja — lihat §4 kenapa `db:migrate` tak dipakai semasa runtime. |
+| **drizzle-kit** | ^0.31 | Jana fail migration `.sql` daripada schema | *Authoring* sahaja — lihat §4 kenapa `db:migrate` tak dipakai semasa runtime. |
 
 **Keputusan menarik — crypto ditulis sendiri.** Tiada `bcrypt`/`argon2`/library JWT. Guna `node:crypto`
 sahaja: `scryptSync` untuk hash kata laluan (salt 16-byte rawak, `timingSafeEqual` untuk sahkan), HMAC-
@@ -60,23 +55,22 @@ terhadap vektor ujian rasmi RFC 6238 Appendix B dalam `auth.test.ts`). Pilihan "
 
 | Teknologi | Versi | Kenapa |
 |-----------|-------|--------|
-| **React** | ^18.3 | UI. Routing sebenar guna **react-router-dom** (`BrowserRouter`) — Designer & Post Editor kini laluan (`route`) sebenar (`/content/pages/:id`, `/content/posts/:id`), bukan `useState` conditional mount. |
-| **Vite** | ^5.4 | Dev server + bundler. |
-| **Tailwind CSS** | ^3.4 | Styling utiliti. |
+| **React** | ^19.3 | UI admin dengan react-router-dom dan Page Designer. |
+| **Vite** | ^8.3 | Dev server dan bundler admin. |
+| **Tailwind CSS** | ^4.3 | Styling admin. |
 | **Radix UI (13 primitif) + shadcn convention** | — | Accordion, Dialog, Dropdown, Popover, Select, Tabs, Tooltip, dll. `components.json` + helper `cn()` — **sudah dipakai sebenar** (bukan scaffolding kosong seperti versi lama dokumen ini pernah nyatakan). |
 | **@blocknote/core + react + mantine** | ^0.51 | Editor kaya (rich-text) untuk Post body, dengan toolbar tersuai + custom block `bookmarkCard` (`@`-mention content-search). |
 | **react-hook-form + zod + @hookform/resolvers** | — | Borang. |
 | **lucide-react** | — | Ikon (termasuk untuk medan `icon` info-box/mega-menu). |
-| **embla-carousel** (dirujuk juga di frontend) | — | Digunakan selari dengan slider block. |
 
 ### 2.3 Frontend awam — `apps/frontend`
 
 | Teknologi | Versi | Kenapa |
 |-----------|-------|--------|
-| **Astro** | ^7.1 | Render tapak awam — hampir-sifar JS klien secara default (island architecture). |
+| **Astro** | ^7.3 | Render tapak awam melalui SSR. |
 | **@astrojs/node** | ^11 | Adapter **SSR** mod `"middleware"` (`output: "server"`) — `server.mjs` sendiri milik `http.Server` supaya boleh tutup elegan pada `SIGTERM`/`SIGINT`. |
 | **Tailwind CSS v4 + daisyUI** | ^4.3 / ^5.6 | Styling; daisyUI bekalkan set warna tema (UI Themes) yang dipetakan ke sistem tema tenant. |
-| **embla-carousel + embla-carousel-autoplay** | ^8.6 | Satu-satunya dependency UI npm sebenar di frontend selain Tailwind — carousel headless ~6kb untuk elemen Slider (sentuh/drag/momentum/loop percuma). |
+| **swiper** | ^11.2 | Carousel elemen slider pada tapak awam. |
 
 **Kenapa SSR, bukan SSG?** Identiti tenant diselesaikan daripada **Host header semasa runtime** — satu
 instance melayani berpuluh domain berbeza. Pra-render statik tak boleh, sebab kandungan bergantung tenant
@@ -84,15 +78,11 @@ mana yang meminta pada masa request, bukan masa build.
 
 ### 2.4 Monorepo & tooling
 
-- **pnpm workspace** (`pnpm@11.11`) — `packages: ["apps/*"]`.
+- **pnpm workspace** (pnpm@12.11.2) meliputi apps/* dan packages/*.
 - **`tsconfig.base.json`** — `strict: true`, `target: ES2022`; tiap app override module-resolution ikut
   runtime (api = NodeNext; admin = Bundler + JSX; frontend = extend `astro/tsconfigs/strict`).
 - **ESLint 9 (flat config) + Prettier 3** di root — `pnpm lint` / `pnpm format`.
-- **Ujian:** `node:test` (`tsx --test`) — bukan Jest/Vitest, konsisten falsafah no-bloat. Wujud di
-  `apps/api` (`validate-layout.test.ts`, `validate-menu.test.ts`, `proxy-sync.test.ts`, `auth.test.ts`)
-  dan mula dijalankan di `apps/admin` untuk fail helper `Designer.tsx` yang sudah diekstrak
-  (`src/designer/{types,style,geometry,parsers}.ts`) — bahagian pertama refactor "God Component"
-  Designer.tsx yang sedang berjalan berperingkat.
+- **Ujian:** node:test untuk helper dan unit logic. CI menjalankan lint, typecheck, build serta ujian setiap package. Job E2E berasingan memulakan PostgreSQL/API terpencil dan menjalankan smoke test Designer melalui Playwright.
 
 ---
 
@@ -114,7 +104,7 @@ usim_cms/
 │   │   └── src/
 │   │       ├── App.tsx       # Shell, routing, panel Content/Theme/Users/Roles/Settings/dll
 │   │       ├── Designer.tsx  # Page builder (canvas, Inspector, Live Edit) — fail terbesar
-│   │       ├── designer/     # Layer 0/1a refactor: types/style/geometry/parsers/fields/FieldControls
+│   │       ├── designer/     # Hooks, canvas, palette, Inspector, element preview, field controls, modals
 │   │       └── blocknote/    # Custom BlockNote block (bookmarkCard)
 │   └── frontend/             # Astro SSR — tapak awam pelawat
 │       └── src/
@@ -153,9 +143,9 @@ ini.
      header sembarangan tak boleh cipta/provision DB baru.
    - Selesaikan connection string: `db_url` eksplisit pada baris `tenants` (topologi lain-server), atau
      terbitkan `postgres://.../tenant_<host>` pada server yang sama (`deriveTenantDbUrl`).
-   - Kali pertama host itu dilihat oleh proses ini: `CREATE DATABASE` (jika belum wujud) + **replay
-     semua fail `migrations/*.sql`** ke dalam DB tenant itu (idempoten — `IF NOT EXISTS`/`DROP POLICY IF
-     EXISTS` di seluruh fail, tiada jadual jejak migration drizzle-kit di sisi tenant).
+   - PostgreSQL advisory lock menyelaras provisioning dan migrasi merentas replika.
+   - Database baharu dibuat oleh usim_cms_provisioner, kemudian pemilikan dipindahkan kepada role runtime usim_cms_app sebelum migrasi.
+   - public.ucms_schema_migrations menyimpan nama fail dan SHA-256 checksum. Setiap migrasi baharu digunakan sekali dalam transaksi; database sedia ada membina baseline daripada sejarah idempoten sekali sahaja.
    - Pool Drizzle/pg dicache **per connection string** (`tenantPools`) — dua host yang kongsi `db_url`
      kongsi satu pool.
 3. `req.db` (client Drizzle terikat DB tenant itu) + `req.tenantHost` dilampir oleh plugin.
@@ -236,11 +226,9 @@ senyap, itu sebab role khas ini wajib.
   sesi terbentuk).
 - **`@fastify/helmet`** dipasang; CSP dimatikan sengaja (API JSON sahaja).
 
-**Diketahui belum dibuat (ditanda, bukan terlupa):** token sesi masih di `localStorage` bukan cookie
-`httpOnly` — migrasi ini sentuh setiap request admin dan perlu strategi CSRF sendiri, sengaja tak
-digabung dalam pusingan pengerasan yang sama. HA/replikasi Postgres, monitoring/alerting berterusan, dan
-auto-rollback selepas promote juga belum — perlu keputusan topologi VPS sebenar.
+**Auth semasa:** kredensial sesi admin berada dalam cookie httpOnly; request mutasi membawa token CSRF melalui header. Admin menyimpan metadata sesi dan pilihan UI dalam localStorage.
 
+**Jurang operasi:** HA/replikasi PostgreSQL dan load-test/capacity baseline belum tersedia. Alert webhook kesihatan boleh diaktifkan dengan ALERT_WEBHOOK_URL. Deployment menyokong rollback manual melalui scripts/deploy.sh rollback; rollback automatik berdasarkan kegagalan selepas promosi belum tersedia.
 ---
 
 ## 7. Ciri Kandungan Utama
@@ -400,10 +388,7 @@ warna yang sedang live — selamat diulang.
 
 ### 9.5 Monitoring
 
-**Jurang diketahui** — `restart: unless-stopped` + healthcheck Compose cuma liputi restart-selepas-crash,
-bukan metrik/alerting berterusan. `monitor/` (agen Node berasingan pada host, dikawal auth Basic) sedia
-ada untuk status/restart/log/deploy/SSL manual, tetapi tiada dashboard metrik/alert automatik lagi.
-
+monitor/ (agen Node berasingan pada host, dikawal auth Basic) menyediakan status, restart, log, deploy dan SSL. ALERT_WEBHOOK_URL mengaktifkan notifikasi apabila kesihatan servis berubah. Metrik produk, load-test dan capacity baseline rasmi masih belum tersedia.
 ---
 
 ## 10. Penilaian Ringkas
@@ -416,19 +401,14 @@ ada untuk status/restart/log/deploy/SSL manual, tetapi tiada dashboard metrik/al
 - Sistem koleksi generik (bukan route tulis-tangan berulang) dengan hook `access`/`beforeChange`/
   `afterChange` yang sudah *wired* dan dipakai sebenar (bukan stub — beza besar berbanding versi lama
   dokumen ini).
-- Falsafah no-bloat konsisten dikekalkan walaupun ciri bertambah banyak (crypto sendiri, tiada ORM berat,
-  carousel headless kecil sahaja sebagai satu-satunya dependency UI di frontend).
+- Falsafah no-bloat dikekalkan pada backend dan kandungan frontend dirender dengan SSR; Swiper diasingkan
+  pada komponen slider yang menggunakannya.
 
-**Jurang diketahui (ditanda dalam kod/CLAUDE.md, bukan tersembunyi):**
-- Token sesi masih `localStorage`, bukan cookie `httpOnly` — belum dijadualkan, perlu strategi CSRF
-  berasingan.
-- Tiada monitoring/alerting metrik berterusan; tiada load-test/capacity baseline rasmi.
-- Sebahagian style-override responsif (bag `bp` pada Section/Row/Column/Element) masih preview-admin
-  sahaja, belum dirender sebenar di tapak — kerja tambahan per-jenis elemen yang sengaja ditangguh.
-- Refactor `Designer.tsx` ("God Component", ~50+ hook) baru sampai Layer 1a (field-schema + leaf
-  controls diekstrak); `Inspector`/`ElPreview` — bahagian paling berisiko — masih ditangguh sehingga ada
-  liputan ujian E2E (Playwright) yang dirancang.
-
+**Jurang diketahui:**
+- Tiada HA/replikasi PostgreSQL atau load-test/capacity baseline rasmi.
+- Tiada rollback automatik berdasarkan kegagalan selepas deployment dipromosikan; rollback manual tersedia.
+- Sebahagian style-override responsif (bag bp pada Section/Row/Column/Element) masih preview-admin sahaja.
+- `Designer.tsx` kekal sebagai orchestration component yang besar (~930 baris); hooks domain serta canvas, palette, Inspector, element preview dan modal sudah diekstrak. CI menjalankan smoke test Playwright terhadap PostgreSQL terpencil.
 ---
 
 *Untuk butiran penuh setiap ciri (skema jadual, nama fungsi, sebab keputusan reka bentuk, insiden yang

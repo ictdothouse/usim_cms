@@ -1486,6 +1486,7 @@ install_docker_mode() {
   chmod 600 .env
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
   fill_env_if_blank .env POSTGRES_APP_PASSWORD
+  fill_env_if_blank .env POSTGRES_PROVISIONER_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
   set_env_kv .env VITE_API_URL "http://${public_host}:${api_port}"
   set_env_kv .env VITE_FRONTEND_URL "http://${public_host}:${frontend_port}"
@@ -1517,7 +1518,9 @@ install_docker_mode() {
   # docker-compose.trial.yml adds api/frontend/admin on host-published ports
   # (no Caddy) on top of this file's db+proxy — see that file's own header
   # for why docker-compose.yml alone no longer has those 3 services.
-  docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d --build db api frontend admin
+  docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d db
+  bash scripts/configure-docker-db-roles.sh
+  docker compose -f docker-compose.yml -f docker-compose.trial.yml up -d --build api frontend admin
 
   if ! ensure_reachable_or_selfheal "$api_port" "$admin_port" "$frontend_port" "docker"; then
     echo "" >&2
@@ -1763,6 +1766,7 @@ install_production_mode() {
 
   fill_env_if_blank .env POSTGRES_SUPERUSER_PASSWORD
   fill_env_if_blank .env POSTGRES_APP_PASSWORD
+  fill_env_if_blank .env POSTGRES_PROVISIONER_PASSWORD
   fill_env_if_blank .env SESSION_SECRET
   fill_env_if_blank .env DEPLOY_SECRET
   set_env_kv .env ADMIN_DOMAIN "$ADMIN_DOMAIN"
@@ -1798,6 +1802,7 @@ install_production_mode() {
   echo ""
   echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
   docker compose up -d db pgbouncer redis proxy
+  bash scripts/configure-docker-db-roles.sh
 
   echo ""
   echo "-- first deploy (build+test+health-check+promote, see scripts/deploy.sh) --"
@@ -1900,6 +1905,19 @@ ensure_app_database() {
     sudo -u postgres psql -c "CREATE DATABASE usim_cms" >/dev/null
   fi
   sudo -u postgres psql -d usim_cms -f apps/api/scripts/setup-db-role.sql >/dev/null
+
+  if ! grep -qE '^DATABASE_PROVISIONER_URL=.+' apps/api/.env 2>/dev/null; then
+    local provisioner_password
+    provisioner_password="$(openssl rand -hex 24)"
+    sudo -u postgres psql -d usim_cms <<-EOSQL >/dev/null
+      SET password_encryption = 'md5';
+      ALTER ROLE usim_cms_provisioner WITH PASSWORD '${provisioner_password}';
+    EOSQL
+    set_env_kv apps/api/.env DATABASE_PROVISIONER_URL "postgres://usim_cms_provisioner:${provisioner_password}@127.0.0.1:5432/usim_cms"
+    echo "Created a separate usim_cms_provisioner credential."
+  else
+    echo "Reusing existing DATABASE_PROVISIONER_URL in apps/api/.env."
+  fi
 
   if ! grep -qE "^DATABASE_URL=.+" apps/api/.env 2>/dev/null; then
     local db_password

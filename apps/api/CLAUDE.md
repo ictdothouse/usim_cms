@@ -4,6 +4,15 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
 
 ## Multi-tenancy: database-per-tenant
 
+- Tenant provisioning is serialized across API replicas with a PostgreSQL session advisory lock.
+  `DATABASE_URL` is the NOCREATEDB runtime role; `DATABASE_PROVISIONER_URL` is a direct-PostgreSQL
+  credential for the separate CREATEDB role and is used only to create same-server tenant databases.
+  New databases are transferred to `usim_cms_app` before tenant migrations run.
+- Tenant migrations use `public.ucms_schema_migrations` with a SHA-256 checksum per filename. Missing
+  migrations run once, in transactions, and an applied file changed in place fails closed. Existing
+  tenant databases establish a baseline by replaying the idempotent migration history once; future
+  schema changes must be new migration files. Do not target control-plane tables from tenant migrations.
+
 - `DATABASE_URL` holds only the **control plane** — the `tenants`/`users`/`roles`/`site_theme`/
   `shared_content`/`theme_presets`/`languages` registry tables (`apps/api/src/db/tenant-pool.ts`'s fixed
   `pool`). Tenant content (`pages`, etc.) never lives there. `theme_presets` is a personal, per-user
@@ -283,7 +292,7 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   description fallback chain is `seo.description || autoDescription || tenantDefaults.defaultDescription
   || ""`. **Schema-file gotcha worth remembering**: `platform_settings`/`site_theme` are control-plane
   tables bootstrapped by `bootstrap-public.sql` (`ensurePublicSchema`, run once against `DATABASE_URL`),
-  NOT by anything in `src/db/migrations/` (which `ensureTenantDatabase` blindly replays into every
+  NOT by anything in `src/db/migrations/` (which `ensureTenantDatabase` applies to tenant databases under
   TENANT's own database, where these two tables don't exist at all — see this file's own "Multi-tenancy"
   section above). A migration file targeting either table would 500 every tenant's first request per
   process after deploy (and block new-tenant creation) with `relation "platform_settings" does not
@@ -292,12 +301,13 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   position/style, MFA/Entra flags, etc).
 - Each row in `tenants` has a nullable `db_url`. Null means "derive it": the tenant's database lives on
   the same Postgres server as the control plane, named `tenant_<host>` (`tenantDbName`/
-  `deriveTenantDbUrl`), created on demand (`CREATE DATABASE`) and migrated the first time that host is
-  requested. An explicit `db_url` means the tenant's data lives on a different server that must already
-  exist — topology is registry data, never code.
+  `deriveTenantDbUrl`), created on demand by `usim_cms_provisioner`, transferred to `usim_cms_app`, and
+  migrated the first time that host is requested. An explicit `db_url` means the tenant's data lives
+  on a different server that must already exist — topology is registry data, never code.
 - `getTenantConnection(tenantHost)` is the only way a request gets a tenant's `db`: registry lookup on
   the control plane confirms the host is known and `active`, then resolves/derives its connection
-  string, provisions+migrates it if this process hasn't seen it yet, and hands back a pooled client
+  string, provisions+migrates it if this process hasn't seen it yet (a cross-replica advisory lock and
+  tenant-local migration ledger coordinate this), and hands back a pooled client
   (`tenantPools` cached per connection string, not per host, so two hosts sharing a `db_url` share a
   pool). `plugins/tenant.ts` calls this on every request and attaches the result as `req.db`.
 - This makes tenant DB isolation real (a compromised or buggy query against one tenant's `req.db`

@@ -1,8 +1,10 @@
 # Designer.tsx refactor — design
 
-**Status:** design only, not yet implemented. Deliberately deferred to a fresh
-session (see "Why deferred" below) — implement via the `writing-plans` skill
-from this doc, not by editing straight from this file.
+**Status:** original design note from 20 August 2026; no longer a current
+status report. Layers 0, 1a, and 1b have since been implemented, and Playwright
+Designer smoke tests now run in CI. The remaining optional state-hook
+consolidation is described in `apps/admin/CLAUDE.md`; current architecture is
+documented in `docs/ARSITEKTUR.md`.
 
 ## Problem
 
@@ -113,15 +115,9 @@ Split `useDesignerState` further by concern: `useClipboard`,
 Only do this if Layer 2's single hook is still unwieldy in practice —
 don't pre-split speculatively.
 
-## Testing gap (address before Layer 1)
+## Original testing gap (superseded)
 
-There is currently **no automated test at all** for Designer.tsx — it's
-pure UI, historically verified by manual click-through only. Before
-Layer 1 (the first layer with real behavior-preservation risk), write one
-Playwright E2E smoke test: create a page, drag in an element, set a style
-property, save, reload, assert the layout persisted correctly. This is
-the safety net that lets Layers 1–3 be verified by more than "typecheck
-passed and it looked fine when I clicked around."
+At the time this note was written, Designer.tsx had no automated browser coverage. Playwright smoke tests now cover block drag-in, save/reload, and Live Edit drag-in, and CI runs them against an isolated PostgreSQL/API pair.
 
 ## Why deferred to a fresh session
 
@@ -134,8 +130,6 @@ deserves a session with full budget and a clean context window, not the
 tail end of an already-long one. The user explicitly chose this option
 when asked.
 
-## Next step
+## Original next step (superseded)
 
-Start a new session/conversation with this file as context, and invoke
-the `writing-plans` skill against it to produce a concrete, step-by-step
-implementation plan for Layer 0 first.
+Layers 0, 1a, and 1b were completed after this note. See `apps/admin/CLAUDE.md` for the current extraction status and remaining Layer 2 follow-up.

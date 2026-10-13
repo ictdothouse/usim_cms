@@ -1,4 +1,8 @@
-# Custom Multi-Tenant Headless CMS Spec (2026/2027)
+# Historical Product Brief — Custom Multi-Tenant Headless CMS
+
+> This is the initial product brief, not the current implementation spec. The implemented system has three
+> apps, database-per-tenant provisioning, a control plane, and shared workspace packages. See
+> `docs/ARSITEKTUR.md` for the maintained architecture and `CLAUDE.md` for repository workflows.
 
 ## Core Stack
 - **Architecture**: Monorepo using pnpm workspaces (`apps/api`, `apps/admin`)

@@ -31,6 +31,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_DIR="$(pwd)"
 
+# Older .env files predate the dedicated database-provisioner role. Create its
+# secret before Compose interpolates the new required DB/API settings.
+bash scripts/ensure-provisioner-secret.sh
+
 if [ -f .env ]; then
   set -a
   # shellcheck disable=SC1091
@@ -192,6 +196,7 @@ do_deploy() {
 
   echo "-- ensuring base (db+pgbouncer+redis+proxy) is up --"
   docker compose up -d db pgbouncer redis proxy
+  bash scripts/configure-docker-db-roles.sh
 
   echo "-- building & starting $next --"
   docker compose -p "$project" -f "$RELEASE_FILE" build

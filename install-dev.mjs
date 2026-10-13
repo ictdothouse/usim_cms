@@ -313,6 +313,8 @@ async function install() {
     copyFileSync(join(REPO_DIR, ".env.example"), envFile);
   }
   fillEnvIfBlank(envFile, "POSTGRES_SUPERUSER_PASSWORD");
+  fillEnvIfBlank(envFile, "POSTGRES_APP_PASSWORD");
+  fillEnvIfBlank(envFile, "POSTGRES_PROVISIONER_PASSWORD");
   fillEnvIfBlank(envFile, "SESSION_SECRET");
   setEnvKv(envFile, "VITE_API_URL", `http://localhost:${apiPort}`);
   setEnvKv(envFile, "VITE_FRONTEND_URL", `http://localhost:${frontendPort}`);
@@ -335,9 +337,39 @@ async function install() {
   // pair is install.sh's own docker-mode trial overlay, mirrored here since
   // local dev has no go-live/blue-green step of its own. See that file's
   // header for why this is the right one to use pre-launch.
+  const composeArgs = ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.trial.yml"];
+  execFileSync("docker", [...composeArgs, "up", "-d", "db"], { cwd: REPO_DIR, stdio: "inherit" });
+  let dbReady = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      execFileSync("docker", [...composeArgs, "exec", "-T", "db", "pg_isready", "-U", "postgres"], {
+        cwd: REPO_DIR,
+        stdio: "ignore",
+      });
+      dbReady = true;
+      break;
+    } catch {
+      await sleep(1000);
+    }
+  }
+  if (!dbReady) throw new Error("PostgreSQL did not become ready; cannot configure application roles.");
   execFileSync(
     "docker",
-    ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.trial.yml", "up", "-d", "--build", "db", "api", "frontend", "admin"],
+    [...composeArgs, "exec", "-T", "db", "psql", "-U", "postgres", "-d", "usim_cms", "-v", "ON_ERROR_STOP=1", "-f", "/docker-entrypoint-initdb.d/01-setup-db-role.sql"],
+    { cwd: REPO_DIR, stdio: "inherit" },
+  );
+  execFileSync(
+    "docker",
+    [...composeArgs, "exec", "-T", "db", "sh", "-c", 'psql -U postgres -d usim_cms -v ON_ERROR_STOP=1 -v app_password="$POSTGRES_APP_PASSWORD" -v provisioner_password="$POSTGRES_PROVISIONER_PASSWORD"'],
+    {
+      cwd: REPO_DIR,
+      input: readFileSync(join(REPO_DIR, "apps/api/scripts/rotate-db-role-passwords.sql")),
+      stdio: ["pipe", "inherit", "inherit"],
+    },
+  );
+  execFileSync(
+    "docker",
+    ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.trial.yml", "up", "-d", "--build", "api", "frontend", "admin"],
     { cwd: REPO_DIR, stdio: "inherit" },
   );
 
