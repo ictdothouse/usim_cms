@@ -221,7 +221,7 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
       <FormError>{error}</FormError>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-xs">
+        <div className="flex items-center gap-1 text-sm">
           <button
             onClick={() => setActiveFolder(null)}
             className={activeFolder === null ? "font-semibold text-ink" : "text-sub hover:text-ink"}
@@ -239,6 +239,7 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-sub" />
             <input
+              aria-label={t("media-search-placeholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("media-search-placeholder")}
@@ -248,7 +249,8 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
           {addingFolder ? (
             <div className="flex items-center gap-1.5">
               <input
-                className="rounded border border-line/30 px-1.5 py-1 text-xs outline-none"
+              aria-label={t("media-new-folder-prompt")}
+                className="rounded border border-line/30 px-1.5 py-1 text-sm outline-none"
                 placeholder={t("media-new-folder-prompt")}
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
@@ -258,10 +260,10 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
                 }}
                 autoFocus
               />
-              <button onClick={addFolder} className="text-xs font-semibold text-accent hover:underline">
+              <button onClick={addFolder} className="text-sm font-semibold text-accent hover:underline">
                 {t("media-save")}
               </button>
-              <button onClick={() => setAddingFolder(false)} className="text-xs text-sub hover:underline">
+              <button onClick={() => setAddingFolder(false)} className="text-sm text-sub hover:underline">
                 {t("media-cancel")}
               </button>
             </div>
@@ -275,37 +277,15 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
 
       {activeFolder === null && !search.trim() && folders.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-sub">{t("media-folders-heading")}</p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-sub">{t("media-folders-heading")}</p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {folders.map((f) => (
-              <div
-                key={f.id as string}
-                onClick={() => setActiveFolder(f.id as string)}
-                className={`${card} group flex cursor-pointer flex-col gap-2 p-3 transition-colors hover:border-accent/50`}
-              >
-                <div className="flex items-start justify-between">
-                  <Folder className="h-7 w-7 text-accent/70" />
-                  {editingFolderId !== f.id && (
-                    <div className="hidden items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => {
-                          setEditingFolderId(f.id as string);
-                          setEditingFolderName(f.name as string);
-                        }}
-                        className="rounded p-1 text-sub hover:bg-canvas"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => removeFolder(f.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </div>
+              <div key={f.id as string} className={`${card} min-w-0 p-3 transition-colors hover:border-accent/50`}>
                 {editingFolderId === f.id ? (
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-1">
                     <input
-                      className="w-full rounded border border-line/30 px-1.5 py-0.5 text-xs outline-none"
+                      aria-label={t("media-new-folder-prompt")}
+                      className="w-full rounded border border-line/30 px-1.5 py-0.5 text-sm outline-none"
                       value={editingFolderName}
                       onChange={(e) => setEditingFolderName(e.target.value)}
                       onKeyDown={(e) => {
@@ -314,19 +294,28 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
                       }}
                       autoFocus
                     />
-                    <button onClick={() => renameFolder(f)} className="text-[10px] font-semibold text-accent hover:underline">
+                    <button onClick={() => renameFolder(f)} className="text-sm font-semibold text-accent hover:underline">
                       {t("media-save")}
                     </button>
-                    <button onClick={() => setEditingFolderId(null)} className="text-[10px] text-sub hover:underline">
+                    <button onClick={() => setEditingFolderId(null)} className="text-sm text-sub hover:underline">
                       {t("media-cancel")}
                     </button>
                   </div>
                 ) : (
-                  <div>
-                    <p className="truncate text-xs font-semibold text-ink">{f.name as string}</p>
-                    <p className="text-[10px] text-sub">
-                      {folderCounts.get(f.id as string) ?? 0} {t("media-items-suffix")}
-                    </p>
+                  <div className="flex items-start justify-between gap-1">
+                    <button type="button" onClick={() => setActiveFolder(f.id as string)} className="flex min-w-0 flex-1 flex-col items-start gap-1 rounded text-left focus-visible:outline-2 focus-visible:outline-accent">
+                      <Folder className="h-7 w-7 text-accent" />
+                      <span className="w-full truncate text-sm font-semibold text-ink">{f.name as string}</span>
+                      <span className="text-sm text-sub">{folderCounts.get(f.id as string) ?? 0} {t("media-items-suffix")}</span>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button type="button" aria-label={`${t("media-edit")}: ${f.name as string}`} onClick={() => { setEditingFolderId(f.id as string); setEditingFolderName(f.name as string); }} className="rounded p-2 text-sub hover:bg-canvas focus-visible:outline-2 focus-visible:outline-accent">
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button type="button" aria-label={`${t("pages-delete")}: ${f.name as string}`} onClick={() => void removeFolder(f.id as string)} className="rounded p-2 text-red-600 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-accent">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -336,22 +325,23 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
       )}
 
       <div className="space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-sub">{t("media-assets-heading")}</p>
+        <p className="text-sm font-semibold uppercase tracking-wide text-sub">{t("media-assets-heading")}</p>
 
         <div
-          onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
+          className={`rounded-xl border-2 border-dashed p-2 transition-colors ${
             dragOver ? "border-accent bg-accent/5" : "border-line/50 hover:border-accent/50"
           }`}
         >
-          <UploadCloud className="h-6 w-6 text-accent" />
-          <p className="text-xs font-medium text-ink">{uploading ? t("uploading") : t("media-dropzone-title")}</p>
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex min-h-24 w-full flex-col items-center justify-center gap-1.5 rounded text-center focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-60">
+            <UploadCloud className="h-6 w-6 text-accent" />
+            <span className="text-sm font-medium text-ink">{uploading ? t("uploading") : t("media-dropzone-title")}</span>
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -363,10 +353,11 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
         </div>
 
         {visibleItems.length > 0 && (
-          <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center justify-between text-sm">
             <label className="flex items-center gap-1.5 text-sub">
               <input
                 type="checkbox"
+                aria-label={`${t("media-select-all")}`}
                 checked={selected.size > 0 && selected.size === visibleItems.length}
                 onChange={toggleSelectAll}
               />
@@ -395,6 +386,7 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
             <div key={m.id as string} className={`${card} group relative overflow-hidden`}>
               <input
                 type="checkbox"
+                aria-label={`${t("media-select-all")}: ${m.originalName as string}`}
                 checked={selected.has(m.id as string)}
                 onChange={() => toggleSelect(m.id as string)}
                 className="absolute left-1.5 top-1.5 z-10 h-3.5 w-3.5"
@@ -407,20 +399,22 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
               {editingId === m.id ? (
                 <div className="space-y-1.5 p-2">
                   <input
-                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    aria-label={t("media-name-label")}
+                    className="w-full rounded border border-line px-1.5 py-1 text-sm"
                     placeholder={t("media-name-label")}
                     value={editForm.originalName}
                     onChange={(e) => setEditForm({ ...editForm, originalName: e.target.value })}
                   />
                   <input
-                    className={`w-full rounded border px-1.5 py-1 text-[10px] ${altRequired ? "border-red-400" : "border-line"}`}
+                    aria-label={t("media-alt-label")}
+                    className={`w-full rounded border px-1.5 py-1 text-sm ${altRequired ? "border-red-400" : "border-line"}`}
                     placeholder={t("media-alt-label")}
                     value={editForm.altText}
                     disabled={editForm.isDecorative}
                     onChange={(e) => setEditForm({ ...editForm, altText: e.target.value })}
                   />
-                  {altRequired && <p className="text-[9px] text-red-600">{t("media-alt-required-hint")}</p>}
-                  <label className="flex items-center gap-1.5 text-[10px] text-sub">
+                  {altRequired && <p className="text-sm text-red-600">{t("media-alt-required-hint")}</p>}
+                  <label className="flex items-center gap-1.5 text-sm text-sub">
                     <input
                       type="checkbox"
                       checked={editForm.isDecorative}
@@ -429,13 +423,14 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
                     {t("media-decorative-label")}
                   </label>
                   <textarea
-                    className="w-full rounded border border-line px-1.5 py-1 text-[10px]"
+                    aria-label={t("media-description-label")}
+                    className="w-full rounded border border-line px-1.5 py-1 text-sm"
                     placeholder={t("media-description-label")}
                     value={editForm.description}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                   />
                   <Select value={editForm.folderId || "__none"} onValueChange={(v) => setEditForm({ ...editForm, folderId: v === "__none" ? "" : v })}>
-                    <SelectTrigger className="text-[10px]">
+                    <SelectTrigger aria-label={t("media-folders-heading")} className="text-sm">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -448,13 +443,13 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
                     </SelectContent>
                   </Select>
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => setEditingId(null)} className="text-[10px] text-sub hover:underline">
+                    <button onClick={() => setEditingId(null)} className="text-sm text-sub hover:underline">
                       {t("media-cancel")}
                     </button>
                     <button
                       onClick={() => saveEdit(m.id as string)}
                       disabled={altRequired}
-                      className="text-[10px] font-semibold text-accent hover:underline disabled:opacity-40"
+                      className="text-sm font-semibold text-accent hover:underline disabled:opacity-40"
                     >
                       {t("media-save")}
                     </button>
@@ -462,25 +457,25 @@ export default function MediaManager({ tenantHost, token }: { tenantHost: string
                 </div>
               ) : (
                 <div className="space-y-1.5 p-2">
-                  <p className="truncate text-[10px] font-medium text-ink" title={m.originalName as string}>
+                  <p className="truncate text-sm font-medium text-ink" title={m.originalName as string}>
                     {m.originalName as string}
                   </p>
                   {!m.isDecorative && !m.altText && (
-                    <p className="text-[9px] font-semibold text-warn">{t("media-no-alt-badge")}</p>
+                    <p className="text-sm font-semibold text-warn">{t("media-no-alt-badge")}</p>
                   )}
-                  <p className="text-[10px] text-sub">
+                  <p className="text-sm text-sub">
                     {Math.max(1, Math.round((m.sizeBytes as number) / 1024))} KB ·{" "}
                     {new Date(m.createdAt as string).toLocaleDateString()}
                   </p>
                   <div className="flex items-center justify-between">
-                    <button onClick={() => copyUrl(m)} className="text-[10px] font-semibold text-accent hover:underline">
+                    <button onClick={() => copyUrl(m)} className="text-sm font-semibold text-accent hover:underline">
                       {copiedId === m.id ? t("media-copied") : t("media-copy")}
                     </button>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => startEdit(m)} className="rounded p-1 text-sub hover:bg-canvas">
+                      <button onClick={() => startEdit(m)} aria-label={`${t("media-edit")}: ${m.originalName as string}`} className="rounded p-2 text-sub hover:bg-canvas">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={() => remove(m.id as string)} className="rounded p-1 text-red-500 hover:bg-red-50">
+                      <button onClick={() => void remove(m.id as string)} aria-label={`${t("pages-delete")}: ${m.originalName as string}`} className="rounded p-2 text-red-600 hover:bg-red-50">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>

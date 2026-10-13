@@ -41,9 +41,9 @@ export default function MediaPickerModal({
         <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex items-center gap-1.5 self-start">
           <Upload className="h-3.5 w-3.5" /> {uploading ? t("media-picker-uploading") : t("media-picker-upload-new")}
         </Button>
-        <div className="grid flex-1 grid-cols-4 gap-3 overflow-y-auto">
+        <div className="grid flex-1 grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-4">
           {items.filter((m) => (m.mimeType as string).startsWith("image/")).map((m) => (
-            <button key={m.id as string} onClick={() => { const raw = m.url as string; onSelect(raw.startsWith("http") ? raw : api.publicMediaBase(tenantHost) + raw); }} className="group relative aspect-square overflow-hidden rounded-lg border border-line/30 hover:border-accent">
+            <button key={m.id as string} aria-label={m.originalName as string} onClick={() => { const raw = m.url as string; onSelect(raw.startsWith("http") ? raw : api.publicMediaBase(tenantHost) + raw); }} className="group relative aspect-square overflow-hidden rounded-lg border border-line/30 hover:border-accent focus-visible:outline-2 focus-visible:outline-accent">
               <img src={(m.url as string).startsWith("http") ? (m.url as string) : api.publicMediaBase(tenantHost) + (m.url as string)} alt={(m.altText as string) ?? ""} className="h-full w-full object-cover" />
             </button>
           ))}

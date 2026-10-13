@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, useContext, useEffect, useState } from "react";
+import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
@@ -7,7 +7,6 @@ import {
   Globe,
   Inbox,
   KeyRound,
-  Languages,
   Layers,
   LayoutDashboard,
   LayoutTemplate,
@@ -64,29 +63,44 @@ function loadSession(): Session | null {
 }
 
 // ---------- i18n ----------
-export const I18nCtx = createContext<{ lang: Lang; t: (k: Key) => string }>({
-  lang: "en",
-  t: (k) => dict.en[k],
+export const I18nCtx = createContext<{ lang: Lang; setLang: (lang: Lang) => void; t: (k: Key) => string }>({
+  lang: "ms",
+  setLang: () => {},
+  t: (k) => dict.ms[k],
 });
 export const useT = () => useContext(I18nCtx);
 
+export function LanguageSwitcher() {
+  const { lang, setLang } = useT();
+  return (
+    <div className="flex shrink-0 rounded-lg border border-line/50 bg-canvas p-0.5" role="group" aria-label="Language / Bahasa">
+      {(["ms", "en"] as const).map((l) => (
+        <button key={l} type="button" onClick={() => setLang(l)} aria-pressed={lang === l}
+          className={`min-h-9 rounded px-3 py-1 text-sm transition-colors ${lang === l ? "bg-white font-semibold text-ink shadow-sm" : "font-medium text-sub hover:text-ink"}`}>
+          {l.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------- shared styles (prototype look) ----------
 export const inputCls =
-  "w-full rounded-lg border border-line/30 bg-canvas px-3 py-2 text-xs text-ink outline-none transition-all focus:border-line focus:bg-white";
+  "w-full min-h-10 rounded-lg border border-line/50 bg-canvas px-3 py-2 text-sm text-ink transition-colors focus-visible:border-accent focus-visible:bg-white focus-visible:outline-2 focus-visible:outline-accent";
 export const btnPrimary =
-  "rounded-full bg-accent px-5 py-2.5 text-xs font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50";
+  "inline-flex min-h-10 items-center justify-center rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50";
 export const btnGhost =
-  "rounded-full bg-canvas px-4 py-2 text-xs font-semibold text-ink transition-colors hover:bg-[#e8e8ed]";
+  "inline-flex min-h-10 items-center justify-center rounded-full bg-canvas px-4 py-2 text-sm font-semibold text-ink transition-colors hover:bg-[#e8e8ed] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 export const card = "rounded-xl border border-line/40 bg-white";
 
 // Standardized form error — role="alert"/aria-live so a screen reader
 // announces it the moment it appears, not just when focus happens to land
-// on it. Replaces the same hand-repeated <p className="text-xs text-red-600">
+// on it. Replaces the same hand-repeated <p className="text-sm text-red-600">
 // pattern that was duplicated across every panel's own error state.
 export function FormError({ children }: { children?: React.ReactNode }) {
   if (!children) return null;
   return (
-    <p role="alert" aria-live="assertive" className="text-xs text-red-600">
+    <p role="alert" aria-live="assertive" className="text-sm text-red-600">
       {children}
     </p>
   );
@@ -97,7 +111,7 @@ export function FormError({ children }: { children?: React.ReactNode }) {
 export function ListLoading() {
   const { t } = useT();
   return (
-    <div className="flex items-center justify-center gap-2 py-8 text-xs text-sub">
+    <div className="flex items-center justify-center gap-2 py-8 text-sm text-sub">
       <Loader2 className="h-4 w-4 animate-spin" /> {t("list-loading")}
     </div>
   );
@@ -105,7 +119,7 @@ export function ListLoading() {
 
 export function ListEmpty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-sub">
+    <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-sm text-sub">
       <Inbox className="h-6 w-6 text-line" />
       <p>{children}</p>
     </div>
@@ -230,7 +244,7 @@ function NavButton({ tab, active, onClick, collapsed }: { tab: Tab; active: bool
       aria-current={active ? "page" : undefined}
       aria-label={t(labelKey)}
       title={t(labelKey)}
-      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${collapsed ? "md:justify-center md:px-0" : ""} ${
+      className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent ${collapsed ? "md:justify-center md:px-0" : ""} ${
         active ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
       }`}
     >
@@ -238,6 +252,15 @@ function NavButton({ tab, active, onClick, collapsed }: { tab: Tab; active: bool
       <span className={collapsed ? "md:sr-only" : ""}>{t(labelKey)}</span>
     </button>
   );
+}
+
+export function NotFound() {
+  const { t } = useT();
+  const navigate = useNavigate();
+  return <section className="mx-auto max-w-lg space-y-4 py-16 text-center">
+    <h2 className="font-display text-2xl font-semibold text-ink">{t("nav-not-found")}</h2>
+    <button className={btnPrimary} onClick={() => navigate("/dashboard")}>{t("nav-back-dashboard")}</button>
+  </section>;
 }
 
 function Shell({
@@ -253,15 +276,44 @@ function Shell({
   impersonating: boolean;
   onExitImpersonation: () => void;
 }) {
-  const [lang, setLang] = useState<Lang>("en");
-  const t = (k: Key) => dict[lang][k];
+  const { t } = useT();
   const isSuper = session.role === "superadmin";
   const location = useLocation();
   const navigate = useNavigate();
-  const activeTab = (location.pathname.split("/")[1] || "dashboard") as Tab;
+  const pathTab = location.pathname.split("/")[1] || "dashboard";
+  const activeTab = Object.prototype.hasOwnProperty.call(TAB_META, pathTab) ? pathTab as Tab : null;
   // Sidebar is a fixed off-canvas drawer below md (Sprint 2: responsive admin
   // shell), static in-flow at md+ — see the `aside`/backdrop classes below.
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [desktopNav, setDesktopNav] = useState(() => window.matchMedia("(min-width: 768px)").matches);
+  const openNavButton = useRef<HTMLButtonElement>(null);
+  const closeNavButton = useRef<HTMLButtonElement>(null);
+  const sideNav = useRef<HTMLElement>(null);
+  const mainShell = useRef<HTMLDivElement>(null);
+  const wasMobileNavOpen = useRef(false);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => setDesktopNav(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!mobileNavOpen || desktopNav) return;
+    closeNavButton.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileNavOpen, desktopNav]);
+  useEffect(() => {
+    if (sideNav.current) sideNav.current.inert = !desktopNav && !mobileNavOpen;
+    if (mainShell.current) mainShell.current.inert = !desktopNav && mobileNavOpen;
+    if (!desktopNav && !mobileNavOpen && wasMobileNavOpen.current) openNavButton.current?.focus();
+    wasMobileNavOpen.current = mobileNavOpen;
+  }, [desktopNav, mobileNavOpen]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem("usim_cms_sidebar_collapsed") === "true",
   );
@@ -274,10 +326,16 @@ function Shell({
   };
   // superadmin picks which site to manage in the content tab; webmaster is locked to theirs
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
+  const [tenantsError, setTenantsError] = useState<string | null>(null);
   const [siteHost, setSiteHost] = useState<string>(session.tenantHost ?? "");
 
+  function loadTenants() {
+    setTenantsError(null);
+    void api.listPortalTenants(session.token).then(setTenants).catch((err) => setTenantsError((err as Error).message));
+  }
   useEffect(() => {
-    if (isSuper) void api.listPortalTenants(session.token).then(setTenants);
+    if (isSuper) loadTenants();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuper, session.token]);
 
   // Webmaster with more than one assigned site gets the same site picker a
@@ -294,15 +352,12 @@ function Shell({
     : ["content", "theme", "languages", "seo", "menus", "header-footer", "blueprints", "events"];
 
   return (
-    <I18nCtx.Provider value={{ lang, t }}>
-      {/* Nested here (not at the app root in main.tsx) so its confirm-dialog
-          labels can call useT() and actually see this real lang state —
-          every useConfirm() call site lives inside Shell anyway (nothing
-          pre-login uses it), so nothing upstream needs it. */}
+    <>
       <ConfirmDialogProvider>
-      <div className="flex h-screen flex-col overflow-hidden bg-canvas font-sans text-ink antialiased">
+      <div className="flex h-dvh flex-col overflow-hidden bg-canvas font-sans text-ink antialiased">
+        <a href="#admin-main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-[60] focus:rounded focus:bg-white focus:p-3 focus:text-ink">Skip to main content / Langkau ke kandungan</a>
         {impersonating && (
-          <div className="flex shrink-0 items-center justify-center gap-3 bg-warn px-4 py-1.5 text-[11px] font-semibold text-white">
+          <div className="flex shrink-0 items-center justify-center gap-3 bg-warn px-4 py-1.5 text-sm font-semibold text-white">
             <span>
               {t("impersonate-banner")} {session.tenantHost} ({session.role})
             </span>
@@ -322,6 +377,11 @@ function Shell({
         )}
         {/* Sidebar: fixed off-canvas drawer below md, static in-flow at md+ */}
         <aside
+          ref={sideNav}
+          aria-hidden={!desktopNav && !mobileNavOpen}
+          role={!desktopNav ? "dialog" : undefined}
+          aria-modal={!desktopNav && mobileNavOpen ? "true" : undefined}
+          aria-label={!desktopNav ? t("nav-open") : undefined}
           className={`fixed inset-y-0 left-0 z-40 flex h-full w-64 shrink-0 transform flex-col border-r border-line/50 bg-white transition-all duration-200 ease-out md:static md:z-auto md:translate-x-0 ${
             mobileNavOpen ? "translate-x-0" : "-translate-x-full"
           } ${sidebarCollapsed ? "md:w-20" : "md:w-64"}`}
@@ -332,7 +392,7 @@ function Shell({
             </div>
             <div className={sidebarCollapsed ? "md:sr-only" : ""}>
               <h1 className="font-display text-sm font-bold tracking-tight text-ink">USIM CMS</h1>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
+              <p className="text-sm font-semibold uppercase tracking-wider text-sub">{t("brand-sub")}</p>
             </div>
             <button
               onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
@@ -345,6 +405,7 @@ function Shell({
               {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
             </button>
             <button
+              ref={closeNavButton}
               onClick={() => setMobileNavOpen(false)}
               className="ml-auto rounded-full p-1.5 text-sub hover:bg-canvas hover:text-ink md:hidden"
               aria-label={t("nav-close")}
@@ -355,14 +416,14 @@ function Shell({
           </div>
           <nav id="admin-sidebar-nav" className={`flex-1 space-y-1.5 overflow-y-auto p-4 ${sidebarCollapsed ? "md:px-2" : ""}`}>
             <div className={sidebarCollapsed ? "md:mb-3 md:border-b md:border-line/30 md:pb-3" : ""}>
-              <div className={`mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t("nav-main")}</div>
+              <div className={`mb-2 px-3 text-sm font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t("nav-main")}</div>
             {mainTabs.map((tb) => (
               <NavButton key={tb} tab={tb} active={activeTab === tb} collapsed={sidebarCollapsed} onClick={() => goTo(tb)} />
             ))}
             </div>
             {isSuper ? (
               <div className={sidebarCollapsed ? "md:pt-1" : ""}>
-                <div className={`mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t("nav-content")}</div>
+                <div className={`mb-2 px-3 pt-4 text-sm font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t("nav-content")}</div>
                 {contentTabs.map((tb) => (
                   <NavButton key={tb} tab={tb} active={activeTab === tb} collapsed={sidebarCollapsed} onClick={() => goTo(tb)} />
                 ))}
@@ -373,7 +434,7 @@ function Shell({
                 if (tabs.length === 0) return null;
                 return (
                   <div key={group} className={sidebarCollapsed && groupIndex > 0 ? "md:mt-2 md:border-t md:border-line/30 md:pt-2" : ""}>
-                    <div className={`mb-2 px-3 pt-4 text-[10px] font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t(NAV_GROUP_LABEL[group])}</div>
+                    <div className={`mb-2 px-3 pt-4 text-sm font-bold uppercase tracking-wider text-sub ${sidebarCollapsed ? "md:sr-only" : ""}`}>{t(NAV_GROUP_LABEL[group])}</div>
                     {tabs.map((tb) => (
                       <NavButton key={tb} tab={tb} active={activeTab === tb} collapsed={sidebarCollapsed} onClick={() => goTo(tb)} />
                     ))}
@@ -383,12 +444,12 @@ function Shell({
             )}
           </nav>
           <div className={`flex items-center gap-3 border-t border-line/30 bg-canvas/30 p-4 ${sidebarCollapsed ? "md:flex-col md:gap-2 md:p-2" : ""}`}>
-            <div title={session.role} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold uppercase text-white">
+            <div title={session.role} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-bold uppercase text-white">
               {session.role[0]}
             </div>
             <div className={`min-w-0 flex-1 ${sidebarCollapsed ? "md:sr-only" : ""}`}>
-              <h4 className="truncate text-xs font-semibold capitalize text-ink">{session.role}</h4>
-              {session.tenantHost && <p className="truncate text-[10px] text-sub">{session.tenantHost}</p>}
+              <h4 className="truncate text-sm font-semibold capitalize text-ink">{session.role}</h4>
+              {session.tenantHost && <p className="truncate text-sm text-sub">{session.tenantHost}</p>}
             </div>
             <button
               onClick={onLogout}
@@ -402,10 +463,11 @@ function Shell({
         </aside>
 
         {/* Main */}
-        <div className="flex flex-1 flex-col overflow-hidden bg-white">
+        <div ref={mainShell} aria-hidden={!desktopNav && mobileNavOpen} className="flex flex-1 flex-col overflow-hidden bg-white">
           <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line/40 bg-white px-4 py-4 sm:px-8">
             <div className="flex min-w-0 items-center gap-3">
               <button
+                ref={openNavButton}
                 onClick={() => setMobileNavOpen(true)}
                 className="shrink-0 rounded-full p-1.5 text-sub hover:bg-canvas hover:text-ink md:hidden"
                 aria-label={t("nav-open")}
@@ -413,33 +475,25 @@ function Shell({
               >
                 <Menu className="h-5 w-5" />
               </button>
-              <span className="hidden text-xs font-bold uppercase tracking-wider text-sub sm:inline">{t("header-workspace")}</span>
+              <span className="hidden text-sm font-bold uppercase tracking-wider text-sub sm:inline">{t("header-workspace")}</span>
               <ChevronRight className="hidden h-3.5 w-3.5 text-line sm:inline" />
-              <span className="flex items-center gap-1.5 truncate rounded-full border border-line/30 bg-canvas px-2.5 py-0.5 text-xs font-bold text-ink">
+              <span className="flex items-center gap-1.5 truncate rounded-full border border-line/30 bg-canvas px-2.5 py-0.5 text-sm font-bold text-ink">
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
-                <span className="truncate">{t(TAB_META[activeTab].labelKey)}</span>
+                <span className="truncate">{activeTab ? t(TAB_META[activeTab].labelKey) : t("nav-not-found")}</span>
               </span>
-              <span className="hidden shrink-0 rounded-full bg-accent/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-accent sm:inline">
+              <span className="hidden shrink-0 rounded-full bg-accent/10 px-2.5 py-1 text-sm font-bold uppercase tracking-wider text-accent sm:inline">
                 {session.role}
               </span>
             </div>
-            <div className="flex shrink-0 rounded-lg border border-line/50 bg-canvas p-0.5">
-              {(["ms", "en"] as const).map((l) => (
-                <button
-                  key={l}
-                  onClick={() => setLang(l)}
-                  className={`flex items-center gap-1 rounded px-3 py-1 text-[10px] transition-all ${
-                    lang === l ? "bg-white font-semibold text-ink shadow-sm" : "font-medium text-sub hover:text-ink"
-                  }`}
-                >
-                  <Languages className="h-3 w-3 text-accent" /> {l.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            <LanguageSwitcher />
           </header>
 
-          <main className="flex-1 overflow-y-auto bg-white p-4 sm:p-8">
+          <main id="admin-main" tabIndex={-1} className="flex-1 overflow-y-auto bg-white p-4 sm:p-8">
             <div className="mx-auto max-w-7xl space-y-6 pb-10">
+              {tenantsError && <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <span>{t("list-load-error")}: {tenantsError}</span>
+                <button type="button" onClick={loadTenants} className="font-semibold underline">{t("list-retry")}</button>
+              </div>}
               <Suspense fallback={<ListLoading />}>
               <Routes>
                 <Route index element={<Navigate to="dashboard" replace />} />
@@ -468,6 +522,7 @@ function Shell({
                 <Route path="feed" element={isSuper ? <PortalFeedPanel token={session.token} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="settings" element={isSuper ? <SettingsPanel token={session.token} tenants={tenants} /> : <Navigate to="/dashboard" replace />} />
                 <Route path="security" element={<SecurityPanel token={session.token} />} />
+                <Route path="*" element={<NotFound />} />
               </Routes>
               </Suspense>
             </div>
@@ -476,13 +531,19 @@ function Shell({
         </div>
       </div>
       </ConfirmDialogProvider>
-    </I18nCtx.Provider>
+    </>
   );
 }
 
 const IMPERSONATOR_KEY = "usim_cms_impersonator";
 
 export default function App() {
+  const [lang, setLang] = useState<Lang>(() => localStorage.getItem("usim_cms_lang") === "en" ? "en" : "ms");
+  useEffect(() => {
+    localStorage.setItem("usim_cms_lang", lang);
+    document.documentElement.lang = lang;
+  }, [lang]);
+  const i18n = { lang, setLang, t: (key: Key) => dict[lang][key] };
   const [session, setSession] = useState<Session | null>(() => loadSession());
   // Entra login lands here as a real browser navigation (never a fetch —
   // Microsoft's own login page needs a top-level redirect). entra/callback
@@ -565,10 +626,12 @@ export default function App() {
 
   if (!session) {
     if (needsSetup === null) return null;
-    if (needsSetup) return <SetupWizard onDone={setSession} />;
-    return <LoginForm onLogin={setSession} entraError={entraError} />;
+    return <I18nCtx.Provider value={i18n}>
+      {needsSetup ? <SetupWizard onDone={setSession} /> : <LoginForm onLogin={setSession} entraError={entraError} />}
+    </I18nCtx.Provider>;
   }
   return (
+    <I18nCtx.Provider value={i18n}>
     <BrowserRouter>
       <Routes>
         <Route
@@ -590,5 +653,6 @@ export default function App() {
         />
       </Routes>
     </BrowserRouter>
+    </I18nCtx.Provider>
   );
 }

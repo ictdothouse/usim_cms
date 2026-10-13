@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { SuggestionMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
@@ -163,14 +163,14 @@ function PostHistory({ tenantHost, token, postId, onRestored }: { tenantHost: st
   }
   return (
     <div className="space-y-2 rounded-lg border border-line/30 bg-canvas/40 p-3">
-      <p className="flex items-center gap-1.5 text-xs font-semibold text-ink"><History className="h-3.5 w-3.5" /> {t("posts-history")}</p>
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      {loaded && revisions.length === 0 && <p className="text-[11px] text-sub">{t("posts-history-empty")}</p>}
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-ink"><History className="h-3.5 w-3.5" /> {t("posts-history")}</p>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {loaded && revisions.length === 0 && <p className="text-sm text-sub">{t("posts-history-empty")}</p>}
       <ul className="divide-y divide-line/20">
         {revisions.map((r) => (
-          <li key={r.id} className="flex items-center gap-3 py-1.5 text-xs">
+          <li key={r.id} className="flex items-center gap-3 py-1.5 text-sm">
             <span className="min-w-0 flex-1 truncate text-sub">{new Date(r.createdAt).toLocaleString()} · {r.title}</span>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${r.status === "private" ? "bg-violet-500/10 text-violet-700" : "bg-ok/10 text-ok"}`}>
+            <span className={`rounded-full px-2 py-0.5 text-sm font-bold ${r.status === "private" ? "bg-violet-500/10 text-violet-700" : "bg-ok/10 text-ok"}`}>
               {r.status === "private" ? t("posts-private") : t("posts-published")}
             </span>
             <button onClick={() => void restore(r.id)} className="flex items-center gap-1 font-semibold text-accent hover:underline">{t("posts-restore")}</button>
@@ -208,7 +208,7 @@ function effectiveDisplay(value: DisplayOverride, themeDefault: boolean): boolea
 function MetaSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className="flex items-center justify-between gap-3 py-0.5">
-      <span className="text-xs text-body">{label}</span>
+      <span className="text-sm text-body">{label}</span>
       <button
         type="button"
         role="switch"
@@ -260,12 +260,32 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   // Only for computing each MetaSwitch's default on/off position when a
   // field is still "inherit" — this page never edits the theme itself.
   const [theme, setTheme] = useState<Record<string, string> | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
   const [showHistory, setShowHistory] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const hydratingEditor = useRef(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  async function closeEditor() {
+    if (dirty && !(await confirm(t("posts-unsaved-confirm")))) return;
+    navigate("/content/posts");
+  }
+
+  const loadPost = useCallback(async () => {
+    setError(null);
+    try { setPosts(await api.getPosts(tenantHost, token)); }
+    catch (err) { setError((err as Error).message); }
+  }, [tenantHost, token]);
 
   const post = useMemo(() => posts?.find((p) => p.id === id), [posts, id]);
 
@@ -301,15 +321,16 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   const [bodyVersion, setBodyVersion] = useState(0);
 
   useEffect(() => {
-    void api.getPosts(tenantHost, token).then(setPosts);
-    void api.listCategories(tenantHost, token).then(setCategories);
-    void api.getTheme(tenantHost, token).then(setTheme);
+    setPosts(null);
+    void loadPost();
+    void api.listCategories(tenantHost, token).then(setCategories).catch((err) => setError((err as Error).message));
+    void api.getTheme(tenantHost, token).then(setTheme).catch((err) => setError((err as Error).message));
     void api.getTenantLanguages(tenantHost, token).then((d) => {
       setSiteLanguages(d.allEnabled);
       setSiteMultilangEnabled(d.multilangEnabled);
       setSiteDefaultLanguage(d.defaultLanguage);
-    });
-  }, [tenantHost, id]);
+    }).catch((err) => setError((err as Error).message));
+  }, [tenantHost, token, id, loadPost]);
 
   // Applied once the site default arrives — only for a post that has never
   // had its own language explicitly chosen (post.language still null). A
@@ -345,6 +366,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     setShowCategory(toDisplayOverride(post.showCategory as boolean | null | undefined));
     setShowAuthor(toDisplayOverride(post.showAuthor as boolean | null | undefined));
     setShowPublishedDate(toDisplayOverride(post.showPublishedDate as boolean | null | undefined));
+    setDirty(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post?.id]);
 
@@ -365,6 +387,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     const leaving: LangContent = { title, excerpt, body: html };
     let targetEntry = content[target];
     if (!targetEntry) {
+      setDirty(true);
       const sourceCode = activeLang === BASE_LANG ? (language || undefined) : activeLang;
       setTranslating(true);
       setError(null);
@@ -396,6 +419,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
   function clickLanguagePill(code: string) {
     if (!language) {
       setLanguage(code);
+      setDirty(true);
       return;
     }
     void switchLanguage(code === language ? BASE_LANG : code);
@@ -411,8 +435,11 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
 
   useEffect(() => {
     if (!post) return;
+    hydratingEditor.current = true;
     const blocks = editor.tryParseHTMLToBlocks((post.body as string) || "");
     editor.replaceBlocks(editor.document, blocks);
+    const timer = setTimeout(() => { hydratingEditor.current = false; setDirty(false); }, 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post?.id, bodyVersion]);
 
@@ -422,7 +449,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     let cancelled = false;
     void api.getPostPreviewToken(tenantHost, token, post.id as string).then((t) => {
       if (!cancelled) setPreviewToken(t);
-    });
+    }).catch((err) => { if (!cancelled) setError((err as Error).message); });
     return () => {
       cancelled = true;
     };
@@ -485,8 +512,9 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
       for (const [code, entry] of Object.entries(merged)) {
         if (code !== BASE_LANG) translations[code] = entry;
       }
+      const committedTags = tagDraft.trim() ? [...new Set([...tags, tagDraft.trim()])] : tags;
       await api.updatePost(tenantHost, token, post.id as string, {
-        title: base.title, excerpt: base.excerpt.trim() || autoExcerpt(base.body), categoryId: categoryId || null, tags, bannerImageUrl,
+        title: base.title, excerpt: base.excerpt.trim() || autoExcerpt(base.body), categoryId: categoryId || null, tags: committedTags, bannerImageUrl,
         seo,
         body: base.body,
         translations,
@@ -498,6 +526,9 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
         showPublishedDate: fromDisplayOverride(showPublishedDate),
         ...(nextStatus ? { status: nextStatus, publishedAt: nextStatus === "draft" ? null : new Date().toISOString() } : {}),
       });
+      setTags(committedTags);
+      setTagDraft("");
+      setDirty(false);
       if (nextStatus) setStatus(nextStatus);
       setPosts(await api.getPosts(tenantHost, token));
     } catch (err) {
@@ -514,6 +545,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
       const created = await api.createCategory(tenantHost, token, trimmed, trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
       setCategories((prev) => [...prev, created]);
       setCategoryId(created.id);
+      setDirty(true);
       setNewCategoryName("");
     } catch (err) {
       setError((err as Error).message);
@@ -530,47 +562,50 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     }
   }
 
-  if (posts === null) return null;
-  if (!post) return <p className="p-8 text-xs text-sub">{t("posts-empty")}</p>;
+  if (posts === null) return <div className="p-8 text-sm text-body" role="status">
+    {error ? <><p role="alert" className="mb-3 text-red-700">{error}</p><button type="button" onClick={() => void loadPost()} className={btnPrimary}>{t("list-retry")}</button></> : t("list-loading")}
+  </div>;
+  if (!post) return <p className="p-8 text-sm text-sub">{t("posts-empty")}</p>;
 
   const statusBadge: Record<PostStatus, string> = { draft: "bg-warn/10 text-warn", published: "bg-ok/10 text-ok", private: "bg-violet-500/10 text-violet-700" };
   const otherStatuses = (current: PostStatus): PostStatus[] => (["draft", "published", "private"] as PostStatus[]).filter((s) => s !== current);
   const statusActionKey: Record<PostStatus, Key> = { draft: "posts-set-draft", published: "posts-publish", private: "posts-make-private" };
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-white">
-      <header className="flex shrink-0 items-center gap-3 border-b border-line/40 px-6 py-3">
-        <button onClick={() => navigate("/content/posts")} className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ArrowLeft className="h-4 w-4" /></button>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusBadge[status]}`}>{t(`posts-${status}` as Key)}</span>
-        <span className="flex-1" />
-        {error && <p className="text-xs text-red-600">{error}</p>}
+    <div className="fixed inset-0 z-40 flex flex-col bg-white" onChangeCapture={() => setDirty(true)}>
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line/40 px-3 py-2 sm:px-6 sm:py-3">
+        <button onClick={() => void closeEditor()} aria-label={t("posts-close")} className="flex min-h-10 items-center gap-1 rounded px-2 text-sm font-semibold text-body hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"><ArrowLeft className="h-4 w-4" /> <span className="hidden sm:inline">{t("posts-close")}</span></button>
+        <span className={`rounded-full px-2 py-0.5 text-sm font-bold ${statusBadge[status]}`}>{t(`posts-${status}` as Key)}</span>
+        <span className={`min-w-0 flex-1 text-sm font-medium ${dirty ? "text-warn" : "text-sub"}`} role="status">{dirty ? t("posts-unsaved") : t("posts-saved")}</span>
+        {error && <p className="text-sm text-red-600">{error}</p>}
         {status === "published" ? (
-          <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a>
+          <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`)} title={dirty ? t("posts-preview-saved") : undefined} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-sm font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a>
         ) : (
-          <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`, previewToken ?? undefined)} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a>
+          previewToken ? <a href={api.previewUrl(tenantHost, `posts/${post.slug as string}`, previewToken)} title={dirty ? t("posts-preview-saved") : undefined} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-sm font-semibold text-body hover:text-ink"><ExternalLink className="h-3.5 w-3.5" /> {t("posts-preview")}</a> : <span className="text-sm text-sub">{t("list-loading")}</span>
         )}
         {otherStatuses(status).map((s) => (<button key={s} onClick={() => void save(s)} disabled={saving} className={btnGhost}>{t(statusActionKey[s])}</button>))}
         <button onClick={() => void save()} disabled={saving} className={btnPrimary}>{saving ? t("blocks-saving") : t("posts-save")}</button>
-        <button onClick={() => setPanelOpen((v) => !v)} className="rounded p-1.5 text-body hover:bg-canvas" title={t("posts-settings")}><Settings2 className="h-4 w-4" /></button>
+        <button onClick={() => setPanelOpen((v) => !v)} aria-label={t("posts-settings")} aria-expanded={panelOpen} className="rounded p-2 text-body hover:bg-canvas" title={t("posts-settings")}><Settings2 className="h-4 w-4" /></button>
       </header>
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
+        {panelOpen && <button type="button" aria-label={t("posts-close")} onClick={() => setPanelOpen(false)} className="absolute inset-0 z-10 bg-black/30 lg:hidden" />}
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl space-y-4 p-8">
             {bannerImageUrl ? (
               <div className="group relative">
                 <img src={bannerImageUrl} alt="" className="h-64 w-full rounded-lg object-cover" />
-                <button onClick={() => setBannerImageUrl(null)} className="absolute right-2 top-2 rounded-full bg-black/50 p-1.5 text-white opacity-0 group-hover:opacity-100"><X className="h-4 w-4" /></button>
+                <button onClick={() => { setBannerImageUrl(null); setDirty(true); }} aria-label={t("pages-delete")} className="absolute right-2 top-2 rounded-full bg-black/60 p-2 text-white opacity-100 focus-visible:outline-2 focus-visible:outline-accent sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"><X className="h-4 w-4" /></button>
               </div>
             ) : (
-              <button onClick={() => setShowMediaPicker(true)} className="flex h-32 w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-line/40 text-xs font-semibold text-sub hover:border-accent hover:text-accent">
+              <button onClick={() => setShowMediaPicker(true)} className="flex h-32 w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-line/40 text-sm font-semibold text-sub hover:border-accent hover:text-accent">
                 <ImagePlus className="h-4 w-4" /> {t("posts-add-feature-image")}
               </button>
             )}
-            <textarea value={title} onChange={(e) => setTitle(e.target.value)} rows={1} placeholder={t("posts-title-placeholder")} className="w-full resize-none border-0 font-display text-3xl font-bold text-ink outline-none" onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }} />
+            <textarea aria-label={t("posts-title-placeholder")} value={title} onChange={(e) => setTitle(e.target.value)} rows={1} placeholder={t("posts-title-placeholder")} className="w-full resize-none border-0 font-display text-3xl font-bold text-ink focus-visible:outline-2 focus-visible:outline-accent" onInput={(e) => { const el = e.currentTarget; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }} />
             <div>
               <EditorToolbar editor={editor} />
               <div className="rounded-b-lg border border-line/30 bg-white py-2 [&_.bn-editor]:min-h-[400px]">
-                <BlockNoteView editor={editor} theme="light">
+                <BlockNoteView editor={editor} theme="light" onChange={() => { if (!hydratingEditor.current) setDirty(true); }}>
                   <SuggestionMenuController
                     triggerCharacter="@"
                     getItems={async (query) => {
@@ -611,10 +646,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
           </div>
         </div>
         {panelOpen && (
-          <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l border-line/30 bg-canvas/30 p-4">
+          <aside aria-label={t("posts-settings")} className="absolute inset-y-0 right-0 z-20 w-[min(88vw,20rem)] shrink-0 space-y-4 overflow-y-auto border-l border-line/30 bg-canvas p-4 lg:static lg:z-auto lg:w-72 lg:bg-canvas/30">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-category")}</label>
-              <Select value={categoryId || "__none"} onValueChange={(v) => setCategoryId(v === "__none" ? "" : v)}>
+              <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("posts-category")}</label>
+              <Select value={categoryId || "__none"} onValueChange={(v) => { setCategoryId(v === "__none" ? "" : v); setDirty(true); }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -632,8 +667,8 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
             </div>
             {siteMultilangEnabled && (
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-language")}</label>
-                <label className="flex items-center gap-2 text-xs text-ink">
+                <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("posts-language")}</label>
+                <label className="flex items-center gap-2 text-sm text-ink">
                   <input type="checkbox" checked={multilangEnabled} onChange={(e) => setMultilangEnabled(e.target.checked)} />
                   {t("posts-multilang-enable")}
                 </label>
@@ -651,7 +686,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                           disabled={isCurrent || translating}
                           onClick={() => clickLanguagePill(l.code)}
                           title={isBase ? t("posts-language-default-badge") : !language || hasContent ? undefined : t("posts-translate-btn")}
-                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50 ${
+                          className={`rounded-full px-2.5 py-1 text-sm font-semibold disabled:opacity-50 ${
                             isBase ? "ring-2 ring-amber-400 ring-offset-1" : ""
                           } ${
                             isCurrent
@@ -667,7 +702,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                     })}
                   </div>
                 ) : (
-                  <Select value={language || "__none"} onValueChange={(v) => setLanguage(v === "__none" ? "" : v)}>
+                  <Select value={language || "__none"} onValueChange={(v) => { setLanguage(v === "__none" ? "" : v); setDirty(true); }}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -682,11 +717,11 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
               </div>
             )}
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-excerpt")}</label>
+              <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("posts-excerpt")}</label>
               <textarea rows={3} value={excerpt} onChange={(e) => setExcerpt(e.target.value)} placeholder={t("posts-excerpt-auto")} className={`${inputCls} resize-none`} />
             </div>
             <div className="space-y-2 border-t border-line/30 pt-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-page-seo-heading")}</p>
+              <p className="text-sm font-bold uppercase tracking-wider text-sub">{t("designer-page-seo-heading")}</p>
               <input
                 type="text"
                 value={seo.title ?? ""}
@@ -722,7 +757,7 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                 placeholder={t("designer-page-seo-canonical")}
                 className={inputCls}
               />
-              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+              <label className="flex items-center gap-2 text-sm font-medium text-body">
                 <input type="checkbox" checked={seo.noindex ?? false} onChange={(e) => setSeo({ noindex: e.target.checked || undefined })} />
                 {t("designer-page-seo-noindex")}
               </label>
@@ -733,15 +768,15 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-tags")}</label>
+              <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("posts-tags")}</label>
               <div
                 className={`${inputCls} flex flex-wrap items-center gap-1`}
                 onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement | null)?.focus()}
               >
                 {tags.map((tag) => (
-                  <span key={tag} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[11px] text-body">
+                  <span key={tag} className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-sm text-body">
                     {tag}
-                    <button type="button" onClick={() => setTags((prev) => prev.filter((t2) => t2 !== tag))} className="text-sub hover:text-ink"><X className="h-3 w-3" /></button>
+                    <button type="button" aria-label={`${t("pages-delete")}: ${tag}`} onClick={() => { setTags((prev) => prev.filter((t2) => t2 !== tag)); setDirty(true); }} className="text-sub hover:text-ink"><X className="h-3 w-3" /></button>
                   </span>
                 ))}
                 <input
@@ -770,36 +805,36 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
                     setTagDraft("");
                   }}
                   placeholder={tags.length ? "" : t("posts-tags")}
-                  className="min-w-[60px] flex-1 border-0 bg-transparent text-xs outline-none"
+                  className="min-w-[60px] flex-1 border-0 bg-transparent text-sm outline-none"
                 />
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("posts-show-meta")}</label>
+              <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("posts-show-meta")}</label>
               <MetaSwitch
                 label={t("posts-show-tags")}
                 checked={effectiveDisplay(showTags, theme ? theme.showPostTags !== "false" : true)}
-                onChange={(v) => setShowTags(v ? "show" : "hide")}
+                onChange={(v) => { setShowTags(v ? "show" : "hide"); setDirty(true); }}
               />
               <MetaSwitch
                 label={t("posts-show-category")}
                 checked={effectiveDisplay(showCategory, theme ? theme.showPostCategory !== "false" : true)}
-                onChange={(v) => setShowCategory(v ? "show" : "hide")}
+                onChange={(v) => { setShowCategory(v ? "show" : "hide"); setDirty(true); }}
               />
               <MetaSwitch
                 label={t("posts-show-author")}
                 checked={effectiveDisplay(showAuthor, theme ? theme.showPostAuthor !== "false" : true)}
-                onChange={(v) => setShowAuthor(v ? "show" : "hide")}
+                onChange={(v) => { setShowAuthor(v ? "show" : "hide"); setDirty(true); }}
               />
               <MetaSwitch
                 label={t("posts-show-date")}
                 checked={effectiveDisplay(showPublishedDate, theme ? theme.showPostDate !== "false" : true)}
-                onChange={(v) => setShowPublishedDate(v ? "show" : "hide")}
+                onChange={(v) => { setShowPublishedDate(v ? "show" : "hide"); setDirty(true); }}
               />
             </div>
             {status === "published" && (<button onClick={() => void share()} className={`${btnGhost} w-full`}>{t("posts-share")}</button>)}
-            {(post.authorEmail as string | null) && (<p className="text-[11px] text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}
-            <button type="button" onClick={() => setShowHistory((v) => !v)} className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-sub hover:bg-canvas">
+            {(post.authorEmail as string | null) && (<p className="text-sm text-sub">{t("posts-author")}: {post.authorEmail as string}</p>)}
+            <button type="button" onClick={() => setShowHistory((v) => !v)} className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold text-sub hover:bg-canvas">
               <History className="h-3.5 w-3.5" /> {t("posts-history")}
             </button>
             {showHistory && (
@@ -816,15 +851,15 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
           </aside>
         )}
       </div>
-      {showMediaPicker && (<MediaPickerModal tenantHost={tenantHost} token={token} onSelect={(url) => { setBannerImageUrl(url); setShowMediaPicker(false); }} onClose={() => setShowMediaPicker(false)} />)}
+      {showMediaPicker && (<MediaPickerModal tenantHost={tenantHost} token={token} onSelect={(url) => { setBannerImageUrl(url); setDirty(true); setShowMediaPicker(false); }} onClose={() => setShowMediaPicker(false)} />)}
       {resyncPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { resyncPrompt.resolve([]); setResyncPrompt(null); }}>
           <div className="w-80 space-y-3 rounded-lg bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <p className="text-sm font-semibold text-ink">{t("posts-resync-title")}</p>
-            <p className="text-xs text-sub">{t("posts-resync-desc")}</p>
+            <p className="text-sm text-sub">{t("posts-resync-desc")}</p>
             <div className="space-y-1.5">
               {resyncPrompt.langs.map((code) => (
-                <label key={code} className="flex items-center gap-2 text-xs text-ink">
+                <label key={code} className="flex items-center gap-2 text-sm text-ink">
                   <input
                     type="checkbox"
                     checked={resyncChecked.has(code)}

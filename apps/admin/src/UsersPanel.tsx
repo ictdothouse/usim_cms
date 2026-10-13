@@ -180,7 +180,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
           minLength={15}
         />
         <div className="flex min-w-56 flex-col gap-0.5">
-          <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-entra-object-id")}</label>
+          <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("users-entra-object-id")}</label>
           <input
             className={`${inputCls} w-auto`}
             placeholder="00000000-0000-0000-0000-000000000000"
@@ -191,9 +191,9 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
           />
         </div>
         <div className="flex flex-col gap-0.5">
-          <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-account-type")}</label>
+          <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("users-account-type")}</label>
           <Select value={role} onValueChange={(v) => setRole(v as "webmaster" | "superadmin")}>
-            <SelectTrigger className="text-xs">
+            <SelectTrigger className="text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -204,9 +204,9 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
         </div>
         {role === "webmaster" && (
           <div className="flex flex-col gap-0.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-role")}</label>
+            <label className="text-sm font-bold uppercase tracking-wider text-sub">{t("users-role")}</label>
             <Select value={roleId} onValueChange={setRoleId}>
-              <SelectTrigger className="text-xs">
+              <SelectTrigger className="text-sm">
                 <SelectValue placeholder={t("users-role-none")} />
               </SelectTrigger>
               <SelectContent>
@@ -220,7 +220,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
           </div>
         )}
         {role === "webmaster" && canMultiSite && (
-          <div className="flex max-w-xs flex-wrap gap-x-3 gap-y-1 rounded-lg border border-line/30 bg-white px-3 py-2 text-[11px] text-body">
+          <div className="flex max-w-xs flex-wrap gap-x-3 gap-y-1 rounded-lg border border-line/30 bg-white px-3 py-2 text-sm text-body">
             {tenants.map((tn) => (
               <label key={tn.id as string} className="flex items-center gap-1">
                 <input
@@ -260,10 +260,10 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
           {t("users-create")}
         </button>
       </form>
-      <div className={`${card} overflow-hidden`}>
-        <table className="w-full border-collapse text-left">
+      <div className={`${card} overflow-x-auto`}>
+        <table className="min-w-[50rem] w-full border-collapse text-left">
           <thead>
-            <tr className="border-b border-line/30 bg-canvas text-[10px] font-bold uppercase tracking-wider text-sub">
+            <tr className="border-b border-line/30 bg-canvas text-sm font-bold uppercase tracking-wider text-sub">
               <th className="px-4 py-3">{t("users-email")}</th>
               <th className="px-4 py-3">{t("users-account-type")}</th>
               <th className="px-4 py-3">{t("users-tenant")}</th>
@@ -272,32 +272,32 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
               <th className="px-4 py-3" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-line/20 text-xs text-ink">
+          <tbody className="divide-y divide-line/20 text-sm text-ink">
             {users.map((u) => (
               <Fragment key={u.id as string}>
               <tr className="transition-colors hover:bg-canvas/30">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[11px] font-bold uppercase text-accent">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-bold uppercase text-accent">
                       {(u.email as string)[0]}
                     </div>
                     <span className="font-medium">{u.email as string}</span>
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="rounded-full bg-accent/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide text-accent">
+                  <span className="rounded-full bg-accent/10 px-2.5 py-1 text-sm font-bold uppercase tracking-wide text-accent">
                     {u.role as string}
                   </span>
                 </td>
-                <td className="px-4 py-3 font-mono text-[11px] text-sub">
+                <td className="px-4 py-3 font-mono text-sm text-sub">
                   {((u.tenantHosts as string[] | null) ?? []).join(", ") || (u.tenantHost as string) || "—"}
                 </td>
                 <td className="px-4 py-3">
                   {u.role === "superadmin" ? (
-                    <span className="text-[10px] text-sub">{t("cap-all")}</span>
+                    <span className="text-sm text-sub">{t("cap-all")}</span>
                   ) : (
                     <Select value={(u.roleId as string | null) ?? "__none"} onValueChange={(v) => assignRole(u, v === "__none" ? "" : v)}>
-                      <SelectTrigger className="text-[11px]">
+                      <SelectTrigger className="text-sm">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -317,7 +317,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                       <div className="flex flex-col gap-1">
                         <div className="flex flex-wrap gap-x-2 gap-y-1">
                           {PERMISSIONS.map((perm) => (
-                            <label key={perm} className="flex items-center gap-1 text-[10px]">
+                            <label key={perm} className="flex items-center gap-1 text-sm">
                               <input
                                 type="checkbox"
                                 checked={editingPerms.includes(perm)}
@@ -337,13 +337,13 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                               await setUserExtraPermissions(u, editingPerms);
                               setEditingId(null);
                             }}
-                            className="text-[10px] font-semibold text-accent hover:underline"
+                            className="text-sm font-semibold text-accent hover:underline"
                           >
                             {t("media-save")}
                           </button>
                           <button
                             onClick={() => setEditingId(null)}
-                            className="text-[10px] font-semibold text-sub hover:underline"
+                            className="text-sm font-semibold text-sub hover:underline"
                           >
                             {t("media-cancel")}
                           </button>
@@ -351,7 +351,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                       </div>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-sub">
+                        <span className="text-sm text-sub">
                           {((u.extraPermissions as string[] | null) ?? []).length
                             ? ((u.extraPermissions as string[]).map((p) => t(PERMISSION_LABEL_KEY[p as (typeof PERMISSIONS)[number]])).join(", "))
                             : "—"}
@@ -373,7 +373,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-3">
                     {u.role === "webmaster" && (
-                      <button onClick={() => impersonate(u)} className="text-[10px] font-semibold text-accent hover:underline">
+                      <button onClick={() => impersonate(u)} className="text-sm font-semibold text-accent hover:underline">
                         {t("users-impersonate")}
                       </button>
                     )}
@@ -391,10 +391,10 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
               {editUserId === (u.id as string) && (
                 <tr key={`${u.id as string}-edit`} className="bg-canvas/40">
                   <td colSpan={6} className="space-y-3 px-4 py-4">
-                    {editError && <p className="text-xs text-red-600">{editError}</p>}
+                    {editError && <p className="text-sm text-red-600">{editError}</p>}
                     <div className="flex flex-wrap items-end gap-2">
                       <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                        <label className="text-sm font-bold uppercase tracking-wider text-sub">
                           {t("users-edit-password-label")}
                         </label>
                         <input
@@ -409,14 +409,14 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                       <button
                         disabled={!editPassword.trim()}
                         onClick={() => void saveEditPassword(u)}
-                        className={`${btnGhost} px-3 py-1.5 text-xs`}
+                        className={`${btnGhost} px-3 py-1.5 text-sm`}
                       >
                         {t("users-edit-save-password")}
                       </button>
                     </div>
                     <div className="flex flex-wrap items-end gap-2">
                       <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                        <label className="text-sm font-bold uppercase tracking-wider text-sub">
                           {t("users-mfa-reset-reason")}
                         </label>
                         <input
@@ -430,14 +430,14 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                       <button
                         disabled={mfaResetReason.trim().length < 10}
                         onClick={() => void resetUserMfa(u)}
-                        className={`${btnGhost} px-3 py-1.5 text-xs`}
+                        className={`${btnGhost} px-3 py-1.5 text-sm`}
                       >
                         {t("users-mfa-reset")}
                       </button>
                     </div>
                     <div className="flex flex-wrap items-end gap-2">
                       <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                        <label className="text-sm font-bold uppercase tracking-wider text-sub">
                           {t("users-entra-object-id")}
                         </label>
                         <input
@@ -448,17 +448,17 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                           maxLength={36}
                         />
                       </div>
-                      <button onClick={() => void saveEditEntraObjectId(u)} className={`${btnGhost} px-3 py-1.5 text-xs`}>
+                      <button onClick={() => void saveEditEntraObjectId(u)} className={`${btnGhost} px-3 py-1.5 text-sm`}>
                         {t("media-save")}
                       </button>
                     </div>
                     {u.role === "webmaster" && (
                       <div className="flex flex-wrap items-end gap-2">
                         <div className="flex flex-col gap-0.5">
-                          <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                          <label className="text-sm font-bold uppercase tracking-wider text-sub">
                             {t("users-edit-sites-label")}
                           </label>
-                          <div className="flex max-w-md flex-wrap gap-x-3 gap-y-1 rounded-lg border border-line/30 bg-white px-3 py-2 text-[11px] text-body">
+                          <div className="flex max-w-md flex-wrap gap-x-3 gap-y-1 rounded-lg border border-line/30 bg-white px-3 py-2 text-sm text-body">
                             {tenants.map((tn) => (
                               <label key={tn.id as string} className="flex items-center gap-1">
                                 <input
@@ -477,14 +477,14 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                             ))}
                           </div>
                         </div>
-                        <button onClick={() => void saveEditTenantHosts(u)} className={`${btnGhost} px-3 py-1.5 text-xs`}>
+                        <button onClick={() => void saveEditTenantHosts(u)} className={`${btnGhost} px-3 py-1.5 text-sm`}>
                           {t("users-edit-save-sites")}
                         </button>
                       </div>
                     )}
                     <button
                       onClick={() => void removeUser(u)}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-700"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-red-700"
                     >
                       <Trash2 className="h-3.5 w-3.5" /> {t("users-delete")}
                     </button>
