@@ -22,6 +22,7 @@ ARG VITE_API_URL=http://localhost:3000
 ARG VITE_FRONTEND_URL=http://localhost:4321
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_FRONTEND_URL=$VITE_FRONTEND_URL
+RUN node --input-type=module -e 'import fs from "node:fs"; const file="apps/admin/security-headers.conf"; const api=new URL(process.env.VITE_API_URL); if (!["http:","https:"].includes(api.protocol)) throw new Error("VITE_API_URL must use HTTP or HTTPS"); fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("__UCMS_API_ORIGIN__", api.origin));'
 # @ucms/element-schema/@ucms/element-style (apps/admin's own dependencies, see
 # designer/elements.test.ts and package.json) ship no dist/ in the repo — build
 # both before apps/admin's own test/build, which import their compiled output
@@ -38,7 +39,8 @@ RUN pnpm --filter @ucms/element-render build
 RUN pnpm --filter @ucms/admin test
 RUN pnpm --filter @ucms/admin build
 
-FROM nginx:alpine AS runtime
-COPY --from=build /app/apps/admin/dist /usr/share/nginx/html
-COPY apps/admin/nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+FROM nginxinc/nginx-unprivileged:alpine AS runtime
+COPY --from=build --chown=101:0 /app/apps/admin/dist /usr/share/nginx/html
+COPY --chown=101:0 apps/admin/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build --chown=101:0 /app/apps/admin/security-headers.conf /etc/nginx/ucms-security-headers.conf
+EXPOSE 8080

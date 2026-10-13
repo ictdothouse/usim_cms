@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "../schema.js";
 import { pool, ensurePublicSchema } from "./internal.js";
@@ -27,6 +27,18 @@ export async function findUserById(id: string) {
   }
 }
 
+export async function findUserByEntraObjectId(objectId: string) {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.entraObjectId, objectId));
+    return user;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listUsers() {
   const client = await pool.connect();
   try {
@@ -36,11 +48,13 @@ export async function listUsers() {
       .select({
         id: schema.users.id,
         email: schema.users.email,
+        entraObjectId: schema.users.entraObjectId,
         role: schema.users.role,
         tenantHost: schema.users.tenantHost,
         tenantHosts: schema.users.tenantHosts,
         roleId: schema.users.roleId,
         extraPermissions: schema.users.extraPermissions,
+        totpEnabled: schema.users.totpEnabled,
         createdAt: schema.users.createdAt,
       })
       .from(schema.users);
@@ -57,18 +71,72 @@ export async function createUser(
   roleId: string | null = null,
   tenantHosts: string[] = tenantHost ? [tenantHost] : [],
   extraPermissions: string[] = [],
-) {
+  entraObjectId: string | null = null,
+): Promise<boolean> {
   const client = await pool.connect();
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    await db
+    const [created] = await db
       .insert(schema.users)
-      .values({ email, passwordHash, role, tenantHost, tenantHosts, roleId, extraPermissions })
-      .onConflictDoUpdate({
-        target: schema.users.email,
-        set: { passwordHash, role, tenantHost, tenantHosts, roleId, extraPermissions },
-      });
+      .values({ email, passwordHash, role, tenantHost, tenantHosts, roleId, extraPermissions, entraObjectId })
+      .onConflictDoNothing({ target: schema.users.email })
+      .returning({ id: schema.users.id });
+    return !!created;
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") return false;
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateUserEntraObjectId(id: string, entraObjectId: string | null): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    try {
+      const [updated] = await db
+        .update(schema.users)
+        .set({ entraObjectId, authVersion: sql`${schema.users.authVersion} + 1` })
+        .where(eq(schema.users.id, id))
+        .returning({ id: schema.users.id });
+      return !!updated;
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505") return false;
+      throw error;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// First-run setup must be serialized in the database. A process-local mutex
+// is insufficient because deployments may run multiple API replicas. The
+// transaction advisory lock ensures exactly one request can create the first
+// account, and only while the users table is empty.
+export async function createInitialSuperadmin(email: string, passwordHash: string): Promise<string | null> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock($1)", [7_518_230_041]);
+    const result = await client.query<{ count: string }>('SELECT count(*)::text AS count FROM "public"."users"');
+    if (Number(result.rows[0]?.count ?? 0) > 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const db = drizzle(client, { schema });
+    const [user] = await db
+      .insert(schema.users)
+      .values({ email, passwordHash, role: "superadmin", tenantHost: null, tenantHosts: [], roleId: null, extraPermissions: [] })
+      .returning({ id: schema.users.id });
+    await client.query("COMMIT");
+    return user?.id ?? null;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
   } finally {
     client.release();
   }
@@ -81,7 +149,9 @@ export async function updateUserRole(id: string, roleId: string | null, extraPer
     const db = drizzle(client, { schema });
     await db
       .update(schema.users)
-      .set(extraPermissions === undefined ? { roleId } : { roleId, extraPermissions })
+      .set(extraPermissions === undefined
+        ? { roleId, authVersion: sql`${schema.users.authVersion} + 1` }
+        : { roleId, extraPermissions, authVersion: sql`${schema.users.authVersion} + 1` })
       .where(eq(schema.users.id, id));
   } finally {
     client.release();
@@ -93,7 +163,7 @@ export async function updateUserPassword(id: string, passwordHash: string) {
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    await db.update(schema.users).set({ passwordHash }).where(eq(schema.users.id, id));
+    await db.update(schema.users).set({ passwordHash, authVersion: sql`${schema.users.authVersion} + 1` }).where(eq(schema.users.id, id));
   } finally {
     client.release();
   }
@@ -108,7 +178,7 @@ export async function updateUserTenantHosts(id: string, tenantHosts: string[]) {
     const db = drizzle(client, { schema });
     await db
       .update(schema.users)
-      .set({ tenantHosts, tenantHost: tenantHosts[0] ?? null })
+      .set({ tenantHosts, tenantHost: tenantHosts[0] ?? null, authVersion: sql`${schema.users.authVersion} + 1` })
       .where(eq(schema.users.id, id));
   } finally {
     client.release();
@@ -135,7 +205,10 @@ export async function setUserTotpSecret(id: string, secret: string): Promise<voi
   try {
     await ensurePublicSchema(client);
     const db = drizzle(client, { schema });
-    await db.update(schema.users).set({ totpSecret: secret, totpEnabled: false }).where(eq(schema.users.id, id));
+    await db
+      .update(schema.users)
+      .set({ totpSecret: secret, totpEnabled: false, authVersion: sql`${schema.users.authVersion} + 1` })
+      .where(eq(schema.users.id, id));
   } finally {
     client.release();
   }
@@ -151,7 +224,9 @@ export async function setUserTotpEnabled(id: string, enabled: boolean): Promise<
     const db = drizzle(client, { schema });
     await db
       .update(schema.users)
-      .set(enabled ? { totpEnabled: true } : { totpEnabled: false, totpSecret: null })
+      .set(enabled
+        ? { totpEnabled: true, authVersion: sql`${schema.users.authVersion} + 1` }
+        : { totpEnabled: false, totpSecret: null, authVersion: sql`${schema.users.authVersion} + 1` })
       .where(eq(schema.users.id, id));
   } finally {
     client.release();
@@ -221,7 +296,9 @@ export async function getRolePermissions(roleId: string | null): Promise<string[
 }
 
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_RATE_LIMIT_MAX_FAILURES = 5;
+const LOGIN_RATE_LIMIT_MAX_ACCOUNT_IP_FAILURES = 10;
+const LOGIN_RATE_LIMIT_MAX_ACCOUNT_FAILURES = 50;
+const LOGIN_RATE_LIMIT_MAX_IP_FAILURES = 30;
 const LOGIN_ATTEMPTS_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export async function recordLoginAttempt(email: string, ip: string, success: boolean): Promise<void> {
@@ -250,10 +327,12 @@ export async function isLoginRateLimited(email: string, ip: string): Promise<boo
     await ensurePublicSchema(client);
     const cutoff = new Date(Date.now() - LOGIN_RATE_LIMIT_WINDOW_MS);
     const { rows } = await client.query(
-      "SELECT count(*)::int AS n FROM login_attempts WHERE success = false AND created_at > $1 AND (email = $2 OR ip = $3)",
+      "SELECT count(*) FILTER (WHERE email = $2 AND ip = $3)::int AS account_ip_failures, count(*) FILTER (WHERE email = $2)::int AS account_failures, count(*) FILTER (WHERE ip = $3)::int AS ip_failures FROM login_attempts WHERE success = false AND created_at > $1 AND (email = $2 OR ip = $3)",
       [cutoff, email, ip],
     );
-    return (rows[0]?.n ?? 0) >= LOGIN_RATE_LIMIT_MAX_FAILURES;
+    return (rows[0]?.account_ip_failures ?? 0) >= LOGIN_RATE_LIMIT_MAX_ACCOUNT_IP_FAILURES ||
+      (rows[0]?.account_failures ?? 0) >= LOGIN_RATE_LIMIT_MAX_ACCOUNT_FAILURES ||
+      (rows[0]?.ip_failures ?? 0) >= LOGIN_RATE_LIMIT_MAX_IP_FAILURES;
   } finally {
     client.release();
   }

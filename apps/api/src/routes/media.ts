@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
 import * as schema from "../db/schema.js";
 import { hasPermission } from "./permissions.js";
+import { matchesAllowedMediaSignature } from "../file-validation.js";
 import { getMergedStorageLimits, getTenantRecord } from "../db/tenant-pool.js";
 import { generateImageVariants, deleteImageVariants } from "../image-variants.js";
 import {
@@ -167,6 +168,10 @@ export function registerMediaRoutes(protectedScope: FastifyInstance) {
     if (file.file.truncated) {
       reply.code(413);
       return { error: `file too large (max ${limits.maxUploadFileSizeMb} MB)` };
+    }
+    if (!matchesAllowedMediaSignature(file.mimetype, fileBuffer)) {
+      reply.code(415);
+      return { error: "file content does not match its declared media type" };
     }
     if (limits.maxTotalStorageMb !== null) {
       const [{ total }] = await req.db.select({ total: sql<string>`coalesce(sum(${schema.media.sizeBytes}), 0)` }).from(schema.media);

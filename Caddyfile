@@ -24,14 +24,21 @@
 	# auto_https off
 }
 
+# A temporary monitor HTTPS vhost is written by scripts/monitor-access.sh.
+# The glob is empty in SSH/cloud mode. Dynamic /load config includes the same
+# route after a deploy, while this import covers a proxy-only restart.
+import monitor-access/*.caddy
+
 {$ADMIN_DOMAIN:admin.localhost} {
+	header Strict-Transport-Security "max-age=31536000"
 	# Same reasoning as the tenant block's own encode below — without it the
 	# admin SPA bundle (React/Radix/Mantine/BlockNote) ships uncompressed.
 	encode zstd gzip
-	reverse_proxy ucms-blue-admin-1:80
+	reverse_proxy ucms-blue-admin-1:8080
 }
 
 {$API_DOMAIN:api.localhost} {
+	header Strict-Transport-Security "max-age=31536000"
 	# JSON responses otherwise go over the wire uncompressed too.
 	encode zstd gzip
 	reverse_proxy ucms-blue-api-1:3000
@@ -49,6 +56,7 @@
 # hostname) — a visitor's own tenant domain now serves its own uploads too,
 # same files, just proxied under the hostname they're actually looking at.
 {$TENANT_DOMAINS:tenant.localhost} {
+	header Strict-Transport-Security "max-age=31536000"
 	# Caddy's reverse_proxy does not compress responses by default — without
 	# this, every HTML/CSS/JS/font response goes over the wire uncompressed.
 	encode zstd gzip

@@ -362,34 +362,11 @@ export const tenants = pgTable("tenants", {
 export const platformSettings = pgTable("platform_settings", {
   id: text("id").primaryKey().default("singleton"),
   proxyAutomationEnabled: boolean("proxy_automation_enabled").notNull().default(false),
-  // Instance-wide master switch for the "Login Methods" Settings card — off
-  // by default (no disruption to an already-live install). While on: any
-  // user who has personally enrolled TOTP (users.totpEnabled) is required to
-  // complete it as a second factor at login; users who haven't enrolled yet
-  // just see the "Set up MFA" prompt appear in their own Security tab. This
-  // is the extension point for Entra ID/SSO later — see users table comment.
+  // Instance-wide self-service MFA switch. Production auth policy enforces enrollment regardless of this legacy UI default.
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
-  // Off by default. While on: any non-superadmin account without TOTP
-  // enrolled yet is forced through enrollment (QR/manual key + code) as an
-  // unskippable step of login itself, before a session is ever issued —
-  // unlike mfaEnabled above, which only ever *offers* the Security-tab
-  // enrollment passively. superadmin is exempt (break-glass, same reasoning
-  // as entraOnly below) so the person who flips this can't lock themselves
-  // out. See db/auth.ts's isMfaSetupRequired, the one place this is read.
+  // Optional policy outside production. Production enforces mandatory MFA in the login route and rejects attempts to disable it in settings.
   mfaRequired: boolean("mfa_required").notNull().default(false),
-  // Entra ID SSO — the extension point the comment above already flagged.
-  // entraEnabled: Entra login available at all (login page shows the
-  // button). entraOnly: password login disabled for every role EXCEPT
-  // superadmin (a superadmin's password still works as a break-glass path
-  // if Entra is ever misconfigured — see index.ts's POST /api/auth/login
-  // guard) — only meaningful when entraEnabled is true. entraTenantId/
-  // entraClientId are the non-secret half of the Azure app registration;
-  // the client secret and redirect URI are env vars only (ENTRA_CLIENT_
-  // SECRET/ENTRA_REDIRECT_URI), never stored here. Account provisioning is
-  // NEVER automatic in any mode — see entra.ts/index.ts's callback route,
-  // which only ever authenticates an email that already has a users row;
-  // this table has no allowlist of its own because the users table already
-  // is one.
+  // Entra SSO configuration. Production requires a prebound immutable object ID and a signed MFA claim.
   entraEnabled: boolean("entra_enabled").notNull().default(false),
   entraOnly: boolean("entra_only").notNull().default(false),
   entraTenantId: text("entra_tenant_id"),
@@ -626,6 +603,9 @@ export const roles = pgTable("roles", {
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: text("email").notNull().unique(),
+  // Immutable Entra object identifier; SSO authorization must not use mutable
+  // email/UPN claims as the account key.
+  entraObjectId: text("entra_object_id"),
   passwordHash: text("password_hash").notNull(),
   role: text("role").notNull(), // "superadmin" | "webmaster"
   tenantHost: text("tenant_host"),
@@ -648,5 +628,8 @@ export const users = pgTable("users", {
   // but never confirmed, and login ignores it entirely.
   totpSecret: text("totp_secret"),
   totpEnabled: boolean("totp_enabled").notNull().default(false),
+  // Monotonic credential/authorization revision; increment on password,
+  // MFA, role, permission, or tenant-binding changes to revoke old sessions.
+  authVersion: integer("auth_version").notNull().default(1),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

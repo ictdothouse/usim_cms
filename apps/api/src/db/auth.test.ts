@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, scryptSync } from "node:crypto";
 import {
   hashPassword,
   verifyPassword,
@@ -12,6 +12,8 @@ import {
   totpAuthUri,
   base32Encode,
   isMfaSetupRequired,
+  createAuthStamp,
+  matchesAuthStamp,
   type SessionPayload,
 } from "./auth.js";
 
@@ -23,17 +25,30 @@ const basePayload: SessionPayload = {
   permissions: [],
 };
 
-test("isMfaSetupRequired: forces enrollment for non-superadmin without TOTP when mfaRequired is on, exempts superadmin and already-enrolled accounts", () => {
-  assert.equal(isMfaSetupRequired("webmaster", false, true), true);
-  assert.equal(isMfaSetupRequired("superadmin", false, true), false, "superadmin break-glass exemption");
-  assert.equal(isMfaSetupRequired("webmaster", true, true), false, "already enrolled — normal challenge instead");
-  assert.equal(isMfaSetupRequired("webmaster", false, false), false, "mfaRequired off");
+test("isMfaSetupRequired: forces enrollment for every role when MFA is mandatory", () => {
+  assert.equal(isMfaSetupRequired(false, true), true);
+  assert.equal(isMfaSetupRequired(true, true), false, "already enrolled — normal challenge instead");
+  assert.equal(isMfaSetupRequired(false, false), false, "mfaRequired off");
 });
 
-test("hashPassword/verifyPassword round-trip", () => {
-  const stored = hashPassword("correct horse battery staple");
-  assert.equal(verifyPassword("correct horse battery staple", stored), true);
-  assert.equal(verifyPassword("wrong password", stored), false);
+test("hashPassword/verifyPassword round-trip", async () => {
+  const stored = await hashPassword("correct horse battery staple");
+  assert.match(stored, /^scrypt\$131072\$8\$1\$/);
+  assert.equal(await verifyPassword("correct horse battery staple", stored), true);
+  assert.equal(await verifyPassword("wrong password", stored), false);
+});
+
+test("verifyPassword keeps accepting existing legacy scrypt hashes", async () => {
+  const salt = "a9d043093a978e9c1f4123888307b51d";
+  const legacy = `${salt}:${scryptSync("legacy fixture", salt, 64).toString("hex")}`;
+  assert.equal(await verifyPassword("legacy fixture", legacy), true);
+});
+
+test("auth stamps revoke sessions monotonically after credential and role changes", () => {
+  const user = { passwordHash: "hash", totpSecret: null, totpEnabled: false, authVersion: 1 };
+  const stamp = createAuthStamp(user);
+  assert.equal(matchesAuthStamp(stamp, user), true);
+  assert.equal(matchesAuthStamp(stamp, { ...user, authVersion: 2 }), false);
 });
 
 test("signSession/verifySession round-trip preserves payload", () => {

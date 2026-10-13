@@ -39,6 +39,12 @@ if (typeof fetch !== "function") {
 
 const REPO_DIR = dirname(fileURLToPath(import.meta.url));
 process.chdir(REPO_DIR);
+// Local development services should never listen on every host interface.
+// The VPS installer explicitly opts in to public binds for trial mode.
+process.env.API_BIND_ADDRESS = "127.0.0.1";
+process.env.FRONTEND_BIND_ADDRESS = "127.0.0.1";
+process.env.ADMIN_BIND_ADDRESS = "127.0.0.1";
+process.env.UCMS_API_NODE_ENV = "development";
 
 const flags = {
   adminOnly: false,
@@ -71,6 +77,10 @@ async function findFreePort(start) {
 
 function readEnvFile(file) {
   return existsSync(file) ? readFileSync(file, "utf8") : "";
+}
+function getEnvValue(file, key) {
+  const match = readEnvFile(file).match(new RegExp(`^${key}=(.*)$`, "m"));
+  return match ? match[1].trim() : "";
 }
 function setEnvKv(file, key, value) {
   let content = readEnvFile(file);
@@ -248,7 +258,7 @@ async function ensureReachableOrReport(apiPort, adminPort, frontendPort) {
   return false;
 }
 
-async function createSuperadmin(apiPort, email, password) {
+async function createSuperadmin(apiPort, email, password, setupSecret) {
   console.log("\nCreating superadmin account...");
   let status;
   try {
@@ -265,7 +275,7 @@ async function createSuperadmin(apiPort, email, password) {
   try {
     const res = await fetch(`http://localhost:${apiPort}/api/setup`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-setup-secret": setupSecret },
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json().catch(() => ({}));
@@ -316,6 +326,7 @@ async function install() {
   fillEnvIfBlank(envFile, "POSTGRES_APP_PASSWORD");
   fillEnvIfBlank(envFile, "POSTGRES_PROVISIONER_PASSWORD");
   fillEnvIfBlank(envFile, "SESSION_SECRET");
+  fillEnvIfBlank(envFile, "SETUP_SECRET");
   setEnvKv(envFile, "VITE_API_URL", `http://localhost:${apiPort}`);
   setEnvKv(envFile, "VITE_FRONTEND_URL", `http://localhost:${frontendPort}`);
   // Without this, apps/api's CORS check rejects the admin panel's own
@@ -360,7 +371,7 @@ async function install() {
   );
   execFileSync(
     "docker",
-    [...composeArgs, "exec", "-T", "db", "sh", "-c", 'psql -U postgres -d usim_cms -v ON_ERROR_STOP=1 -v app_password="$POSTGRES_APP_PASSWORD" -v provisioner_password="$POSTGRES_PROVISIONER_PASSWORD"'],
+    [...composeArgs, "exec", "-T", "db", "sh", "-c", 'psql -U postgres -d usim_cms -v ON_ERROR_STOP=1 -v superuser_password="$POSTGRES_SUPERUSER_PASSWORD" -v app_password="$POSTGRES_APP_PASSWORD" -v provisioner_password="$POSTGRES_PROVISIONER_PASSWORD"'],
     {
       cwd: REPO_DIR,
       input: readFileSync(join(REPO_DIR, "apps/api/scripts/rotate-db-role-passwords.sql")),
@@ -378,7 +389,7 @@ async function install() {
     process.exit(1);
   }
 
-  await createSuperadmin(apiPort, flags.email, flags.password);
+  await createSuperadmin(apiPort, flags.email, flags.password, getEnvValue(envFile, "SETUP_SECRET"));
 
   console.log("\n================================================================");
   console.log(" Done.");
@@ -406,7 +417,9 @@ async function main() {
     const { apiPort } = resolveRunningPorts();
     console.log("Waiting for the API to become healthy...");
     await waitForApiHealth(apiPort, 30);
-    await createSuperadmin(apiPort, flags.email, flags.password);
+    const envFile = join(REPO_DIR, ".env");
+    fillEnvIfBlank(envFile, "SETUP_SECRET");
+    await createSuperadmin(apiPort, flags.email, flags.password, getEnvValue(envFile, "SETUP_SECRET"));
     process.exit(0);
   }
 

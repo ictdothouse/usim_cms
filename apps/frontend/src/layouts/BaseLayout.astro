@@ -4,6 +4,8 @@ import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
 import type { SiteChrome } from "../lib/api";
 
+const cspNonce = Astro.request.headers.get("x-ucms-csp-nonce") ?? undefined;
+
 interface Props {
   title: string;
   ogImage?: string | null;
@@ -77,6 +79,10 @@ const {
   requestedLang = null,
   lcpImage = null,
 } = Astro.props;
+// A JSON-LD value can contain user-authored text. Escape HTML-significant
+// characters before embedding it in a script data block to prevent a stored
+// `</script>` sequence from ending the element early.
+const jsonLdText = jsonLd ? JSON.stringify(jsonLd).replaceAll("<", "\\u003c") : "";
 
 // Set only by apps/admin's device-preview modal (openDevicePreview, via
 // ?deviceFrame=mobile|tablet on the preview/blueprint-preview/chrome-preview
@@ -192,7 +198,7 @@ const fontsHref = allFonts.length
     )}
     {noindex && <meta name="robots" content="noindex,nofollow" />}
     {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
-    {jsonLd && <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
+    {jsonLd && <script type="application/ld+json" set:html={jsonLdText} />}
     {lcpImage && <link rel="preload" as="image" fetchpriority="high" href={lcpImage} />}
     {fontsHref && (
       <>
@@ -365,7 +371,7 @@ const fontsHref = allFonts.length
         device size, but there a press-and-drag is an edit gesture (reorder,
         free-position drag/resize) — the wheel still scrolls it. */}
     {deviceFrame && !designerEdit && (
-      <script is:inline>
+      <script is:inline nonce={cspNonce}>
         (() => {
           // Mouse has no touch to drag-scroll with, and the phone/tablet
           // bezel this page is framed in has no room for a real scrollbar
@@ -415,7 +421,7 @@ const fontsHref = allFonts.length
       </script>
     )}
     {designerEdit && (
-      <script is:inline>
+      <script is:inline nonce={cspNonce}>
         (() => {
           const targetOrigin = document.referrer ? new URL(document.referrer).origin : null;
           if (!targetOrigin) return;
@@ -1692,7 +1698,7 @@ const fontsHref = allFonts.length
         })();
       </script>
     )}
-    <script is:inline>
+    <script is:inline nonce={cspNonce}>
       // Scroll-driven entrance animations (global.css's .ds-entrance-*,
       // animation-timeline:view()) can get permanently stuck at their
       // `from` keyframe (opacity:0) when the element is already inside the

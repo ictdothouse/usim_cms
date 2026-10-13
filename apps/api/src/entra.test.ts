@@ -19,13 +19,14 @@ test("isEntraStateValid: rejects missing/mismatched nonce, accepts a matching on
 });
 
 test("getEntraAuthorizeUrl builds the expected Microsoft authorize URL", () => {
-  const url = new URL(getEntraAuthorizeUrl("tenant-123", "client-abc", "https://api.example/cb", "state-xyz"));
+  const url = new URL(getEntraAuthorizeUrl("tenant-123", "client-abc", "https://api.example/cb", "state-xyz", "nonce-xyz"));
   assert.equal(url.origin, "https://login.microsoftonline.com");
   assert.equal(url.pathname, "/tenant-123/oauth2/v2.0/authorize");
   assert.equal(url.searchParams.get("client_id"), "client-abc");
   assert.equal(url.searchParams.get("redirect_uri"), "https://api.example/cb");
   assert.equal(url.searchParams.get("response_type"), "code");
   assert.equal(url.searchParams.get("state"), "state-xyz");
+  assert.equal(url.searchParams.get("nonce"), "nonce-xyz");
 });
 
 function base64Url(input: Buffer | string): string {
@@ -49,6 +50,7 @@ test("verifyEntraIdToken accepts a validly-signed, unexpired token and rejects a
   const tenantId = "tenant-test-1";
   const clientId = "client-test-1";
   const kid = "test-kid-1";
+  const objectId = "4b2e14d4-3e94-4fd5-8e19-a621050132ab";
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string | URL) => {
@@ -63,31 +65,67 @@ test("verifyEntraIdToken accepts a validly-signed, unexpired token and rejects a
     const validToken = signTestIdToken(privateKey, kid, {
       iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
       aud: clientId,
+      tid: tenantId,
+      oid: objectId,
       exp: now + 3600,
-      preferred_username: "webmaster@usim.edu.my",
+      iat: now,
+      nonce: "nonce-test",
+      amr: ["mfa", "pwd"],
     });
-    const claims = await verifyEntraIdToken(validToken, tenantId, clientId);
-    assert.equal(claims.email, "webmaster@usim.edu.my");
+    const claims = await verifyEntraIdToken(validToken, tenantId, clientId, "nonce-test", true);
+    assert.equal(claims.oid, objectId);
 
     const expiredToken = signTestIdToken(privateKey, kid, {
       iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
       aud: clientId,
+      tid: tenantId,
+      oid: objectId,
       exp: now - 3600,
-      preferred_username: "webmaster@usim.edu.my",
+      iat: now,
+      nonce: "nonce-test",
+      amr: ["mfa"],
     });
-    await assert.rejects(() => verifyEntraIdToken(expiredToken, tenantId, clientId));
+    await assert.rejects(() => verifyEntraIdToken(expiredToken, tenantId, clientId, "nonce-test", true));
 
     const wrongAudToken = signTestIdToken(privateKey, kid, {
       iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
       aud: "someone-else",
+      tid: tenantId,
+      oid: objectId,
       exp: now + 3600,
-      preferred_username: "webmaster@usim.edu.my",
+      iat: now,
+      nonce: "nonce-test",
+      amr: ["mfa"],
     });
-    await assert.rejects(() => verifyEntraIdToken(wrongAudToken, tenantId, clientId));
+    await assert.rejects(() => verifyEntraIdToken(wrongAudToken, tenantId, clientId, "nonce-test", true));
+
+    const wrongNonceToken = signTestIdToken(privateKey, kid, {
+      iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+      aud: clientId,
+      tid: tenantId,
+      oid: objectId,
+      exp: now + 3600,
+      iat: now,
+      nonce: "attacker-nonce",
+      amr: ["mfa"],
+    });
+    await assert.rejects(() => verifyEntraIdToken(wrongNonceToken, tenantId, clientId, "nonce-test", true));
+
+    const noMfaToken = signTestIdToken(privateKey, kid, {
+      iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+      aud: clientId,
+      tid: tenantId,
+      oid: objectId,
+      exp: now + 3600,
+      iat: now,
+      nonce: "nonce-test",
+      amr: ["pwd"],
+    });
+    await assert.rejects(() => verifyEntraIdToken(noMfaToken, tenantId, clientId, "nonce-test", true));
 
     const [h, p] = validToken.split(".");
     const tamperedSignature = `${h}.${p}.${base64Url("not-a-real-signature")}`;
-    await assert.rejects(() => verifyEntraIdToken(tamperedSignature, tenantId, clientId));
+    await assert.rejects(() => verifyEntraIdToken(tamperedSignature, tenantId, clientId, "nonce-test", true));
   } finally {
     globalThis.fetch = originalFetch;
   }

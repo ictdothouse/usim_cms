@@ -48,8 +48,7 @@ COPY --from=build /app/deploy/api ./
 # an empty named volume mounted over a path that doesn't already exist in the
 # image is created root:root — unwritable by the non-root `app` user below,
 # breaking every upload with EACCES on a fresh deploy.
-RUN mkdir -p uploads
-RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app
+RUN addgroup -S app && adduser -S app -G app && mkdir -p uploads && chown app:app uploads
 USER app
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:${PORT:-3000}/health || exit 1

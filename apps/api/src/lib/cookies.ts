@@ -14,7 +14,13 @@ function getCookie(req: FastifyRequest, name: string): string | undefined {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
     const partName = part.slice(0, eq).trim();
-    if (partName === name) return decodeURIComponent(part.slice(eq + 1).trim());
+    if (partName === name) {
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        return undefined;
+      }
+    }
   }
   return undefined;
 }
@@ -46,7 +52,11 @@ function appendSetCookie(reply: FastifyReply, cookieString: string): void {
 // requests. Overridable via env for a deployment that genuinely splits
 // admin/api across unrelated domains (needs SameSite=None, which browsers
 // additionally require Secure for).
-const SAMESITE = process.env.SESSION_COOKIE_SAMESITE ?? "Lax";
+const configuredSameSite = process.env.SESSION_COOKIE_SAMESITE;
+const SAMESITE = ["Strict", "Lax", "None"].includes(configuredSameSite ?? "") &&
+  (configuredSameSite !== "None" || process.env.NODE_ENV === "production")
+  ? configuredSameSite!
+  : "Lax";
 
 function baseAttrs(maxAgeSeconds: number): string[] {
   const attrs = ["Path=/", "HttpOnly", `SameSite=${SAMESITE}`, `Max-Age=${maxAgeSeconds}`];

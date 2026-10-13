@@ -1,5 +1,5 @@
 # install.sh's docker-mode trial flow ONLY. Adds api/frontend/admin — each
-# published straight to a host port, no Caddy in front — on top of
+# bound to private localhost ports for SSH tunneling, no Caddy in front — on top of
 # docker-compose.yml's db+proxy (proxy stays unused here; install.sh never
 # starts it). This recreates the single-container shape docker-compose.yml
 # itself used before it was split for blue-green (see docker-compose.release.yml),
@@ -22,6 +22,13 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       db:
         condition: service_healthy
@@ -31,7 +38,9 @@ services:
       DATABASE_URL: postgres://usim_cms_app:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}@db:5432/usim_cms
       DATABASE_PROVISIONER_URL: postgres://usim_cms_provisioner:${POSTGRES_PROVISIONER_PASSWORD:?set POSTGRES_PROVISIONER_PASSWORD in .env}@db:5432/usim_cms
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      SETUP_SECRET: ${SETUP_SECRET:?set SETUP_SECRET in .env}
       PORT: 3000
+      NODE_ENV: ${UCMS_API_NODE_ENV:-production}
       # The api's Dockerfile bakes NODE_ENV=production, which trips index.ts's
       # own boot-time guard (`ADMIN_ORIGIN must be set in production`) unless
       # this is set — the browser reaches the admin container directly on
@@ -46,6 +55,10 @@ services:
       # (Docker Desktop already resolves it natively) — needed because the
       # monitor process this calls runs on the HOST, not in a container.
       MONITOR_URL: ${MONITOR_URL:-}
+      MONITOR_ACCESS_MODE: ${MONITOR_ACCESS_MODE:-ssh}
+      MONITOR_PUBLIC_DOMAIN: ${MONITOR_PUBLIC_DOMAIN:-}
+      MONITOR_UPSTREAM: ${MONITOR_UPSTREAM:-host.docker.internal:5555}
+      MONITOR_ACCESS_CONFIG: /app/monitor-access/config.json
       MONITOR_USER: ${MONITOR_USER:-admin}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
       # Optional integrations — see docker-compose.release.yml's own comment
@@ -65,8 +78,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${API_PORT:-3000}:3000"
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3000}:3000"
     volumes:
+      - ./monitor/access:/app/monitor-access:ro
       - ucms-uploads:/app/uploads
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
@@ -79,6 +93,13 @@ services:
       context: .
       dockerfile: apps/frontend/Dockerfile
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       api:
         condition: service_healthy
@@ -90,7 +111,7 @@ services:
       # See docker-compose.release.yml's own comment on this same key.
       ADMIN_ORIGIN: ${ADMIN_ORIGIN:-}
     ports:
-      - "${FRONTEND_PORT:-4321}:4321"
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-4321}:4321"
 
   admin:
     build:
@@ -100,9 +121,16 @@ services:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
         VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:-http://localhost:4321}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/cache/nginx
     depends_on:
       - api
     networks:
       - ucms-net
     ports:
-      - "${ADMIN_PORT:-5173}:80"
+      - "${ADMIN_BIND_ADDRESS:-127.0.0.1}:${ADMIN_PORT:-5173}:8080"

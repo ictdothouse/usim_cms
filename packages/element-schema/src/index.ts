@@ -573,16 +573,10 @@ export function validateElement(el: unknown, path: string): string | null {
   return null;
 }
 
-// A "html" element's `props.html` renders raw via `set:html` on the public
-// site (ElementBlock.astro) with no sanitization by design — it's the
-// Custom-HTML/Embed-code element, meant for scripts/widgets a sanitizer
-// would strip. That makes it a standing stored-XSS surface for whichever
-// role can write it, so apps/api gates it behind its own permission
-// (layout.unsafeHtml) on top of the collection's normal write permission —
-// these walkers let that permission check find one anywhere in a tree
-// without duplicating the Section/Row/Column/Element shape apps/api has no
-// other reason to know. Exported (same precedent as validateElement) so a
-// symbol's bare `node` can be checked the same way a page's layout is.
+// A "html" element's `props.html` is sanitized to static markup at render
+// time by ElementBlock.astro. The write surface remains separately gated by
+// apps/api's permission; these walkers let that check find one anywhere in a
+// page, site chrome or symbol tree without duplicating its nested shape.
 export function elementHasUnsafeHtml(el: unknown): boolean {
   if (typeof el !== "object" || el === null) return false;
   const e = el as Record<string, unknown>;

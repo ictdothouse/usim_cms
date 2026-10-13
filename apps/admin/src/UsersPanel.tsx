@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Users as UsersIcon, Pencil, Trash2 } from "lucide-react";
 import * as api from "@/lib/api";
 import type { Session } from "@/lib/api";
@@ -14,6 +14,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [entraObjectId, setEntraObjectId] = useState("");
   const [role, setRole] = useState<"webmaster" | "superadmin">("webmaster");
   const [tenantHosts, setTenantHosts] = useState<string[]>([]);
   const [roleId, setRoleId] = useState("");
@@ -22,6 +23,8 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
   const [editingPerms, setEditingPerms] = useState<string[]>([]);
   const [editUserId, setEditUserId] = useState<string | null>(null);
   const [editPassword, setEditPassword] = useState("");
+  const [editEntraObjectId, setEditEntraObjectId] = useState("");
+  const [mfaResetReason, setMfaResetReason] = useState("");
   const [editTenantHosts, setEditTenantHosts] = useState<string[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -39,14 +42,14 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
     }
   }
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setUsers(await api.listPortalUsers(token));
     setRoles(await api.listPortalRoles(token));
     setTenants(await api.listPortalTenants(token));
-  }
+  }, [token]);
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -54,12 +57,14 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
       await api.createPortalUser(token, {
         email,
         password,
+        entraObjectId: entraObjectId.trim() || undefined,
         role,
         tenantHosts: tenantHosts.length ? tenantHosts : undefined,
         roleId: roleId || null,
       });
       setEmail("");
       setPassword("");
+      setEntraObjectId("");
       setTenantHosts([]);
       setRoleId("");
       await refresh();
@@ -89,6 +94,8 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
   function openEditUser(u: Record<string, unknown>) {
     setEditUserId(u.id as string);
     setEditPassword("");
+    setEditEntraObjectId((u.entraObjectId as string | null) ?? "");
+    setMfaResetReason("");
     setEditTenantHosts(((u.tenantHosts as string[] | null) ?? []).length ? (u.tenantHosts as string[]) : u.tenantHost ? [u.tenantHost as string] : []);
     setEditError(null);
   }
@@ -98,6 +105,27 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
     try {
       await api.updatePortalUserPassword(token, u.id as string, editPassword.trim());
       setEditPassword("");
+    } catch (err) {
+      setEditError((err as Error).message);
+    }
+  }
+
+  async function saveEditEntraObjectId(u: Record<string, unknown>) {
+    try {
+      await api.updatePortalUserEntraObjectId(token, u.id as string, editEntraObjectId.trim() || null);
+      await refresh();
+    } catch (err) {
+      setEditError((err as Error).message);
+    }
+  }
+
+  async function resetUserMfa(u: Record<string, unknown>) {
+    if (mfaResetReason.trim().length < 10) return;
+    if (!(await confirm(t("users-mfa-reset-confirm")))) return;
+    try {
+      await api.resetPortalUserMfa(token, u.id as string, mfaResetReason.trim());
+      setMfaResetReason("");
+      await refresh();
     } catch (err) {
       setEditError((err as Error).message);
     }
@@ -149,7 +177,19 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          minLength={15}
         />
+        <div className="flex min-w-56 flex-col gap-0.5">
+          <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-entra-object-id")}</label>
+          <input
+            className={`${inputCls} w-auto`}
+            placeholder="00000000-0000-0000-0000-000000000000"
+            value={entraObjectId}
+            onChange={(e) => setEntraObjectId(e.target.value)}
+            maxLength={36}
+            aria-label={t("users-entra-object-id")}
+          />
+        </div>
         <div className="flex flex-col gap-0.5">
           <label className="text-[9px] font-bold uppercase tracking-wider text-sub">{t("users-account-type")}</label>
           <Select value={role} onValueChange={(v) => setRole(v as "webmaster" | "superadmin")}>
@@ -363,6 +403,7 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                           placeholder={t("users-edit-password-placeholder")}
                           value={editPassword}
                           onChange={(e) => setEditPassword(e.target.value)}
+                          minLength={15}
                         />
                       </div>
                       <button
@@ -371,6 +412,44 @@ export default function UsersPanel({ token, onImpersonate }: { token: string; on
                         className={`${btnGhost} px-3 py-1.5 text-xs`}
                       >
                         {t("users-edit-save-password")}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                          {t("users-mfa-reset-reason")}
+                        </label>
+                        <input
+                          className={`${inputCls} w-72`}
+                          value={mfaResetReason}
+                          onChange={(e) => setMfaResetReason(e.target.value)}
+                          minLength={10}
+                          maxLength={500}
+                        />
+                      </div>
+                      <button
+                        disabled={mfaResetReason.trim().length < 10}
+                        onClick={() => void resetUserMfa(u)}
+                        className={`${btnGhost} px-3 py-1.5 text-xs`}
+                      >
+                        {t("users-mfa-reset")}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-sub">
+                          {t("users-entra-object-id")}
+                        </label>
+                        <input
+                          className={`${inputCls} w-auto`}
+                          placeholder="00000000-0000-0000-0000-000000000000"
+                          value={editEntraObjectId}
+                          onChange={(e) => setEditEntraObjectId(e.target.value)}
+                          maxLength={36}
+                        />
+                      </div>
+                      <button onClick={() => void saveEditEntraObjectId(u)} className={`${btnGhost} px-3 py-1.5 text-xs`}>
+                        {t("media-save")}
                       </button>
                     </div>
                     {u.role === "webmaster" && (

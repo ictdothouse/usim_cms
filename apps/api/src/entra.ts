@@ -15,13 +15,15 @@ export function getEntraAuthorizeUrl(
   clientId: string,
   redirectUri: string,
   state: string,
+  nonce: string,
 ): string {
-  const url = new URL(`https://login.microsoftonline.com/${tenantId}/${AUTHORIZE_PATH}`);
+  const url = new URL(`https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/${AUTHORIZE_PATH}`);
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", "openid email profile");
   url.searchParams.set("state", state);
+  url.searchParams.set("nonce", nonce);
   return url.toString();
 }
 
@@ -32,7 +34,7 @@ export async function exchangeEntraCode(
   redirectUri: string,
   code: string,
 ): Promise<{ idToken: string }> {
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/${TOKEN_PATH}`, {
+  const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/${TOKEN_PATH}`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -67,7 +69,7 @@ const JWKS_TTL_MS = 24 * 60 * 60 * 1000;
 async function getJwks(tenantId: string): Promise<Jwk[]> {
   const cached = jwksCache.get(tenantId);
   if (cached && Date.now() - cached.fetchedAt < JWKS_TTL_MS) return cached.keys;
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/${JWKS_PATH}`, {
+  const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/${JWKS_PATH}`, {
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`entra jwks endpoint returned ${res.status}`);
@@ -81,7 +83,8 @@ function base64UrlDecode(input: string): Buffer {
 }
 
 export interface EntraClaims {
-  email: string;
+  oid: string;
+  amr: string[];
 }
 
 // The entraOnly break-glass rule, pulled out as a pure function so it has
@@ -122,7 +125,13 @@ export function isEntraStateValid(
 // email claim (preferred_username, falling back to email) on success; throws
 // on any verification failure so every caller can treat "no claims back" as
 // "reject this login", never partially-trust a bad token.
-export async function verifyEntraIdToken(idToken: string, tenantId: string, clientId: string): Promise<EntraClaims> {
+export async function verifyEntraIdToken(
+  idToken: string,
+  tenantId: string,
+  clientId: string,
+  expectedNonce: string,
+  requireMfa = false,
+): Promise<EntraClaims> {
   const parts = idToken.split(".");
   if (parts.length !== 3) throw new Error("malformed id_token");
   const [headerB64, payloadB64, signatureB64] = parts;
@@ -143,16 +152,32 @@ export async function verifyEntraIdToken(idToken: string, tenantId: string, clie
   const payload = JSON.parse(base64UrlDecode(payloadB64).toString("utf8")) as {
     iss?: string;
     aud?: string;
+    tid?: string;
+    oid?: string;
     exp?: number;
-    preferred_username?: string;
-    email?: string;
+    iat?: number;
+    nbf?: number;
+    nonce?: string;
+    amr?: string[];
   };
   const expectedIss = `https://login.microsoftonline.com/${tenantId}/v2.0`;
   if (payload.iss !== expectedIss) throw new Error("id_token iss mismatch");
   if (payload.aud !== clientId) throw new Error("id_token aud mismatch");
-  if (!payload.exp || payload.exp * 1000 < Date.now()) throw new Error("id_token expired");
+  if (payload.tid?.toLowerCase() !== tenantId.toLowerCase()) throw new Error("id_token tid mismatch");
+  const now = Date.now();
+  if (!Number.isSafeInteger(payload.exp) || payload.exp! * 1000 <= now) throw new Error("id_token expired");
+  if (!Number.isSafeInteger(payload.iat) || payload.iat! * 1000 > now + 60_000 || now - payload.iat! * 1000 > 10 * 60_000) {
+    throw new Error("id_token iat is invalid or too old");
+  }
+  if (payload.nbf !== undefined && (!Number.isSafeInteger(payload.nbf) || payload.nbf * 1000 > now + 60_000)) {
+    throw new Error("id_token is not yet valid");
+  }
+  if (!payload.nonce || payload.nonce !== expectedNonce) throw new Error("id_token nonce mismatch");
 
-  const email = payload.preferred_username ?? payload.email;
-  if (!email) throw new Error("id_token missing email claim");
-  return { email };
+  if (!payload.oid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.oid)) {
+    throw new Error("id_token missing valid immutable oid claim");
+  }
+  const amr = Array.isArray(payload.amr) ? payload.amr.filter((value): value is string => typeof value === "string") : [];
+  if (requireMfa && !amr.includes("mfa")) throw new Error("id_token does not prove MFA");
+  return { oid: payload.oid.toLowerCase(), amr };
 }

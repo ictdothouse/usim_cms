@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { sql } from "drizzle-orm";
 import { verifySession, type SessionPayload } from "../db/auth.js";
 import { getSessionCookie } from "../lib/cookies.js";
+import { findUserById, getRolePermissions } from "../db/tenant-pool.js";
+import { mergePermissions } from "../routes/permissions.js";
+import { matchesAuthStamp } from "../db/auth.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -10,6 +13,32 @@ declare module "fastify" {
 }
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// Resolve every cookie-backed session against current control-plane state.
+// This makes deleted users and changed passwords/MFA take effect immediately,
+// and prevents stale role/tenant/permission claims from surviving edits.
+export function registerSessionRefresh(app: FastifyInstance) {
+  app.addHook("preHandler", async (req) => {
+    if (!req.url.startsWith("/api/")) return;
+    const cookie = getSessionCookie(req);
+    if (!cookie) return;
+    const signed = verifySession(cookie);
+    if (!signed || !signed.userId || signed.previewOnly || signed.pendingMfa || signed.entraState) return;
+    if (process.env.NODE_ENV === "production" && signed.mfaVerified !== true) return;
+    const user = await findUserById(signed.userId);
+    if (!user || !matchesAuthStamp(signed.authStamp, user)) return;
+    req.user = {
+      ...signed,
+      email: user.email,
+      role: user.role as "superadmin" | "webmaster",
+      tenantHost: user.tenantHost,
+      tenantHosts: (user.tenantHosts as string[] | null) ?? [],
+      permissions: user.role === "superadmin"
+        ? []
+        : mergePermissions(await getRolePermissions(user.roleId as string | null), user.extraPermissions as string[] | null),
+    };
+  });
+}
 
 // The session itself lives in an httpOnly cookie (unreadable by JS, so an
 // XSS bug can't exfiltrate it) — but that means the browser now attaches it
@@ -38,19 +67,23 @@ export async function requireTenantAuth(app: FastifyInstance) {
     if (!cookie) {
       return reply.code(401).send({ error: "Missing session" });
     }
-    const session = verifySession(cookie);
-    if (!session) {
+    const signed = verifySession(cookie);
+    if (!signed) {
       return reply.code(401).send({ error: "Invalid or expired session" });
     }
     // A preview token (see /api/pages/:id/preview-token) is read-only by
     // design — it must never reach a write/protected route, even though it
     // carries a real role/tenantHost that would otherwise pass every check
     // below.
-    if (session.previewOnly) {
+    if (signed.previewOnly) {
       return reply.code(403).send({ error: "Preview token cannot be used here" });
     }
-    if (session.pendingMfa) {
+    if (signed.pendingMfa) {
       return reply.code(403).send({ error: "Complete MFA verification first" });
+    }
+    const session = req.user;
+    if (!session || session.userId !== signed.userId) {
+      return reply.code(401).send({ error: "Session is no longer valid; sign in again" });
     }
     if (!checkCsrf(req, reply, session)) return;
     const allowedHosts = session.tenantHosts ?? (session.tenantHost ? [session.tenantHost] : []);
@@ -77,17 +110,22 @@ export function verifySuperadmin(req: FastifyRequest, reply: FastifyReply): Sess
     reply.code(401).send({ error: "Missing session" });
     return null;
   }
-  const session = verifySession(cookie);
-  if (!session) {
+  const signed = verifySession(cookie);
+  if (!signed) {
     reply.code(401).send({ error: "Invalid or expired session" });
     return null;
   }
-  if (session.previewOnly) {
+  if (signed.previewOnly) {
     reply.code(403).send({ error: "Preview token cannot be used here" });
     return null;
   }
-  if (session.pendingMfa) {
+  if (signed.pendingMfa) {
     reply.code(403).send({ error: "Complete MFA verification first" });
+    return null;
+  }
+  const session = req.user;
+  if (!session || session.userId !== signed.userId) {
+    reply.code(401).send({ error: "Session is no longer valid; sign in again" });
     return null;
   }
   if (session.role !== "superadmin") {
@@ -107,17 +145,22 @@ export function verifyAnyUser(req: FastifyRequest, reply: FastifyReply): Session
     reply.code(401).send({ error: "Missing session" });
     return null;
   }
-  const session = verifySession(cookie);
-  if (!session) {
+  const signed = verifySession(cookie);
+  if (!signed) {
     reply.code(401).send({ error: "Invalid or expired session" });
     return null;
   }
-  if (session.previewOnly) {
+  if (signed.previewOnly) {
     reply.code(403).send({ error: "Preview token cannot be used here" });
     return null;
   }
-  if (session.pendingMfa) {
+  if (signed.pendingMfa) {
     reply.code(403).send({ error: "Complete MFA verification first" });
+    return null;
+  }
+  const session = req.user;
+  if (!session || session.userId !== signed.userId) {
+    reply.code(401).send({ error: "Session is no longer valid; sign in again" });
     return null;
   }
   if (!checkCsrf(req, reply, session)) return null;

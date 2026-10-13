@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { verifySuperadmin, verifyAnyUser } from "../plugins/auth.js";
 import { mergePermissions } from "./permissions.js";
-import { listUsers, getRolePermissions, findUserByEmail } from "../db/tenant-pool.js";
-import { signSession, SESSION_TTL_MS, generateCsrfToken } from "../db/auth.js";
+import { findUserById, getRolePermissions, findUserByEmail, insertAuditLog } from "../db/tenant-pool.js";
+import { signSession, SESSION_TTL_MS, generateCsrfToken, createAuthStamp } from "../db/auth.js";
 import { setSessionCookie } from "../lib/cookies.js";
 
 // "View as" impersonation + its reverse — moved out of index.ts verbatim
@@ -23,7 +23,7 @@ export function registerImpersonationRoutes(app: FastifyInstance) {
       reply.code(400);
       return { error: "userId required" };
     }
-    const target = (await listUsers()).find((u) => u.id === userId);
+    const target = await findUserById(userId);
     if (!target) {
       reply.code(404);
       return { error: "user not found" };
@@ -44,10 +44,13 @@ export function registerImpersonationRoutes(app: FastifyInstance) {
       tenantHost: target.tenantHost as string | null,
       tenantHosts: (target.tenantHosts as string[] | null) ?? [],
       permissions,
+      authStamp: createAuthStamp(target),
+      mfaVerified: true,
       impersonatedBy: admin.email,
       csrfToken,
       exp: Date.now() + SESSION_TTL_MS,
     });
+    await insertAuditLog({ actorUserId: admin.userId, actorEmail: admin.email, action: "impersonation.start", target: target.id, ip: req.ip });
     // Overwrites the superadmin's own session cookie with the target's — see
     // exit-impersonation below for how the admin gets their own session back
     // (the old cookie's raw value is gone the moment this response lands, so
@@ -79,6 +82,7 @@ export function registerImpersonationRoutes(app: FastifyInstance) {
       reply.code(404);
       return { error: "original superadmin account not found" };
     }
+    await insertAuditLog({ actorUserId: admin.id, actorEmail: admin.email, action: "impersonation.end", target: session.userId, ip: req.ip });
     const csrfToken = generateCsrfToken();
     const token = signSession({
       userId: admin.id,
@@ -86,6 +90,8 @@ export function registerImpersonationRoutes(app: FastifyInstance) {
       role: "superadmin",
       tenantHost: null,
       permissions: [],
+      authStamp: createAuthStamp(admin),
+      mfaVerified: true,
       csrfToken,
       exp: Date.now() + SESSION_TTL_MS,
     });

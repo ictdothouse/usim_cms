@@ -261,7 +261,8 @@ export function registerPortalSettingsRoutes(app: FastifyInstance) {
   app.get("/api/portal/login-settings", async (req, reply) => {
     if (!verifySuperadmin(req, reply)) return;
     const entra = await getEntraSettings();
-    return { mfaEnabled: await getMfaEnabled(), mfaRequired: await getMfaRequired(), ...entra };
+    const production = process.env.NODE_ENV === "production";
+    return { mfaEnabled: production || await getMfaEnabled(), mfaRequired: production || await getMfaRequired(), ...entra };
   });
 
   app.put("/api/portal/login-settings", async (req, reply) => {
@@ -275,6 +276,14 @@ export function registerPortalSettingsRoutes(app: FastifyInstance) {
       entraTenantId?: string | null;
       entraClientId?: string | null;
     };
+    if (process.env.NODE_ENV === "production" && mfaEnabled === false) {
+      reply.code(400);
+      return { error: "MFA cannot be disabled in production" };
+    }
+    if (process.env.NODE_ENV === "production" && mfaRequired === false) {
+      reply.code(400);
+      return { error: "MFA is mandatory in production" };
+    }
     if (mfaEnabled !== undefined) {
       if (typeof mfaEnabled !== "boolean") {
         reply.code(400);
@@ -318,7 +327,8 @@ export function registerPortalSettingsRoutes(app: FastifyInstance) {
         ip: req.ip,
       });
     }
-    return { mfaEnabled: await getMfaEnabled(), mfaRequired: await getMfaRequired(), ...(await getEntraSettings()) };
+    const production = process.env.NODE_ENV === "production";
+    return { mfaEnabled: production || await getMfaEnabled(), mfaRequired: production || await getMfaRequired(), ...(await getEntraSettings()) };
   });
 
   // Cross-department aggregator (portal), reads public.shared_content directly

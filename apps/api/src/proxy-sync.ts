@@ -1,5 +1,7 @@
 import { X509Certificate } from "node:crypto";
 import http from "node:http";
+import fs from "node:fs";
+import net from "node:net";
 
 // Bundled Caddy proxy's Admin API — reachable only on the docker-internal
 // network (never published to the host, see docker-compose.yml's proxy
@@ -10,6 +12,46 @@ import http from "node:http";
 const CADDY_ADMIN_URL = process.env.CADDY_ADMIN_URL;
 const ADMIN_DOMAIN = process.env.ADMIN_DOMAIN ?? "admin.localhost";
 const API_DOMAIN = process.env.API_DOMAIN ?? "api.localhost";
+const MONITOR_ACCESS_MODE = process.env.MONITOR_ACCESS_MODE ?? "ssh";
+const MONITOR_PUBLIC_DOMAIN = process.env.MONITOR_PUBLIC_DOMAIN ?? "";
+const MONITOR_UPSTREAM = process.env.MONITOR_UPSTREAM ?? "host.docker.internal:5555";
+const MONITOR_ACCESS_CONFIG = process.env.MONITOR_ACCESS_CONFIG ?? "";
+
+function monitorAccess() {
+  if (MONITOR_ACCESS_CONFIG) {
+    try {
+      const config = JSON.parse(fs.readFileSync(MONITOR_ACCESS_CONFIG, "utf8")) as Record<string, unknown>;
+      return {
+        mode: config.mode,
+        domain: config.domain,
+        upstream: config.upstream,
+      };
+    } catch (error) {
+      // Missing file means this installation still uses .env. A malformed
+      // present file must fail closed instead of silently publishing a stale
+      // public route from the process environment.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { mode: "ssh", domain: "", upstream: "" };
+    }
+  }
+  return { mode: MONITOR_ACCESS_MODE, domain: MONITOR_PUBLIC_DOMAIN, upstream: MONITOR_UPSTREAM };
+}
+
+function validMonitorDomain(domain: string): boolean {
+  return domain.length <= 253 && domain.includes(".") &&
+    !domain.endsWith(".localhost") &&
+    domain.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
+function validMonitorUpstream(value: string): boolean {
+  const match = /^([^:]+):([1-9][0-9]{0,4})$/.exec(value);
+  if (!match || Number(match[2]) > 65535) return false;
+  if (match[1] === "host.docker.internal") return true;
+  if (net.isIP(match[1]) !== 4) return false;
+  const parts = match[1].split(".").map(Number);
+  return parts[0] === 10 ||
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168);
+}
 // 5s was too tight for /load specifically — pushing a full config makes Caddy
 // synchronously validate/apply it (and reload TLS state for every tenant
 // domain), which can legitimately run past 5s under load; deploy.sh's own
@@ -21,7 +63,7 @@ const TIMEOUT_MS = 15000;
 // deploy in use) — one container each, matching docker-compose.yml's
 // service names. A blue-green deploy (scripts/deploy.sh) always passes its
 // own CaddyUpstreams explicitly instead of relying on these.
-const DEFAULT_ADMIN_UPSTREAM = process.env.ADMIN_UPSTREAM ?? "admin:80";
+const DEFAULT_ADMIN_UPSTREAM = process.env.ADMIN_UPSTREAM ?? "admin:8080";
 const DEFAULT_API_UPSTREAM = process.env.API_UPSTREAM ?? "api:3000";
 const DEFAULT_FRONTEND_UPSTREAM = process.env.FRONTEND_UPSTREAM ?? "frontend:4321";
 
@@ -153,6 +195,10 @@ export function buildCaddyConfig(
   // every subsequent /load push replaces the whole config with buildCaddyConfig's
   // output, so this is the only copy of that setting that actually stays live.
   const encodeHandler = { handler: "encode", encodings: { zstd: {}, gzip: {} }, prefer: ["zstd", "gzip"] };
+  const securityHeadersHandler = {
+    handler: "headers",
+    response: { set: { "Strict-Transport-Security": ["max-age=31536000"] } },
+  };
 
   // Active health checks on each service's own upstream(s) — without this, a
   // crashed replica within a scaled/multi-replica service (docker-compose.
@@ -171,24 +217,48 @@ export function buildCaddyConfig(
     .flatMap((t) => [
       {
         match: [{ host: [t.host], path: ["/uploads/*"] }],
-        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: apiUpstreams, health_checks: healthChecks("/health") }],
+        handle: [encodeHandler, securityHeadersHandler, { handler: "reverse_proxy", upstreams: apiUpstreams, health_checks: healthChecks("/health") }],
       },
       {
         match: [{ host: [t.host] }],
-        handle: [encodeHandler, { handler: "reverse_proxy", upstreams: frontendUpstreams, health_checks: healthChecks("/health") }],
+        handle: [encodeHandler, securityHeadersHandler, { handler: "reverse_proxy", upstreams: frontendUpstreams, health_checks: healthChecks("/health") }],
       },
     ]);
 
   const staticRoutes = [
     {
       match: [{ host: [ADMIN_DOMAIN] }],
-      handle: [{ handler: "reverse_proxy", upstreams: adminUpstreams, health_checks: healthChecks("/") }],
+      handle: [securityHeadersHandler, { handler: "reverse_proxy", upstreams: adminUpstreams, health_checks: healthChecks("/") }],
     },
     {
       match: [{ host: [API_DOMAIN] }],
-      handle: [{ handler: "reverse_proxy", upstreams: apiUpstreams, health_checks: healthChecks("/health") }],
+      handle: [securityHeadersHandler, { handler: "reverse_proxy", upstreams: apiUpstreams, health_checks: healthChecks("/health") }],
     },
   ];
+
+  // The root-capable monitor has no public route in SSH mode. Its listener
+  // stays on Docker's private bridge gateway in either mode; only Caddy can
+  // publish the HTTPS endpoint. Reject malformed/colliding hostnames so a
+  // typo cannot shadow the API, admin, or a tenant route.
+  const monitor = monitorAccess();
+  const monitorDomain = typeof monitor.domain === "string" ? monitor.domain.toLowerCase() : "";
+  const monitorUpstream = typeof monitor.upstream === "string" ? monitor.upstream : "";
+  const allowedMonitorDomain = validMonitorDomain(monitorDomain)
+    && ![ADMIN_DOMAIN.toLowerCase(), API_DOMAIN.toLowerCase(), ...tenants.map((t) => t.host.toLowerCase())].includes(monitorDomain);
+  const monitorRoutes = monitor.mode === "public" && allowedMonitorDomain && validMonitorUpstream(monitorUpstream)
+    ? [{
+        "@id": "ucms-monitor-http-deny",
+        match: [{ host: [monitorDomain], protocol: "http" }],
+        handle: [{ handler: "static_response", status_code: 403, body: "HTTPS required" }],
+      }, {
+        "@id": "ucms-monitor-route",
+        match: [{ host: [monitorDomain], protocol: "https" }],
+        handle: [securityHeadersHandler, {
+          handler: "reverse_proxy",
+          upstreams: [{ dial: monitorUpstream }],
+        }],
+      }]
+    : [];
 
   const trustedProxyCidrs = edge?.enabled
     ? edge.trustedProxyCidrs
@@ -208,7 +278,7 @@ export function buildCaddyConfig(
         servers: {
           srv0: {
             listen: [":443", ":80"],
-            routes: [...staticRoutes, ...tenantRoutes],
+            routes: [...staticRoutes, ...monitorRoutes, ...tenantRoutes],
             // Omitted entirely (not just an empty ranges list) when not in
             // cloudflare mode — Caddy's own no-trusted-proxies default is
             // exactly the safe, correct behavior for a direct-connection

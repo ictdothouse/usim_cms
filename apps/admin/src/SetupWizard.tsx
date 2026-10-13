@@ -67,7 +67,7 @@ export default function SetupWizard({ onDone }: { onDone: (s: Session) => void }
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
-          minLength={8}
+          minLength={15}
         />
         <label className="sr-only" htmlFor="setup-host">{t("setup-host")}</label>
         <input

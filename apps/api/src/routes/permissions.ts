@@ -24,12 +24,9 @@ export const PERMISSIONS = new Set([
   "events.write",
   "headerFooter.write",
   // Separate from pages.update/headerFooter.write (siteChrome)/pages.update
-  // (symbols, reuses pages.*): the "html" ElType renders its content raw
-  // (`set:html`, no sanitizer — see ElementBlock.astro) by design, since
-  // it's the Custom-HTML/embed-code element and a sanitizer would strip the
-  // scripts it exists for. A role can have ordinary layout-write access
-  // without this and still edit every other element type; only setting
-  // non-empty content on an actual "html" element additionally requires this.
+  // (symbols, reuses pages.*): custom HTML remains an advanced write surface.
+  // The frontend sanitizes it to static markup at render time; this permission
+  // lets a webmaster edit that field without granting raw executable code.
   "layout.unsafeHtml",
 ]);
 
