@@ -2412,23 +2412,23 @@ const DASHBOARD_HTML = `<!doctype html>
 </div>
 
 <div class="tabs" id="tabs">
-  <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
-  <button class="tab-btn" data-tab="stack" onclick="switchTab('stack')">Stack &amp; versions</button>
-  <button class="tab-btn" data-tab="containers" onclick="switchTab('containers')">Containers</button>
-  <button class="tab-btn" data-tab="data" onclick="switchTab('data')">Database &amp; Sites</button>
-  <button class="tab-btn" data-tab="ssl" onclick="switchTab('ssl')">SSL</button>
-  <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="stack">Stack &amp; versions</button>
+  <button class="tab-btn" data-tab="containers">Containers</button>
+  <button class="tab-btn" data-tab="data">Database &amp; Sites</button>
+  <button class="tab-btn" data-tab="ssl">SSL</button>
+  <button class="tab-btn" data-tab="logs">Logs</button>
 </div>
 
 <div class="tab-panel active" id="panel-overview">
   <div class="grid" id="hostGrid"></div>
 
   <div class="row">
-    <button onclick="pull()">Pull latest &amp; deploy</button>
-    <button class="secondary" onclick="rollback()">Rollback</button>
-    <button class="secondary" onclick="applyBaseTier()">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
-    <button class="secondary" onclick="restartAll()">Restart all</button>
-    <button class="secondary" onclick="refresh()">Refresh now</button>
+    <button data-action="pull">Pull latest &amp; deploy</button>
+    <button class="secondary" data-action="rollback">Rollback</button>
+    <button class="secondary" data-action="apply-base-tier">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
+    <button class="secondary" data-action="restart-all">Restart all</button>
+    <button class="secondary" data-action="refresh">Refresh now</button>
   </div>
   <p class="muted" id="deployState"></p>
   <div class="progress-track" id="deployTrack" style="display:none"><div class="progress-fill" id="deployFill"></div></div>
@@ -2468,7 +2468,7 @@ const DASHBOARD_HTML = `<!doctype html>
   <div class="row">
     <span class="dot" id="dbDot"></span>
     <span class="muted" id="dbStatus">checking…</span>
-    <button class="secondary" id="dbRestartBtn" onclick="dbRestart()">Restart DB</button>
+    <button class="secondary" id="dbRestartBtn" data-action="db-restart">Restart DB</button>
   </div>
 
   <h3>Sites (uploads folder size per tenant)</h3>
@@ -2490,8 +2490,8 @@ const DASHBOARD_HTML = `<!doctype html>
     <tbody></tbody>
   </table>
   <div class="row">
-    <button class="secondary" onclick="refreshDiskUsage()">Refresh</button>
-    <button class="secondary" onclick="showDiskUsageDetail()">Full breakdown (per image/volume)</button>
+    <button class="secondary" data-action="refresh-disk-usage">Refresh</button>
+    <button class="secondary" data-action="show-disk-usage-detail">Full breakdown (per image/volume)</button>
   </div>
   <pre class="term" id="diskUsageLog" style="display:none"></pre>
 
@@ -2499,14 +2499,14 @@ const DASHBOARD_HTML = `<!doctype html>
   <p class="muted">Real data size per database (control-plane + every tenant's own <code>tenant_&lt;host&gt;</code> database) — separate from the disk usage above, which only sees Docker/OS-level noise and can't tell you if a specific tenant's actual content is what's growing.</p>
   <table id="dbSizesTable" style="width:100%; border-collapse: collapse;"><tbody></tbody></table>
   <div class="row">
-    <button class="secondary" onclick="refreshDbSizes()">Refresh</button>
+    <button class="secondary" data-action="refresh-db-sizes">Refresh</button>
   </div>
 
   <h3>Backup destination</h3>
   <p class="muted">Where the nightly backup cron (<code>/opt/ucms/backup/run.sh</code>) pushes a copy after the local dump finishes. Same setting as the admin panel's Settings tab — editing it here or there updates the same row.</p>
   <div id="backupCronBanner" style="display:none; margin: 0 0 0.6rem; padding: 0.6rem 0.9rem; border-radius: 8px; background: #f9a825; color: #1a1a1a;"></div>
   <div class="row">
-    <select id="backupDestType" onchange="onBackupDestTypeChange()" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;">
+    <select id="backupDestType" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;">
       <option value="local">Local only (no off-site copy)</option>
       <option value="ssh">Remote host (SSH/rsync)</option>
       <option value="s3">S3 / Cloudflare R2</option>
@@ -2535,7 +2535,7 @@ const DASHBOARD_HTML = `<!doctype html>
     <textarea id="backupGdriveJson" placeholder="Paste the service-account JSON key here" rows="4" style="width:100%; font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem; padding:0.4rem; border-radius:6px; border:1px solid #8884; background:transparent; color:inherit;"></textarea>
   </div>
   <div class="row">
-    <button onclick="saveBackupDestination()">Save</button>
+    <button data-action="save-backup-destination">Save</button>
     <span class="muted" id="backupDestMsg"></span>
   </div>
 </div>
@@ -2546,7 +2546,7 @@ const DASHBOARD_HTML = `<!doctype html>
   <div class="row">
     <input id="sslDomain" placeholder="admin.example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
     <input id="sslEmail" placeholder="admin@example.com" style="padding:0.3rem 0.5rem;border-radius:6px;border:1px solid #8884;background:transparent;color:inherit;" />
-    <button onclick="issueSsl()">Issue certificate</button>
+    <button data-action="issue-ssl">Issue certificate</button>
   </div>
   <pre class="term" id="sslLog" style="display:none"></pre>
 </div>
@@ -2771,7 +2771,7 @@ async function refreshBackupCronStatus() {
         ", current v" + escapeHtml(info.expectedVersion || "?") + ")" +
         (info.pgConfigured ? "" : " — this card can't connect to the database yet") +
         ". Off-site push may not work correctly until updated. " +
-        "<button class=\\"secondary\\" onclick=\\"applyBackupCronUpdate()\\" style=\\"margin-left:0.4rem;\\">Apply update</button>";
+        "<button class=\\"secondary\\" data-action=\\"apply-backup-cron-update\\" style=\\"margin-left:0.4rem;\\">Apply update</button>";
     } else {
       el.style.display = "none";
     }
@@ -2789,7 +2789,7 @@ async function applyBackupCronUpdate() {
     el.textContent = "Update applied — monitor is restarting to pick up the new connection details. Reloading in a few seconds…";
     setTimeout(() => location.reload(), 4000);
   } catch (e) {
-    el.innerHTML = "Error applying update: " + escapeHtml(e.message) + " <button class=\\"secondary\\" onclick=\\"applyBackupCronUpdate()\\">Retry</button>";
+    el.innerHTML = "Error applying update: " + escapeHtml(e.message) + " <button class=\\"secondary\\" data-action=\\"apply-backup-cron-update\\">Retry</button>";
   }
 }
 
@@ -2940,7 +2940,7 @@ function actionButton(label, name, action, secondary) {
   const b = document.createElement("button");
   if (secondary) b.className = "secondary";
   b.textContent = label;
-  b.onclick = () => act(name, action);
+  b.addEventListener("click", () => act(name, action));
   return b;
 }
 
@@ -2956,7 +2956,7 @@ async function init() {
     const b = document.createElement("button");
     b.className = "secondary";
     b.textContent = name;
-    b.onclick = () => showLogs(name);
+    b.addEventListener("click", () => showLogs(name));
     logButtons.appendChild(b);
   }
   refresh();
@@ -2996,10 +2996,10 @@ function versionCard(label, value, sub, check, checked, actions) {
 function stackActions(key, label, testable) {
   let html = "<div style=\\"margin-top:.5rem;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap\\">";
   if (testable) {
-    html += "<button class=\\"secondary\\" onclick=\\"stackTest('" + key + "', this)\\">Test</button>";
+    html += "<button class=\\"secondary\\" data-action=\\"stack-test\\" data-stack-key=\\"" + key + "\\">Test</button>";
   }
-  const safeLabel = label.replace(/'/g, "");
-  html += "<button class=\\"secondary\\" onclick=\\"stackUpdate('" + key + "', '" + safeLabel + "', this)\\">Update</button>";
+  const safeLabel = label.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  html += "<button class=\\"secondary\\" data-action=\\"stack-update\\" data-stack-key=\\"" + key + "\\" data-stack-label=\\"" + safeLabel + "\\">Update</button>";
   html += "<span class=\\"muted\\" id=\\"stackMsg-" + key + "\\"></span>";
   html += "</div>";
   return html;
@@ -3276,33 +3276,42 @@ async function restartAll() {
   for (const name of SERVICES) await act(name, "restart");
 }
 
-async function pull() {
-  let pre = null;
+async function pull(button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Checking update…";
   try {
-    pre = await api("/api/preflight");
-  } catch (e) {
-    if (!confirm("Could not run the pre-update safety check (" + e.message + "). Proceed anyway?")) return;
-  }
-  if (pre) {
-    if (pre.verdict === "up-to-date") {
-      if (!confirm("Already on the latest commit — redeploy anyway?")) return;
-    } else if (pre.verdict === "blocked") {
-      alert("Update blocked:\\n\\n" + pre.reasons.join("\\n"));
-      return;
-    } else {
-      const label = pre.verdict === "caution" ? "⚠ Needs attention" : "✓ Safe to update";
-      const msg =
-        label + " — " + pre.commitsBehind + " commit(s) behind origin/main:\\n\\n" +
-        pre.reasons.join("\\n\\n") + "\\n\\nProceed with \\"Pull latest & deploy\\"?";
-      if (!confirm(msg)) return;
+    let pre = null;
+    try {
+      pre = await api("/api/preflight");
+    } catch (e) {
+      if (!confirm("Could not run the pre-update safety check (" + e.message + "). Proceed anyway?")) return;
     }
-  }
-  try {
-    await api("/api/pull", { method: "POST" });
-    pollDeployLog();
-    refresh();
-  } catch (e) {
-    alert(e.message);
+    if (pre) {
+      if (pre.verdict === "up-to-date") {
+        if (!confirm("Already on the latest commit — redeploy anyway?")) return;
+      } else if (pre.verdict === "blocked") {
+        alert("Update blocked:\\n\\n" + pre.reasons.join("\\n"));
+        return;
+      } else {
+        const label = pre.verdict === "caution" ? "⚠ Needs attention" : "✓ Safe to update";
+        const msg =
+          label + " — " + pre.commitsBehind + " commit(s) behind origin/main:\\n\\n" +
+          pre.reasons.join("\\n\\n") + "\\n\\nProceed with \\"Pull latest & deploy\\"?";
+        if (!confirm(msg)) return;
+      }
+    }
+    button.textContent = "Starting deploy…";
+    try {
+      await api("/api/pull", { method: "POST" });
+      pollDeployLog();
+      refresh();
+    } catch (e) {
+      alert(e.message);
+    }
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
   }
 }
 
@@ -3384,6 +3393,40 @@ async function showLogs(name) {
   }
 }
 
+// The CSP blocks inline event attributes. Keep every action in this
+// nonce-authorized script, including buttons inserted by later refreshes.
+const dashboardActions = new Map([
+  ["pull", pull],
+  ["rollback", rollback],
+  ["apply-base-tier", applyBaseTier],
+  ["restart-all", restartAll],
+  ["refresh", refresh],
+  ["db-restart", dbRestart],
+  ["refresh-disk-usage", refreshDiskUsage],
+  ["show-disk-usage-detail", showDiskUsageDetail],
+  ["refresh-db-sizes", refreshDbSizes],
+  ["save-backup-destination", saveBackupDestination],
+  ["apply-backup-cron-update", applyBackupCronUpdate],
+  ["issue-ssl", issueSsl],
+]);
+document.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.classList.contains("tab-btn")) {
+    switchTab(button.dataset.tab);
+    return;
+  }
+  if (button.dataset.action === "stack-test") {
+    stackTest(button.dataset.stackKey, button);
+  } else if (button.dataset.action === "stack-update") {
+    stackUpdate(button.dataset.stackKey, button.dataset.stackLabel, button);
+  } else {
+    const action = dashboardActions.get(button.dataset.action);
+    if (action) action(button);
+  }
+});
+document.getElementById("backupDestType").addEventListener("change", onBackupDestTypeChange);
 init();
 </script>
 </body>
