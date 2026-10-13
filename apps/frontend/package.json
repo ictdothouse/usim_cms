@@ -20,7 +20,7 @@
     "daisyui": "^5.7.47",
     "ioredis": "^5.11.1",
     "sanitize-html": "^2.18.0",
-    "swiper": "^12.1.2",
+    "swiper": "^12.2.0",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
