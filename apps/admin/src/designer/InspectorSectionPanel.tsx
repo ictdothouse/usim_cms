@@ -50,7 +50,7 @@ export function InspectorSectionPanel({ ctx }: { ctx: DesignerCtx }) {
     if (sel.length >= 3) crumbs.push({ label: t("designer-column"), path: sel.slice(0, 3) });
     if (sel.length >= 4) crumbs.push({ label: t("designer-element"), path: sel.slice(0, 4) });
     return (
-      <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-sub">
+      <div className="flex flex-wrap items-center gap-1 text-sm font-medium text-sub">
         {crumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1">
             {i > 0 && <span className="text-line">/</span>}
@@ -77,7 +77,7 @@ export function InspectorSectionPanel({ ctx }: { ctx: DesignerCtx }) {
       <Breadcrumb />
       <p className="text-xs font-bold text-ink">{t("designer-section")}</p>
       {isSuper && (
-        <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+        <label className="flex items-center gap-2 text-sm font-medium text-body">
           <input
             type="checkbox"
             checked={sp.locked === "true"}

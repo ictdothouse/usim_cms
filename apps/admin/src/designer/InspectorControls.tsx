@@ -47,7 +47,7 @@ export function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; pa
   const pathEq = (a: number[]) => sel !== null && sel.length === a.length && a.every((v, i) => sel[i] === v);
   return (
     <div className="space-y-2 rounded-lg border border-line/20 bg-canvas/40 p-2">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-sub">{t("designer-container-children")}</p>
+      <p className="text-xs font-bold uppercase tracking-wide text-sub">{t("designer-container-children")}</p>
       {children.length > 0 && (
         <div className="space-y-1">
           {children.map((child, i) => {
@@ -55,7 +55,7 @@ export function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; pa
             return (
               <div
                 key={child.id}
-                className={`flex items-center gap-1 rounded px-1.5 py-1 text-[11px] ${pathEq(childPath) ? "bg-accent/10 text-accent" : "text-body"}`}
+                className={`flex items-center gap-1 rounded px-1.5 py-1 text-sm ${pathEq(childPath) ? "bg-accent/10 text-accent" : "text-body"}`}
               >
                 <button onClick={() => setSel(childPath)} className="flex-1 truncate text-left font-medium">
                   {t(ELS[child.type].labelKey)}
@@ -107,7 +107,7 @@ export function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; pa
         <select
           value={addType}
           onChange={(ev) => setAddType(ev.target.value as ElType)}
-          className="min-w-0 flex-1 rounded-lg border border-line/30 bg-white px-2 py-1 text-[11px]"
+          className="min-w-0 flex-1 rounded-lg border border-line/30 bg-white px-2 py-1 text-sm"
         >
           {CONTAINER_CHILD_TYPES.map((ty) => (
             <option key={ty} value={ty}>
@@ -117,7 +117,7 @@ export function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; pa
         </select>
         <button
           onClick={() => mutate((bs) => insertAt(bs, path, newEl(addType)))}
-          className="flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-[11px] font-semibold text-white"
+          className="flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-sm font-semibold text-white"
         >
           <Plus className="h-3.5 w-3.5" /> {t("designer-add")}
         </button>
@@ -204,7 +204,7 @@ export function FourSideControl({
 }) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[11px] font-medium text-body">
+      <div className="flex items-center justify-between text-sm font-medium text-body">
         <span className="flex items-center gap-1.5">
           <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
           {hasLangOverride !== undefined && onToggleLangOverride && (
@@ -225,7 +225,7 @@ export function FourSideControl({
       </div>
       {linked ? (
         <BufferedInput
-          className="w-full rounded-lg border border-line/30 bg-white px-2 py-1.5 text-[11px]"
+          className="w-full rounded-lg border border-line/30 bg-white px-2 py-1.5 text-sm"
           value={getSide(sides[0])}
           onCommit={(v) => sides.forEach((s) => setSide(s, v))}
         />
@@ -234,7 +234,7 @@ export function FourSideControl({
           {sides.map((s) => (
             <BufferedInput
               key={s}
-              className="w-full rounded-lg border border-line/30 bg-white px-1 py-1.5 text-center text-[11px]"
+              className="w-full rounded-lg border border-line/30 bg-white px-1 py-1.5 text-center text-sm"
               value={getSide(s)}
               placeholder={s[0].toUpperCase()}
               title={s}
@@ -296,7 +296,7 @@ function BoxModelInput({ ring, side, corner, live }: { ring: RingConfig; side: S
       className={
         corner
           ? "w-7 rounded border border-line/40 bg-white px-0.5 py-0.5 text-center text-[9px] text-ink shadow-sm"
-          : "w-9 rounded border border-line/30 bg-white px-0.5 py-0.5 text-center text-[10px] text-ink"
+          : "w-9 rounded border border-line/30 bg-white px-0.5 py-0.5 text-center text-xs text-ink"
       }
       value={ring.getSide(side)}
       // Unset side: show what Live Edit actually renders (a section's
@@ -398,7 +398,7 @@ const VIS_ITEMS: { key: VisKey; icon: typeof Monitor }[] = [
 // this file, just inverted from "visible".
 export function VisibilityToggle({ get, set, t }: { get: (k: VisKey) => boolean; set: (k: VisKey, v: boolean) => void; t: (k: Key) => string }) {
   return (
-    <label className="block text-[11px] font-medium text-body">
+    <label className="block text-sm font-medium text-body">
       {t("designer-visibility")}
       <div className="mt-1 flex gap-1">
         {VIS_ITEMS.map(({ key, icon: Icon }) => {

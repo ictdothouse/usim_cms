@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useBlocker } from "react-router-dom";
+import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
 import * as api from "@/lib/api";
 import { GOOGLE_FONTS, clone } from "@/lib/utils";
@@ -58,6 +60,7 @@ export default function Designer({
   // component has no route of its own to preview).
   kind?: "page" | "blueprint" | "siteChrome" | "symbol";
 }) {
+  const confirmLeave = useConfirm();
   // Reopen onto an autosaved-but-unpublished edit (pages.draft, apps/api
   // migration 0029 — a published page's autosave target, see usePersist's
   // saveDraft) instead of the live content: overlaid onto `page` itself,
@@ -114,7 +117,7 @@ export default function Designer({
   // Declared ahead of the useUndoRedo() call below, which needs its setter.
   const [hoverBand, setHoverBand] = useState<string | null>(null);
   const {
-    rawBlocks,
+    rawBlocks, canUndo, canRedo,
     mutate,
     setRawBlocksDirectly,
     startSpacingDrag,
@@ -127,6 +130,16 @@ export default function Designer({
   // drawers (same pattern as Shell's mobile nav) instead of the fixed
   // 3-column layout — `null` means both are closed.
   const [mobilePanel, setMobilePanel] = useState<"palette" | null>(null);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => {
+      setIsDesktop(media.matches);
+      if (media.matches) setMobilePanel(null);
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Grouped Styles panel: which Inspector field-groups are collapsed. Shared
   // across every selection (not reset per-select) — matches Framer/Webflow,
@@ -165,7 +178,7 @@ export default function Designer({
   const {
     blocks,
     pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
-    pageSeo, setPageSeo,
+    pageSeo, setPageSeo, loadRestoredPage,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
     siteLanguages, pageLanguage, setPageLanguage,
     activeLang, hasLangSlot, clickPageLanguagePill, translating, retranslatePageLanguage,
@@ -257,17 +270,36 @@ export default function Designer({
   } = useSiteChrome({ tenantHost, token, page, kind, setError, bumpStructural });
 
   const {
-    showHistory, setShowHistory, revisions, revisionsLoaded, restoring,
+    showHistory, setShowHistory, revisions, revisionsLoaded, historyError, restoring,
     renameSlug, save, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
     openDevicePreview, withDeviceFrame,
   } = usePersist({
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
-    rawBlocks, setRawBlocksDirectly, pageSettings, setPageSettings, pageSeo,
+    rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
     dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny, setMsg,
-    previewModal, setPreviewModal, t,
+    previewModal, setPreviewModal, t, confirmAction: confirmLeave,
   });
+
+  const uiBusy = busy || restoring;
+  const blocker = useBlocker(dirty || uiBusy);
+  useEffect(() => {
+    if (!dirty && !uiBusy) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, uiBusy]);
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    let active = true;
+    void confirmLeave(t("designer-unsaved")).then((leave) => {
+      if (!active) return;
+      if (leave) blocker.proceed();
+      else blocker.reset();
+    });
+    return () => { active = false; };
+  }, [blocker, confirmLeave, t]);
 
   // Autosave: debounced silent save while dirty (usePersist's autosave()
   // picks the target). A PUBLISHED page autosaves to its pages.draft only —
@@ -280,12 +312,12 @@ export default function Designer({
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const eligible = kind !== "siteChrome" || chromeStatus !== "published";
-    if (!dirty || !eligible || busy) return;
+    if (!dirty || !eligible || uiBusy) return;
     autosaveTimerRef.current = setTimeout(() => void autosave(), 1000);
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
-  }, [dirty, busy, kind, page.status, chromeStatus, rawBlocks, pageSettings]);
+  }, [dirty, uiBusy, kind, page.status, chromeStatus, rawBlocks, pageSettings]);
 
   // "menu" element's Inspector needs a live list to populate its menuId
   // picker — dynamic per-tenant data, unlike every other field here which
@@ -338,7 +370,10 @@ export default function Designer({
   // author was already on. Jumps to Settings on any new selection so the
   // click-to-edit flow still feels immediate.
   useEffect(() => {
-    if (sel || Object.values(sliderInnerSel).some(Boolean)) setActiveLeftTab("settings");
+    if (sel || Object.values(sliderInnerSel).some(Boolean)) {
+      setActiveLeftTab("settings");
+      if (window.matchMedia("(max-width: 1023px)").matches) setMobilePanel("palette");
+    }
   }, [sel, sliderInnerSel]);
 
   // Auto-expand the Layers tree around the current selection so switching to
@@ -392,6 +427,7 @@ export default function Designer({
     bumpStructural,
     isSectionLocked,
     t,
+    confirmAction: confirmLeave,
     tenantHost,
     token,
     pageSettings,
@@ -502,6 +538,8 @@ export default function Designer({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable], [role='textbox']"))) return;
       const key = e.key.toLowerCase();
       if (key === "z" && e.shiftKey) {
         e.preventDefault();
@@ -571,7 +609,6 @@ export default function Designer({
   // Live Edit and Preview are the same render at the same viewport.
 
   function close() {
-    if (dirty && !confirm(t("designer-unsaved"))) return;
     onClose(savedAny);
   }
 
@@ -580,7 +617,7 @@ export default function Designer({
   const selCls = (p: number[]) =>
     selEq(p) ? "outline outline-2 outline-accent" : "outline outline-1 outline-transparent hover:outline-accent/30";
 
-  function pick(e: React.MouseEvent, p: number[]) {
+  function pick(e: React.SyntheticEvent, p: number[]) {
     e.stopPropagation();
     setSel(p);
   }
@@ -697,7 +734,7 @@ export default function Designer({
   // reference-stable across the component's lifetime, so its presence in
   // the array never triggers a recompute, only satisfies the lint rule).
   const designerCtx: DesignerCtx = useMemo(() => ({
-    t, bp, mode, kind, sel, setSel, blocks,
+    t, confirmAction: confirmLeave, bp, mode, kind, sel, setSel, blocks,
     isSuper,
     ...stableFns,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
@@ -715,7 +752,7 @@ export default function Designer({
     editingText,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
-    t, bp, mode, kind, sel, setSel, blocks,
+    t, confirmLeave, bp, mode, kind, sel, setSel, blocks,
     isSuper,
     stableFns,
     linkedPadding, setLinkedPadding, linkedRadius, setLinkedRadius, linkedMargin, setLinkedMargin,
@@ -741,6 +778,7 @@ export default function Designer({
         setMobilePanel={setMobilePanel}
         t={t}
         page={page}
+        tenantHost={tenantHost}
         kind={kind}
         editingSlug={editingSlug}
         setEditingSlug={setEditingSlug}
@@ -749,7 +787,9 @@ export default function Designer({
         slugError={slugError}
         setSlugError={setSlugError}
         renameSlug={renameSlug}
-        busy={busy}
+        busy={uiBusy}
+        canUndo={canUndo}
+        canRedo={canRedo}
         dirty={dirty}
         hasDraft={hasDraft}
         msg={msg}
@@ -776,16 +816,20 @@ export default function Designer({
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Mobile-only backdrop for the off-canvas palette/inspector drawers */}
         {mobilePanel && (
-          <div className="absolute inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMobilePanel(null)} aria-hidden="true" />
+          <button type="button" aria-label={t("designer-close")} className="absolute inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMobilePanel(null)} />
         )}
         <DesignerPalette
           ctx={designerCtx}
           mobilePanel={mobilePanel}
+          setMobilePanel={setMobilePanel}
+          isDesktop={isDesktop}
           activeLeftTab={activeLeftTab}
           setActiveLeftTab={setActiveLeftTab}
           drag={drag}
           mode={mode}
           startPaletteDrag={startPaletteDrag}
+          dropIntoColumn={dropIntoColumn}
+          dropIntoNewSection={dropIntoNewSection}
           blocks={blocks}
           treeDropHint={treeDropHint}
           rowDragProps={rowDragProps}
@@ -921,6 +965,8 @@ export default function Designer({
         setShowHistory={setShowHistory}
         revisions={revisions}
         revisionsLoaded={revisionsLoaded}
+        historyError={historyError}
+        loadHistory={loadHistory}
         restoring={restoring}
         restoreRevision={restoreRevision}
       />

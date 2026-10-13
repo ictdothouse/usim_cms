@@ -46,6 +46,7 @@ export interface FieldGroupsProps {
   toggleGroup: (g: FieldGroupKey) => void;
   bp: Bp;
   t: (k: Key) => string;
+  confirmAction?: (message: string) => Promise<boolean>;
   // Every other FieldInputProps field, threaded through so FieldGroups can
   // forward it into each FieldInput call below.
   iconSearch: string;
@@ -81,7 +82,7 @@ export interface FieldGroupsProps {
 // collapsed, everything else starts open — see collapsedGroups above).
 export function FieldGroups({
   fields, getValue, setValue, only, hasOverride, onToggleOverride, hasLangOverride, onToggleLangOverride,
-  collapsedGroups, toggleGroup, bp, t,
+  collapsedGroups, toggleGroup, bp, t, confirmAction,
   iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
   sliderInnerSel, setSliderInnerSel,
   uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey, availableMenus, availableCategories, availableSymbols, ICONS,
@@ -102,7 +103,7 @@ export function FieldGroups({
             <button
               type="button"
               onClick={() => toggleGroup(g.key)}
-              className="flex w-full items-center justify-between py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-sub"
+              className="flex w-full items-center justify-between py-1.5 text-left text-sm font-bold uppercase tracking-wide text-sub"
             >
               <span className="flex items-center gap-1.5">
                 <Icon className="h-3.5 w-3.5" /> {t(g.labelKey)}
@@ -121,7 +122,7 @@ export function FieldGroups({
                   // single-control fields where click-to-focus is the point.
                   const Wrapper = f.kind === "slides" || f.kind === "cards" || f.kind === "pairs" || f.kind === "repeater" || f.kind === "gallery" ? "div" : "label";
                   return (
-                    <Wrapper key={f.key} className="block text-[11px] font-medium text-body">
+                    <Wrapper key={f.key} className="block text-sm font-medium text-body">
                       <span className="inline-flex items-center gap-1">
                         {FieldLabel(f.labelKey, t)}
                         {hasLangOverride && onToggleLangOverride && g.key !== "content" && f.kind !== "slides" && f.kind !== "image" && (
@@ -136,7 +137,7 @@ export function FieldGroups({
                           field: f, value: getValue(f), onChange: (v) => setValue(f, v),
                           iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
                           sliderInnerSel, setSliderInnerSel,
-                          bp, t, uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
+                          bp, t, confirmAction, uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,
                           availableMenus, availableCategories, availableSymbols, ICONS,
                         })}
                       </div>

@@ -27,6 +27,7 @@ export const BASE_LANG = "__base__";
 
 export interface DesignerCtx {
   t: (k: Key) => string;
+  confirmAction: (message: string) => Promise<boolean>;
   bp: Bp;
   mode: "blocks" | "live";
   kind: "page" | "blueprint" | "siteChrome" | "symbol";

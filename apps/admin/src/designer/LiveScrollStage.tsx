@@ -13,7 +13,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 type Metrics = { y: number; max: number };
 
 export function LiveScrollStage({ activeKey, children }: { activeKey: string; children: ReactNode }) {
-  const outerRef = useRef<HTMLElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   // Per iframe window (both double-buffer slots report, including the hidden
   // one while it loads), so a swap can apply the new frame's numbers at once.
@@ -70,9 +70,9 @@ export function LiveScrollStage({ activeKey, children }: { activeKey: string; ch
   }
 
   return (
-    <main ref={outerRef} onScroll={onScroll} className="relative min-w-0 flex-1 overflow-y-auto bg-canvas">
+    <div ref={outerRef} role="region" aria-label="Live Edit" data-testid="designer-live-stage" onScroll={onScroll} className="relative min-w-0 flex-1 overflow-y-auto bg-canvas">
       <div className="sticky top-0 h-full p-4">{children}</div>
       <div ref={spacerRef} aria-hidden="true" />
-    </main>
+    </div>
   );
 }

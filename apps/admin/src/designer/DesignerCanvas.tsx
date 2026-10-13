@@ -67,7 +67,7 @@ export interface DesignerCanvasProps {
   ctx: DesignerCtx;
   selEq: (p: number[]) => boolean;
   selCls: (p: number[]) => string;
-  pick: (e: React.MouseEvent, p: number[]) => void;
+  pick: (e: React.SyntheticEvent, p: number[]) => void;
   setCtxMenu: (v: { path: number[]; x: number; y: number } | null) => void;
   effectiveTheme: Record<string, string> | null;
   desktopBoxed: boolean;
@@ -248,7 +248,7 @@ export function DesignerCanvas({
   function BlockControls({ b }: { b: number }) {
     const locked = isSectionLocked(b);
     return (
-      <span className="flex items-center gap-1" onClick={(ev) => ev.stopPropagation()}>
+      <span className="flex items-center gap-1 [&>button]:min-h-8 [&>button]:min-w-8 [&>button]:focus-visible:outline-2 [&>button]:focus-visible:outline-accent" onClick={(ev) => ev.stopPropagation()}>
         {locked && (
           <span title={t("designer-section-locked-title")}>
             <Lock className="h-3 w-3 text-amber-500" />
@@ -272,35 +272,37 @@ export function DesignerCanvas({
         >
           ↓
         </button>
-        <button onClick={() => duplicateSection(b)} className="px-0.5 text-accent" title={t("designer-duplicate")}>
+        <button onClick={() => duplicateSection(b)} className="px-0.5 text-accent" aria-label={t("designer-duplicate")} title={t("designer-duplicate")}>
           <Copy className="h-3 w-3" />
         </button>
-        <button onClick={() => copySection(b)} className="px-0.5 text-accent" title={t("designer-copy")}>
+        <button onClick={() => copySection(b)} className="px-0.5 text-accent" aria-label={t("designer-copy")} title={t("designer-copy")}>
           <Clipboard className="h-3 w-3" />
         </button>
         <button
           onClick={() => pasteSection(b)}
           disabled={!clipHas("section")}
+          aria-label={t("designer-paste")}
           className="px-0.5 text-accent disabled:opacity-30"
           title={t("designer-paste")}
         >
           <ClipboardPaste className="h-3 w-3" />
         </button>
-        <button onClick={() => copyStyleSection(b)} className="px-0.5 text-accent" title={t("designer-copy-style")}>
+        <button onClick={() => copyStyleSection(b)} className="px-0.5 text-accent" aria-label={t("designer-copy-style")} title={t("designer-copy-style")}>
           <Paintbrush className="h-3 w-3" />
         </button>
         <button
           onClick={() => pasteStyleSection(b)}
           disabled={!styleHas("section") || locked}
+          aria-label={t("designer-paste-style")}
           className="px-0.5 text-accent disabled:opacity-30"
           title={t("designer-paste-style")}
         >
           <Paintbrush className="h-3 w-3 opacity-50" />
         </button>
-        <button onClick={() => saveAsTemplate([b])} className="px-0.5 text-accent" title={t("designer-templates-save")}>
+        <button onClick={() => saveAsTemplate([b])} className="px-0.5 text-accent" aria-label={t("designer-templates-save")} title={t("designer-templates-save")}>
           <LayoutTemplate className="h-3 w-3" />
         </button>
-        <button onClick={() => deleteSection(b)} disabled={locked} className="px-0.5 text-red-500 disabled:opacity-30" title={locked ? t("designer-section-locked-title") : t("designer-delete")}>
+        <button onClick={() => deleteSection(b)} disabled={locked} className="px-0.5 text-red-500 disabled:opacity-30" aria-label={t("designer-delete")} title={locked ? t("designer-section-locked-title") : t("designer-delete")}>
           <Trash2 className="h-3 w-3" />
         </button>
       </span>
@@ -308,14 +310,17 @@ export function DesignerCanvas({
   }
 
   return (
-    <main
+    <div
+      role="region"
+      aria-label={t("designer-block-view")}
+      data-testid="designer-canvas"
       // No isCanvasMode means genuinely edge-to-edge content (Live Edit
       // desktop, or a "full" contentWidth page) — the old unconditional
       // p-6 left a same-color gap around it with nothing to explain it,
       // reading as an accidental leftover margin ("macam island") rather
       // than a deliberate frame. Only the boxed/backdropped case gets
       // that breathing room now.
-      className={`min-w-0 flex-1 overflow-y-auto ${framed ? "bg-canvas p-4" : ""}`}
+      className={`min-w-0 flex-1 overflow-y-auto [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent ${framed ? "bg-canvas p-4" : ""}`}
       onClick={() => setSel(null)}
       style={
         {
@@ -429,7 +434,7 @@ export function DesignerCanvas({
               }}
             >
               <HiddenAtBpBadge hidden={sectionHiddenAtBp} bp={bp} t={t} />
-              <div className="absolute -top-3 left-3 z-10 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm group-hover:flex">
+              <div className={`absolute -top-3 left-3 z-10 items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-xs font-bold text-sub shadow-sm ${selEq([b]) ? "flex" : "hidden group-hover:flex group-focus-within:flex"}`}>
                 {t("designer-section")} {BlockControls({ b })}
               </div>
               <div className="relative" style={{ margin: sectionMargin, color: sectionColor }}>
@@ -453,7 +458,7 @@ export function DesignerCanvas({
                           <button
                             onClick={(ev) => pick(ev, [b, r])}
                             title={t("designer-row-gap")}
-                            className="absolute -left-2 -top-2 z-20 hidden items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-[10px] font-bold text-sub shadow-sm opacity-0 transition-opacity group-hover/row:flex group-hover/row:opacity-100"
+                            className={`absolute -left-2 -top-2 z-20 items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-xs font-bold text-sub shadow-sm ${selEq([b, r]) ? "flex" : "hidden group-hover/row:flex group-focus-within/row:flex"}`}
                           >
                             {t("designer-row")}
                           </button>
@@ -463,7 +468,8 @@ export function DesignerCanvas({
                               deleteRow(b, r);
                             }}
                             title={t("designer-delete-row")}
-                            className="absolute -right-2 -top-2 z-20 hidden rounded-full bg-white p-1 text-red-500 opacity-0 shadow-sm ring-1 ring-line/30 transition-opacity group-hover/row:flex group-hover/row:opacity-100"
+                            aria-label={t("designer-delete-row")}
+                            className={`absolute -right-2 -top-2 z-20 rounded-full bg-white p-1 text-red-500 shadow-sm ring-1 ring-line/30 ${selEq([b, r]) ? "flex" : "hidden group-hover/row:flex group-focus-within/row:flex"}`}
                           >
                             <Trash2 className="h-3 w-3" />
                           </button>
@@ -558,6 +564,7 @@ export function DesignerCanvas({
                                 deleteColumn(b, r, c);
                               }}
                               title={t("designer-delete")}
+                              aria-label={t("designer-delete")}
                               className="absolute -right-2 -top-2 z-30 rounded-full bg-white p-1 text-red-500 shadow-sm ring-1 ring-line/30"
                             >
                               <Trash2 className="h-3 w-3" />
@@ -616,6 +623,7 @@ export function DesignerCanvas({
                                     deleteElement(b, r, c, e);
                                   }}
                                   title={t("designer-delete")}
+                                  aria-label={t("designer-delete")}
                                   className="absolute -right-2 -top-2 z-30 rounded-full bg-white p-1 text-red-500 shadow-sm ring-1 ring-line/30"
                                 >
                                   <Trash2 className="h-3 w-3" />
@@ -650,7 +658,7 @@ export function DesignerCanvas({
                     );
                   })}
                   {/* add-row presets */}
-                  <div className="hidden items-center gap-1.5 pt-1 group-hover:flex" onClick={(ev) => ev.stopPropagation()}>
+                  <div className={`items-center gap-1.5 pt-1 ${selEq([b]) ? "flex" : "hidden group-hover:flex group-focus-within:flex"}`} onClick={(ev) => ev.stopPropagation()}>
                     <span className="text-[10px] font-semibold text-sub">{t("designer-add-row")}:</span>
                     {ROW_PRESETS.map((preset, i) => (
                       <button
@@ -707,6 +715,6 @@ export function DesignerCanvas({
         )}
         </div>
       </div>
-    </main>
+    </div>
   );
 }

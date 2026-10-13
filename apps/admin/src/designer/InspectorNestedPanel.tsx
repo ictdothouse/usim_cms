@@ -36,7 +36,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
     if (sel.length >= 3) crumbs.push({ label: t("designer-column"), path: sel.slice(0, 3) });
     if (sel.length >= 4) crumbs.push({ label: t("designer-element"), path: sel.slice(0, 4) });
     return (
-      <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-sub">
+      <div className="flex flex-wrap items-center gap-1 text-sm font-medium text-sub">
         {crumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1">
             {i > 0 && <span className="text-line">/</span>}
@@ -105,7 +105,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
             <button
               key={tab}
               onClick={() => setInspectorTab(tab)}
-              className={`flex-1 rounded-full py-1 text-[11px] font-semibold ${
+              className={`flex-1 rounded-full py-1 text-sm font-semibold ${
                 inspectorTab === tab ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
               }`}
             >
@@ -161,7 +161,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
           <button
             onClick={() => mutate((bs) => moveWithin(bs, parentPath, idx, idx - 1))}
             disabled={idx === 0}
-            className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
             aria-label={t("designer-move-element-up")}
           >
             <ArrowUp className="h-3.5 w-3.5" />
@@ -169,7 +169,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
           <button
             onClick={() => mutate((bs) => moveWithin(bs, parentPath, idx, idx + 1))}
             disabled={idx === siblingCount - 1}
-            className="flex items-center gap-1 text-[11px] font-semibold text-accent disabled:opacity-30"
+            className="flex items-center gap-1 text-sm font-semibold text-accent disabled:opacity-30"
             aria-label={t("designer-move-element-down")}
           >
             <ArrowDown className="h-3.5 w-3.5" />
@@ -178,7 +178,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
         <div className="flex gap-3">
           <button
             onClick={() => mutate((bs) => insertAt(bs, parentPath, structuredClone(getNode(bs, sel)), idx + 1))}
-            className="flex items-center gap-1 text-[11px] font-semibold text-accent"
+            className="flex items-center gap-1 text-sm font-semibold text-accent"
           >
             <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
           </button>
@@ -187,7 +187,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
               mutate((bs) => removeAt(bs, sel));
               setSel(parentPath);
             }}
-            className="flex items-center gap-1 text-[11px] font-semibold text-red-500"
+            className="flex items-center gap-1 text-sm font-semibold text-red-500"
           >
             <Trash2 className="h-3.5 w-3.5" /> {t("designer-delete")}
           </button>

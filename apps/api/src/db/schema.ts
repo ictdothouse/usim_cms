@@ -245,6 +245,10 @@ export const pageRevisions = pgTable("page_revisions", {
   title: text("title").notNull(),
   layout: jsonb("layout").notNull().default([]),
   settings: jsonb("settings").notNull().default({}),
+  seo: jsonb("seo"),
+  translations: jsonb("translations"),
+  language: text("language"),
+  multilangEnabled: boolean("multilang_enabled"),
   bannerImageUrl: text("banner_image_url"),
   status: text("status").notNull(), // "published" — the only page status this ever snapshots
   publishedAt: timestamp("published_at"),

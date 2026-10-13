@@ -12,7 +12,7 @@
 // Holds no hooks of its own — deliberately NOT wrapped in React.memo (this
 // region wasn't memoized before the split either).
 import { ChevronDown, ChevronRight, Layers, Lock, Settings } from "lucide-react";
-import type { MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import type { Key } from "@/i18n";
 import { Inspector } from "./Inspector";
 import { ELS, LAYOUT_PRESETS } from "./elements";
@@ -28,18 +28,28 @@ export function LayersTreeView({
   rowDragProps: (kind: "section" | "column" | "element", path: number[], key: string) => Record<string, unknown>;
   expanded: Set<string>;
   selEq: (p: number[]) => boolean;
-  pick: (e: React.MouseEvent, p: number[]) => void;
+  pick: (e: React.SyntheticEvent, p: number[]) => void;
   toggleExpand: (key: string) => void;
   t: (k: Key) => string;
 }) {
+  const selectOnKey = (ev: React.KeyboardEvent<HTMLElement>, path: number[]) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    pick(ev, path);
+  };
   return (
-    <div className="space-y-0.5 text-xs">
+    <div role="tree" aria-label={t("designer-tab-layers")} className="space-y-0.5 text-sm">
       {blocks.map((block, b) => {
         if (block.type !== "section") {
           const key = `${b}`;
           return (
             <div
               key={b}
+              role="treeitem"
+              tabIndex={0}
+              aria-selected={selEq([b])}
+              onKeyDown={(ev) => selectOnKey(ev, [b])}
               className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sub ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
               {...rowDragProps("section", [b], key)}
             >
@@ -54,6 +64,11 @@ export function LayersTreeView({
         return (
           <div key={b}>
             <div
+              role="treeitem"
+              tabIndex={0}
+              aria-selected={selEq([b])}
+              aria-expanded={isOpen}
+              onKeyDown={(ev) => selectOnKey(ev, [b])}
               className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === key && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === key && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
               onClick={(e) => pick(e, [b])}
               {...rowDragProps("section", [b], key)}
@@ -71,7 +86,11 @@ export function LayersTreeView({
                 <div key={r} className="ml-3">
                   {sp.rows.length > 1 && (
                     <div
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer ${selEq([b, r]) ? "bg-accent/10 text-accent" : "text-sub hover:bg-canvas"}`}
+                      role="treeitem"
+                      tabIndex={0}
+                      aria-selected={selEq([b, r])}
+                      onKeyDown={(ev) => selectOnKey(ev, [b, r])}
+                      className={`rounded px-1.5 py-0.5 text-xs font-semibold cursor-pointer ${selEq([b, r]) ? "bg-accent/10 text-accent" : "text-sub hover:bg-canvas"}`}
                       onClick={(e) => pick(e, [b, r])}
                     >
                       {t("designer-layers-row")} {r + 1}
@@ -83,6 +102,11 @@ export function LayersTreeView({
                     return (
                       <div key={c} className="ml-1.5">
                         <div
+                          role="treeitem"
+                          tabIndex={0}
+                          aria-selected={selEq([b, r, c])}
+                          aria-expanded={colOpen}
+                          onKeyDown={(ev) => selectOnKey(ev, [b, r, c])}
                           className={`flex items-center gap-1 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === colKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === colKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
                           onClick={(e) => pick(e, [b, r, c])}
                           {...rowDragProps("column", [b, r, c], colKey)}
@@ -103,6 +127,10 @@ export function LayersTreeView({
                             const elKey = `${b}.${r}.${c}.${e}`;
                             return (
                               <div
+                                role="treeitem"
+                                tabIndex={0}
+                                aria-selected={selEq([b, r, c, e])}
+                                onKeyDown={(ev) => selectOnKey(ev, [b, r, c, e])}
                                 key={el.id}
                                 className={`ml-4 flex items-center gap-1.5 rounded px-1.5 py-1 cursor-pointer ${selEq([b, r, c, e]) ? "bg-accent/10 text-accent" : "hover:bg-canvas"} ${treeDropHint?.key === elKey && treeDropHint.pos === "before" ? "border-t-2 border-accent rounded-t-none" : ""} ${treeDropHint?.key === elKey && treeDropHint.pos === "after" ? "border-b-2 border-accent rounded-b-none" : ""}`}
                                 onClick={(ev) => pick(ev, [b, r, c, e])}
@@ -127,17 +155,21 @@ export function LayersTreeView({
 export interface DesignerPaletteProps {
   ctx: DesignerCtx;
   mobilePanel: "palette" | null;
+  setMobilePanel: (v: "palette" | null) => void;
+  isDesktop: boolean;
   activeLeftTab: "elements" | "layers" | "settings";
   setActiveLeftTab: (tab: "elements" | "layers" | "settings") => void;
   drag: MutableRefObject<Drag | null>;
   mode: "blocks" | "live";
   startPaletteDrag: (e: React.PointerEvent<HTMLElement>, payload: Drag, label: string) => void;
+  dropIntoColumn: (path: number[], index?: number) => void;
+  dropIntoNewSection: (afterBlockIndex?: number) => void;
   blocks: Block[];
   treeDropHint: { key: string; pos: "before" | "after" } | null;
   rowDragProps: (kind: "section" | "column" | "element", path: number[], key: string) => Record<string, unknown>;
   expanded: Set<string>;
   selEq: (p: number[]) => boolean;
-  pick: (e: React.MouseEvent, p: number[]) => void;
+  pick: (e: React.SyntheticEvent, p: number[]) => void;
   toggleExpand: (key: string) => void;
   t: (k: Key) => string;
   kind: "page" | "blueprint" | "siteChrome" | "symbol";
@@ -148,31 +180,76 @@ export interface DesignerPaletteProps {
 }
 
 export function DesignerPalette({
-  ctx, mobilePanel, activeLeftTab, setActiveLeftTab, drag, mode, startPaletteDrag,
+  ctx, mobilePanel, setMobilePanel, isDesktop, activeLeftTab, setActiveLeftTab, drag, mode, startPaletteDrag, dropIntoColumn, dropIntoNewSection,
   blocks, treeDropHint, rowDragProps, expanded, selEq, pick, toggleExpand, t,
   kind, chromeKind, chromeIsDefault, chromeMobileNav, patchChromeMeta,
 }: DesignerPaletteProps) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (isDesktop || mobilePanel !== "palette") return;
+    const previous = document.activeElement;
+    panelRef.current?.querySelector<HTMLElement>("button")?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setMobilePanel(null); return; }
+      if (event.key !== "Tab") return;
+      const focusable = [...(panelRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']") ?? [])];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (previous instanceof HTMLElement) previous.focus();
+    };
+  }, [isDesktop, mobilePanel, setMobilePanel]);
+  function addFromPalette(payload: Drag) {
+    const selected = ctx.sel;
+    drag.current = payload;
+    if (selected && blocks[selected[0]]?.type === "section") {
+      const sp = blocks[selected[0]].props as unknown as SectionProps;
+      const row = Math.min(selected[1] ?? 0, sp.rows.length - 1);
+      const col = Math.min(selected[2] ?? 0, (sp.rows[row]?.columns.length ?? 1) - 1);
+      if (row >= 0 && col >= 0) dropIntoColumn([selected[0], row, col]);
+      else dropIntoNewSection();
+    } else {
+      dropIntoNewSection();
+    }
+    setMobilePanel(null);
+  }
   return (
     <aside
-      className={`absolute inset-y-0 left-0 z-40 w-72 transform overflow-y-auto border-r border-line/30 bg-white p-3 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-64 lg:translate-x-0 ${
+      id="designer-palette"
+      ref={(node) => { panelRef.current = node; if (node) node.inert = !isDesktop && mobilePanel !== "palette"; }}
+      aria-hidden={!isDesktop && mobilePanel !== "palette"}
+      role={!isDesktop && mobilePanel === "palette" ? "dialog" : undefined}
+      aria-modal={!isDesktop && mobilePanel === "palette" ? true : undefined}
+      aria-label={t(activeLeftTab === "settings" ? "designer-inspector" : activeLeftTab === "layers" ? "designer-tab-layers" : "designer-tab-elements")}
+      className={`designer-palette absolute inset-y-0 left-0 z-40 w-72 transform overflow-y-auto border-r border-line/30 bg-white p-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:static lg:z-auto lg:w-72 lg:translate-x-0 ${
         mobilePanel === "palette" ? "translate-x-0" : "-translate-x-full"
       }`}
     >
-      <div className="mb-2 flex gap-1 rounded-lg bg-canvas p-0.5 text-[10px] font-semibold">
+      <button type="button" onClick={() => setMobilePanel(null)} className="mb-2 min-h-10 w-full rounded-lg border border-line/40 text-sm font-semibold text-body lg:hidden">{t("designer-close")}</button>
+      <div className="mb-2 flex gap-1 rounded-lg bg-canvas p-0.5 text-xs font-semibold">
         <button
           onClick={() => setActiveLeftTab("elements")}
+          aria-pressed={activeLeftTab === "elements"}
           className={`flex-1 rounded-md py-1 ${activeLeftTab === "elements" ? "bg-white shadow-sm" : "text-sub"}`}
         >
           {t("designer-tab-elements")}
         </button>
         <button
           onClick={() => setActiveLeftTab("layers")}
+          aria-pressed={activeLeftTab === "layers"}
           className={`flex-1 rounded-md py-1 inline-flex items-center justify-center gap-1 ${activeLeftTab === "layers" ? "bg-white shadow-sm" : "text-sub"}`}
         >
           <Layers className="h-3 w-3" /> {t("designer-tab-layers")}
         </button>
         <button
           onClick={() => setActiveLeftTab("settings")}
+          aria-pressed={activeLeftTab === "settings"}
           className={`flex-1 rounded-md py-1 inline-flex items-center justify-center gap-1 ${activeLeftTab === "settings" ? "bg-white shadow-sm" : "text-sub"}`}
         >
           <Settings className="h-3 w-3" /> {t("designer-inspector")}
@@ -181,14 +258,16 @@ export function DesignerPalette({
       {activeLeftTab === "elements" ? (
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-category-layout")}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-sub">{t("designer-category-layout")}</p>
             <div className="grid grid-cols-2 gap-1.5">
               {LAYOUT_PRESETS.map((preset) => {
                 const Icon = preset.icon;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={preset.key}
                     draggable={mode !== "live"}
+                    onClick={(ev) => { if (mode !== "live" || ev.detail === 0) addFromPalette(preset.drag); }}
                     onDragStart={
                       mode === "live"
                         ? undefined
@@ -205,24 +284,26 @@ export function DesignerPalette({
                     // ever fires), firing pointercancel immediately — the
                     // gesture never gets a chance to start on a touch
                     // device (final review finding).
-                    className="touch-none flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-[10px] font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+                    className="touch-none flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-xs font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
                   >
                     <Icon className="h-4 w-4 text-accent" /> {t(preset.labelKey)}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
           <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-category-content")}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-sub">{t("designer-category-content")}</p>
             {(Object.keys(ELS) as ElType[])
               .filter((type) => type !== "container")
               .map((type) => {
                 const Icon = ELS[type].icon;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={type}
                     draggable={mode !== "live"}
+                    onClick={(ev) => { if (mode !== "live" || ev.detail === 0) addFromPalette({ kind: "new", type }); }}
                     onDragStart={
                       mode === "live"
                         ? undefined
@@ -236,11 +317,11 @@ export function DesignerPalette({
                     className="touch-none flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
                   >
                     <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
-                  </div>
+                  </button>
                 );
               })}
           </div>
-          <p className="pt-2 text-[10px] leading-relaxed text-sub">{t("designer-drop-hint")}</p>
+          <p className="pt-2 text-xs leading-relaxed text-sub">{t("designer-drop-hint")}</p>
         </div>
       ) : activeLeftTab === "layers" ? (
         <LayersTreeView
@@ -255,11 +336,11 @@ export function DesignerPalette({
         />
       ) : (
         <div className="space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-sub">{t("designer-inspector")}</p>
           {kind === "siteChrome" && (
             <div className="mb-1 space-y-3 rounded-lg border border-line/30 p-3">
               <p className="text-xs font-bold text-ink">{t("header-footer-settings")}</p>
-              <label className="flex items-center gap-2 text-[11px] font-medium text-body">
+              <label className="flex items-center gap-2 text-sm font-medium text-body">
                 <input
                   type="checkbox"
                   checked={chromeIsDefault}
@@ -269,8 +350,8 @@ export function DesignerPalette({
               </label>
               {chromeKind === "header" && (
                 <div className="space-y-2 border-t border-line/20 pt-2">
-                  <p className="text-[11px] font-semibold text-body">{t("header-footer-mobile-nav")}</p>
-                  <label className="block text-[11px] text-body">
+                  <p className="text-sm font-semibold text-body">{t("header-footer-mobile-nav")}</p>
+                  <label className="block text-sm text-body">
                     {t("header-footer-mobile-style")}
                     <select
                       value={chromeMobileNav.style ?? "dropdown"}
@@ -282,7 +363,7 @@ export function DesignerPalette({
                       <option value="fullscreen">{t("header-footer-mobile-style-fullscreen")}</option>
                     </select>
                   </label>
-                  <label className="block text-[11px] text-body">
+                  <label className="block text-sm text-body">
                     {t("header-footer-mobile-position")}
                     <select
                       value={chromeMobileNav.position ?? "right"}
@@ -293,7 +374,7 @@ export function DesignerPalette({
                       <option value="right">{t("header-footer-mobile-right")}</option>
                     </select>
                   </label>
-                  <label className="block text-[11px] text-body">
+                  <label className="block text-sm text-body">
                     {t("header-footer-mobile-size")}
                     <select
                       value={chromeMobileNav.size ?? "md"}
@@ -305,7 +386,7 @@ export function DesignerPalette({
                       <option value="lg">{t("header-footer-mobile-lg")}</option>
                     </select>
                   </label>
-                  <label className="block text-[11px] text-body">
+                  <label className="block text-sm text-body">
                     {t("header-footer-mobile-color")}
                     <input
                       type="color"
@@ -314,7 +395,7 @@ export function DesignerPalette({
                       className="mt-1 h-7 w-full rounded-md border border-line/30"
                     />
                   </label>
-                  <label className="block text-[11px] text-body">
+                  <label className="block text-sm text-body">
                     {t("header-footer-mobile-animation")}
                     <select
                       value={chromeMobileNav.animation ?? "slide"}
