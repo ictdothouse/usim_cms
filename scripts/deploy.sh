@@ -13,7 +13,7 @@
 # Reads .env (repo root) for: DEPLOY_SECRET (required — must match the api
 # container's own, see docker-compose.release.yml), and optionally
 # API_REPLICAS/FRONTEND_REPLICAS/ADMIN_REPLICAS (default 1 each) to scale, and
-# SMOKE_TEST_HOST (a real tenant domain — see smoke_test()'s own comment).
+# SMOKE_TEST_HOST (a real tenant domain, required after the first release).
 #
 # Test gate: each app's own Dockerfile runs its typecheck/test step as part
 # of the image build (see apps/api/Dockerfile's comment) — a failing test
@@ -57,8 +57,8 @@ HEALTH_INTERVAL=2
 CURRENT=""
 [ -f "$STATE_FILE" ] && CURRENT="$(cat "$STATE_FILE")"
 
-# Treats "no HEALTHCHECK defined" (admin has none) as healthy once running —
-# only api/frontend declare a real one in docker-compose.release.yml.
+# All three app services declare healthchecks in docker-compose.release.yml.
+# Keep the fallback for older images during a rollback.
 container_healthy() {
   local name="$1" status
   status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo "missing")"
@@ -97,14 +97,17 @@ wait_for_healthy() {
 # promoted) sails straight through wait_for_healthy. This fetches one real
 # tenant page through the NEW color's own frontend container, the way a
 # browser actually would, before promote ever flips traffic to it.
-# Opt-in via SMOKE_TEST_HOST (a real tenant domain in .env) — skipped with a
-# warning when unset, so a fresh install/trial with no tenant configured yet
-# doesn't fail deploys on this.
+# The first installation may have no tenant yet. Subsequent releases must
+# configure a real tenant host, or the deployment cannot prove pages render.
 smoke_test() {
   local project="$1" name="$2" body
   if [ -z "$SMOKE_TEST_HOST" ]; then
-    echo "SMOKE_TEST_HOST not set in .env — skipping real-page smoke test (health check only)." >&2
-    return 0
+    if [ -z "$CURRENT" ]; then
+      echo "First release has no tenant yet; skipping real-page smoke test." >&2
+      return 0
+    fi
+    echo "SMOKE_TEST_HOST is required for updates. Set a real tenant domain in .env before deploying." >&2
+    return 1
   fi
   echo "-- smoke-testing $SMOKE_TEST_HOST$SMOKE_TEST_PATH via $name --"
   if ! body=$(docker compose -p "$project" -f "$RELEASE_FILE" exec -T "$name" \
@@ -195,6 +198,20 @@ do_deploy() {
 
   echo "== usim_cms deploy: ${CURRENT:-<none yet>} -> $next =="
 
+  # Run these only for a new release. Rollback must remain available even
+  # when the registry is offline or the current revision fails an audit.
+  echo "-- auditing the locked dependency graph before deployment --"
+  if grep -Eq '^[[:space:]]*(ignore|ignoreGhsas):[[:space:]]*(\[|$)' pnpm-workspace.yaml; then
+    echo "Audit ignore rules are configured; refusing an unreviewed release." >&2
+    exit 1
+  fi
+  pnpm audit
+  echo "-- checking monitor code and security-status regression tests --"
+  node --check monitor/server.js
+  node --check monitor/security.js
+  node --check monitor/supervisor.js
+node --test monitor/security.test.js monitor/dashboard.test.js
+
   echo "-- ensuring PostgreSQL is up before SCRAM role migration --"
   docker compose up -d db
   bash scripts/configure-docker-db-roles.sh
@@ -254,6 +271,16 @@ do_deploy() {
     exit 1
   fi
   echo "$next passed the smoke test."
+
+  echo "-- smoke-testing the new admin SPA --"
+  local admin_body
+  if ! admin_body=$(docker compose -p "$project" -f "$RELEASE_FILE" exec -T admin \
+    wget -qO- http://127.0.0.1:8080/ 2>&1) || ! echo "$admin_body" | grep -qi '</html>'; then
+    echo "Admin SPA smoke test failed — leaving ${CURRENT:-<none>} live untouched." >&2
+    echo "$admin_body" | tail -20 >&2
+    docker compose -p "$project" -f "$RELEASE_FILE" down
+    exit 1
+  fi
 
   local body
   body=$(printf '{"admin":%s,"api":%s,"frontend":%s}' \

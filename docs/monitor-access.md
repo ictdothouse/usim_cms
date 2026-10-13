@@ -1,5 +1,49 @@
 # Ops monitor access
 
+## Security status and guarded updates
+
+The **Security status** section compares the installed lockfile with the five
+packages and their advisories identified in the October 2026 review, and runs fresh production and
+development `pnpm audit --json` checks (cached for ten minutes). It shows the
+severity, affected package, fixed version, advisory link, and recommended
+action. A registry outage is reported as **unknown**, never as a clean audit.
+This is a dependency scan, not a penetration test or a guarantee that the
+deployed containers exactly match the checkout during an in-progress release.
+
+**Pull latest & deploy** now enforces these conditions on the server as well
+as in the browser:
+
+- Docker blue/green release is already live; trial and bare-metal modes are
+  blocked because they would restart the live web or admin service.
+- The running monitor uses its rolling supervisor. Install it once on an
+  existing VPS after pulling this release:
+
+  ```bash
+  cd ~/usim_cms
+  sudo bash scripts/monitor-enable-rolling.sh
+  ```
+
+  This one-time conversion restarts the old single-process monitor briefly.
+  Schedule that conversion when a short monitor interruption is acceptable.
+  Future application releases use `systemctl reload ucms-monitor`: the new
+  worker must listen before the old worker drains, so the monitor socket
+  remains available.
+- Shared DB/proxy/pooler configuration changes, a nearly full disk, and a
+  divergent or dirty checkout block the update. Shared infrastructure updates
+  require an HA peer before this console can offer zero downtime.
+- The new revision's dependency audit must pass at every severity. Docker
+  builds run the app test/build gates, `/ready` checks the API and PgBouncer,
+  and the idle frontend and admin must serve real HTML before Caddy flips.
+  `SMOKE_TEST_HOST` must name a working tenant for every release after the
+  first. Failure leaves the current color serving and restores the source
+  checkout. A successful release leaves the previous color stopped and ready
+  for rollback.
+
+These gates protect planned software updates. They cannot guarantee
+availability during a host, network, Caddy, PostgreSQL, or Redis failure on a
+single VPS. A second node and redundant shared services are needed for that
+level of high availability.
+
 The monitor can restart services and deploy code as root. Its HTTP listener
 stays on the host's Docker bridge address; port 5555 must stay closed at the
 host and cloud firewall. Only the selected access path should be public.
@@ -27,7 +71,7 @@ the Host and Origin itself. The command updates the running Caddy route
 without deploying the app tier, so a failed blue/green smoke test does not
 force the current live color to restart. For older installations with no
 `MONITOR_HOST` in `/etc/ucms-monitor.env`, this command detects Docker's
-private bridge gateway and adds the missing setting before restarting the
+private bridge gateway and adds the missing setting before reloading or restarting the
 monitor; rerunning the full production installer is unnecessary.
 
 ## Manage administrators
@@ -88,7 +132,7 @@ provider account and access policy must be set up by the operator.
 The switch writes nonsecret `monitor/access/config.json` (ignored by Git) and
 updates `.env`. API containers built from this change read that file on each
 Caddy sync, so the chosen mode survives later blue/green promotions. The
-systemd monitor restarts to load its matching Host policy. If the live API
+systemd monitor reloads (or restarts on legacy installs) to load its matching Host policy. If the live API
 still uses an older image, the command applies the route immediately but a
 later Caddy resync or restart can remove it until a successful app deploy;
 rerun the switch if that happens. If Caddy sync fails, SSH mode still rejects

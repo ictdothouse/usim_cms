@@ -25,8 +25,9 @@ import process from "node:process";
 import console from "node:console";
 import { Buffer } from "node:buffer";
 import { URL } from "node:url";
-import { setInterval } from "node:timers";
+import { setInterval, setTimeout } from "node:timers";
 import { initializeUsers, authenticate, listUsers, changePassword, addUser, removeUser } from "./users.js";
+import { getSecurityStatus } from "./security.js";
 
 const PORT = Number(process.env.MONITOR_PORT || 5555);
 // The monitor runs as root and can operate the deployment. Bind it to a
@@ -66,8 +67,6 @@ const NODE_BIN = process.env.NODE_BIN || "node";
 // deliberately (same as any other dependency upgrade) when corepack cuts a
 // new release, rather than always trusting whatever npm resolves right now.
 const COREPACK_PIN_VERSION = "0.36.0";
-const API_PORT = process.env.API_PORT || "3000";
-const FRONTEND_PORT = process.env.FRONTEND_PORT || "4321";
 const PUBLIC_HOST = process.env.PUBLIC_HOST || "localhost";
 // Alerting is opt-in — unset means no-op, same convention as REDIS_URL/
 // PGBOUNCER elsewhere in this project. ALERT_WEBHOOK_URL takes any plain
@@ -144,7 +143,9 @@ function isTrialModeActive(cb) {
     "docker",
     ["compose", ...TRIAL_FILES, "ps", "-q", "api"],
     { cwd: REPO_DIR, timeout: 10_000 },
-    (err, stdout) => cb(!err && stdout.trim().length > 0),
+    // A failed Docker probe must never be interpreted as a verified
+    // production blue/green deployment by the update preflight.
+    (err, stdout) => cb(Boolean(err) || stdout.trim().length > 0),
   );
 }
 
@@ -175,7 +176,34 @@ try {
   process.exit(1);
 }
 
+const DEPLOY_STATE_FILE = path.join(REPO_DIR, ".deploy-state.json");
 let deployState = { running: false, exitCode: null, startedAt: null, finishedAt: null };
+try {
+  const previous = JSON.parse(fs.readFileSync(DEPLOY_STATE_FILE, "utf8"));
+  deployState = previous;
+} catch {
+  // No prior deploy state on a fresh installation.
+}
+function saveDeployState() {
+  fs.writeFileSync(DEPLOY_STATE_FILE, JSON.stringify(deployState), { mode: 0o600 });
+}
+function reconcileDeployState() {
+  if (!deployState.running) return;
+  const pid = deployState.pid;
+  if (Number.isInteger(pid) && pid > 1) {
+    try {
+      process.kill(pid, 0);
+      return;
+    } catch (error) {
+      if (error.code === "EPERM") return;
+    }
+  }
+  // If a worker was replaced during a detached deployment, its exit callback
+  // cannot report the result. Treat that outcome as unverified, never as a
+  // successful release, and prevent a second deploy until the child ends.
+  deployState = { ...deployState, running: false, exitCode: 1, finishedAt: new Date().toISOString(), uncertain: true };
+  saveDeployState();
+}
 
 function timingSafeEqualStr(a, b) {
   const bufA = Buffer.from(a);
@@ -328,7 +356,7 @@ function handleUserMutation(req, res, operation, audit) {
 
 function isAllowedHost(header) {
   if (typeof header !== "string" || header.length > 255) return false;
-  if (/[\/@?#\\\s]/.test(header)) return false;
+  if (new RegExp("[/@?#\\\\\\s]").test(header)) return false;
   let hostname;
   try {
     const parsed = new URL(`http://${header}`);
@@ -763,7 +791,9 @@ function getStackVersions(cb) {
   try {
     const dockerfile = fs.readFileSync(path.join(REPO_DIR, "apps/api/Dockerfile"), "utf8");
     dockerImage = (dockerfile.match(/^FROM\s+(\S+)/m) || [])[1] || null;
-  } catch {}
+  } catch {
+    // Dockerfile version is optional in bare-metal mode.
+  }
   const infra = {};
   if (DEPLOY_MODE === "docker") {
     try {
@@ -775,7 +805,9 @@ function getStackVersions(cb) {
         else if (/pgbouncer/.test(img)) infra.pgbouncer = img;
         else if (/^caddy:/.test(img)) infra.proxy = img;
       }
-    } catch {}
+    } catch {
+      // Shared service versions are optional when Compose is unavailable.
+    }
   }
   cb({
     appVersion: root ? root.version : null,
@@ -1021,22 +1053,24 @@ function maybeAlertOnVersionChecks() {
 // needs a closer look — reusing the same signals getRemoteUpdateInfo/isTrialModeActive/
 // getHostStats/deployState already compute elsewhere in this file.
 function getPreflightCheck(cb) {
+  reconcileDeployState();
   getRemoteUpdateInfo((updateInfo) => {
     if (!updateInfo) return cb({ error: "git fetch failed — check network/GitHub reachability" });
-    if (updateInfo.commitsBehind === 0) {
-      return cb({ commitsBehind: 0, verdict: "up-to-date", reasons: ["Already on the latest commit."] });
-    }
+    if (!/^[0-9a-f]{40}$/.test(updateInfo.remoteSha || "")) return cb({ error: "Could not verify origin/main revision." });
     execFile(
       "git",
       ["diff", "--name-only", "HEAD", "origin/main"],
       { cwd: REPO_DIR, timeout: 10_000 },
       (diffErr, diffOut) => {
-        const files = diffErr ? [] : diffOut.trim().split("\n").filter(Boolean);
+        if (diffErr) return cb({ error: "Could not inspect incoming changes." });
+        const files = diffOut.trim().split("\n").filter(Boolean);
         // A base-tier change can interrupt the live color while deploy.sh
         // recreates db/proxy/pgbouncer/redis. A new migration file is fine (every
         // migration in this repo is additive, IF NOT EXISTS/idempotent — see CLAUDE.md), it's
         // just worth calling out explicitly rather than silently applying on first request.
-        const baseTierChanged = files.some((f) => /^(docker-compose.*\.ya?ml|Caddyfile|pgbouncer\/)/.test(f));
+        const baseTierChanged = files.some((f) => /^(docker-compose\.ya?ml|Caddyfile|pgbouncer\/)/.test(f));
+        const deployControlChanged = files.some((f) =>
+          ["scripts/deploy.sh", "monitor/supervisor.js", "monitor/ucms-monitor.service.template"].includes(f));
         const migrationAdded = files.some((f) => /^apps\/api\/src\/db\/migrations\//.test(f));
         isTrialModeActive((trial) => {
           getHostStats((host) => {
@@ -1051,20 +1085,42 @@ function getPreflightCheck(cb) {
               raise("blocked");
               reasons.push("A deploy is already running — wait for it to finish before starting another.");
             }
+            try {
+              execFileSync("git", ["merge-base", "--is-ancestor", "HEAD", updateInfo.remoteSha],
+                { cwd: REPO_DIR, timeout: 5000 });
+            } catch {
+              raise("blocked");
+              reasons.push("Local branch diverged from origin/main; review it before updating.");
+            }
+            try {
+              execFileSync("git", ["diff", "--quiet"], { cwd: REPO_DIR, timeout: 5000 });
+              execFileSync("git", ["diff", "--cached", "--quiet"], { cwd: REPO_DIR, timeout: 5000 });
+            } catch {
+              raise("blocked");
+              reasons.push("Local tracked changes would be overwritten by the update.");
+            }
+            if (deployState.uncertain) {
+              raise("blocked");
+              reasons.push("A previous deploy lost its worker before reporting a result. Verify the live color and deployment log on the VPS before another update.");
+            }
             const noZeroDowntime = DEPLOY_MODE !== "docker" || trial;
             if (noZeroDowntime) {
-              raise("caution");
+              raise("blocked");
               reasons.push(
                 DEPLOY_MODE === "docker"
-                  ? "Still in trial mode (no Caddy/blue-green promoted yet) — this rebuild briefly interrupts the site instead of a zero-downtime flip."
-                  : "This install runs in systemd/bare-metal mode (no blue-green here) — deploying briefly restarts ucms-api/ucms-frontend/ucms-admin.",
+                  ? "Trial mode cannot meet zero downtime. Promote a blue/green release before updating."
+                  : "Systemd mode cannot meet zero downtime for the app tier. Use Docker blue/green deployment.",
               );
             }
             if (baseTierChanged) {
-              raise("caution");
+              raise("blocked");
               reasons.push(
-                "Touches shared docker-compose/Caddyfile/pgbouncer config — the next deploy may recreate a live base-tier container briefly. Schedule the update and watch its health and database login checks.",
+                "Changes shared database, proxy, or pooler configuration. Review and apply that change separately; this update requires uninterrupted service.",
               );
+            }
+            if (deployControlChanged) {
+              raise("blocked");
+              reasons.push("Deployment or monitor supervisor control code changed. Review and install that change separately before one-click updates resume.");
             }
             if (migrationAdded) {
               reasons.push(
@@ -1072,17 +1128,74 @@ function getPreflightCheck(cb) {
               );
             }
             if (diskPct !== null && diskPct >= 85) {
-              raise("caution");
+              raise("blocked");
               reasons.push(`Disk is at ${diskPct}% used — a fresh image build may not have enough room.`);
+            }
+            if (diskPct === null) {
+              raise("blocked");
+              reasons.push("Disk capacity could not be verified.");
+            }
+            if (DEPLOY_MODE === "docker") {
+              try {
+                const color = fs.readFileSync(path.join(REPO_DIR, ".deploy-color"), "utf8").trim();
+                if (!["blue", "green"].includes(color)) throw new Error("invalid color");
+                for (const service of ["api", "frontend", "admin"]) {
+                  const cid = execFileSync("docker", ["compose", "-p", `ucms-${color}`, "-f", RELEASE_FILE, "ps", "-q", service],
+                    { cwd: REPO_DIR, encoding: "utf8", timeout: 5000 }).trim().split("\n")[0];
+                  if (!cid) throw new Error(`${service} is missing`);
+                  const health = execFileSync("docker", ["inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Running}}{{end}}", cid],
+                    { encoding: "utf8", timeout: 5000 }).trim();
+                  if (health !== "healthy" && !(service === "admin" && health === "true")) {
+                    throw new Error(`${service} is ${health || "unavailable"}`);
+                  }
+                }
+                const proxyCid = execFileSync("docker", ["compose", "ps", "-q", "proxy"],
+                  { cwd: REPO_DIR, encoding: "utf8", timeout: 5000 }).trim().split("\n")[0];
+                if (!proxyCid) throw new Error("Caddy proxy is missing");
+                const proxyRunning = execFileSync("docker", ["inspect", "-f", "{{.State.Running}}", proxyCid],
+                  { encoding: "utf8", timeout: 5000 }).trim();
+                if (proxyRunning !== "true") throw new Error("Caddy proxy is stopped");
+              } catch (error) {
+                raise("blocked");
+                reasons.push(`Live blue/green release could not be verified: ${error.message}`);
+              }
+              try {
+                const envText = fs.readFileSync(path.join(REPO_DIR, ".env"), "utf8");
+                if (!/^SMOKE_TEST_HOST=\S+/m.test(envText)) {
+                  raise("blocked");
+                  reasons.push("SMOKE_TEST_HOST is required to check a real tenant page before promotion.");
+                }
+              } catch {
+                raise("blocked");
+                reasons.push("Could not read the deployment configuration for the real-page smoke test.");
+              }
+            }
+            if (DEPLOY_MODE === "docker") {
+              try {
+                const unit = execFileSync("systemctl", ["show", "ucms-monitor", "-p", "ExecStart", "-p", "ExecReload"],
+                  { encoding: "utf8", timeout: 5000 });
+                const mainPid = execFileSync("systemctl", ["show", "ucms-monitor", "-p", "MainPID", "--value"],
+                  { encoding: "utf8", timeout: 5000 }).trim();
+                const runningCommand = /^[1-9][0-9]*$/.test(mainPid) ? fs.readFileSync(`/proc/${mainPid}/cmdline`, "utf8") : "";
+                if (!unit.includes("monitor/supervisor.js") || !unit.includes("USR2") || !runningCommand.includes("monitor/supervisor.js")) {
+                  raise("blocked");
+                  reasons.push("Monitor rolling reload is not installed. Run scripts/monitor-enable-rolling.sh once before updating.");
+                }
+              } catch {
+                raise("blocked");
+                reasons.push("Could not verify the monitor rolling service; update is blocked.");
+              }
             }
             if (verdict === "safe") {
               reasons.push(
                 "Routine update — zero-downtime blue-green deploy (new color is built, test-gated, health-checked, and smoke-tested before traffic switches; the old color stays up for instant rollback).",
               );
             }
+            if (updateInfo.commitsBehind === 0) reasons.unshift("Already on the latest commit; this action would redeploy the current revision.");
             cb({
               commitsBehind: updateInfo.commitsBehind,
               commits: updateInfo.commits,
+              remoteSha: updateInfo.remoteSha,
               verdict,
               reasons,
               trial,
@@ -1100,6 +1213,14 @@ function handlePreflight(req, res) {
     if (result.error) return sendJson(res, 502, result);
     sendJson(res, 200, result);
   });
+}
+
+async function handleSecurity(req, res, force) {
+  try {
+    sendJson(res, 200, await getSecurityStatus(REPO_DIR, NODE_BIN, force));
+  } catch (error) {
+    sendJson(res, 503, { error: `Security status unavailable: ${error.message}` });
+  }
 }
 
 // Edge-triggered on remoteSha the same way service up/down and disk-threshold alerts are above —
@@ -1295,78 +1416,61 @@ function handleDbRestart(req, res) {
   });
 }
 
-const TRIAL_FILES_SH = TRIAL_FILES.join(" ");
-
 // git pull + rebuild + redeploy takes a while — run detached, log to a
 // file, and let the dashboard poll /api/pull/status + /api/pull/log instead
 // of holding the HTTP request open.
 function handlePull(req, res) {
+  reconcileDeployState();
   if (deployState.running) return sendJson(res, 409, { error: "a deploy is already running" });
-  deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
-  const logFd = fs.openSync(DEPLOY_LOG, "a");
-  fs.writeSync(logFd, `\n\n=== deploy started ${deployState.startedAt} ===\n`);
-
-  const pullStep = "git fetch origin && git reset --hard origin/main";
-  const script =
-    DEPLOY_MODE === "docker"
-      ? `
-    set -e
-    echo "--- git pull ---"
-    ${pullStep}
-    # Distinguishes "pre-launch trial" (docker-compose.trial.yml's single
-    # api/frontend/admin containers, no Caddy in front) from "gone live"
-    # (scripts/deploy.sh's blue-green flow, Caddy fronting 80/443) from
-    # what's actually running right now, checked right here rather than
-    # earlier in this process — .deploy-color can't be trusted for this
-    # (written once by deploy.sh's first promote, never cleared, so a box
-    # rolled back to trial containers by hand still has a stale one), and
-    # checking any earlier than the instant before acting on it would
-    # reopen the same check-then-act gap this line is closing.
-    if [ -n "$(docker compose ${TRIAL_FILES_SH} ps -q api)" ]; then
-      echo "--- trial rebuild (no Caddy/proxy touched — see docker-compose.trial.yml) ---"
-      docker compose ${TRIAL_FILES_SH} up -d --build api frontend admin
-    else
-      echo "--- blue-green deploy (zero-downtime, see scripts/deploy.sh) ---"
+  if (deployState.uncertain) return sendJson(res, 409, { error: "Previous deploy outcome is unverified; inspect the VPS before another update." });
+  getPreflightCheck((pre) => {
+    if (pre.error) return sendJson(res, 502, { error: pre.error });
+    if (pre.verdict !== "safe" || !/^[0-9a-f]{40}$/.test(pre.remoteSha || "")) {
+      return sendJson(res, 409, { error: `Update blocked: ${pre.reasons.join(" ")}` });
+    }
+    if (deployState.running) return sendJson(res, 409, { error: "a deploy is already running" });
+    deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+    saveDeployState();
+    const logFd = fs.openSync(DEPLOY_LOG, "a");
+    fs.writeSync(logFd, `\n\n=== deploy started ${deployState.startedAt} ===\n`);
+    const script = `
+      set -e
+      NODE_DIR="$(dirname "${NODE_BIN}")"
+      export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+      if ! git diff --quiet || ! git diff --cached --quiet; then
+        echo "Tracked local changes exist; refusing to overwrite them." >&2
+        exit 1
+      fi
+      old_head="$(git rev-parse HEAD)"
+      git merge-base --is-ancestor "$old_head" "${pre.remoteSha}" || {
+        echo "origin/main diverged from this checkout; refusing a destructive reset." >&2
+        exit 1
+      }
+      trap 'result=$?; if [ "$result" -ne 0 ]; then git reset --hard "$old_head"; fi' EXIT
+      echo "--- checking out approved revision ${pre.remoteSha} ---"
+      git reset --hard "${pre.remoteSha}"
+      echo "--- blue-green deploy: dependency audit, build tests, readiness and real-page smoke test before promotion ---"
       bash scripts/deploy.sh
-    fi
-    echo "--- restarting monitor ---"
-    systemctl restart ucms-monitor
-    echo "--- done ---"
-  `
-      : `
-    set -e
-    NODE_DIR="$(dirname "${NODE_BIN}")"
-    export PATH="$NODE_DIR:$PATH"
-    "$NODE_DIR/corepack" enable
-    echo "--- git pull ---"
-    ${pullStep}
-    echo "--- pnpm install ---"
-    pnpm install --frozen-lockfile
-    echo "--- build api ---"
-    pnpm --filter @ucms/api build
-    echo "--- build admin ---"
-    VITE_API_URL="http://${PUBLIC_HOST}:${API_PORT}" VITE_FRONTEND_URL="http://${PUBLIC_HOST}:${FRONTEND_PORT}" \\
-      pnpm --filter @ucms/admin build
-    echo "--- build frontend ---"
-    API_URL="http://127.0.0.1:${API_PORT}" pnpm --filter @ucms/frontend build
-    echo "--- restarting services ---"
-    systemctl restart ucms-api ucms-frontend ucms-admin
-    echo "--- restarting monitor ---"
-    systemctl restart ucms-monitor
-    echo "--- done ---"
-  `;
-  const child = spawn("sh", ["-c", script], {
-    cwd: REPO_DIR,
-    stdio: ["ignore", logFd, logFd],
-    detached: true,
+      trap - EXIT
+      echo "--- app release promoted; monitor worker will roll after deploy state is saved ---"
+    `;
+    const child = spawn("sh", ["-c", script], { cwd: REPO_DIR, stdio: ["ignore", logFd, logFd], detached: true });
+    deployState.pid = child.pid;
+    saveDeployState();
+    child.unref();
+    child.on("exit", (code) => {
+      deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+      saveDeployState();
+      fs.appendFileSync(DEPLOY_LOG, `=== deploy finished, exit ${code} ===\n`);
+      fs.closeSync(logFd);
+      if (code === 0) {
+        execFile("systemctl", ["reload", "ucms-monitor"], { timeout: 10_000 }, (error) => {
+          if (error) fs.appendFileSync(DEPLOY_LOG, `WARNING: monitor rolling reload failed: ${error.message}\n`);
+        });
+      }
+    });
+    sendJson(res, 202, { ok: true, started: true });
   });
-  child.unref();
-  child.on("exit", (code) => {
-    deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
-    fs.appendFileSync(DEPLOY_LOG, `=== deploy finished, exit ${code} ===\n`);
-    fs.closeSync(logFd);
-  });
-  sendJson(res, 202, { ok: true, started: true });
 }
 
 // Flips back to whichever color scripts/deploy.sh last left stopped-but-not-
@@ -1389,6 +1493,7 @@ function handleRollback(req, res) {
       });
     }
     deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+    saveDeployState();
     const logFd = fs.openSync(DEPLOY_LOG, "a");
     fs.writeSync(logFd, `\n\n=== rollback started ${deployState.startedAt} ===\n`);
     const child = spawn("bash", ["scripts/deploy.sh", "rollback"], {
@@ -1396,9 +1501,12 @@ function handleRollback(req, res) {
       stdio: ["ignore", logFd, logFd],
       detached: true,
     });
+    deployState.pid = child.pid;
+    saveDeployState();
     child.unref();
     child.on("exit", (code) => {
       deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+      saveDeployState();
       fs.appendFileSync(DEPLOY_LOG, `=== rollback finished, exit ${code} ===\n`);
       fs.closeSync(logFd);
     });
@@ -1406,46 +1514,14 @@ function handleRollback(req, res) {
   });
 }
 
-// Explicit operator action for shared base-tier config. The normal
-// scripts/deploy.sh also runs compose up for these services; this action is
-// useful when only their config needs applying. `up -d` only recreates a
-// container whose own config actually changed, but any of these four is a
-// single instance, so expect a few seconds of interruption per container
-// recreated. Docker-mode only: systemd/bare-metal mode has no containers
-// here at all.
+// Shared db/proxy/pooler/cache are single instances. Updating them from this
+// console would violate the zero-downtime update policy.
 function handleApplyBaseTier(req, res) {
-  if (DEPLOY_MODE !== "docker") {
-    return sendJson(res, 501, {
-      error: "base-tier apply needs docker mode — this box runs systemd mode",
-    });
-  }
-  if (deployState.running) return sendJson(res, 409, { error: "a deploy/rollback is already running" });
-  deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
-  const logFd = fs.openSync(DEPLOY_LOG, "a");
-  fs.writeSync(logFd, `\n\n=== base-tier apply started ${deployState.startedAt} ===\n`);
-  const script = `
-    set -e
-    echo "--- git pull ---"
-    git fetch origin && git reset --hard origin/main
-    echo "--- recreating db/proxy/pgbouncer/redis (only containers whose config actually changed are touched) ---"
-    docker compose up -d db proxy pgbouncer redis
-    echo "--- done ---"
-  `;
-  const child = spawn("sh", ["-c", script], {
-    cwd: REPO_DIR,
-    stdio: ["ignore", logFd, logFd],
-    detached: true,
-  });
-  child.unref();
-  child.on("exit", (code) => {
-    deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
-    fs.appendFileSync(DEPLOY_LOG, `=== base-tier apply finished, exit ${code} ===\n`);
-    fs.closeSync(logFd);
-  });
-  sendJson(res, 202, { ok: true, started: true });
+  sendJson(res, 409, { error: "Shared database, proxy, pooler and cache updates require redundant infrastructure or a maintenance window." });
 }
 
 function handlePullStatus(req, res) {
+  reconcileDeployState();
   sendJson(res, 200, deployState);
 }
 
@@ -1709,6 +1785,9 @@ function handleStackTest(req, res, key) {
 // single-flight gate as "Pull latest & deploy" (handlePull), so it can never
 // race with that or with another stack update.
 function handleStackUpdate(req, res, key) {
+  if (["postgres", "redis", "pgbouncer", "caddy"].includes(key)) {
+    return sendJson(res, 409, { error: "Shared infrastructure cannot be updated without an HA peer while zero downtime is required." });
+  }
   if (key === "node") return handleNodeUpdate(req, res);
   if (key === "pnpm") return handlePnpmUpdate(req, res);
   if (key === "deps") return handleDepsUpdate(req, res);
@@ -1856,6 +1935,7 @@ function handleStackUpdate(req, res, key) {
 function startSourceBumpDeploy(label, oldContents, commitMsg, res, preCommitScript) {
   const files = Object.keys(oldContents);
   deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+  saveDeployState();
   const logFd = fs.openSync(DEPLOY_LOG, "a");
   fs.writeSync(logFd, `\n\n=== ${label} started ${deployState.startedAt} ===\n`);
   const quotedFiles = files.map((f) => `"${f}"`).join(" ");
@@ -1879,15 +1959,20 @@ COMMITMSG
     echo "--- done ---"
   `;
   const child = spawn("sh", ["-c", script], { cwd: REPO_DIR, stdio: ["ignore", logFd, logFd], detached: true });
+  deployState.pid = child.pid;
+  saveDeployState();
   child.unref();
   child.on("exit", (code) => {
     deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+    saveDeployState();
     fs.appendFileSync(DEPLOY_LOG, `=== ${label} finished, exit ${code} ===\n`);
     if (code !== 0) {
       for (const [rel, oldContent] of Object.entries(oldContents)) {
         try {
           fs.writeFileSync(path.join(REPO_DIR, rel), oldContent, "utf8");
-        } catch {}
+        } catch {
+          // Keep reporting the original deployment failure.
+        }
       }
       fs.appendFileSync(
         DEPLOY_LOG,
@@ -1968,7 +2053,9 @@ function handlePnpmUpdate(req, res) {
     const oldContents = { "package.json": content };
     try {
       oldContents["pnpm-lock.yaml"] = fs.readFileSync(lockPath, "utf8");
-    } catch {}
+    } catch {
+      // A missing lockfile is handled by the regeneration step below.
+    }
 
     // The lockfile pins package-manager-version-specific metadata, not just
     // dependency versions — a bumped packageManager field with a stale
@@ -2035,7 +2122,8 @@ function handleDepsCheck(req, res) {
   execFile("sh", ["-c", script], { cwd: REPO_DIR, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
     // `pnpm outdated` exits 1 when there ARE outdated packages — that's the
     // normal "found something" case here, not a failure.
-    const output = (stdout || stderr || "").replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const ansiColor = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*m", "g");
+    const output = (stdout || stderr || "").replace(ansiColor, "").trim();
     fs.appendFileSync(
       DEPLOY_LOG,
       `\n\n=== dependency check ${new Date().toISOString()} ===\n${output || "(nothing outdated within declared ranges)"}\n`,
@@ -2088,6 +2176,8 @@ function handleDepsUpdate(req, res) {
   export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
   echo "--- updating dependencies within their declared package.json ranges (pnpm -r update) ---"
   pnpm -r update
+  echo "--- auditing updated dependency graph before commit or deployment ---"
+  pnpm audit
   `;
   startSourceBumpDeploy(
     "dependency update",
@@ -2181,7 +2271,9 @@ function runPsql(sql) {
     const cleanup = () => {
       try {
         fs.unlinkSync(tmpFile);
-      } catch {}
+      } catch {
+        // Temporary file may already have been removed.
+      }
     };
     const pgEnv = { ...process.env, PGHOST: PG_HOST, PGPORT: PG_PORT, PGUSER: PG_USER, PGPASSWORD: PG_PASSWORD, PGDATABASE: PG_DATABASE };
     const cmd = DEPLOY_MODE === "docker" ? "docker" : "psql";
@@ -2339,7 +2431,9 @@ function getBackupCronStatus() {
     const installSh = fs.readFileSync(path.join(REPO_DIR, "install.sh"), "utf8");
     const m = installSh.match(/^BACKUP_CRON_VERSION="([^"]*)"/m);
     expectedVersion = m ? m[1] : "";
-  } catch {}
+  } catch {
+    // No generated cron template yet.
+  }
   let cronExists = false;
   let installedVersion = "";
   try {
@@ -2347,7 +2441,9 @@ function getBackupCronStatus() {
     cronExists = true;
     const m = envContent.match(/^BACKUP_CRON_VERSION=(.*)$/m);
     installedVersion = m ? m[1].trim() : "";
-  } catch {}
+  } catch {
+    // Cron has not been installed yet.
+  }
   const pgConfigured = Boolean(PG_HOST);
   const needsUpdate = cronExists && (!pgConfigured || installedVersion !== expectedVersion);
   return { cronExists, pgConfigured, installedVersion, expectedVersion, needsUpdate };
@@ -2375,14 +2471,12 @@ function handleApplyBackupCronUpdate(req, res) {
         sendJson(res, 500, { error: String(stderr || err.message).trim(), stdout });
         return;
       }
-      sendJson(res, 200, { ok: true, stdout, restarting: true });
+      sendJson(res, 200, { ok: true, stdout, reloading: true });
       // The reapply just wrote fresh PGHOST/etc into /etc/ucms-monitor.env —
-      // this process already loaded the OLD values once at module start
-      // (PG_HOST/PG_PORT/... above), so it has to restart to pick up the
-      // new ones. Delayed slightly so the response above actually reaches
-      // the browser before systemd kills this process.
+      // The supervisor reads the updated environment for a new worker and
+      // drains the old worker after the replacement starts listening.
       setTimeout(() => {
-        execFile("systemctl", ["restart", "ucms-monitor"], () => {});
+        execFile("systemctl", ["reload", "ucms-monitor"], () => {});
       }, 500);
     },
   );
@@ -2452,6 +2546,13 @@ const DASHBOARD_HTML = `<!doctype html>
   .container-desc { max-width: 340px; }
   .account-field { display:block; margin:0.55rem 0; }
   .account-field input { display:block; box-sizing:border-box; width:100%; max-width:380px; padding:0.45rem; border:1px solid #8886; border-radius:6px; background:transparent; color:inherit; }
+  .security-status { font-weight:700; padding:0.65rem 0.85rem; border-radius:8px; background:#ecf5f0; border:1px solid #b4d9c8; }
+  .security-status.attention { background:#fff0ea; border-color:#eebbaa; color:#873b2c; }
+  .security-status.unknown { background:#fff6e4; border-color:#e8cb8e; color:#765a19; }
+  .security-list { display:grid; gap:0.65rem; margin:1rem 0; }
+  .security-item { padding:0.75rem 0.9rem; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+  .security-item strong { display:block; }
+  .security-item small { color:var(--muted); }
 
   /* The monitor is an operations console: navigation stays visible while
      the work area can grow with logs, sites, and infrastructure controls. */
@@ -2579,8 +2680,9 @@ const DASHBOARD_HTML = `<!doctype html>
       <button class="tab-btn" data-tab="storage"><span class="nav-index">06</span>Storage &amp; backups</button>
       <button class="tab-btn" data-tab="logs"><span class="nav-index">07</span>Logs</button>
       <p class="nav-label">Access &amp; security</p>
-      <button class="tab-btn" data-tab="ssl"><span class="nav-index">08</span>SSL certificates</button>
-      <button class="tab-btn" data-tab="accounts"><span class="nav-index">09</span>Accounts</button>
+      <button class="tab-btn" data-tab="security"><span class="nav-index">08</span>Security status</button>
+      <button class="tab-btn" data-tab="ssl"><span class="nav-index">09</span>SSL certificates</button>
+      <button class="tab-btn" data-tab="accounts"><span class="nav-index">10</span>Accounts</button>
     </nav>
     <div class="sidebar-footer"><p>HOST RUNTIME</p><p class="muted" id="uptime">Loading…</p><p class="muted">Privileged operations console</p></div>
   </aside>
@@ -2612,9 +2714,9 @@ const DASHBOARD_HTML = `<!doctype html>
     <div class="row">
       <button data-action="pull">Pull latest &amp; deploy</button>
       <button class="secondary" data-action="rollback">Rollback</button>
-      <button class="secondary" data-action="apply-base-tier">Apply base-tier config (db/proxy/pgbouncer/redis)</button>
       <button class="secondary" data-action="restart-all">Restart all</button>
     </div>
+    <p class="muted">Shared database, proxy, pooler and cache updates are unavailable here until redundant infrastructure is configured.</p>
   </div>
   <div class="section-head"><h3>Deployment activity</h3></div>
   <p class="muted" id="deployState">No deploy run yet.</p>
@@ -2626,6 +2728,19 @@ const DASHBOARD_HTML = `<!doctype html>
   <h3>Tech stack &amp; versions</h3>
   <p class="muted" id="versionGitLine"></p>
   <div class="grid" id="versionGrid"></div>
+</div>
+
+<div class="tab-panel" id="panel-security">
+  <p class="section-intro">Dependency advisories for the checked-out release. Registry checks are cached for ten minutes; a failed audit is shown as unknown and blocks deployment.</p>
+  <div class="row"><button class="secondary" data-action="refresh-security">Refresh security check</button><span class="muted" id="securityCheckedAt"></span></div>
+  <p class="security-status unknown" id="securityStatus">Checking dependency security…</p>
+  <h3>Five packages from the review</h3>
+  <div class="security-list" id="trackedSecurity"></div>
+  <h3>Registry audit</h3>
+  <div class="grid" id="securityAuditSummary"></div>
+  <div class="security-list" id="securityAdvisories"></div>
+  <h3>Recommended actions</h3>
+  <ul id="securityRecommendations"></ul>
 </div>
 
 <div class="tab-panel" id="panel-containers">
@@ -2789,6 +2904,7 @@ const sectionMeta = {
   containers: ["Containers", "Every container on this host, including older releases."],
   data: ["Database & sites", "Database status and tenant upload folders."],
   storage: ["Storage & backups", "Disk usage, database sizes and backup destination."],
+  security: ["Security status", "Vulnerable dependencies, audit results and update advice."],
   logs: ["Logs", "Recent output from each managed service."],
   ssl: ["SSL certificates", "Issue a certificate for a configured domain."],
   accounts: ["Accounts", "Manage monitor administrators and passwords."],
@@ -3031,7 +3147,7 @@ async function applyBackupCronUpdate() {
   el.textContent = "Applying update…";
   try {
     await api("/api/backup-cron/apply-update", { method: "POST" });
-    el.textContent = "Update applied — monitor is restarting to pick up the new connection details. Reloading in a few seconds…";
+    el.textContent = "Update applied — monitor is rolling to the new connection details. Refreshing in a few seconds…";
     setTimeout(() => location.reload(), 4000);
   } catch (e) {
     el.innerHTML = "Error applying update: " + escapeHtml(e.message) + " <button class=\\"secondary\\" data-action=\\"apply-backup-cron-update\\">Retry</button>";
@@ -3086,7 +3202,7 @@ function renderContainers(containers) {
   }
   const baseCounts = {};
   for (const c of containers) {
-    const base = String(c.Names || c.Name || "").replace(/-\d+$/, "");
+    const base = String(c.Names || c.Name || "").replace(/-\\d+$/, "");
     baseCounts[base] = (baseCounts[base] || 0) + 1;
   }
   const dupes = Object.keys(baseCounts).filter((b) => baseCounts[b] > 1);
@@ -3108,7 +3224,7 @@ function renderContainers(containers) {
   };
   for (const c of containers) {
     const name = String(c.Names || c.Name || "");
-    const base = name.replace(/-\d+$/, "");
+    const base = name.replace(/-\\d+$/, "");
     const info = describeContainer(c);
     const tr = document.createElement("tr");
     tr.style.borderBottom = "1px solid #8882";
@@ -3214,6 +3330,7 @@ async function init() {
   refreshBackupCronStatus();
   refreshUpdateCheck();
   refreshVersions();
+  refreshSecurity();
   setInterval(refresh, 5000);
   setInterval(refreshDb, 10000);
   setInterval(refreshSites, 30000);
@@ -3245,7 +3362,11 @@ function stackActions(key, label, testable) {
     html += "<button class=\\"secondary\\" data-action=\\"stack-test\\" data-stack-key=\\"" + key + "\\">Test</button>";
   }
   const safeLabel = label.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  html += "<button class=\\"secondary\\" data-action=\\"stack-update\\" data-stack-key=\\"" + key + "\\" data-stack-label=\\"" + safeLabel + "\\">Update</button>";
+  if (["postgres", "redis", "pgbouncer", "caddy"].includes(key)) {
+    html += "<span class=\\"muted\\">Update requires a redundant peer for zero downtime</span>";
+  } else {
+    html += "<button class=\\"secondary\\" data-action=\\"stack-update\\" data-stack-key=\\"" + key + "\\" data-stack-label=\\"" + safeLabel + "\\">Update</button>";
+  }
   html += "<span class=\\"muted\\" id=\\"stackMsg-" + key + "\\"></span>";
   html += "</div>";
   return html;
@@ -3496,6 +3617,90 @@ async function refresh() {
   }
 }
 
+async function refreshSecurity(force = false) {
+  const status = document.getElementById("securityStatus");
+  status.textContent = "Checking the dependency lockfile and registry…";
+  status.className = "security-status unknown";
+  try {
+    const data = await api("/api/security" + (force ? "?refresh=1" : ""));
+    const labels = { clear: "No known dependency advisory detected", attention: "Security update recommended", unknown: "Security state could not be verified" };
+    status.textContent = labels[data.level] || labels.unknown;
+    status.className = "security-status " + (data.level || "unknown");
+    document.getElementById("securityCheckedAt").textContent = "Checked " + new Date(data.checkedAt).toLocaleString();
+    const trackedList = document.getElementById("trackedSecurity");
+    trackedList.replaceChildren();
+    for (const item of data.tracked || []) {
+      const row = document.createElement("div");
+      row.className = "security-item";
+      const title = document.createElement("strong");
+      title.textContent = item.name + " " + (item.versions.join(", ") || "not in lockfile") + " — " + item.status;
+      const meta = document.createElement("small");
+      meta.textContent = item.scope + " · " + item.severity + " · fixed in " + item.fixed + " · ";
+      const advice = document.createElement("div");
+      advice.textContent = item.recommendation;
+      row.append(title, meta);
+      for (const advisory of item.advisories || []) {
+        const link = document.createElement("a");
+        link.href = "https://github.com/advisories/" + advisory;
+        link.textContent = advisory + " ";
+        link.rel = "noopener noreferrer";
+        link.target = "_blank";
+        row.append(link);
+      }
+      row.append(advice);
+      trackedList.append(row);
+    }
+    const summary = document.getElementById("securityAuditSummary");
+    summary.replaceChildren();
+    const details = document.getElementById("securityAdvisories");
+    details.replaceChildren();
+    for (const [scope, report] of [["Production", data.production], ["Development", data.development]]) {
+      const card = document.createElement("div");
+      card.className = "card";
+      const heading = document.createElement("div");
+      heading.className = "label";
+      heading.textContent = scope + " dependencies";
+      const value = document.createElement("div");
+      value.className = "value";
+      value.textContent = report.status === "unknown" ? "Unknown" : report.total + " advisories";
+      const sub = document.createElement("div");
+      sub.className = "muted";
+      sub.textContent = report.status === "unknown" ? report.error :
+        ["critical", "high", "moderate", "low"].map((level) => level + ": " + (report.counts[level] || 0)).join(" · ");
+      card.append(heading, value, sub);
+      summary.append(card);
+      for (const advisory of report.advisories || []) {
+        const row = document.createElement("div");
+        row.className = "security-item";
+        const title = document.createElement("strong");
+        title.textContent = scope + " · " + advisory.severity + " · " + advisory.name + " · " + advisory.title;
+        row.append(title);
+        const info = document.createElement("small");
+        info.textContent = "Patched versions: " + (advisory.patched || "no published fix");
+        row.append(info);
+        if (/^GHSA-[a-z0-9-]+$/i.test(advisory.id)) {
+          const link = document.createElement("a");
+          link.href = "https://github.com/advisories/" + advisory.id;
+          link.textContent = " · " + advisory.id;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          row.append(link);
+        }
+        details.append(row);
+      }
+    }
+    const recommendations = document.getElementById("securityRecommendations");
+    recommendations.replaceChildren();
+    for (const recommendation of data.recommendations || []) {
+      const item = document.createElement("li");
+      item.textContent = recommendation;
+      recommendations.append(item);
+    }
+  } catch (error) {
+    status.textContent = "Security state could not be verified: " + error.message;
+  }
+}
+
 async function refreshDb() {
   try {
     const d = await api("/api/db/status");
@@ -3571,17 +3776,6 @@ async function rollback() {
   if (!confirm("Roll back to the previously deployed color? This flips live traffic to whatever was running before the last deploy.")) return;
   try {
     await api("/api/rollback", { method: "POST" });
-    pollDeployLog();
-    refresh();
-  } catch (e) {
-    alert(e.message);
-  }
-}
-
-async function applyBaseTier() {
-  if (!confirm("Recreate db/proxy/pgbouncer/redis to pick up a docker-compose.yml change? Each one that actually changed will briefly interrupt (a few seconds) — these aren't blue-green.")) return;
-  try {
-    await api("/api/base/apply", { method: "POST" });
     pollDeployLog();
     refresh();
   } catch (e) {
@@ -3739,9 +3933,9 @@ const dashboardActions = new Map([
   ["open-deploy", () => switchTab("deploy")],
   ["pull", pull],
   ["rollback", rollback],
-  ["apply-base-tier", applyBaseTier],
   ["restart-all", restartAll],
   ["refresh", refresh],
+  ["refresh-security", () => refreshSecurity(true)],
   ["db-restart", dbRestart],
   ["refresh-disk-usage", refreshDiskUsage],
   ["show-disk-usage-detail", showDiskUsageDetail],
@@ -3879,6 +4073,8 @@ const server = http.createServer(async (req, res) => {
       handleVersionChecks(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/preflight") {
       handlePreflight(req, res);
+    } else if (req.method === "GET" && url.pathname === "/api/security") {
+      handleSecurity(req, res, url.searchParams.get("refresh") === "1");
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "service" && parts[3]) {
       handleServiceAction(req, res, parts[2], parts[3]);
     } else if (req.method === "GET" && parts[0] === "api" && parts[1] === "logs" && parts[2]) {
@@ -3896,7 +4092,15 @@ const server = http.createServer(async (req, res) => {
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "test") {
       handleStackTest(req, res, parts[2]);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "update") {
-      handleStackUpdate(req, res, parts[2]);
+      if (["node", "pnpm", "deps"].includes(parts[2])) {
+        getPreflightCheck((pre) => {
+          if (pre.error) return sendJson(res, 502, { error: pre.error });
+          if (pre.verdict !== "safe") return sendJson(res, 409, { error: `Update blocked: ${pre.reasons.join(" ")}` });
+          handleStackUpdate(req, res, parts[2]);
+        });
+      } else {
+        handleStackUpdate(req, res, parts[2]);
+      }
     } else if (req.method === "GET" && url.pathname === "/api/pull/status") {
       handlePullStatus(req, res);
     } else if (req.method === "GET" && url.pathname === "/api/pull/log") {
@@ -3924,6 +4128,11 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, MONITOR_HOST, () => {
   console.log(`usim_cms monitor listening on ${MONITOR_HOST}:${PORT} (repo: ${REPO_DIR}, mode: ${DEPLOY_MODE})`);
 });
+
+// The cluster supervisor first starts a healthy replacement, then drains
+// this worker's HTTP connections. Polling timers would otherwise keep the
+// disconnected worker alive after its listener has closed.
+process.on("disconnect", () => process.exit(0));
 
 if (ALERT_WEBHOOK_URL) {
   console.log(`alerting enabled: polling every ${ALERT_POLL_INTERVAL_MS}ms`);
