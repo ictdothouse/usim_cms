@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, desc, getTableColumns, ilike, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, getTableColumns, ilike, sql, type SQL } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { publishSharedContent } from "../db/tenant-pool.js";
 import { verifySession, signSession } from "../db/auth.js";
@@ -101,10 +101,12 @@ function buildListFilters(table: CollectionConfig["table"], query: Record<string
       conditions.push(ilike(columns.title as never, `%${raw}%`));
     } else if (key === "tag" && "tags" in columns) {
       conditions.push(sql`${columns.tags} @> ARRAY[${raw}]::text[]`);
-    } else if (key === "from" && "publishedAt" in columns) {
-      conditions.push(sql`${columns.publishedAt} >= ${raw}`);
-    } else if (key === "to" && "publishedAt" in columns) {
-      conditions.push(sql`${columns.publishedAt} <= ${raw}`);
+    } else if (key === "from" && ("startDate" in columns || "publishedAt" in columns)) {
+      const dateColumn = "startDate" in columns ? columns.startDate : columns.publishedAt;
+      conditions.push(sql`${dateColumn} >= ${raw}`);
+    } else if (key === "to" && ("startDate" in columns || "publishedAt" in columns)) {
+      const dateColumn = "startDate" in columns ? columns.startDate : columns.publishedAt;
+      conditions.push(sql`${dateColumn} <= ${raw}`);
     } else if (key in columns) {
       conditions.push(sql`${columns[key as keyof typeof columns]} = ${raw}`);
     }
@@ -138,6 +140,8 @@ export function registerPublicCollectionRoutes(app: FastifyInstance, config: Col
     const limit = typeof limitParam === "string" ? Math.min(Math.max(parseInt(limitParam, 10) || 0, 1), 200) : undefined;
     const offset = typeof offsetParam === "string" ? Math.max(parseInt(offsetParam, 10) || 0, 0) : 0;
     let query = filters ? req.db.select().from(table).where(filters) : req.db.select().from(table);
+    const orderColumn = config.defaultOrderBy ? getTableColumns(table)[config.defaultOrderBy] : undefined;
+    if (orderColumn) query = query.orderBy(asc(orderColumn as never)) as typeof query;
     if (limit !== undefined) query = query.limit(limit).offset(offset) as typeof query;
     let items: unknown[] = await query;
     if (config.hooks?.afterRead) items = await config.hooks.afterRead(items, req);

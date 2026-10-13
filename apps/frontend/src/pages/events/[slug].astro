@@ -1,0 +1,99 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import HeroBlock from "../../components/HeroBlock.astro";
+import { getEventBySlug, getSeoDefaults, getTheme, resolveDefaultHeaderFooter } from "../../lib/api";
+import { tenantAwarePath } from "../../lib/tenant-links";
+import { safeUrl } from "../../lib/element-render";
+
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+  ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
+  : rawHost;
+const event = await getEventBySlug(tenantHost, Astro.params.slug ?? "");
+if (!event) Astro.response.status = 404;
+const [theme, seoDefaults, chrome] = await Promise.all([
+  getTheme(tenantHost),
+  getSeoDefaults(tenantHost),
+  resolveDefaultHeaderFooter(tenantHost),
+]);
+const title = event?.title ?? "Acara tidak dijumpai";
+const effectiveTitle = seoDefaults.titleTemplate ? seoDefaults.titleTemplate.replace("%s", title) : title;
+const description = event?.description || seoDefaults.defaultDescription || "Maklumat acara.";
+const canonicalUrl = event ? `https://${tenantHost}/events/${encodeURIComponent(event.slug)}` : undefined;
+const eventLocation = event ? [event.venue, event.location].filter(Boolean).join(", ") : "";
+const dateLabel = (value: string) => new Intl.DateTimeFormat("ms-MY", { dateStyle: "full", timeStyle: "short", timeZone: event?.timezone ?? "Asia/Kuala_Lumpur" }).format(new Date(value));
+const jsonLd = event ? {
+  "@context": "https://schema.org",
+  "@type": "Event",
+  name: event.title,
+  description,
+  startDate: event.startDate,
+  ...(event.endDate ? { endDate: event.endDate } : {}),
+  eventStatus: event.eventState === "cancelled" ? "https://schema.org/EventCancelled" : event.eventState === "postponed" ? "https://schema.org/EventPostponed" : "https://schema.org/EventScheduled",
+  eventAttendanceMode: event.locationType === "online" ? "https://schema.org/OnlineEventAttendanceMode" : event.locationType === "hybrid" ? "https://schema.org/MixedEventAttendanceMode" : "https://schema.org/OfflineEventAttendanceMode",
+  ...(eventLocation ? { location: { "@type": event.locationType === "online" ? "VirtualLocation" : "Place", name: eventLocation, ...(event.mapUrl ? { url: event.mapUrl } : {}) } } : {}),
+  ...(event.organizer ? { organizer: { "@type": "Organization", name: event.organizer } } : {}),
+  ...(event.imageUrl ? { image: event.imageUrl } : {}),
+  url: canonicalUrl,
+} : null;
+---
+
+<BaseLayout
+  title={effectiveTitle}
+  ogImage={event?.imageUrl}
+  metaDescription={description}
+  canonicalUrl={canonicalUrl}
+  jsonLd={jsonLd}
+  theme={theme}
+  headerChrome={chrome.header}
+  footerChrome={chrome.footer}
+  tenantHost={tenantHost}
+>
+  {!event ? (
+    <HeroBlock title="Acara tidak dijumpai" subtitle="Acara ini belum tersedia atau telah dialihkan." />
+  ) : (
+    <main class="event-detail">
+      <a class="back-link" href={tenantAwarePath("/events", Astro.url)}>← Kembali ke kalendar</a>
+      {event.imageUrl && <img class="event-image" src={event.imageUrl} alt="" fetchpriority="high" />}
+      <article>
+        <div class="event-kicker">
+          {event.eventState === "cancelled" ? "DIBATALKAN" : event.eventState === "postponed" ? "DITANGGUHKAN" : "ACARA"}
+          <span>{event.locationType === "online" ? "Dalam talian" : event.locationType === "hybrid" ? "Hibrid" : "Bersemuka"}</span>
+        </div>
+        <h1>{event.title}</h1>
+        <dl class="event-facts">
+          <div><dt>Tarikh dan masa</dt><dd><time datetime={event.startDate}>{dateLabel(event.startDate)}</time>{event.endDate && <> – <time datetime={event.endDate}>{dateLabel(event.endDate)}</time></>}</dd></div>
+          {(eventLocation || event.locationType === "online") && <div><dt>Lokasi</dt><dd>{eventLocation || "Dalam talian"}{event.mapUrl && safeUrl(event.mapUrl) && <a href={safeUrl(event.mapUrl)} target="_blank" rel="noopener noreferrer">Lihat peta</a>}</dd></div>}
+          {event.organizer && <div><dt>Penganjur</dt><dd>{event.organizer}</dd></div>}
+          <div><dt>Zon masa</dt><dd>{event.timezone}</dd></div>
+        </dl>
+        {event.description && <div class="event-description">{event.description}</div>}
+        <div class="event-actions">
+          <a class="calendar-link" href={tenantAwarePath(`/events/${encodeURIComponent(event.slug)}/calendar.ics`, Astro.url)}>Tambah ke kalendar (.ics)</a>
+          {event.registrationUrl && safeUrl(event.registrationUrl) && <a class="register-link" href={safeUrl(event.registrationUrl)} target="_blank" rel="noopener noreferrer">Daftar sekarang</a>}
+        </div>
+      </article>
+    </main>
+  )}
+  <style>
+    .event-detail { width: min(54rem,calc(100% - 2rem)); margin: 0 auto; padding: clamp(1.5rem,5vw,4rem) 0; }
+    .back-link { display: inline-block; margin-bottom: 1.25rem; color: inherit; opacity: .72; text-decoration: none; font-size: .88rem; }
+    .back-link:hover { text-decoration: underline; }
+    .event-image { display: block; width: 100%; max-height: 28rem; margin-bottom: 2rem; border-radius: 1rem; object-fit: cover; }
+    .event-detail article { max-width: 46rem; margin: 0 auto; }
+    .event-kicker { display: flex; gap: .65rem; align-items: center; color: var(--color-primary,#17483d); font-size: .72rem; font-weight: 800; letter-spacing: .1em; }
+    .event-kicker span { padding: .25rem .55rem; border-radius: 999px; background: rgba(0,0,0,.06); letter-spacing: 0; }
+    .event-detail h1 { margin: .7rem 0 1.4rem; color: var(--color-primary,#17483d); font-size: clamp(2rem,5vw,3.4rem); line-height: 1.08; }
+    .event-facts { display: grid; gap: .85rem; margin: 0 0 1.75rem; }
+    .event-facts div { display: grid; grid-template-columns: 9rem 1fr; gap: .75rem; }
+    .event-facts dt { font-size: .85rem; font-weight: 700; opacity: .65; }
+    .event-facts dd { margin: 0; line-height: 1.55; }
+    .event-facts dd a { margin-left: .5rem; color: var(--color-primary,#17483d); }
+    .event-description { white-space: pre-wrap; line-height: 1.75; }
+    .event-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 2rem; }
+    .event-actions a { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: .7rem 1rem; border-radius: .55rem; font-size: .88rem; font-weight: 700; text-decoration: none; }
+    .calendar-link { border: 1px solid rgba(0,0,0,.17); color: inherit; }
+    .register-link { background: var(--color-primary,#17483d); color: white; }
+    @media (max-width: 560px) { .event-facts div { grid-template-columns: 1fr; gap: .2rem; } }
+  </style>
+</BaseLayout>

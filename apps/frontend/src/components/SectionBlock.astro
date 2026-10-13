@@ -597,7 +597,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                     <EventListBlock
                       count={p.count}
                       columns={p.columns}
-                      eventLayout={p.eventLayout as "grid" | "list" | undefined}
+                      eventLayout={p.eventLayout as "grid" | "list" | "calendar" | undefined}
                       tenantHost={tenantHost}
                       p={p}
                       bp={el.bp}
@@ -797,6 +797,20 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
     margin: 0;
     font-size: 1.1rem;
     font-weight: 700;
+  }
+  .ds-eventlist-state {
+    align-self: flex-start;
+    margin: 0;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(210, 139, 32, 0.12);
+    color: #875a12;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+  .ds-eventlist-state.cancelled {
+    background: rgba(176, 50, 50, 0.1);
+    color: #a83232;
   }
   .ds-eventlist-location {
     margin: 0;

@@ -48,6 +48,9 @@ export interface RevisionsConfig<T = unknown> {
 
 export interface CollectionConfig<T = unknown> {
   slug: string;
+  // Optional stable list order for collection GETs. The value must name a
+  // column on `table`; used for events so admin lists are chronological.
+  defaultOrderBy?: string;
   // Drizzle table backing the generic CRUD routes; must have an "id" column.
   table?: PgTable;
   // JSON-schema for the POST body, validated before it ever reaches the DB.

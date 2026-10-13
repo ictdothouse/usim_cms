@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { listPages, listPosts } from "../lib/api";
+import { listEvents, listPages, listPosts } from "../lib/api";
 
 // Native SEO + AEO: lists every published, non-noindex page/post for this tenant.
 // Same Host-header tenant resolution every other page file in this app already
@@ -12,14 +12,17 @@ export const GET: APIRoute = async ({ request }) => {
     : rawHost;
   const base = `https://${tenantHost}`;
 
-  const [pages, posts] = await Promise.all([
+  const [pages, posts, events] = await Promise.all([
     listPages(tenantHost, { status: "published" }),
     listPosts(tenantHost, { status: "published" }),
+    listEvents(tenantHost),
   ]);
 
   const urls = [
     ...pages.filter((p) => !p.seo?.noindex).map((p) => ({ loc: `${base}/${p.slug}`, lastmod: null as string | null })),
     ...posts.filter((p) => !p.seo?.noindex).map((p) => ({ loc: `${base}/posts/${p.slug}`, lastmod: p.publishedAt })),
+    { loc: `${base}/events`, lastmod: null as string | null },
+    ...events.map((event) => ({ loc: `${base}/events/${event.slug}`, lastmod: null as string | null })),
   ];
 
   const body = `<?xml version="1.0" encoding="UTF-8"?>

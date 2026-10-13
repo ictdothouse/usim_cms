@@ -364,17 +364,50 @@ export async function listCategories(tenantHost: string): Promise<Category[]> {
 // fetches and filters/sorts (upcoming-first) at render time.
 export interface EventItem {
   id: string;
+  slug: string;
   title: string;
   description: string;
   startDate: string;
   endDate: string | null;
+  timezone: string;
+  eventState: "scheduled" | "cancelled" | "postponed";
+  locationType: "physical" | "online" | "hybrid";
   location: string | null;
+  venue: string | null;
+  organizer: string | null;
+  mapUrl: string | null;
   imageUrl: string | null;
   registrationUrl: string | null;
+  status?: "draft" | "published";
 }
 
-export async function listEvents(tenantHost: string): Promise<EventItem[]> {
-  const { items } = await apiGet<{ items: EventItem[] }>("/api/events?status=published", tenantHost);
+export async function listEvents(tenantHost: string, token?: string): Promise<EventItem[]> {
+  const all: EventItem[] = [];
+  const pageSize = 200;
+  let offset = 0;
+  while (true) {
+    const query = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
+    if (!token) query.set("status", "published");
+    const { items, total } = await apiGet<{ items: EventItem[]; total?: number }>(`/api/events?${query}`, tenantHost, token);
+    all.push(...items);
+    offset += items.length;
+    if (items.length < pageSize || (total !== undefined && offset >= total)) break;
+  }
+  return all;
+}
+
+export async function getEventBySlug(tenantHost: string, slug: string): Promise<EventItem | null> {
+  try {
+    const { item } = await apiGet<{ item: EventItem }>(`/api/events/slug/${encodeURIComponent(slug)}`, tenantHost);
+    return item;
+  } catch {
+    return null;
+  }
+}
+
+export async function getEventsCalendar(tenantHost: string, from: Date, to: Date, limit = 300): Promise<EventItem[]> {
+  const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(), limit: String(limit) });
+  const { items } = await apiGet<{ items: EventItem[] }>(`/api/events/calendar?${query}`, tenantHost);
   return items;
 }
 

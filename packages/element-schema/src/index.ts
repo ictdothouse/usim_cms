@@ -151,7 +151,7 @@ export const ENUM_VALUES: Record<string, string[]> = {
   equalHeight: ["true", "false"],
   dismissible: ["true", "false"],
   postLayout: ["grid", "list"],
-  eventLayout: ["grid", "list"],
+  eventLayout: ["grid", "list", "calendar"],
   count: ["3", "4", "6", "9"],
   // Batch of simple no-backend elements (Designer.tsx's ELS registry) —
   // googlemap/announcementticker's own enum fields.

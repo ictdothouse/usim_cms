@@ -1,0 +1,140 @@
+---
+import { getEventsCalendar, type EventItem } from "../lib/api";
+import { tenantAwarePath } from "../lib/tenant-links";
+
+interface Props {
+  tenantHost: string;
+  month?: string;
+  compact?: boolean;
+}
+
+const { tenantHost, month: requestedMonth, compact = false } = Astro.props;
+const defaultMonth = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kuala_Lumpur",
+  year: "numeric",
+  month: "2-digit",
+}).format(new Date());
+const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth ?? "") ? requestedMonth! : defaultMonth;
+const [year, monthNumber] = month.split("-").map(Number);
+const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1));
+const monthEnd = new Date(Date.UTC(year, monthNumber, 1));
+const rangeFrom = new Date(monthStart.getTime() - 24 * 60 * 60 * 1000);
+const rangeTo = new Date(monthEnd.getTime() + 24 * 60 * 60 * 1000);
+const events = await getEventsCalendar(tenantHost, rangeFrom, rangeTo, 300);
+
+const localDateKey = (value: string, timezone: string) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(value));
+    const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "00";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  } catch {
+    return new Date(value).toISOString().slice(0, 10);
+  }
+};
+
+const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+const mondayOffset = (monthStart.getUTCDay() + 6) % 7;
+const cells = Array.from({ length: 42 }, (_, i) => {
+  const day = i - mondayOffset + 1;
+  const date = new Date(Date.UTC(year, monthNumber - 1, day));
+  return {
+    date,
+    key: date.toISOString().slice(0, 10),
+    day: date.getUTCDate(),
+    inMonth: day >= 1 && day <= daysInMonth,
+  };
+});
+
+const byDate = new Map<string, EventItem[]>();
+for (const event of events) {
+  const startKey = localDateKey(event.startDate, event.timezone || "UTC");
+  const endKey = localDateKey(event.endDate ?? event.startDate, event.timezone || "UTC");
+  const start = new Date(`${startKey}T00:00:00Z`);
+  const end = new Date(`${endKey}T00:00:00Z`);
+  const visibleStart = new Date(Math.max(start.getTime(), monthStart.getTime()));
+  const visibleEnd = new Date(Math.min(end.getTime(), monthEnd.getTime() - 24 * 60 * 60 * 1000));
+  if (visibleEnd < visibleStart) continue;
+  for (let day = visibleStart; day <= visibleEnd; day = new Date(day.getTime() + 24 * 60 * 60 * 1000)) {
+    const key = day.toISOString().slice(0, 10);
+    const bucket = byDate.get(key) ?? [];
+    bucket.push(event);
+    byDate.set(key, bucket);
+  }
+}
+
+const previous = new Date(Date.UTC(year, monthNumber - 2, 1)).toISOString().slice(0, 7);
+const next = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 7);
+const monthLabel = new Intl.DateTimeFormat("ms-MY", { month: "long", year: "numeric", timeZone: "UTC" }).format(monthStart);
+const weekdays = ["Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu", "Ahad"];
+const currentSearch = new URLSearchParams(Astro.url.searchParams);
+const monthHref = (value: string) => {
+  const query = new URLSearchParams(currentSearch);
+  query.set("month", value);
+  return `?${query.toString()}`;
+};
+const eventTime = (event: EventItem) => {
+  try {
+    return new Intl.DateTimeFormat("ms-MY", { hour: "2-digit", minute: "2-digit", timeZone: event.timezone }).format(new Date(event.startDate));
+  } catch {
+    return new Intl.DateTimeFormat("ms-MY", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }).format(new Date(event.startDate));
+  }
+};
+---
+
+<section class:list={["events-calendar", compact && "events-calendar-compact"]} aria-label={`Kalendar acara, ${monthLabel}`}>
+  <header class="calendar-heading">
+    <a href={monthHref(previous)} aria-label="Bulan sebelumnya">‹</a>
+    <h2>{monthLabel}</h2>
+    <a href={monthHref(next)} aria-label="Bulan seterusnya">›</a>
+  </header>
+  <div class="calendar-grid" role="grid" aria-label={monthLabel}>
+    {weekdays.map((weekday) => <div class="calendar-weekday" role="columnheader">{weekday}</div>)}
+    {cells.map((cell) => (
+      <div class:list={["calendar-day", !cell.inMonth && "outside-month"]} role="gridcell" aria-label={`${cell.day} ${monthLabel}`}>
+        <span class="calendar-day-number">{cell.day}</span>
+        <ul>
+          {(byDate.get(cell.key) ?? []).slice(0, compact ? 2 : 4).map((event) => (
+            <li>
+              <a class:list={["calendar-event", event.eventState === "cancelled" && "is-cancelled", event.eventState === "postponed" && "is-postponed"]} href={tenantAwarePath(`/events/${encodeURIComponent(event.slug)}`, Astro.url)}>
+                <time datetime={event.startDate}>{eventTime(event)}</time> {event.title}{event.eventState === "cancelled" ? " (Dibatalkan)" : event.eventState === "postponed" ? " (Ditangguhkan)" : ""}
+              </a>
+            </li>
+          ))}
+          {(byDate.get(cell.key)?.length ?? 0) > (compact ? 2 : 4) && <li class="calendar-more">+{(byDate.get(cell.key)?.length ?? 0) - (compact ? 2 : 4)} lagi</li>}
+        </ul>
+      </div>
+    ))}
+  </div>
+  <style>
+    .events-calendar { border: 1px solid color-mix(in srgb, var(--color-primary, #17483d) 18%, transparent); border-radius: 1rem; overflow: hidden; background: var(--color-background, #fff); color: var(--color-text, #17231f); }
+    .calendar-heading { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid rgba(0,0,0,.08); }
+    .calendar-heading h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+    .calendar-heading a { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: 999px; color: inherit; text-decoration: none; font-size: 1.5rem; }
+    .calendar-heading a:hover { background: rgba(0,0,0,.06); }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); }
+    .calendar-weekday { padding: .6rem .45rem; text-align: center; font-size: .72rem; font-weight: 700; opacity: .65; }
+    .calendar-day { min-height: 7.2rem; padding: .5rem; border-top: 1px solid rgba(0,0,0,.07); border-right: 1px solid rgba(0,0,0,.07); min-width: 0; }
+    .calendar-day:nth-child(7n) { border-right: 0; }
+    .calendar-day.outside-month { background: rgba(0,0,0,.025); color: #7e8984; }
+    .calendar-day-number { display: block; margin-bottom: .35rem; font-size: .75rem; font-weight: 700; }
+    .calendar-day ul { display: grid; gap: .25rem; margin: 0; padding: 0; list-style: none; }
+    .calendar-event { display: block; overflow: hidden; padding: .22rem .32rem; border-radius: .3rem; background: color-mix(in srgb, var(--color-primary, #17483d) 10%, white); color: inherit; font-size: .68rem; line-height: 1.35; text-decoration: none; text-overflow: ellipsis; }
+    .calendar-event time { font-weight: 700; }
+    .calendar-event.is-cancelled { text-decoration: line-through; opacity: .65; }
+    .calendar-event.is-postponed { border-inline-start: 2px solid #d28b20; }
+    .calendar-more { font-size: .65rem; opacity: .7; }
+    .events-calendar-compact .calendar-day { min-height: 5.4rem; padding: .35rem; }
+    .events-calendar-compact .calendar-weekday { font-size: .65rem; }
+    @media (max-width: 700px) {
+      .calendar-day { min-height: 5.2rem; padding: .3rem; }
+      .calendar-weekday { padding: .5rem .1rem; font-size: .58rem; }
+      .calendar-event { font-size: .58rem; padding: .18rem; }
+      .calendar-day-number { font-size: .68rem; }
+    }
+  </style>
+</section>

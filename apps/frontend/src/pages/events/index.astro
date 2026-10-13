@@ -1,0 +1,79 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import EventsCalendar from "../../components/EventsCalendar.astro";
+import { getEventsCalendar, getSeoDefaults, getTheme, resolveDefaultHeaderFooter } from "../../lib/api";
+import { tenantAwarePath } from "../../lib/tenant-links";
+
+const rawHost = Astro.request.headers.get("host") ?? "";
+const tenantHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(rawHost)
+  ? (Astro.url.searchParams.get("__tenant") ?? import.meta.env.DEV_TENANT_HOST ?? rawHost)
+  : rawHost;
+const theme = await getTheme(tenantHost);
+const seoDefaults = await getSeoDefaults(tenantHost);
+const { header: headerChrome, footer: footerChrome } = await resolveDefaultHeaderFooter(tenantHost);
+const now = new Date();
+const upcoming = await getEventsCalendar(tenantHost, now, new Date(now.getTime() + 400 * 24 * 60 * 60 * 1000), 100);
+const upcomingEvents = upcoming.filter((event) => new Date(event.endDate ?? event.startDate) >= now).slice(0, 12);
+const title = "Kalendar Acara";
+const effectiveTitle = seoDefaults.titleTemplate ? seoDefaults.titleTemplate.replace("%s", title) : title;
+const description = seoDefaults.defaultDescription || "Lihat acara akan datang.";
+const canonicalUrl = `https://${tenantHost}/events`;
+---
+
+<BaseLayout
+  title={effectiveTitle}
+  metaDescription={description}
+  canonicalUrl={canonicalUrl}
+  theme={theme}
+  headerChrome={headerChrome}
+  footerChrome={footerChrome}
+  tenantHost={tenantHost}
+>
+  <main class="events-page">
+    <header class="events-intro">
+      <p class="eyebrow">AKTIVITI & PROGRAM</p>
+      <h1>Kalendar Acara</h1>
+      <p>Semak tarikh acara dan buka butiran untuk maklumat lokasi, pendaftaran serta pilihan tambah ke kalendar.</p>
+    </header>
+    <EventsCalendar tenantHost={tenantHost} />
+    <section class="upcoming" aria-labelledby="upcoming-title">
+      <h2 id="upcoming-title">Acara akan datang</h2>
+      {upcomingEvents.length ? (
+        <div class="upcoming-list">
+          {upcomingEvents.map((event) => (
+            <article class="upcoming-item">
+              <time datetime={event.startDate}>
+                {new Intl.DateTimeFormat("ms-MY", { day: "numeric", month: "short", year: "numeric", timeZone: event.timezone }).format(new Date(event.startDate))}
+              </time>
+              <div>
+                <h3><a href={tenantAwarePath(`/events/${encodeURIComponent(event.slug)}`, Astro.url)}>{event.title}</a></h3>
+                <p>{event.venue || event.location || (event.locationType === "online" ? "Dalam talian" : "Lokasi akan dimaklumkan")}</p>
+              </div>
+              {event.eventState !== "scheduled" && <span class={`event-state ${event.eventState}`}>{event.eventState === "cancelled" ? "Dibatalkan" : "Ditangguhkan"}</span>}
+            </article>
+          ))}
+        </div>
+      ) : <p class="empty">Belum ada acara akan datang.</p>}
+    </section>
+  </main>
+  <style>
+    .events-page { width: min(76rem, calc(100% - 2rem)); margin: 0 auto; padding: clamp(2rem,6vw,5rem) 0; }
+    .events-intro { max-width: 42rem; margin: 0 auto 2rem; text-align: center; }
+    .events-intro .eyebrow { margin: 0 0 .75rem; color: var(--color-primary,#17483d); font-size: .72rem; font-weight: 800; letter-spacing: .14em; }
+    .events-intro h1 { margin: 0; color: var(--color-primary,#17483d); font-size: clamp(2rem,5vw,3.5rem); line-height: 1.08; }
+    .events-intro > p:last-child { margin: 1rem 0 0; line-height: 1.65; opacity: .76; }
+    .upcoming { margin-top: 3rem; }
+    .upcoming h2 { margin: 0 0 1rem; color: var(--color-primary,#17483d); font-size: 1.5rem; }
+    .upcoming-list { display: grid; gap: .65rem; }
+    .upcoming-item { display: grid; grid-template-columns: 8rem 1fr auto; gap: 1rem; align-items: center; padding: 1rem; border: 1px solid rgba(0,0,0,.1); border-radius: .75rem; }
+    .upcoming-item time { font-size: .83rem; font-weight: 700; opacity: .7; }
+    .upcoming-item h3 { margin: 0; font-size: 1rem; }
+    .upcoming-item h3 a { color: inherit; text-decoration: none; }
+    .upcoming-item h3 a:hover { text-decoration: underline; }
+    .upcoming-item p { margin: .25rem 0 0; font-size: .85rem; opacity: .7; }
+    .event-state { padding: .25rem .55rem; border-radius: 999px; background: rgba(210,139,32,.12); color: #875a12; font-size: .72rem; font-weight: 700; }
+    .event-state.cancelled { background: rgba(176,50,50,.1); color: #a83232; }
+    .empty { opacity: .7; }
+    @media (max-width: 600px) { .upcoming-item { grid-template-columns: 1fr auto; gap: .45rem .8rem; } .upcoming-item time { grid-column: 1 / -1; } }
+  </style>
+</BaseLayout>
