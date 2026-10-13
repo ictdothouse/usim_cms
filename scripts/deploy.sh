@@ -233,7 +233,8 @@ do_deploy() {
   if ! smoke_test "$project" frontend; then
     echo "" >&2
     echo "$next failed the real-page smoke test — leaving ${CURRENT:-<none>} live untouched." >&2
-    docker compose -p "$project" -f "$RELEASE_FILE" logs --tail 50 frontend >&2 || true
+    echo "-- recent API and frontend logs --" >&2
+    docker compose -p "$project" -f "$RELEASE_FILE" logs --tail 100 api frontend >&2 || true
     docker compose -p "$project" -f "$RELEASE_FILE" down
     exit 1
   fi
