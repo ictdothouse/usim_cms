@@ -5,7 +5,8 @@ Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=__NODE_BIN__ __REPO_DIR__/monitor/server.js
+ExecStart=__NODE_BIN__ __REPO_DIR__/monitor/supervisor.js
+ExecReload=/bin/kill -USR2 $MAINPID
 WorkingDirectory=__REPO_DIR__
 EnvironmentFile=/etc/ucms-monitor.env
 Restart=on-failure

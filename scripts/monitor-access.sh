@@ -117,7 +117,13 @@ mv -f "$temp_file" monitor/access/config.json
 # The monitor reads the config file at startup. In SSH mode this immediately
 # rejects requests for the former public hostname, even if Caddy is down and
 # the route removal cannot yet be applied.
-systemctl restart ucms-monitor
+main_pid="$(systemctl show ucms-monitor -p MainPID --value 2>/dev/null || true)"
+if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/${main_pid}/cmdline" ] && \
+   tr '\0' ' ' < "/proc/${main_pid}/cmdline" | grep -q 'monitor/supervisor.js'; then
+  systemctl reload ucms-monitor
+else
+  systemctl restart ucms-monitor
+fi
 systemctl is-active --quiet ucms-monitor
 if [ "$mode" = "public" ]; then
   temp_route="$(mktemp monitor/access/.route.XXXXXX)"
