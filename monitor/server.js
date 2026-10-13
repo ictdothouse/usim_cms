@@ -2707,16 +2707,15 @@ const DASHBOARD_HTML = `<!doctype html>
 </div>
 
 <div class="tab-panel" id="panel-deploy">
-  <p class="section-intro">Promote an update, return to the previous release, or apply infrastructure changes.</p>
+  <p class="section-intro">Promote an update or return to the previous release.</p>
   <div class="action-panel">
     <h3>Release controls</h3>
     <p class="muted">Deployment checks the new release before switching traffic.</p>
     <div class="row">
       <button data-action="pull">Pull latest &amp; deploy</button>
       <button class="secondary" data-action="rollback">Rollback</button>
-      <button class="secondary" data-action="restart-all">Restart all</button>
     </div>
-    <p class="muted">Shared database, proxy, pooler and cache updates are unavailable here until redundant infrastructure is configured.</p>
+    <p class="muted">To refresh the app services, use Pull latest &amp; deploy; it checks the release before switching traffic. Restarting every service would interrupt the shared database and proxy on this single VPS, so that action is unavailable. Shared database, proxy, pooler and cache updates also require redundant infrastructure.</p>
   </div>
   <div class="section-head"><h3>Deployment activity</h3></div>
   <p class="muted" id="deployState">No deploy run yet.</p>
@@ -3729,10 +3728,6 @@ async function act(name, action) {
   }
 }
 
-async function restartAll() {
-  for (const name of SERVICES) await act(name, "restart");
-}
-
 async function pull(button) {
   const originalText = button.textContent;
   button.disabled = true;
@@ -3933,7 +3928,6 @@ const dashboardActions = new Map([
   ["open-deploy", () => switchTab("deploy")],
   ["pull", pull],
   ["rollback", rollback],
-  ["restart-all", restartAll],
   ["refresh", refresh],
   ["refresh-security", () => refreshSecurity(true)],
   ["db-restart", dbRestart],
