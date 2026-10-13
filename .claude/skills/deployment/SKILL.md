@@ -3,11 +3,12 @@ name: deployment
 description: Deployment, infra, and ops reference for usim_cms — docker-compose services (pgbouncer, redis, proxy/Caddy), backup/restore, install.sh (VPS/local-dev installers), blue-green zero-downtime deploys, nginx/certbot SSL, and the monitor dashboard. Use when working on deployment configs, docker-compose files, install scripts, the Caddyfile, scripts/deploy.sh, or monitor/server.js.
 ---
 
-- `docker-compose.yml` runs the whole stack: `db` (Postgres, runs
-  `scripts/setup-db-role.sql` once via `docker-entrypoint-initdb.d` to create the
-  `usim_cms_app` role), `api`, `frontend`, `admin` (static SPA served by nginx inside its
-  own image, see `apps/admin/Dockerfile`), and `proxy`. Each service has a healthcheck;
-  `depends_on: condition: service_healthy` sequences the startup order.
+- `docker-compose.yml` runs the shared base tier: PostgreSQL, PgBouncer, Redis,
+  and Caddy. `docker-compose.release.yml` runs the blue/green API, frontend,
+  and admin tier. PostgreSQL runs `setup-db-role.sql` only when its data volume
+  is empty; `scripts/configure-docker-db-roles.sh` updates existing volumes.
+  API readiness checks a real database query; the frontend has its own
+  healthcheck and the admin is considered ready once its container is running.
 - **`pgbouncer`** (`docker-compose.yml`, always-on alongside `db`/`proxy`) sits between every
   `api` replica and Postgres — architecture-review fix for connection-pool blowup: without it,
   total backend connections scale as `(control pool × replicas) + (tenant pool × tenants ×
@@ -34,40 +35,19 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   recommendation resolves to in practice). `scripts/deploy.sh`'s base-tier line
   (`docker compose up -d db pgbouncer redis proxy`) must keep listing `pgbouncer`/`redis`
   explicitly — an explicit service list doesn't pick up a newly added compose service on its own.
-  **Real auth, not `auth_type = trust`** (a security-audit finding: the wildcard `[databases]`
-  entry used to embed a literal hardcoded password and `auth_type = trust` meant PgBouncer never
-  checked a connecting client's password at all). `POSTGRES_APP_PASSWORD` (`.env`) is the single
-  source of truth: the `db` container's own `docker-entrypoint-initdb.d/02-rotate-db-role-
-  password.sh` (runs right after `setup-db-role.sql`, same first-boot-only pass) forces
-  `usim_cms_app`'s password into classic **md5** storage (`SET password_encryption = 'md5'`, not
-  Postgres 16's `scram-sha-256` default) from that env var, and `db`'s own
-  `POSTGRES_HOST_AUTH_METHOD=md5` makes Postgres demand md5 over the network to match. `install.sh`'s
-  `write_pgbouncer_userlist()` independently computes the same `md5(password + role)` hash from the
-  identical env var and writes it to `pgbouncer/userlist.txt` (git-ignored — see
-  `pgbouncer/userlist.txt.example` — generated fresh on every production-mode install/re-run,
-  before `pgbouncer` first starts). `pgbouncer.ini`'s `[databases]` line now has no `password=`
-  field at all — PgBouncer falls back to this same `auth_file` entry to authenticate the *backend*
-  leg to Postgres too, not just the incoming client (`auth_type = md5`) — verified locally by
-  spinning up `db`+`pgbouncer` with a test password: correct password connects, a wrong one gets a
-  real `FATAL: password authentication failed`. **This only rotates a FRESH install's role** —
-  `docker-entrypoint-initdb.d` scripts never re-run against an existing data volume, so an
-  already-deployed instance's live password rotation is still a supervised, by-hand step (rotate
-  `.env`'s `POSTGRES_APP_PASSWORD`, `docker compose exec db psql -U postgres -c "SET
-  password_encryption='md5'; ALTER ROLE usim_cms_app WITH PASSWORD '...';"`, re-run
-  `write_pgbouncer_userlist` — or its one-liner equivalent — then restart `pgbouncer` and `api`).
-  Two gotchas hit doing this live (both fixed, but worth knowing for the next already-deployed
-  instance): (1) `userlist.txt` must be `chown 0:70` (edoburu/pgbouncer's container runs as uid:gid
-  **70:70**, not root, not whatever host user wrote the file) + `chmod 640` — `600` alone gets
-  `could not open auth_file ...: Permission denied` on pgbouncer boot, and plain `644` is
-  needlessly world-readable for a credential file when the right gid is one `chown` away; (2) an
-  already-initialized volume's `pg_hba.conf` was written at that instance's ORIGINAL first boot,
-  before this fix existed — if its host rule still says `scram-sha-256` (Postgres 16's default)
-  instead of `md5`, forcing the role's password into md5 storage while `pg_hba` demands SCRAM
-  produces the exact same generic `FATAL: password authentication failed` as a wrong password.
-  Check with `docker compose exec db grep -Ev '^\s*#|^\s*$' /var/lib/postgresql/data/pg_hba.conf`;
-  fix live, no reinit/restart needed: `docker compose exec db sed -i 's/^host all all all
-  scram-sha-256/host all all all md5/' /var/lib/postgresql/data/pg_hba.conf` then `docker compose
-  exec db psql -U postgres -c "SELECT pg_reload_conf();"`.
+  **SCRAM-SHA-256 authentication.** New installations store PostgreSQL role
+  passwords as SCRAM verifiers and PgBouncer reads the exact app-role verifier
+  from `pg_authid` into the private `pgbouncer/userlist.txt` file. On existing
+  Docker volumes, `scripts/configure-docker-db-roles.sh` performs the one-time
+  role migration before Compose recreates PgBouncer. Keep the file `root:70`
+  with mode `640`; the Percona PgBouncer container runs as UID/GID 70 through
+  an explicit Compose setting. PgBouncer 1.26.0 fixes a SCRAM pass-through
+  reconnect regression in 1.25.2. `scripts/deploy.sh` checks a real
+  `SELECT 1` through PgBouncer before building the idle color, and the API
+  container healthcheck calls `/ready` to confirm database access. Never
+  switch the app role back to MD5 or write a separately generated SCRAM
+  verifier into the userlist: PgBouncer pass-through needs the exact verifier
+  (including salt) stored by PostgreSQL. See `docs/DEPLOY.md` for recovery.
 - **Connection budget, with real numbers** (Fasa 1's "dokumentasikan max_connections dan resource
   requirement" — the one open item left in the architecture audit's phased roadmap). Nothing here
   overrides Postgres's own config, so today's actual ceiling is the stock `postgres:16-alpine`
@@ -536,9 +516,10 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `db` (the image refuses to start against an old-format data directory) since neither this update-
   check flow nor `scripts/deploy.sh` migrates the volume; a real major upgrade needs a deliberate
   backup (`apps/api/scripts/backup.sh`) + `pg_upgrade`/dump-restore pass first. Minor/patch Postgres
-  bumps (same on-disk format) still show up and flow through normally — same base-tier caveat as
-  below (needs `docker compose pull db && docker compose up -d db` by hand, "Pull latest & deploy"
-  doesn't touch base tier).
+  bumps (same on-disk format) still show up and flow through normally. Apply a
+  floating-tag refresh through the monitor's stack update action or an explicit
+  `docker compose pull db && docker compose up -d db`; normal deploys run
+  `docker compose up -d` for the base tier but do not pull newer tag contents.
 - **`GET /api/sites`** (dashboard's "Sites" section) — per-tenant uploads folder size, one `du -sb` per
   top-level folder under the uploads dir (docker mode auto-resolves the named `ucms-uploads` volume's
   real host path via `docker volume inspect`; bare-metal defaults to `apps/api/uploads`; `UPLOADS_DIR`

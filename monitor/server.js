@@ -822,14 +822,17 @@ function maxTagMajor(tags) {
   return best;
 }
 
-function maxSemverTag(tags, re) {
+function maxPgbouncerTag(tags) {
   let best = null;
   let bestParsed = null;
   for (const t of tags) {
-    const m = String(t).match(re);
+    // Percona publishes both 1.26.0 and 1.26.0-1; the latter is a newer
+    // immutable image rebuild. Ignore per-architecture tags and moving tags.
+    const m = String(t).match(/^(\d+)\.(\d+)\.(\d+)(?:-(\d+))?$/);
     if (!m) continue;
-    const parsed = [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)];
-    if (!bestParsed || cmpVer(parsed, bestParsed) > 0) {
+    const parsed = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4] || 0)];
+    const firstDifference = bestParsed && parsed.map((part, i) => part - bestParsed[i]).find((delta) => delta !== 0);
+    if (!bestParsed || firstDifference > 0) {
       bestParsed = parsed;
       best = t;
     }
@@ -878,8 +881,8 @@ function getUpstreamLatest(cb) {
     result.caddy = tags ? maxTagMajor(tags) : null;
     done();
   });
-  dockerHubTags("edoburu/pgbouncer", (tags) => {
-    result.pgbouncer = tags ? maxSemverTag(tags, /^v?(\d+)\.(\d+)\.(\d+)/) : null;
+  dockerHubTags("percona/percona-pgbouncer", (tags) => {
+    result.pgbouncer = tags ? maxPgbouncerTag(tags) : null;
     done();
   });
 }
@@ -909,8 +912,13 @@ function computeVersionChecks(cb) {
         checks.caddy = { current: cur, latest: latest.caddy ? String(latest.caddy) : null, ...verdict(cur, latest.caddy, true) };
       }
       if (v.infra.pgbouncer) {
-        const cur = (v.infra.pgbouncer.match(/^edoburu\/pgbouncer:(\S+)/) || [])[1];
-        checks.pgbouncer = { current: cur, latest: latest.pgbouncer, ...verdict(cur, latest.pgbouncer, false) };
+        const cur = (v.infra.pgbouncer.match(/^percona\/percona-pgbouncer:(\S+)/) || [])[1];
+        const check = verdict(cur, latest.pgbouncer, false);
+        if (check.status === "latest" && cur && latest.pgbouncer && cur !== latest.pgbouncer && maxPgbouncerTag([cur, latest.pgbouncer]) === latest.pgbouncer) {
+          check.status = "behind";
+          check.note = `${latest.pgbouncer} image rebuild available`;
+        }
+        checks.pgbouncer = { current: cur, latest: latest.pgbouncer, ...check };
       }
       cb(checks);
     });
@@ -971,11 +979,8 @@ function getPreflightCheck(cb) {
       { cwd: REPO_DIR, timeout: 10_000 },
       (diffErr, diffOut) => {
         const files = diffErr ? [] : diffOut.trim().split("\n").filter(Boolean);
-        // These are the two change classes the existing deploy pipeline does NOT fully cover
-        // on its own: docker-compose.yml/Caddyfile/pgbouncer config lives in the always-on
-        // base tier that "Pull latest & deploy" deliberately never touches (see
-        // handleApplyBaseTier's comment) — a tenant-facing symptom only shows up if someone
-        // assumes the Update button applied it. A new migration file is actually fine (every
+        // A base-tier change can interrupt the live color while deploy.sh
+        // recreates db/proxy/pgbouncer/redis. A new migration file is fine (every
         // migration in this repo is additive, IF NOT EXISTS/idempotent — see CLAUDE.md), it's
         // just worth calling out explicitly rather than silently applying on first request.
         const baseTierChanged = files.some((f) => /^(docker-compose.*\.ya?ml|Caddyfile|pgbouncer\/)/.test(f));
@@ -1005,7 +1010,7 @@ function getPreflightCheck(cb) {
             if (baseTierChanged) {
               raise("caution");
               reasons.push(
-                "Touches docker-compose/Caddyfile/pgbouncer config — \"Pull latest & deploy\" only redeploys api/frontend/admin, it won't apply this. Review the change, then run \"Apply base-tier config\" separately afterwards.",
+                "Touches shared docker-compose/Caddyfile/pgbouncer config — the next deploy may recreate a live base-tier container briefly. Schedule the update and watch its health and database login checks.",
               );
             }
             if (migrationAdded) {
@@ -1348,11 +1353,9 @@ function handleRollback(req, res) {
   });
 }
 
-// Deliberately separate from handlePull/scripts/deploy.sh: db/proxy/
-// pgbouncer/redis are the always-on "base" every blue/green color shares,
-// so a normal redeploy must never touch them (that's the whole point of the
-// split). This is the one-off manual step for when docker-compose.yml
-// itself changed (e.g. a new mem_limit) — `up -d` only recreates a
+// Explicit operator action for shared base-tier config. The normal
+// scripts/deploy.sh also runs compose up for these services; this action is
+// useful when only their config needs applying. `up -d` only recreates a
 // container whose own config actually changed, but any of these four is a
 // single instance, so expect a few seconds of interruption per container
 // recreated. Docker-mode only: systemd/bare-metal mode has no containers
@@ -1437,7 +1440,24 @@ function pollHealthThenMaybeRollback(service, imageRef, oldImageId, logLine, don
     getComposeStatus((err, services) => {
       const entry = !err && services ? services.find((s) => s.Service === service) : null;
       logLine(`health check (${service}): ${entry ? entry.State : "(not found)"}`);
-      if (entry && isServiceUp(entry.State)) return done(true);
+      if (entry && isServiceUp(entry.State)) {
+        if (service !== "pgbouncer") return done(true);
+        // PgBouncer's own image has no psql. Its TCP listener can be healthy
+        // while every server login fails, so probe through it from the db
+        // container before accepting an update as successful.
+        return runCompose(
+          ["exec", "-T", "db", "sh", "-ec", 'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql -h pgbouncer -p 6432 -U usim_cms_app -d usim_cms -Atq -c "SELECT 1"'],
+          (authErr, authOut, authErrText) => {
+            if (!authErr && String(authOut).trim() === "1") {
+              logLine("PgBouncer backend login: healthy");
+              return done(true);
+            }
+            logLine(`PgBouncer backend login failed: ${(authErrText || authErr?.message || "unexpected response").trim().slice(-300)}`);
+            if (Date.now() >= deadline) return done(false);
+            setTimeout(tick, 3000);
+          },
+        );
+      }
       if (Date.now() >= deadline) {
         if (!oldImageId) {
           logLine(`timed out waiting for ${service} to become healthy`);
@@ -1536,10 +1556,11 @@ function stagingBootTest(key, imageRef, cb) {
     execFile(
       "docker",
       [
-        "run", "-d", "--rm", "--name", name,
+        "run", "-d", "--rm", "--name", name, "--network", "none",
+        "--user", "70:70", "--entrypoint", "/usr/bin/pgbouncer",
         "-v", `${ini}:/etc/pgbouncer/pgbouncer.ini:ro`,
         "-v", `${userlist}:/etc/pgbouncer/userlist.txt:ro`,
-        imageRef,
+        imageRef, "/etc/pgbouncer/pgbouncer.ini",
       ],
       { timeout: 30_000 },
       (startErr, _o, startStderr) => {
@@ -1611,7 +1632,7 @@ function handleStackTest(req, res, key) {
     if (key === "pgbouncer") {
       getUpstreamLatest((latest) => {
         if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
-        const newRef = `edoburu/pgbouncer:${latest.pgbouncer}`;
+        const newRef = `percona/percona-pgbouncer:${latest.pgbouncer}`;
         execFile("docker", ["pull", newRef], { timeout: 120_000 }, (err, stdout, stderr) => {
           if (err) {
             logStackTestResult("pgbouncer", newRef, false, stderr || err.message);
@@ -1691,7 +1712,7 @@ function handleStackUpdate(req, res, key) {
       }
       getUpstreamLatest((latest) => {
         if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
-        const newRef = `edoburu/pgbouncer:${latest.pgbouncer}`;
+        const newRef = `percona/percona-pgbouncer:${latest.pgbouncer}`;
         if (newRef === v.infra.pgbouncer) return sendJson(res, 400, { error: "already on the latest PgBouncer tag" });
 
         const composePath = path.join(REPO_DIR, "docker-compose.yml");
@@ -1701,7 +1722,7 @@ function handleStackUpdate(req, res, key) {
         } catch (e) {
           return sendJson(res, 500, { error: `couldn't read docker-compose.yml: ${e.message}` });
         }
-        const re = /^(\s*image:\s*)edoburu\/pgbouncer:\S+/m;
+        const re = /^(\s*image:\s*)percona\/percona-pgbouncer:\S+/m;
         if (!re.test(oldContent)) {
           return sendJson(res, 500, { error: "pgbouncer image: line not found in docker-compose.yml" });
         }

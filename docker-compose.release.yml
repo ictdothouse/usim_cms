@@ -118,7 +118,9 @@ services:
       - ./monitor/access:/app/monitor-access:ro
       - api-uploads:/app/uploads
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      # A TCP-only /health can report success while PgBouncer rejects every
+      # database login. /ready checks a real control-plane query.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/ready"]
       interval: 10s
       timeout: 3s
       retries: 5

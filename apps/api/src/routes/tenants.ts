@@ -381,10 +381,13 @@ export function registerTenantRoutes(app: FastifyInstance) {
 // Exported standalone (not nested in registerTenantRoutes) since index.ts
 // calls it once at server boot, outside any route handler.
 export async function maybeSyncCaddyAtBoot(app: FastifyInstance): Promise<void> {
-  const edge = await getEdgeProtectionSettings();
-  if (!(await getProxyAutomationEnabled()) && !edge.enabled) return;
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
+      // The control-plane database may still be unavailable while the base
+      // tier starts. Keep those reads inside the retry guard as well: an
+      // unhandled rejection here used to terminate an otherwise live API.
+      const edge = await getEdgeProtectionSettings();
+      if (!(await getProxyAutomationEnabled()) && !edge.enabled) return;
       await syncCaddy(await listTenants(), {}, edgeConfigForCaddy(edge));
       return;
     } catch (err) {
