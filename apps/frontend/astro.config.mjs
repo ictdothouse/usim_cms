@@ -17,5 +17,14 @@ export default defineConfig({
   // check): the API's static-export renders pages by requesting this server
   // with Host: <tenant>, which Vite's DNS-rebinding protection would 403.
   // Dev binds to localhost, so accepting any Host name here is fine.
-  vite: { plugins: [tailwindcss()], server: { allowedHosts: true } },
+  vite: {
+    plugins: [tailwindcss()],
+    server: { allowedHosts: true },
+    // Never inline a component's <script> (Astro inlines any under 4kb):
+    // server.mjs's CSP is script-src 'self' 'nonce-…' and Astro's inlined
+    // <script type="module"> carries no nonce, so tabs/announcement dismiss/
+    // map consent/menu were silently blocked in production. As /_astro/*.js
+    // files they load under 'self'. undefined = Vite's default for CSS etc.
+    build: { assetsInlineLimit: (file) => (file.endsWith(".js") ? false : undefined) },
+  },
 });
