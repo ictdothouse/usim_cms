@@ -465,6 +465,23 @@ const fontsHref = allFonts.length
             parent.postMessage({ type: "designer:select", path: node.dataset.designerPath }, targetOrigin);
           });
 
+          // Entering text-edit mode requires an explicit double-click, not a
+          // plain select — a single click used to also flip contentEditable
+          // on immediately (useLiveEditBridge.ts's designer:selected effect),
+          // which permanently blocked the pointerdown drag-reorder gesture
+          // above for that node (isContentEditable is checked there so
+          // drag-selecting text doesn't start a reorder instead) the moment
+          // ANY heading/text was clicked once — a heading/text element could
+          // never be dragged after being selected. Requesting it by name lets
+          // admin answer with the exact same designer:text message as before;
+          // the handler for it (below) is unchanged.
+          document.addEventListener("dblclick", (e) => {
+            if (e.target.closest("[data-slide-sel]")) return;
+            const node = e.target.closest("[data-designer-path]");
+            if (!node || !["heading", "text"].includes(node.dataset.dsType || "")) return;
+            parent.postMessage({ type: "designer:requestEditText", path: node.dataset.designerPath }, targetOrigin);
+          });
+
           // Right-click to edit: mirrors Blocks mode's own context menu,
           // which is element-level only (4-part path) — see Designer.tsx's
           // ctxMenu render block.
@@ -1654,7 +1671,15 @@ const fontsHref = allFonts.length
             if (e.data.type === "designer:selected") {
               if (e.data.labels) labels = { ...labels, ...e.data.labels };
               if (e.data.spacing) spacing = e.data.spacing;
-              if (selectedNode) visualTarget(selectedNode).style.outline = "";
+              if (selectedNode) {
+                const prevTarget = visualTarget(selectedNode);
+                prevTarget.style.outline = "";
+                // Belt-and-braces alongside the blur listener above: a
+                // reselect driven from the Layers tree/Inspector (not a
+                // click inside this iframe) never fires a DOM blur event
+                // here, so this is the only reset that path gets.
+                if (prevTarget.isContentEditable) prevTarget.contentEditable = "false";
+              }
               selectionResizeObserver.disconnect();
               destroySpacingHandles();
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
@@ -1687,11 +1712,21 @@ const fontsHref = allFonts.length
             if (e.data.type === "designer:text") {
               const target = visualTarget(node);
               target.contentEditable = String(Boolean(e.data.editable));
+              if (e.data.editable) target.focus();
               if (e.data.editable && !target.dataset.designerBound) {
                 target.dataset.designerBound = "1";
                 const path = node.dataset.designerPath;
                 target.addEventListener("input", () => {
                   parent.postMessage({ type: "designer:textInput", path, value: target.textContent }, targetOrigin);
+                });
+                // Exits edit mode on its own the moment focus leaves (click
+                // elsewhere, Tab, etc.) — without this, only re-selecting a
+                // DIFFERENT element (designer:selected's own reset below)
+                // ever turned it back off, and clicking blank page space
+                // (which selects nothing) left it editable, and therefore
+                // still undraggable, indefinitely.
+                target.addEventListener("blur", () => {
+                  target.contentEditable = "false";
                 });
               }
             }
