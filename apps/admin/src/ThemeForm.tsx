@@ -271,6 +271,7 @@ export function ThemeForm({
   const [applyingImport, setApplyingImport] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const formId = useId();
 
   // Per-site ThemeForm uploads into that tenant's own media library; the
   // Global Theme form (no previewTenantHost) has no tenant media library to
@@ -726,7 +727,10 @@ export function ThemeForm({
       <div className="rounded-2xl bg-white p-3 ring-1 ring-slate-900/8 transition-shadow duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:ring-slate-900/20">
         <div className="mb-2 flex items-start justify-between gap-2">
           <label htmlFor={`theme-${key}`} className="text-xs font-semibold text-ink">{label}</label>
-          <span className="text-[10px] text-sub">{value ? t("theme-override") : inherited ? t("theme-inherited") : t("theme-unset")}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-[10px] text-sub">{value ? t("theme-override") : inherited ? t("theme-inherited") : t("theme-unset")}</span>
+            {allowDeactivate && value && <button type="button" onClick={() => onChange("")} className="text-[11px] font-semibold text-accent hover:underline">{t("theme-reset")}</button>}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <input type="color" aria-label={label} value={shown} onChange={(e) => onChange(e.target.value.toUpperCase())}
@@ -734,7 +738,6 @@ export function ThemeForm({
           <input id={`theme-${key}`} value={value} placeholder={inherited || "#RRGGBB"} maxLength={7}
             onChange={(e) => onChange(e.target.value.toUpperCase())}
             className="min-w-0 flex-1 rounded-xl bg-slate-50 px-3 py-2 font-mono text-xs text-ink outline-none ring-1 ring-slate-900/10 focus:ring-2 focus:ring-accent" />
-          {allowDeactivate && value && <button type="button" onClick={() => onChange("")} className="text-xs font-medium text-accent hover:underline">{t("theme-reset")}</button>}
         </div>
         {role && <p className="mt-2 text-[11px] leading-relaxed text-sub">{role}</p>}
         {value && !/^#[0-9a-f]{6}$/i.test(value) && <p className="mt-1 text-[11px] text-red-600">{t("theme-invalid-color")}</p>}
@@ -799,8 +802,8 @@ export function ThemeForm({
         </div>
         <p className="mt-5 max-w-3xl text-xs leading-relaxed text-slate-300">{previewTenantHost ? t("theme-scope-site") : t("theme-scope-global")}</p>
       </header>
-      <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(350px,420px)]">
-        <form onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6`}>
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
+        <form id={formId} onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6`}>
           <div className="space-y-3 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-900/5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-sm font-bold text-ink">{t("theme-presets")}</p>
@@ -842,7 +845,7 @@ export function ThemeForm({
               </button>
             </div>
           </div>
-          <div role="tablist" aria-label={t("theme-studio")} className="flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1">
+          <div role="tablist" aria-label={t("theme-studio")} className="flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1 xl:sticky xl:top-24 xl:z-10 xl:shadow-sm">
             {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
               <button
                 key={tabId}
@@ -988,11 +991,18 @@ export function ThemeForm({
             sits in its own box below (not inside the preview) and always
             uses fixed neutral styling, not the theme's own colors — it has
             to stay legible even when the theme it's judging isn't. */}
-        <aside className="min-w-0 space-y-4 2xl:sticky 2xl:top-6">
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto xl:overscroll-contain xl:pr-2">
         <div ref={previewRef} className="scroll-mt-6 space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-ink">{pendingImport ? t("theme-import-preview") : t("theme-preview-label")}</h3>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-800">{t("theme-preview-unsaved")}</span>
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${pendingImport || isDirty ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-800"}`}>
+                {pendingImport || isDirty ? t("theme-preview-unsaved") : t("theme-saved-status")}
+              </span>
+              <button type="submit" form={formId} disabled={loading || Boolean(pendingImport) || !isDirty} className="hidden rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 xl:inline-flex">
+                {t("theme-save")}
+              </button>
+            </div>
           </div>
           <div
             className="space-y-4 rounded-[1.5rem] p-5 ring-1 ring-slate-900/10 sm:p-6"
