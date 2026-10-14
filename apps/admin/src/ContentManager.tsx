@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
 import {
   CalendarDays,
   FileText,
@@ -69,7 +69,6 @@ export default function ContentManager({
 }) {
   const { t } = useT();
   const location = useLocation();
-  const navigate = useNavigate();
   const activeSubTab = (location.pathname.split("/")[2] || "pages") as ContentSubTab;
   const subTabs: Array<{ id: ContentSubTab; labelKey: Key; icon: React.ComponentType<{ className?: string }> }> = [
     { id: "pages", labelKey: "pages-title", icon: FileText },
@@ -118,16 +117,16 @@ export default function ContentManager({
                 <div key={group} className="flex shrink-0 gap-1 md:block md:space-y-0.5">
                   <div className="hidden px-3 text-sm font-bold uppercase tracking-wider text-sub md:block">{t(NAV_GROUP_LABEL[group])}</div>
                   {items.map(({ id, labelKey, icon: Icon }) => (
-                    <button
+                    <Link
                       key={id}
-                      onClick={() => navigate(id)}
+                      to={`/content/${id}`}
                       aria-current={activeSubTab === id ? "page" : undefined}
                       className={`flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors md:w-full ${
                         activeSubTab === id ? "bg-canvas text-accent" : "text-body hover:bg-canvas/60 hover:text-ink"
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" /> {t(labelKey)}
-                    </button>
+                    </Link>
                   ))}
                 </div>
               );
