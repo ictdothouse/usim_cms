@@ -36,8 +36,14 @@ export function LiveScrollStage({ activeKey, children }: { activeKey: string; ch
     function onMessage(e: MessageEvent) {
       const type = e.data?.type;
       if ((type !== "designer:scroll" && type !== "designer:scrollMax") || !e.source) return;
-      const frames = outerRef.current?.querySelectorAll("iframe") ?? [];
-      if (![...frames].some((f) => f.contentWindow === e.source)) return;
+      // e.source alone is already an unspoofable window reference, but every
+      // other postMessage listener in this codebase (useLiveEditBridge.ts)
+      // also checks e.origin against the iframe's own src — matched here too
+      // so a compromised/misconfigured third-party frame embedded elsewhere
+      // on the page can't masquerade as one of these two by other means.
+      const frames = [...(outerRef.current?.querySelectorAll<HTMLIFrameElement>("iframe") ?? [])];
+      const matched = frames.find((f) => f.contentWindow === e.source);
+      if (!matched || !matched.src || e.origin !== new URL(matched.src, window.location.href).origin) return;
       const prev = metrics.current.get(e.source) ?? { y: 0, max: 0 };
       const next = { y: Number(e.data.y ?? prev.y), max: type === "designer:scrollMax" ? Number(e.data.max ?? 0) : prev.max };
       metrics.current.set(e.source, next);
