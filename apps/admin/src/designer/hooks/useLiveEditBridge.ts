@@ -432,6 +432,18 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         if (sliderId && action === "delete") setSliderInnerSel((m) => ({ ...m, [sliderId]: null }));
         return;
       }
+      if (e.data?.type === "designer:requestEditText") {
+        // Posted by BaseLayout.astro's own dblclick handler — the iframe
+        // asks before entering contentEditable rather than it happening
+        // automatically on select (see this hook's designer:selected effect
+        // for why). Replies with the exact same designer:text message that
+        // effect used to send unconditionally; e.source/e.origin, not
+        // liveFrame.current, since a reload can be mid-flight.
+        if (e.source && typeof (e.source as Window).postMessage === "function") {
+          (e.source as Window).postMessage({ type: "designer:text", path: e.data.path, editable: true }, e.origin);
+        }
+        return;
+      }
       if (e.data?.type === "designer:spacingLink") {
         if (e.data.kind === "padding") setLinkedPadding((v) => !v);
         else if (e.data.kind === "margin") setLinkedMargin((v) => !v);
@@ -594,9 +606,13 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         linkSides: t("designer-f-link-sides"),
       },
     });
-    if (sel && selEl && (selEl.type === "heading" || selEl.type === "text")) {
-      post({ type: "designer:text", path: sel.join("."), editable: true });
-    }
+    // No longer auto-enters text-edit mode here just because a heading/text
+    // got selected — that used to make it permanently contentEditable, which
+    // the pointerdown drag-reorder gesture in BaseLayout.astro deliberately
+    // skips (so drag-selecting text there doesn't start a reorder instead),
+    // so a heading/text element could never be dragged again once clicked
+    // once. Edit mode is now requested explicitly by a double-click in the
+    // iframe (designer:requestEditText below), same designer:text reply.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, sel, liveSrc, sliderInnerSel, sliderSlideIdx, linkedPadding, linkedMargin]);
 
