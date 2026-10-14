@@ -149,7 +149,7 @@ export default function ContentManager({
               element={<HeaderFooterDesignerRoute tenantHost={siteHost} token={token} isSuper backTo="/content/header-footer" />}
             />
             {isSuper && (
-              <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getTheme(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
+              <Route path="theme" element={<ThemeForm key={siteHost} title={t("theme-title")} desc={t("theme-desc")} load={() => api.getThemeSettings(siteHost, token)} save={(s) => api.putTheme(siteHost, token, s)} token={token} allowDeactivate previewTenantHost={siteHost} />} />
             )}
             {isSuper && (
               <Route path="languages" element={<TenantLanguagesForm key={siteHost} tenantHost={siteHost} token={token} />} />

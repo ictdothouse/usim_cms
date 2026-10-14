@@ -16,6 +16,8 @@ import {
   getTenantLanguageSelection,
   setTenantLanguageSelection,
   getMergedTheme,
+  getGlobalTheme,
+  getTenantTheme,
   setTenantTheme,
   getLanguageSwitcherDefaults,
   setLanguageSwitcherDefaults,
@@ -346,6 +348,17 @@ await app.register(async (protectedScope) => {
   // A dept admin can only ever write their own row here — the global row is
   // out of reach from this scope. Writes to the control-plane site_theme
   // table (never req.db — see the public GET above).
+  protectedScope.get("/api/theme-settings", async (req, reply) => {
+    if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "theme.write")) {
+      reply.code(403);
+      return { error: "missing theme.write permission" };
+    }
+    return {
+      own: (await getTenantTheme(req.tenantHost)) ?? {},
+      inherited: await getGlobalTheme(),
+    };
+  });
+
   protectedScope.put("/api/theme", async (req, reply) => {
     if (!hasPermission({ role: req.user.role, permissions: req.user.permissions }, "theme.write")) {
       reply.code(403);

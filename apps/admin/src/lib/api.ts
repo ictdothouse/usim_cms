@@ -811,6 +811,12 @@ export const blueprintPreviewUrl = (tenantHost: string, id: string, previewToken
 export const getTheme = (tenantHost: string, token: string) =>
   request("/api/theme", tenantHost, token).then((b) => b.theme as Record<string, string>);
 
+export const getThemeSettings = (tenantHost: string, token: string) =>
+  request("/api/theme-settings", tenantHost, token).then((b) => ({
+    own: b.own as Record<string, string>,
+    inherited: b.inherited as Record<string, string>,
+  }));
+
 export const putTheme = (tenantHost: string, token: string, settings: Record<string, string>) =>
   request("/api/theme", tenantHost, token, { method: "PUT", body: JSON.stringify(settings) });
 

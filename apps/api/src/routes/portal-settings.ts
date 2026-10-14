@@ -6,6 +6,7 @@ import { isSafeUrl } from "../collections/validate-layout.js";
 import { uploadFile } from "../storage.js";
 import {
   listSharedContent,
+  listTenants,
   getGlobalTheme,
   setGlobalTheme,
   getMfaEnabled,
@@ -25,6 +26,7 @@ import {
   maskBackupDestination,
 } from "../db/tenant-pool.js";
 import type { BackupDestinationConfig } from "../db/tenant-pool.js";
+import { cacheInvalidate } from "../cache.js";
 
 // Language-switcher placement/style — shared enum for both the global
 // (platform_settings) and per-site (tenant_languages) settings.
@@ -354,7 +356,14 @@ export function registerPortalSettingsRoutes(app: FastifyInstance) {
       reply.code(400);
       return { error };
     }
+    // A global change must be visible on every site that inherits it now,
+    // including already-cached theme responses and rendered HTML.
+    const tenants = await listTenants();
     await setGlobalTheme(settings);
+    await Promise.all(tenants.flatMap((tenant) => [
+      cacheInvalidate(`ucms:cache:${tenant.host}:theme`),
+      cacheInvalidate(`ucms:htmlcache:${tenant.host}:`),
+    ]));
     return { saved: true };
   });
 

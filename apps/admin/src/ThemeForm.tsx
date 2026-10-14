@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { Palette, Sparkles, Trash2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { ArrowUpRight, Download, RotateCcw, Sparkles, Trash2, Upload } from "lucide-react";
 import * as api from "@/lib/api";
 import { slugify, oklchToHex, contrastRatio, bestTextColor, GOOGLE_FONTS } from "@/lib/utils";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useT, inputCls, btnPrimary, card, FormError } from "./App";
+import { parseDesignMd, serializeDesignMd, THEME_FIELDS, type ImportedDesignMd, type ThemeSettings } from "./theme-design-md";
 
 // ---------- Theme (shared form for per-site and global) ----------
 // A curated slice of daisyUI's own built-in themes (real oklch() triples
@@ -82,13 +83,17 @@ function FontField({
   value,
   onChange,
   placeholder,
+  inherited,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  inherited?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const listId = useId();
   const matches = GOOGLE_FONTS.filter((f) => f.toLowerCase().includes(value.toLowerCase()));
   return (
     <div className="relative">
@@ -99,24 +104,38 @@ function FontField({
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
+            setHighlighted(0);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder={placeholder}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { setOpen(false); return; }
+            if (!open || matches.length === 0) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); setHighlighted((index) => Math.min(index + 1, matches.length - 1)); }
+            if (e.key === "ArrowUp") { e.preventDefault(); setHighlighted((index) => Math.max(index - 1, 0)); }
+            if (e.key === "Enter") { e.preventDefault(); onChange(matches[highlighted] || matches[0]); setOpen(false); }
+          }}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open && matches.length > 0}
+          aria-controls={listId}
+          aria-activedescendant={open && matches.length > 0 ? `${listId}-${highlighted}` : undefined}
+          placeholder={inherited || placeholder}
         />
       </label>
+      {!value && inherited && <p className="mt-1 text-[11px] text-sub">{inherited}</p>}
       {open && matches.length > 0 && (
-        <ul className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
-          {matches.map((f) => (
-            <li key={f}>
+        <ul id={listId} role="listbox" className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line/30 bg-white shadow-lg">
+          {matches.map((f, index) => (
+            <li key={f} id={`${listId}-${index}`} role="option" aria-selected={index === highlighted}>
               <button
                 type="button"
                 onMouseDown={() => {
                   onChange(f);
                   setOpen(false);
                 }}
-                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas"
+                className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-canvas ${index === highlighted ? "bg-canvas" : ""}`}
                 style={{ fontFamily: f }}
               >
                 {f}
@@ -192,7 +211,7 @@ export function ThemeForm({
 }: {
   title: string;
   desc?: string;
-  load: () => Promise<Record<string, string>>;
+  load: () => Promise<{ own: ThemeSettings; inherited: ThemeSettings }>;
   save: (settings: Record<string, string>) => Promise<unknown>;
   token: string;
   // Only the per-site override has a "default" above it to fall back to —
@@ -232,7 +251,6 @@ export function ThemeForm({
   const [captionFontSize, setCaptionFontSize] = useState("");
   const [captionLineHeight, setCaptionLineHeight] = useState("");
   const [activeTab, setActiveTab] = useState<"colors" | "typography" | "postdisplay" | "branding">("colors");
-  const [importNotice, setImportNotice] = useState(false);
   const [showPostTags, setShowPostTags] = useState("");
   const [showPostCategory, setShowPostCategory] = useState("");
   const [showPostAuthor, setShowPostAuthor] = useState("");
@@ -244,7 +262,15 @@ export function ThemeForm({
   const [error, setError] = useState<string | null>(null);
   const [presets, setPresets] = useState<api.ThemePreset[]>([]);
   const [presetName, setPresetName] = useState("");
+  const [inheritedTheme, setInheritedTheme] = useState<ThemeSettings>({});
+  const [savedSettings, setSavedSettings] = useState<ThemeSettings>({});
+  const [loading, setLoading] = useState(true);
+  const [pendingImport, setPendingImport] = useState<(ImportedDesignMd & { fileName: string; candidate: ThemeSettings }) | null>(null);
+  const [importAcknowledged, setImportAcknowledged] = useState(false);
+  const [lastImportBackup, setLastImportBackup] = useState<api.ThemePreset | null>(null);
+  const [applyingImport, setApplyingImport] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // Per-site ThemeForm uploads into that tenant's own media library; the
   // Global Theme form (no previewTenantHost) has no tenant media library to
@@ -308,6 +334,11 @@ export function ThemeForm({
     faviconUrl,
   });
 
+  const mergeEffective = (own: ThemeSettings): ThemeSettings => ({
+    ...inheritedTheme,
+    ...Object.fromEntries(Object.entries(own).filter(([, value]) => value !== "")),
+  });
+
   async function refreshPresets() {
     try {
       setPresets(await api.listThemePresets(token));
@@ -317,7 +348,12 @@ export function ThemeForm({
   }
 
   useEffect(() => {
-    void load().then((th) => {
+    let active = true;
+    setLoading(true);
+    void load().then(({ own: th, inherited }) => {
+      if (!active) return;
+      setInheritedTheme(inherited);
+      setSavedSettings(th);
       setPrimaryColor(th.primaryColor ?? "");
       setSecondaryColor(th.secondaryColor ?? "");
       setBackgroundColor(th.backgroundColor ?? "");
@@ -348,8 +384,12 @@ export function ThemeForm({
       setShowPostDate(th.showPostDate ?? "");
       setLogoUrl(th.logoUrl ?? "");
       setFaviconUrl(th.faviconUrl ?? "");
+      setLoading(false);
+    }).catch((err: Error) => {
+      if (active) { setError(err.message); setLoading(false); }
     });
     void refreshPresets();
+    return () => { active = false; };
   }, []);
 
   // "Add to my favourites" — saves whatever's currently in the form
@@ -358,7 +398,7 @@ export function ThemeForm({
     const name = presetName.trim();
     if (!name) return;
     try {
-      await api.createThemePreset(token, name, currentColors());
+      await api.createThemePreset(token, name, mergeEffective(currentColors()));
       setPresetName("");
       await refreshPresets();
     } catch (err) {
@@ -452,6 +492,7 @@ export function ThemeForm({
     loadPreset(p);
     try {
       await save(p.settings);
+      setSavedSettings(p.settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (err) {
@@ -459,46 +500,15 @@ export function ThemeForm({
     }
   }
 
-  // Revert this site to inheriting the global theme untouched — clearing
-  // every key (not deleting the row) is exactly what the existing PUT
-  // /api/theme already treats as "no override" (validateThemeSettings
-  // allows "" for every field; getMergedTheme spreads an empty object).
+  // Persist an empty tenant theme so every field inherits the global theme.
+  // The API also ignores legacy empty-string overrides when merging.
   async function deactivate() {
-    const empty = {
-      primaryColor: "",
-      secondaryColor: "",
-      backgroundColor: "",
-      textColor: "",
-      fontFamily: "",
-      headingFont: "",
-      subHeadingFont: "",
-      postTitleFont: "",
-      postTitleFontSize: "",
-      postTitleLineHeight: "",
-      tertiaryColor: "",
-      successColor: "",
-      warningColor: "",
-      errorColor: "",
-      infoColor: "",
-      captionFont: "",
-      headingFontSize: "",
-      headingLineHeight: "",
-      subHeadingFontSize: "",
-      subHeadingLineHeight: "",
-      bodyFontSize: "",
-      bodyLineHeight: "",
-      captionFontSize: "",
-      captionLineHeight: "",
-      showPostTags: "",
-      showPostCategory: "",
-      showPostAuthor: "",
-      showPostDate: "",
-      logoUrl: "",
-      faviconUrl: "",
-    };
+    if (!(await confirm(t("theme-deactivate-confirm")))) return;
+    const empty: ThemeSettings = {};
     try {
       await save(empty);
       loadPreset({ id: "", name: "", createdAt: "", settings: empty });
+      setSavedSettings(empty);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (err) {
@@ -506,148 +516,99 @@ export function ThemeForm({
     }
   }
 
-  // design.md export/import (v2) — a YAML-frontmatter-flavored text file:
-  // the frontmatter is still the exact round-trippable key:value dump this
-  // app's own importDesignMd reads back (every key currentColors() returns,
-  // generic — a new theme key added later needs no change here), the body
-  // below it is human-readable documentation of the same values (palette
-  // w/ fixed role labels, typography scale) for a person reading the file
-  // outside this app. Deliberately does NOT include marketplace/social
-  // metadata (license, uploaded-by, downloads/likes, "Use with MCP") — this
-  // is a single-tenant CMS, per the user's own explicit scope call.
-  function downloadDesignMd() {
-    const c = currentColors();
-    const palette: Array<[string, string, string]> = [
-      [t("theme-primary"), c.primaryColor, t("theme-role-primary")],
-      [t("theme-secondary"), c.secondaryColor, t("theme-role-secondary")],
-      [t("theme-tertiary"), c.tertiaryColor, t("theme-role-tertiary")],
-      [t("theme-background"), c.backgroundColor, t("theme-role-background")],
-      [t("theme-text"), c.textColor, t("theme-role-text")],
-      [t("theme-success"), c.successColor, t("theme-role-success")],
-      [t("theme-warning"), c.warningColor, t("theme-role-warning")],
-      [t("theme-error"), c.errorColor, t("theme-role-error")],
-      [t("theme-info"), c.infoColor, t("theme-role-info")],
-    ].filter(([, hex]) => hex) as Array<[string, string, string]>;
-    const typography: Array<[string, string, string, string]> = [
-      [t("theme-font-heading"), c.headingFont, c.headingFontSize, c.headingLineHeight],
-      [t("theme-font-subheading"), c.subHeadingFont, c.subHeadingFontSize, c.subHeadingLineHeight],
-      [t("theme-font-posttitle"), c.postTitleFont, c.postTitleFontSize, c.postTitleLineHeight],
-      [t("theme-font-body"), c.fontFamily, c.bodyFontSize, c.bodyLineHeight],
-      [t("theme-font-caption"), c.captionFont, c.captionFontSize, c.captionLineHeight],
-    ].filter(([, font, size, lh]) => font || size || lh) as Array<[string, string, string, string]>;
-    const lines = [
-      "---",
-      `name: ${presetName.trim() || title}`,
-      ...Object.entries(c).map(([k, v]) => `${k}: ${v}`),
-      "---",
-      "",
-      `# ${presetName.trim() || title}`,
-      "",
-      "Generated by USIM CMS's Theme panel. Upload this file back into any site's",
-      "Theme panel to preview or apply these settings — colors/fonts it recognizes",
-      "are filled in automatically, the rest of this file is documentation only.",
-      "",
-      "## Palette",
-      "",
-      "| Role | Color | Description |",
-      "| --- | --- | --- |",
-      ...palette.map(([role, hex, desc]) => `| ${role} | \`${hex}\` | ${desc} |`),
-      "",
-      "## Typography scale",
-      "",
-      "| Role | Font | Size (px) | Line height |",
-      "| --- | --- | --- | --- |",
-      ...typography.map(([role, font, size, lh]) => `| ${role} | ${font || "(inherit)"} | ${size || "(auto)"} | ${lh || "(auto)"} |`),
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${slugify(presetName.trim() || title)}.design.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // Export the complete effective style. A site inheriting global tokens gets
+  // those actual values in the portable file, while the CMS extension keeps
+  // every supported setting round-trippable.
+  function downloadDesignMd(settings = mergeEffective(currentColors()), name = presetName.trim() || title) {
+    const content = serializeDesignMd(name, settings);
+    const url = URL.createObjectURL(new Blob([content], { type: "text/markdown" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slugify(name)}.design.md`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
-  // Generic import fallback — for a design.md NOT written by this app (e.g.
-  // CorpScale-style exports): no known frontmatter keys to read, so instead
-  // scan the whole file text for "<role word> ... #hexcolor" (covers both a
-  // foreign frontmatter's own naming and a plain markdown palette table row
-  // like "| Primary | `#0F62FE` | ..."). Best-effort only — fonts/sizes have
-  // too many free-form spellings to reliably regex-extract, so this covers
-  // colors only; a value the frontmatter pass already found always wins.
-  const GENERIC_COLOR_ROLES: Array<[RegExp, (v: string) => void]> = [
-    [/primary/i, setPrimaryColor],
-    [/secondary/i, setSecondaryColor],
-    [/tertiary/i, setTertiaryColor],
-    [/background/i, setBackgroundColor],
-    [/\btext\b/i, setTextColor],
-    [/success/i, setSuccessColor],
-    [/warning/i, setWarningColor],
-    [/error|danger/i, setErrorColor],
-    [/\binfo\b/i, setInfoColor],
-  ];
-
+  // An outside file is only staged here. The form and persisted theme do not
+  // change until the review panel's explicit Apply action completes.
   async function importDesignMd(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    setError(null);
     try {
-      const text = await file.text();
-      const frontmatter = text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
-      const parsed: Record<string, string> = {};
-      for (const line of frontmatter.split("\n")) {
-        const m = line.match(/^([a-zA-Z]+):\s*(.*)$/);
-        if (m) parsed[m[1]] = m[2].trim();
+      if (file.size > 256 * 1024) {
+        setError(t("theme-import-too-large"));
+        return;
       }
-      let usedGenericFallback = false;
-      const hex = (role: RegExp): string | undefined => {
-        for (const line of text.split("\n")) {
-          if (!role.test(line)) continue;
-          const m = line.match(/#[0-9a-f]{6}/i);
-          if (m) return m[0];
-        }
-        return undefined;
-      };
-      const resolveColor = (key: string, role: RegExp, current: string): string => {
-        if (parsed[key] !== undefined) return parsed[key];
-        const found = hex(role);
-        if (found) {
-          usedGenericFallback = true;
-          return found;
-        }
-        return current;
-      };
-      setPrimaryColor(resolveColor("primaryColor", GENERIC_COLOR_ROLES[0][0], primaryColor));
-      setSecondaryColor(resolveColor("secondaryColor", GENERIC_COLOR_ROLES[1][0], secondaryColor));
-      setTertiaryColor(resolveColor("tertiaryColor", GENERIC_COLOR_ROLES[2][0], tertiaryColor));
-      setBackgroundColor(resolveColor("backgroundColor", GENERIC_COLOR_ROLES[3][0], backgroundColor));
-      setTextColor(resolveColor("textColor", GENERIC_COLOR_ROLES[4][0], textColor));
-      setSuccessColor(resolveColor("successColor", GENERIC_COLOR_ROLES[5][0], successColor));
-      setWarningColor(resolveColor("warningColor", GENERIC_COLOR_ROLES[6][0], warningColor));
-      setErrorColor(resolveColor("errorColor", GENERIC_COLOR_ROLES[7][0], errorColor));
-      setInfoColor(resolveColor("infoColor", GENERIC_COLOR_ROLES[8][0], infoColor));
-      setFontFamily(parsed.fontFamily ?? fontFamily);
-      setHeadingFont(parsed.headingFont ?? headingFont);
-      setSubHeadingFont(parsed.subHeadingFont ?? subHeadingFont);
-      setPostTitleFont(parsed.postTitleFont ?? postTitleFont);
-      setCaptionFont(parsed.captionFont ?? captionFont);
-      setPostTitleFontSize(parsed.postTitleFontSize ?? postTitleFontSize);
-      setPostTitleLineHeight(parsed.postTitleLineHeight ?? postTitleLineHeight);
-      setHeadingFontSize(parsed.headingFontSize ?? headingFontSize);
-      setHeadingLineHeight(parsed.headingLineHeight ?? headingLineHeight);
-      setSubHeadingFontSize(parsed.subHeadingFontSize ?? subHeadingFontSize);
-      setSubHeadingLineHeight(parsed.subHeadingLineHeight ?? subHeadingLineHeight);
-      setBodyFontSize(parsed.bodyFontSize ?? bodyFontSize);
-      setBodyLineHeight(parsed.bodyLineHeight ?? bodyLineHeight);
-      setCaptionFontSize(parsed.captionFontSize ?? captionFontSize);
-      setCaptionLineHeight(parsed.captionLineHeight ?? captionLineHeight);
-      setShowPostTags(parsed.showPostTags ?? showPostTags);
-      setShowPostCategory(parsed.showPostCategory ?? showPostCategory);
-      setShowPostAuthor(parsed.showPostAuthor ?? showPostAuthor);
-      setShowPostDate(parsed.showPostDate ?? showPostDate);
-      setLogoUrl(parsed.logoUrl ?? logoUrl);
-      if (parsed.name) setPresetName(parsed.name);
-      setImportNotice(usedGenericFallback);
+      const parsed = parseDesignMd(await file.text());
+      if (!parsed) {
+        setError(t("theme-import-no-matches"));
+        return;
+      }
+      // Overlay only the last persisted state. Unsaved edits in the form must
+      // never slip into an import that the reviewer did not see in the file.
+      setPendingImport({ ...parsed, fileName: file.name, candidate: { ...savedSettings, ...parsed.settings } });
+      setImportAcknowledged(false);
+      requestAnimationFrame(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    } catch {
+      setError(t("theme-import-invalid"));
+    }
+  }
+
+  async function previewRealSite(settings: ThemeSettings) {
+    if (!previewTenantHost) return;
+    const win = window.open("", "_blank", "noreferrer");
+    if (!win) {
+      setError(t("designer-preview-blocked"));
+      return;
+    }
+    try {
+      const themeToken = await api.getThemePreviewToken(token, mergeEffective(settings));
+      win.location.href = api.previewUrl(previewTenantHost, "home", undefined, themeToken);
+    } catch (err) {
+      win.close();
+      setError((err as Error).message);
+    }
+  }
+
+  async function applyImportedTheme() {
+    if (!pendingImport || !importAcknowledged || applyingImport) return;
+    setApplyingImport(true);
+    setError(null);
+    try {
+      // A server-side personal snapshot survives a browser refresh, so the
+      // imported theme can always be restored from My collection later.
+      const backup = await api.createThemePreset(
+        token,
+        `${t("theme-before-import")} - ${new Date().toLocaleString()}`,
+        savedSettings,
+      );
+      await save(pendingImport.candidate);
+      loadPreset({ id: "", name: "", createdAt: "", settings: pendingImport.candidate });
+      setSavedSettings(pendingImport.candidate);
+      setLastImportBackup(backup);
+      setPendingImport(null);
+      setImportAcknowledged(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+      void refreshPresets();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setApplyingImport(false);
+    }
+  }
+
+  async function restoreBeforeImport() {
+    if (!lastImportBackup) return;
+    try {
+      await save(lastImportBackup.settings);
+      loadPreset(lastImportBackup);
+      setSavedSettings(lastImportBackup.settings);
+      setLastImportBackup(null);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -669,8 +630,19 @@ export function ThemeForm({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (pendingImport) return;
+    const draft = currentColors();
+    if (THEME_FIELDS.some((key) => key.endsWith("Color") && draft[key] && !/^#[0-9a-f]{6}$/i.test(draft[key]))) {
+      setError(t("theme-invalid-color"));
+      return;
+    }
+    const effective = mergeEffective(draft);
+    if (contrastRatio(effective.textColor || "#111111", effective.backgroundColor || "#ffffff") < 4.5) {
+      if (!(await confirm(t("theme-low-contrast-confirm")))) return;
+    }
     try {
-      await save(currentColors());
+      await save(draft);
+      setSavedSettings(draft);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (err) {
@@ -705,10 +677,17 @@ export function ThemeForm({
   // secondaryColor isn't checked: it has no real rendered consumer yet
   // (BaseLayout.astro defines --color-secondary but nothing reads it), so
   // testing it here would just be flagging an admin-preview-only decoration.
+  const draftTheme = currentColors();
+  const effectiveTheme = mergeEffective(draftTheme);
+  const previewTheme = pendingImport ? mergeEffective(pendingImport.candidate) : effectiveTheme;
+  const previewValue = (key: string, fallback: string) =>
+    /^#[0-9a-f]{6}$/i.test(previewTheme[key] || "") ? previewTheme[key] : fallback;
+  const isDirty = THEME_FIELDS.some((key) => (draftTheme[key] || "") !== (savedSettings[key] || ""));
+  const bodyContrast = contrastRatio(previewValue("textColor", "#111111"), previewValue("backgroundColor", "#ffffff"));
   const colorReadability = readabilityScore(
     Math.min(
-      contrastRatio(textColor || "#111111", backgroundColor || "#ffffff"),
-      contrastRatio(bestTextColor(primaryColor || "#0f62fe"), primaryColor || "#0f62fe"),
+      bodyContrast,
+      contrastRatio(bestTextColor(previewValue("primaryColor", "#0f62fe")), previewValue("primaryColor", "#0f62fe")),
       // Secondary/accent is checked the same way as primary: as a filled
       // swatch with an auto-picked (black-or-white) label, matching how
       // daisyUI actually pairs every color with its own "-content" text —
@@ -718,17 +697,17 @@ export function ThemeForm({
       // combination nothing actually renders. Accent color still moves this
       // score (a genuinely low-contrast fill, e.g. white text picked for a
       // near-white accent, is still caught).
-      contrastRatio(bestTextColor(secondaryColor || "#666666"), secondaryColor || "#666666"),
+      contrastRatio(bestTextColor(previewValue("secondaryColor", "#666666")), previewValue("secondaryColor", "#666666")),
     ),
   );
   // Font legibility is checked separately from color contrast (a script body
   // font is unreadable even with perfect contrast) — if any field fails,
   // that caps the overall score/tone, since "readable" has to mean both.
   const illegibleFontFields = [
-    !isLegibleFont(fontFamily, "body") && t("theme-font-body"),
-    !isLegibleFont(headingFont, "heading") && t("theme-font-heading"),
-    !isLegibleFont(subHeadingFont, "heading") && t("theme-font-subheading"),
-    !isLegibleFont(postTitleFont, "heading") && t("theme-font-posttitle"),
+    !isLegibleFont(previewTheme.fontFamily || "", "body") && t("theme-font-body"),
+    !isLegibleFont(previewTheme.headingFont || "", "heading") && t("theme-font-heading"),
+    !isLegibleFont(previewTheme.subHeadingFont || "", "heading") && t("theme-font-subheading"),
+    !isLegibleFont(previewTheme.postTitleFont || "", "heading") && t("theme-font-posttitle"),
   ].filter((v): v is string => Boolean(v));
   const readability =
     illegibleFontFields.length > 0
@@ -740,24 +719,28 @@ export function ThemeForm({
   // role: a fixed, non-editable description shown under the swatch (e.g.
   // "Main buttons & links") — the "palette + role label" shape the user
   // picked for design.md v2's richer color coverage.
-  const colorField = (label: string, value: string, onChange: (v: string) => void, role?: string) => (
-    <label
-      className="flex flex-col items-center gap-1 rounded-xl border border-line/30 bg-white px-2 py-2.5 text-center transition-colors hover:border-line/60"
-      title={role}
-    >
-      <span className="text-[11px] font-medium text-body">{label}</span>
-      <span className="h-9 w-9 overflow-hidden rounded-lg border border-line/30 shadow-sm">
-        <input
-          type="color"
-          className="h-full w-full cursor-pointer border-0 p-0"
-          value={value || "#000000"}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      </span>
-      <span className="font-mono text-[10px] uppercase text-sub">{value || "#000000"}</span>
-      {role && <span className="text-[9px] leading-tight text-sub/70">{role}</span>}
-    </label>
-  );
+  const colorField = (label: string, key: string, value: string, onChange: (v: string) => void, role?: string) => {
+    const inherited = inheritedTheme[key] || "";
+    const shown = /^#[0-9a-f]{6}$/i.test(value) ? value : inherited || "#FFFFFF";
+    return (
+      <div className="rounded-2xl bg-white p-3 ring-1 ring-slate-900/8 transition-shadow duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:ring-slate-900/20">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <label htmlFor={`theme-${key}`} className="text-xs font-semibold text-ink">{label}</label>
+          <span className="text-[10px] text-sub">{value ? t("theme-override") : inherited ? t("theme-inherited") : t("theme-unset")}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="color" aria-label={label} value={shown} onChange={(e) => onChange(e.target.value.toUpperCase())}
+            className="h-11 w-11 shrink-0 cursor-pointer rounded-xl border-0 bg-transparent p-0" />
+          <input id={`theme-${key}`} value={value} placeholder={inherited || "#RRGGBB"} maxLength={7}
+            onChange={(e) => onChange(e.target.value.toUpperCase())}
+            className="min-w-0 flex-1 rounded-xl bg-slate-50 px-3 py-2 font-mono text-xs text-ink outline-none ring-1 ring-slate-900/10 focus:ring-2 focus:ring-accent" />
+          {allowDeactivate && value && <button type="button" onClick={() => onChange("")} className="text-xs font-medium text-accent hover:underline">{t("theme-reset")}</button>}
+        </div>
+        {role && <p className="mt-2 text-[11px] leading-relaxed text-sub">{role}</p>}
+        {value && !/^#[0-9a-f]{6}$/i.test(value) && <p className="mt-1 text-[11px] text-red-600">{t("theme-invalid-color")}</p>}
+      </div>
+    );
+  };
 
   // Shared size+line-height pair — every typography-scale role (heading,
   // sub-heading, body, caption, and post-title below) is the same two
@@ -802,17 +785,29 @@ export function ThemeForm({
   );
 
   return (
-    <section className="space-y-3">
-      <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
-        <Palette className="h-4 w-4 text-accent" /> {title}
-      </h2>
-      {desc && <p className="text-xs text-sub">{desc}</p>}
-      <div className="flex flex-wrap items-start gap-4">
-        <form onSubmit={submit} className={`${card} max-w-sm space-y-4 p-5`}>
-          <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
-            <p className="text-xs font-medium text-body">{t("theme-presets")}</p>
-            <div className="flex flex-wrap gap-2">
-              {THEME_PRESETS.map((p, i) => {
+    <section className="mx-auto max-w-[1500px] space-y-6 pb-12">
+      <header className="rounded-[1.75rem] bg-slate-950 px-6 py-7 text-white sm:px-8">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300">{t("theme-studio")}</p>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{title}</h2>
+            {desc && <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">{desc}</p>}
+          </div>
+          <span className="rounded-full bg-white/10 px-4 py-2 text-xs font-semibold text-white ring-1 ring-white/15">
+            {loading ? t("theme-loading") : pendingImport ? t("theme-preview-unsaved") : isDirty ? t("theme-unsaved") : t("theme-saved-status")}
+          </span>
+        </div>
+        <p className="mt-5 max-w-3xl text-xs leading-relaxed text-slate-300">{previewTenantHost ? t("theme-scope-site") : t("theme-scope-global")}</p>
+      </header>
+      <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(350px,420px)]">
+        <form onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6`}>
+          <div className="space-y-3 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-900/5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm font-bold text-ink">{t("theme-presets")}</p>
+              <p className="text-xs text-sub">{t("theme-presets-hint")}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+              {THEME_PRESETS.map((p) => {
                 const colors = presetToColors(p);
                 const active =
                   primaryColor === colors.primaryColor &&
@@ -823,13 +818,17 @@ export function ThemeForm({
                   <button
                     key={p.name}
                     type="button"
-                    title={`${t("theme-presets")} ${i + 1}`}
+                    title={p.name}
+                    aria-label={`${t("theme-presets")}: ${p.name}`}
+                    aria-pressed={active}
                     onClick={() => applyPalette(colors)}
-                    className={`h-9 w-9 shrink-0 overflow-hidden rounded-lg border shadow-sm transition-all hover:scale-110 hover:shadow-md ${
-                      active ? "border-accent ring-2 ring-accent ring-offset-2 ring-offset-canvas" : "border-line/30"
+                    className={`flex min-h-14 flex-col justify-between gap-2 rounded-xl bg-white p-2 text-left text-xs font-semibold capitalize text-ink ring-1 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5 ${
+                      active ? "ring-2 ring-accent" : "ring-slate-900/10"
                     }`}
-                    style={{ background: `linear-gradient(135deg, ${colors.primaryColor} 50%, ${colors.secondaryColor} 50%)` }}
-                  />
+                  >
+                    <span className="h-4 w-full rounded-md" style={{ background: `linear-gradient(90deg, ${colors.primaryColor} 45%, ${colors.secondaryColor} 45% 70%, ${colors.backgroundColor} 70%)` }} />
+                    <span>{p.name}</span>
+                  </button>
                 );
               })}
               <button
@@ -837,19 +836,21 @@ export function ThemeForm({
                 title={t("theme-generate")}
                 aria-label={t("theme-generate")}
                 onClick={() => applyPalette(randomTheme())}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-line/50 text-sub transition-all hover:scale-110 hover:border-accent hover:text-accent"
+                className="flex min-h-14 items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white px-2 text-xs font-semibold text-sub transition-colors hover:border-accent hover:text-accent"
               >
-                <Sparkles className="h-4 w-4" />
+                <Sparkles className="h-4 w-4" /> {t("theme-generate")}
               </button>
             </div>
           </div>
-          <div className="flex gap-1 rounded-xl border border-line/20 bg-canvas/40 p-1">
+          <div role="tablist" aria-label={t("theme-studio")} className="flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1">
             {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
               <button
                 key={tabId}
                 type="button"
+                role="tab"
+                aria-selected={activeTab === tabId}
                 onClick={() => setActiveTab(tabId)}
-                className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                className={`min-w-max flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
                   activeTab === tabId ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
                 }`}
               >
@@ -859,18 +860,18 @@ export function ThemeForm({
           </div>
 
           {activeTab === "colors" && (
-            <div className="space-y-2 rounded-xl border border-line/20 bg-canvas/40 p-3">
-              <p className="text-xs font-medium text-body">{t("theme-colors")}</p>
-              <div className="grid grid-cols-3 gap-2">
-                {colorField(t("theme-primary"), primaryColor, setPrimaryColor, t("theme-role-primary"))}
-                {colorField(t("theme-secondary"), secondaryColor, setSecondaryColor, t("theme-role-secondary"))}
-                {colorField(t("theme-tertiary"), tertiaryColor, setTertiaryColor, t("theme-role-tertiary"))}
-                {colorField(t("theme-background"), backgroundColor, setBackgroundColor, t("theme-role-background"))}
-                {colorField(t("theme-text"), textColor, setTextColor, t("theme-role-text"))}
-                {colorField(t("theme-success"), successColor, setSuccessColor, t("theme-role-success"))}
-                {colorField(t("theme-warning"), warningColor, setWarningColor, t("theme-role-warning"))}
-                {colorField(t("theme-error"), errorColor, setErrorColor, t("theme-role-error"))}
-                {colorField(t("theme-info"), infoColor, setInfoColor, t("theme-role-info"))}
+            <div className="space-y-3 rounded-2xl bg-slate-50 p-3 sm:p-4">
+              <div><p className="text-sm font-bold text-ink">{t("theme-colors")}</p><p className="mt-1 text-xs text-sub">{t("theme-colors-hint")}</p></div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {colorField(t("theme-primary"), "primaryColor", primaryColor, setPrimaryColor, t("theme-role-primary"))}
+                {colorField(t("theme-secondary"), "secondaryColor", secondaryColor, setSecondaryColor, t("theme-role-secondary"))}
+                {colorField(t("theme-tertiary"), "tertiaryColor", tertiaryColor, setTertiaryColor, t("theme-role-tertiary"))}
+                {colorField(t("theme-background"), "backgroundColor", backgroundColor, setBackgroundColor, t("theme-role-background"))}
+                {colorField(t("theme-text"), "textColor", textColor, setTextColor, t("theme-role-text"))}
+                {colorField(t("theme-success"), "successColor", successColor, setSuccessColor, t("theme-role-success"))}
+                {colorField(t("theme-warning"), "warningColor", warningColor, setWarningColor, t("theme-role-warning"))}
+                {colorField(t("theme-error"), "errorColor", errorColor, setErrorColor, t("theme-role-error"))}
+                {colorField(t("theme-info"), "infoColor", infoColor, setInfoColor, t("theme-role-info"))}
               </div>
             </div>
           )}
@@ -887,30 +888,30 @@ export function ThemeForm({
                   <Sparkles className="h-3 w-3" /> {t("theme-font-pairing")}
                 </button>
               </div>
-              <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} placeholder="Poppins" />
+              <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} inherited={inheritedTheme.headingFont} placeholder="Poppins" />
               {sizeLineHeightFields(
                 t("theme-heading-size"), headingFontSize, setHeadingFontSize,
                 t("theme-heading-line-height"), headingLineHeight, setHeadingLineHeight,
               )}
-              <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} placeholder="Poppins" />
+              <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} inherited={inheritedTheme.subHeadingFont} placeholder="Poppins" />
               {sameFontNote(subHeadingFont, headingFont)}
               {sizeLineHeightFields(
                 t("theme-subheading-size"), subHeadingFontSize, setSubHeadingFontSize,
                 t("theme-subheading-line-height"), subHeadingLineHeight, setSubHeadingLineHeight,
               )}
-              <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} placeholder="Poppins" />
+              <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} inherited={inheritedTheme.postTitleFont} placeholder="Poppins" />
               {sameFontNote(postTitleFont, headingFont)}
               {sizeLineHeightFields(
                 t("theme-post-title-size"), postTitleFontSize, setPostTitleFontSize,
                 t("theme-post-title-line-height"), postTitleLineHeight, setPostTitleLineHeight,
                 12, 96,
               )}
-              <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} placeholder="Inter" />
+              <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} inherited={inheritedTheme.fontFamily} placeholder="Plus Jakarta Sans" />
               {sizeLineHeightFields(
                 t("theme-body-size"), bodyFontSize, setBodyFontSize,
                 t("theme-body-line-height"), bodyLineHeight, setBodyLineHeight,
               )}
-              <FontField label={t("theme-font-caption")} value={captionFont} onChange={setCaptionFont} placeholder="Inter" />
+              <FontField label={t("theme-font-caption")} value={captionFont} onChange={setCaptionFont} inherited={inheritedTheme.captionFont} placeholder="Plus Jakarta Sans" />
               {sizeLineHeightFields(
                 t("theme-caption-size"), captionFontSize, setCaptionFontSize,
                 t("theme-caption-line-height"), captionLineHeight, setCaptionLineHeight,
@@ -972,11 +973,12 @@ export function ThemeForm({
             </div>
           )}
           <div className="flex items-center gap-2 pt-1">
-            <button type="submit" className={`${btnPrimary} w-full py-3 text-sm shadow-md`}>
+            <button type="submit" disabled={loading || Boolean(pendingImport) || !isDirty} className={`${btnPrimary} w-full py-3 text-sm disabled:cursor-not-allowed disabled:opacity-50`}>
               {t("theme-save")}
             </button>
             {saved && <span className="shrink-0 text-xs font-semibold text-ok">{t("theme-saved")}</span>}
           </div>
+          {pendingImport && <p className="text-xs text-amber-700">{t("theme-import-save-disabled")}</p>}
           <FormError>{error}</FormError>
         </form>
 
@@ -986,68 +988,65 @@ export function ThemeForm({
             sits in its own box below (not inside the preview) and always
             uses fixed neutral styling, not the theme's own colors — it has
             to stay legible even when the theme it's judging isn't. */}
-        <div className="w-72 shrink-0 space-y-2">
+        <aside className="min-w-0 space-y-4 2xl:sticky 2xl:top-6">
+        <div ref={previewRef} className="scroll-mt-6 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-ink">{pendingImport ? t("theme-import-preview") : t("theme-preview-label")}</h3>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-800">{t("theme-preview-unsaved")}</span>
+          </div>
           <div
-            className="space-y-3 rounded-xl border border-line/30 p-5"
+            className="space-y-4 rounded-[1.5rem] p-5 ring-1 ring-slate-900/10 sm:p-6"
             style={{
-              background: backgroundColor || "#ffffff",
-              color: textColor || "#111111",
-              fontFamily: fontFamily || undefined,
+              background: previewValue("backgroundColor", "#ffffff"),
+              color: previewValue("textColor", "#111111"),
+              fontFamily: previewTheme.fontFamily || undefined,
             }}
           >
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">{t("theme-preview-label")}</p>
-            <p className="text-lg font-bold" style={{ fontFamily: headingFont || undefined }}>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em]">{t("theme-preview-label")}</p>
+            <p className="text-2xl font-bold tracking-tight" style={{ fontFamily: previewTheme.headingFont || undefined, fontSize: previewTheme.headingFontSize ? `${previewTheme.headingFontSize}px` : undefined, lineHeight: previewTheme.headingLineHeight || undefined }}>
               {t("theme-preview-heading")}
             </p>
-            <p className="text-base font-semibold opacity-90" style={{ fontFamily: subHeadingFont || undefined }}>
+            <p className="text-base font-semibold" style={{ fontFamily: previewTheme.subHeadingFont || undefined, fontSize: previewTheme.subHeadingFontSize ? `${previewTheme.subHeadingFontSize}px` : undefined, lineHeight: previewTheme.subHeadingLineHeight || undefined }}>
               {t("theme-preview-subheading")}
             </p>
             <p
-              className="text-sm font-semibold opacity-80"
+              className="text-sm font-semibold"
               style={{
-                fontFamily: postTitleFont || undefined,
-                fontSize: postTitleFontSize ? `${postTitleFontSize}px` : undefined,
-                lineHeight: postTitleLineHeight || undefined,
+                fontFamily: previewTheme.postTitleFont || undefined,
+                fontSize: previewTheme.postTitleFontSize ? `${previewTheme.postTitleFontSize}px` : undefined,
+                lineHeight: previewTheme.postTitleLineHeight || undefined,
               }}
             >
               {t("theme-preview-posttitle")}
             </p>
-            <p className="text-sm opacity-80">{t("theme-preview-body")}</p>
-            <div className="flex gap-2">
+            <p className="text-sm leading-relaxed" style={{ fontSize: previewTheme.bodyFontSize ? `${previewTheme.bodyFontSize}px` : undefined, lineHeight: previewTheme.bodyLineHeight || undefined }}>
+              {t("theme-preview-body")}
+            </p>
+            <p className="text-xs opacity-75" style={{ fontFamily: previewTheme.captionFont || undefined, fontSize: previewTheme.captionFontSize ? `${previewTheme.captionFontSize}px` : undefined, lineHeight: previewTheme.captionLineHeight || undefined }}>
+              {t("theme-preview-caption")}
+            </p>
+            <div className="flex flex-wrap gap-2">
               <span
                 className="rounded-full px-3 py-1.5 text-xs font-semibold"
-                style={{ background: primaryColor || "#0f62fe", color: bestTextColor(primaryColor || "#0f62fe") }}
+                style={{ background: previewValue("primaryColor", "#0f62fe"), color: bestTextColor(previewValue("primaryColor", "#0f62fe")) }}
               >
                 {t("theme-preview-primary")}
               </span>
               <span
                 className="rounded-full px-3 py-1.5 text-xs font-semibold"
-                style={{ background: secondaryColor || "#666666", color: bestTextColor(secondaryColor || "#666666") }}
+                style={{ background: previewValue("secondaryColor", "#666666"), color: bestTextColor(previewValue("secondaryColor", "#666666")) }}
               >
                 {t("theme-preview-secondary")}
               </span>
             </div>
-            <div className="flex gap-1.5 border-t border-current/10 pt-3">
-              <input
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                placeholder={t("theme-preset-name")}
-                className="min-w-0 flex-1 rounded-lg border border-current/20 bg-white/40 px-2 py-1 text-xs text-ink placeholder:text-current/50"
-              />
-              <button
-                type="button"
-                onClick={() => void saveToCollection()}
-                disabled={!presetName.trim()}
-                className="shrink-0 rounded-lg bg-black/10 px-2 py-1 text-xs font-semibold disabled:opacity-40"
-              >
-                {t("theme-add-favourite")}
-              </button>
-            </div>
           </div>
-          <div className={`${card} space-y-1 p-3`}>
+          {previewTenantHost && <button type="button" onClick={() => void previewRealSite(pendingImport?.candidate ?? draftTheme)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-0.5"><ArrowUpRight className="h-4 w-4" />{t("theme-preview-live")}</button>}
+          <div className={`${card} space-y-2 rounded-2xl p-4`}>
             <p className={`text-xs font-semibold ${readabilityToneClass}`}>
               {t("theme-readability")}: {readability.percent}% — {t(`theme-readability-${readability.tone}`)}
             </p>
+            <p className="text-xs text-sub">{t("theme-contrast-ratio")}: {bodyContrast.toFixed(2)}:1</p>
+            {bodyContrast < 4.5 && !pendingImport && <button type="button" onClick={() => setTextColor(bestTextColor(previewValue("backgroundColor", "#ffffff")))} className="text-xs font-semibold text-accent hover:underline">{t("theme-fix-contrast")}</button>}
             {illegibleFontFields.length > 0 && (
               <p className="text-[11px] text-sub">
                 {t("theme-readability-font-note")} {illegibleFontFields.join(", ")}
@@ -1058,35 +1057,46 @@ export function ThemeForm({
           {/* Visual-only mockup of common components in the current
               colors/fonts — never changes real site styling, just an
               at-a-glance preview of the palette+typography in context. */}
-          <div className={`${card} space-y-2 p-3`}>
-            <p className="text-xs font-semibold text-ink">{t("theme-component-preview")}</p>
-            <p className="text-[10px] text-sub">{t("theme-component-preview-note")}</p>
+          <div className={`${card} space-y-3 rounded-2xl p-4`}>
+            <p className="text-sm font-bold text-ink">{t("theme-component-preview")}</p>
+            <p className="text-xs text-sub">{t("theme-component-preview-note")}</p>
             <div
-              className="space-y-2 rounded-lg border border-line/20 p-3"
-              style={{ background: backgroundColor || "#ffffff", color: textColor || "#111111", fontFamily: fontFamily || undefined }}
+              className="space-y-3 rounded-xl p-4 ring-1 ring-slate-900/10"
+              style={{ background: previewValue("backgroundColor", "#ffffff"), color: previewValue("textColor", "#111111"), fontFamily: previewTheme.fontFamily || undefined }}
             >
               <div className="flex flex-wrap gap-1.5">
                 <span
                   className="rounded-md px-2.5 py-1 text-[11px] font-semibold"
-                  style={{ background: primaryColor || "#0f62fe", color: bestTextColor(primaryColor || "#0f62fe") }}
+                  style={{ background: previewValue("primaryColor", "#0f62fe"), color: bestTextColor(previewValue("primaryColor", "#0f62fe")) }}
                 >
                   {t("theme-preview-primary")}
                 </span>
                 <span
                   className="rounded-md px-2.5 py-1 text-[11px] font-semibold"
-                  style={{ background: secondaryColor || "#666666", color: bestTextColor(secondaryColor || "#666666") }}
+                  style={{ background: previewValue("secondaryColor", "#666666"), color: bestTextColor(previewValue("secondaryColor", "#666666")) }}
                 >
                   {t("theme-preview-secondary")}
                 </span>
                 <span
                   className="rounded-md border px-2.5 py-1 text-[11px] font-semibold"
-                  style={{ borderColor: errorColor || "#dc2626", color: errorColor || "#dc2626" }}
+                  style={{ borderColor: previewValue("errorColor", "#dc2626"), color: previewValue("errorColor", "#dc2626") }}
                 >
                   {t("theme-error")}
                 </span>
               </div>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  ["successColor", t("theme-success"), "#10B981"],
+                  ["warningColor", t("theme-warning"), "#F59E0B"],
+                  ["errorColor", t("theme-error"), "#DC2626"],
+                  ["infoColor", t("theme-info"), "#3B82F6"],
+                ] as const).map(([key, label, fallback]) => {
+                  const color = previewValue(key, fallback);
+                  return <span key={key} className="rounded-md px-2.5 py-1 text-[11px] font-semibold" style={{ background: color, color: bestTextColor(color) }}>{label}</span>;
+                })}
+              </div>
               <div className="rounded-lg border border-current/15 p-2.5">
-                <p className="text-xs font-bold" style={{ fontFamily: headingFont || undefined }}>
+                <p className="text-xs font-bold" style={{ fontFamily: previewTheme.headingFont || undefined }}>
                   {t("theme-preview-card-title")}
                 </p>
                 <p className="text-[11px] opacity-80">{t("theme-preview-card-body")}</p>
@@ -1094,7 +1104,7 @@ export function ThemeForm({
               <div className="space-y-1">
                 <label className="block text-[10px] font-medium opacity-70">{t("theme-preview-input-label")}</label>
                 <input disabled className="w-full rounded-md border border-current/20 bg-white/50 px-2 py-1 text-[11px]" />
-                <p className="text-[10px]" style={{ color: errorColor || "#dc2626" }}>
+                <p className="text-[10px]" style={{ color: previewValue("errorColor", "#dc2626") }}>
                   {t("theme-preview-input-error")}
                 </p>
               </div>
@@ -1102,42 +1112,77 @@ export function ThemeForm({
           </div>
         </div>
 
+        {pendingImport && (
+          <section aria-labelledby="theme-import-review" className="space-y-4 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-300/70">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-800">{t("theme-import-review-label")}</p>
+              <h3 id="theme-import-review" className="mt-1 break-words text-lg font-bold text-slate-950">{pendingImport.name}</h3>
+              <p className="mt-1 break-all text-xs text-slate-700">{pendingImport.fileName}</p>
+            </div>
+            <p className="text-sm leading-relaxed text-slate-800">{t("theme-import-mapped")}: <strong>{pendingImport.mappedFields.length}</strong>. {t("theme-import-only-supported")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {pendingImport.mappedFields.map((field) => <span key={field} className="rounded-full bg-white px-2.5 py-1 font-mono text-[10px] text-slate-700 ring-1 ring-amber-200">{field}</span>)}
+            </div>
+            {pendingImport.ignoredSections.length > 0 && <p className="text-xs leading-relaxed text-amber-900">{t("theme-import-ignored")}: {pendingImport.ignoredSections.join(", ")}.</p>}
+            <p className="rounded-xl bg-white p-3 text-xs font-semibold leading-relaxed text-slate-900 ring-1 ring-amber-200">
+              {previewTenantHost ? t("theme-import-impact-site") : t("theme-import-impact-global")}
+            </p>
+            <p className="text-xs leading-relaxed text-slate-700">{t("theme-import-backup-note")}</p>
+            <label className="flex cursor-pointer items-start gap-2 text-xs font-medium leading-relaxed text-slate-900">
+              <input type="checkbox" checked={importAcknowledged} onChange={(e) => setImportAcknowledged(e.target.checked)} className="mt-0.5 accent-amber-700" />
+              {t("theme-import-acknowledge")}
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={!importAcknowledged || applyingImport} onClick={() => void applyImportedTheme()} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                {applyingImport ? t("theme-import-applying") : t("theme-import-apply")}
+              </button>
+              <button type="button" onClick={() => { setPendingImport(null); setImportAcknowledged(false); }} className="rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-slate-800 ring-1 ring-slate-900/10">{t("theme-import-cancel")}</button>
+            </div>
+          </section>
+        )}
+        {lastImportBackup && !pendingImport && <button type="button" onClick={() => void restoreBeforeImport()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-200"><RotateCcw className="h-4 w-4" />{t("theme-restore-before-import")}</button>}
+
         {/* Export/import a whole theme as a small human-readable file —
             works across sites: download here, upload on any other site's
             Theme panel to load the same settings into its form/preview. */}
-        <div className={`${card} w-64 shrink-0 space-y-2 p-4`}>
-          <p className="text-xs font-semibold text-ink">{t("theme-file-title")}</p>
-          <p className="text-[11px] text-sub">{t("theme-file-desc")}</p>
-          <button type="button" onClick={downloadDesignMd} className="w-full rounded-lg bg-canvas px-3 py-1.5 text-xs font-semibold text-ink hover:bg-[#e8e8ed]">
-            {t("theme-file-download")}
+        <div className={`${card} space-y-3 rounded-2xl p-4`}>
+          <p className="text-sm font-bold text-ink">{t("theme-file-title")}</p>
+          <p className="text-xs leading-relaxed text-sub">{t("theme-file-desc")}</p>
+          <button type="button" onClick={() => downloadDesignMd(pendingImport ? mergeEffective(pendingImport.candidate) : effectiveTheme, pendingImport?.name || presetName.trim() || title)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-semibold text-ink hover:bg-slate-200">
+            <Download className="h-4 w-4" />{t("theme-file-download")}
           </button>
           <button
             type="button"
             onClick={() => importInputRef.current?.click()}
-            className="w-full rounded-lg border border-line/30 px-3 py-1.5 text-xs font-semibold text-body hover:bg-canvas"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-xs font-semibold text-body ring-1 ring-slate-900/15 hover:bg-slate-50"
           >
-            {t("theme-file-upload")}
+            <Upload className="h-4 w-4" />{t("theme-file-upload")}
           </button>
           <input ref={importInputRef} type="file" accept=".md,text/markdown" onChange={importDesignMd} className="hidden" />
-          {importNotice && <p className="text-[11px] text-amber-600">{t("theme-import-generic-note")}</p>}
+          <div className="flex gap-2">
+            <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder={t("theme-preset-name")} className={`${inputCls} min-w-0 flex-1 text-xs`} />
+            <button type="button" disabled={!presetName.trim() || Boolean(pendingImport)} onClick={() => void saveToCollection()} className="rounded-xl bg-slate-950 px-3 text-xs font-semibold text-white disabled:opacity-40">{t("theme-add-favourite")}</button>
+          </div>
         </div>
+        </aside>
       </div>
 
       {/* "My collection" — personal favourites, not tied to any one site;
           Test loads a preset into the form/preview without saving, Activate
           loads it and saves immediately. */}
-      <Card className="max-w-3xl">
-        <CardContent className="space-y-2 p-4">
-          <p className="text-xs font-semibold text-ink">{t("theme-collection-title")}</p>
+      <Card className="rounded-[1.75rem]">
+        <CardContent className="space-y-3 p-4 sm:p-6">
+          <p className="text-sm font-bold text-ink">{t("theme-collection-title")}</p>
           {presets.length === 0 && <p className="text-[11px] text-sub">{t("theme-collection-empty")}</p>}
           <ul className="divide-y divide-line/20">
             {presets.map((p) => (
-              <li key={p.id} className="flex items-center gap-3 py-2 text-xs">
+              <li key={p.id} className="flex flex-wrap items-center gap-3 py-3 text-xs">
                 <span
                   className="h-5 w-5 shrink-0 rounded-full border border-line/30"
                   style={{ background: `linear-gradient(135deg, ${p.settings.primaryColor || "#ccc"} 50%, ${p.settings.secondaryColor || "#999"} 50%)` }}
                 />
                 <span className="min-w-0 flex-1 truncate font-semibold text-ink">{p.name}</span>
+                <div className="flex w-full flex-wrap items-center gap-1 sm:w-auto">
                 <Button variant="ghost" size="sm" onClick={() => testPreset(p)}>
                   {t("theme-preset-test")}
                 </Button>
@@ -1147,11 +1192,7 @@ export function ThemeForm({
                 <Button
                   variant="link"
                   size="sm"
-                  onClick={() => {
-                    setPresetName(p.name);
-                    loadPreset(p);
-                    downloadDesignMd();
-                  }}
+                  onClick={() => downloadDesignMd(mergeEffective(p.settings), p.name)}
                 >
                   {t("theme-file-download")}
                 </Button>
@@ -1168,6 +1209,7 @@ export function ThemeForm({
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
+                </div>
               </li>
             ))}
           </ul>
@@ -1177,8 +1219,9 @@ export function ThemeForm({
       {allowDeactivate && (
         <button
           type="button"
+          disabled={Boolean(pendingImport)}
           onClick={() => void deactivate()}
-          className="text-xs font-semibold text-sub hover:text-red-600 hover:underline"
+          className="text-xs font-semibold text-sub hover:text-red-600 hover:underline disabled:opacity-40"
         >
           {t("theme-deactivate")}
         </button>

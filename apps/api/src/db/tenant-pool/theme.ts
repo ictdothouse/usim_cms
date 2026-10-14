@@ -49,7 +49,10 @@ export async function getMergedTheme(tenantHost: string): Promise<Record<string,
       .where(inArray(schema.siteTheme.tenantHost, [GLOBAL_THEME_HOST, tenantHost]));
     const global = (rows.find((r) => r.tenantHost === GLOBAL_THEME_HOST)?.settings as Record<string, unknown>) ?? {};
     const tenant = (rows.find((r) => r.tenantHost === tenantHost)?.settings as Record<string, unknown>) ?? {};
-    return { ...global, ...tenant };
+    // Empty site fields mean "inherit", including legacy rows written by the
+    // old Deactivate button. Letting "" overwrite the global value silently
+    // dropped sites back to the renderer's hard-coded defaults.
+    return { ...global, ...Object.fromEntries(Object.entries(tenant).filter(([, value]) => value !== "")) };
   } finally {
     client.release();
   }

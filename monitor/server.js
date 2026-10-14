@@ -84,7 +84,7 @@ const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) ||
 // bumps included, once merged) — separate from ALERT_POLL_INTERVAL_MS since a git fetch is a
 // network call to GitHub and update freshness doesn't need 60s granularity. GET /api/update-check
 // (the dashboard's own on-demand refresh) always fetches fresh regardless of this interval.
-const UPDATE_CHECK_INTERVAL_MS = Number(process.env.UPDATE_CHECK_INTERVAL_MS) || 30 * 60_000;
+const UPDATE_CHECK_INTERVAL_MS = Number(process.env.UPDATE_CHECK_INTERVAL_MS) || 5 * 60_000;
 // Same idea as UPDATE_CHECK_INTERVAL_MS but for upstream stack versions
 // (Node/pnpm/Postgres/Redis/Caddy/PgBouncer, see getUpstreamLatest) — those
 // move on their own release cadence, not this repo's commits, so they get
@@ -3333,7 +3333,7 @@ async function init() {
   setInterval(refresh, 5000);
   setInterval(refreshDb, 10000);
   setInterval(refreshSites, 30000);
-  setInterval(refreshUpdateCheck, 5 * 60000);
+  setInterval(refreshUpdateCheck, 60_000);
 }
 
 function checkLine(check) {
@@ -3548,9 +3548,17 @@ async function refreshUpdateCheck() {
       count.style.display = "none";
     }
   } catch (e) {
-    // git fetch failed (offline/GitHub down) — not alert-worthy on the dashboard itself,
-    // pollForUpdateAlert server-side already treats this as "unknown", same here.
-    el.style.display = "none";
+    // An unknown check must be visible: hiding it looks exactly like "latest".
+    el.style.display = "block";
+    el.replaceChildren();
+    const message = document.createElement("b");
+    message.textContent = "Update check unavailable. ";
+    const details = document.createTextNode(e.message + " ");
+    const retry = document.createElement("button");
+    retry.className = "secondary";
+    retry.dataset.action = "refresh-update-check";
+    retry.textContent = "Retry";
+    el.append(message, details, retry);
     count.style.display = "none";
   }
 }
@@ -3928,7 +3936,8 @@ const dashboardActions = new Map([
   ["open-deploy", () => switchTab("deploy")],
   ["pull", pull],
   ["rollback", rollback],
-  ["refresh", refresh],
+  ["refresh", () => { refresh(); refreshUpdateCheck(); }],
+  ["refresh-update-check", refreshUpdateCheck],
   ["refresh-security", () => refreshSecurity(true)],
   ["db-restart", dbRestart],
   ["refresh-disk-usage", refreshDiskUsage],
