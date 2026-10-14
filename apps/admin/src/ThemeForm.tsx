@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useT, inputCls, btnPrimary, card, FormError } from "./App";
 import { parseDesignMd, serializeDesignMd, THEME_FIELDS, type ImportedDesignMd, type ThemeSettings } from "./theme-design-md";
+import { suggestFontjoyPairing, type FontjoyPairing } from "./fontjoy-data/pairing";
 
 // ---------- Theme (shared form for per-site and global) ----------
 // A curated slice of daisyUI's own built-in themes (real oklch() triples
@@ -148,48 +149,6 @@ function FontField({
   );
 }
 
-// Curated heading/body pairings (not derived from the freeform GOOGLE_FONTS
-// list above) so "Generate pairing" always lands on a combination that's
-// actually designed to look intentional together, not two random fonts —
-// every pair here is a well-documented typography pairing (the kind of combo
-// fontpair.co-style galleries recommend), every font name is also in
-// GOOGLE_FONTS so the picker/preview can actually render it.
-const FONT_PAIRINGS: Array<{ heading: string; body: string }> = [
-  { heading: "Poppins", body: "Inter" },
-  { heading: "Playfair Display", body: "Source Sans Pro" },
-  { heading: "Playfair Display", body: "Raleway" },
-  { heading: "Space Grotesk", body: "Inter" },
-  { heading: "Merriweather", body: "Open Sans" },
-  { heading: "Merriweather", body: "Montserrat" },
-  { heading: "Montserrat", body: "Nunito" },
-  { heading: "Oswald", body: "Roboto" },
-  { heading: "Oswald", body: "Lato" },
-  { heading: "Libre Baskerville", body: "Lato" },
-  { heading: "Archivo", body: "Work Sans" },
-  { heading: "Bitter", body: "Karla" },
-  { heading: "Bitter", body: "Raleway" },
-  { heading: "Abril Fatface", body: "Mulish" },
-  { heading: "Abril Fatface", body: "Poppins" },
-  { heading: "DM Sans", body: "IBM Plex Sans" },
-  { heading: "Rubik", body: "Noto Sans" },
-  { heading: "Raleway", body: "Roboto" },
-  { heading: "Lora", body: "Montserrat" },
-  { heading: "Crimson Text", body: "Karla" },
-  { heading: "Cormorant Garamond", body: "Montserrat" },
-  { heading: "Josefin Sans", body: "Nunito" },
-  { heading: "Zilla Slab", body: "Work Sans" },
-  { heading: "Domine", body: "Mulish" },
-  { heading: "Barlow", body: "Fira Sans" },
-  { heading: "Manrope", body: "Inter" },
-  { heading: "Outfit", body: "Inter" },
-  { heading: "Plus Jakarta Sans", body: "Inter" },
-  { heading: "Quicksand", body: "Nunito" },
-  { heading: "Titillium Web", body: "Open Sans" },
-];
-function randomFontPairing() {
-  return FONT_PAIRINGS[Math.floor(Math.random() * FONT_PAIRINGS.length)];
-}
-
 // WCAG contrast ratio maxes out its useful range at 7:1 (the AAA threshold
 // for normal text) — scaling the percent to that instead of the ratio's true
 // max (21:1, pure black on white) keeps "100%" meaning "as readable as it
@@ -269,8 +228,10 @@ export function ThemeForm({
   const [importAcknowledged, setImportAcknowledged] = useState(false);
   const [lastImportBackup, setLastImportBackup] = useState<api.ThemePreset | null>(null);
   const [applyingImport, setApplyingImport] = useState(false);
+  const [recommendedSystem, setRecommendedSystem] = useState<FontjoyPairing | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLFormElement>(null);
   const formId = useId();
 
   // Per-site ThemeForm uploads into that tenant's own media library; the
@@ -417,6 +378,7 @@ export function ThemeForm({
   }
 
   function loadPreset(p: api.ThemePreset) {
+    setRecommendedSystem(null);
     setPrimaryColor(p.settings.primaryColor ?? "");
     setSecondaryColor(p.settings.secondaryColor ?? "");
     setBackgroundColor(p.settings.backgroundColor ?? "");
@@ -449,18 +411,20 @@ export function ThemeForm({
     setFaviconUrl(p.settings.faviconUrl ?? "");
   }
 
-  // Fills all 4 font roles from one curated pairing — heading, sub-heading,
-  // and post-title share the display face (all "big text", same family at
-  // different weights, matching how the source pairings are actually used
-  // in the wild), body gets the paired reading face. Same pattern as
-  // applyPalette below for colors.
   function applyFontPairing() {
-    const pairing = randomFontPairing();
-    setHeadingFont(pairing.heading);
-    setSubHeadingFont(pairing.heading);
-    setPostTitleFont(pairing.heading);
-    setFontFamily(pairing.body);
+    const system = suggestFontjoyPairing({ heading: headingFont, subheading: subHeadingFont, body: fontFamily });
+    setHeadingFont(system.heading);
+    setSubHeadingFont(system.subheading);
+    setPostTitleFont(system.subheading);
+    setFontFamily(system.body);
+    setCaptionFont(system.body);
+    setRecommendedSystem(system);
   }
+
+  const setFontManually = (setter: (value: string) => void) => (value: string) => {
+    setter(value);
+    setRecommendedSystem(null);
+  };
 
   // "Test only" — loads the preset into the form/local preview (same as
   // clicking a preset swatch) AND, when there's a real site to preview
@@ -789,7 +753,7 @@ export function ThemeForm({
 
   return (
     <section className="mx-auto max-w-[1500px] space-y-6 pb-12">
-      <header className="rounded-[1.75rem] bg-slate-950 px-6 py-7 text-white sm:px-8">
+      <header className="rounded-[1.75rem] bg-slate-950 px-6 py-5 text-white sm:px-8">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300">{t("theme-studio")}</p>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -800,16 +764,36 @@ export function ThemeForm({
             {loading ? t("theme-loading") : pendingImport ? t("theme-preview-unsaved") : isDirty ? t("theme-unsaved") : t("theme-saved-status")}
           </span>
         </div>
-        <p className="mt-5 max-w-3xl text-xs leading-relaxed text-slate-300">{previewTenantHost ? t("theme-scope-site") : t("theme-scope-global")}</p>
+        <p className="mt-3 max-w-3xl text-xs leading-relaxed text-slate-300">{previewTenantHost ? t("theme-scope-site") : t("theme-scope-global")}</p>
       </header>
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
-        <form id={formId} onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6`}>
-          <div className="space-y-3 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-900/5">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(340px,0.8fr)_minmax(0,1.2fr)]">
+        <form ref={settingsRef} id={formId} onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6 xl:sticky xl:top-24 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto xl:overscroll-contain`}>
+          <div className="-mx-4 -mt-4 space-y-3 rounded-t-[1.75rem] border-b border-slate-100 bg-white/95 px-4 pb-3 pt-4 backdrop-blur sm:-mx-6 sm:-mt-6 sm:px-6 xl:sticky xl:top-0 xl:z-20">
+            <p className="text-sm font-bold text-ink">{t("theme-settings-panel")}</p>
+            <div role="tablist" aria-label={t("theme-settings-panel")} className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
+              {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
+                <button
+                  key={tabId}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tabId}
+                  onClick={() => {
+                    setActiveTab(tabId);
+                    settingsRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className={`min-w-max flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${activeTab === tabId ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"}`}
+                >
+                  {t(`theme-tab-${tabId}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {activeTab === "colors" && <div className="space-y-3 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-900/5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-sm font-bold text-ink">{t("theme-presets")}</p>
               <p className="text-xs text-sub">{t("theme-presets-hint")}</p>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 2xl:grid-cols-3">
               {THEME_PRESETS.map((p) => {
                 const colors = presetToColors(p);
                 const active =
@@ -844,28 +828,12 @@ export function ThemeForm({
                 <Sparkles className="h-4 w-4" /> {t("theme-generate")}
               </button>
             </div>
-          </div>
-          <div role="tablist" aria-label={t("theme-studio")} className="flex gap-1 overflow-x-auto rounded-2xl bg-slate-100 p-1 xl:sticky xl:top-24 xl:z-10 xl:shadow-sm">
-            {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
-              <button
-                key={tabId}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tabId}
-                onClick={() => setActiveTab(tabId)}
-                className={`min-w-max flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
-                  activeTab === tabId ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"
-                }`}
-              >
-                {t(`theme-tab-${tabId}`)}
-              </button>
-            ))}
-          </div>
+          </div>}
 
           {activeTab === "colors" && (
             <div className="space-y-3 rounded-2xl bg-slate-50 p-3 sm:p-4">
               <div><p className="text-sm font-bold text-ink">{t("theme-colors")}</p><p className="mt-1 text-xs text-sub">{t("theme-colors-hint")}</p></div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 2xl:grid-cols-2">
                 {colorField(t("theme-primary"), "primaryColor", primaryColor, setPrimaryColor, t("theme-role-primary"))}
                 {colorField(t("theme-secondary"), "secondaryColor", secondaryColor, setSecondaryColor, t("theme-role-secondary"))}
                 {colorField(t("theme-tertiary"), "tertiaryColor", tertiaryColor, setTertiaryColor, t("theme-role-tertiary"))}
@@ -891,30 +859,39 @@ export function ThemeForm({
                   <Sparkles className="h-3 w-3" /> {t("theme-font-pairing")}
                 </button>
               </div>
-              <FontField label={t("theme-font-heading")} value={headingFont} onChange={setHeadingFont} inherited={inheritedTheme.headingFont} placeholder="Poppins" />
+              <p className="text-xs leading-relaxed text-sub">{t("theme-pairing-guide")}</p>
+              {recommendedSystem && (
+                <div role="status" className="space-y-1 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-950 ring-1 ring-emerald-200">
+                  <p className="font-bold">{t("theme-pairing-recommended")}</p>
+                  <p>{recommendedSystem.heading} · {recommendedSystem.subheading} · {recommendedSystem.body}</p>
+                  <p>{t("theme-pairing-rationale")}</p>
+                </div>
+              )}
+              <a href="/fontjoy-license.txt" target="_blank" rel="noopener noreferrer" className="inline-block text-[11px] text-sub underline underline-offset-2 hover:text-ink">Fontjoy · MIT</a>
+              <FontField label={t("theme-font-heading")} value={headingFont} onChange={setFontManually(setHeadingFont)} inherited={inheritedTheme.headingFont} placeholder="Poppins" />
               {sizeLineHeightFields(
                 t("theme-heading-size"), headingFontSize, setHeadingFontSize,
                 t("theme-heading-line-height"), headingLineHeight, setHeadingLineHeight,
               )}
-              <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setSubHeadingFont} inherited={inheritedTheme.subHeadingFont} placeholder="Poppins" />
+              <FontField label={t("theme-font-subheading")} value={subHeadingFont} onChange={setFontManually(setSubHeadingFont)} inherited={inheritedTheme.subHeadingFont} placeholder="Poppins" />
               {sameFontNote(subHeadingFont, headingFont)}
               {sizeLineHeightFields(
                 t("theme-subheading-size"), subHeadingFontSize, setSubHeadingFontSize,
                 t("theme-subheading-line-height"), subHeadingLineHeight, setSubHeadingLineHeight,
               )}
-              <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setPostTitleFont} inherited={inheritedTheme.postTitleFont} placeholder="Poppins" />
+              <FontField label={t("theme-font-posttitle")} value={postTitleFont} onChange={setFontManually(setPostTitleFont)} inherited={inheritedTheme.postTitleFont} placeholder="Poppins" />
               {sameFontNote(postTitleFont, headingFont)}
               {sizeLineHeightFields(
                 t("theme-post-title-size"), postTitleFontSize, setPostTitleFontSize,
                 t("theme-post-title-line-height"), postTitleLineHeight, setPostTitleLineHeight,
                 12, 96,
               )}
-              <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontFamily} inherited={inheritedTheme.fontFamily} placeholder="Plus Jakarta Sans" />
+              <FontField label={t("theme-font-body")} value={fontFamily} onChange={setFontManually(setFontFamily)} inherited={inheritedTheme.fontFamily} placeholder="Plus Jakarta Sans" />
               {sizeLineHeightFields(
                 t("theme-body-size"), bodyFontSize, setBodyFontSize,
                 t("theme-body-line-height"), bodyLineHeight, setBodyLineHeight,
               )}
-              <FontField label={t("theme-font-caption")} value={captionFont} onChange={setCaptionFont} inherited={inheritedTheme.captionFont} placeholder="Plus Jakarta Sans" />
+              <FontField label={t("theme-font-caption")} value={captionFont} onChange={setFontManually(setCaptionFont)} inherited={inheritedTheme.captionFont} placeholder="Plus Jakarta Sans" />
               {sizeLineHeightFields(
                 t("theme-caption-size"), captionFontSize, setCaptionFontSize,
                 t("theme-caption-line-height"), captionLineHeight, setCaptionLineHeight,
