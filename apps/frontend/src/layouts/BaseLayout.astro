@@ -205,12 +205,21 @@ const fontsHref = allFonts.length
       <>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        {/* Loaded non-render-blocking: the media="print" swapped to "all"
-           onload is the standard no-JS-framework way to stop a Google Fonts
-           stylesheet from blocking first paint (it still applies font-face
-           rules as soon as it arrives — display=swap on the URL already
-           covers the "text invisible while the font loads" case). */}
-        <link rel="stylesheet" href={fontsHref} media="print" onload="this.media='all'" />
+        {/* Loaded non-render-blocking: media="print" swapped to "all" once
+           loaded stops a Google Fonts stylesheet from blocking first paint
+           (display=swap on the URL covers "text invisible while the font
+           loads"). The swap is a nonce'd script, not an onload="" attribute:
+           server.mjs's CSP (script-src 'self' 'nonce-…') blocks every inline
+           event handler, so the old attribute left the fonts print-only. */}
+        <link rel="stylesheet" href={fontsHref} media="print" id="ds-fonts" />
+        <script is:inline nonce={cspNonce}>
+          (() => {
+            const l = document.getElementById("ds-fonts");
+            const on = () => (l.media = "all");
+            if (l.sheet) on();
+            else l.addEventListener("load", on);
+          })();
+        </script>
         <noscript><link rel="stylesheet" href={fontsHref} /></noscript>
       </>
     )}

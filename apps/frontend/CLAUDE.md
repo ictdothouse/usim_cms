@@ -23,11 +23,15 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   2026-09-11 — `apps/api`'s own `@fastify/helmet` deliberately sets `contentSecurityPolicy: false` and
   says this file is the real CSP surface, but no CSP existed here until now). Both are defense-in-depth
   around the Custom HTML element's documented raw-HTML trust boundary, not a substitute for it —
-  `script-src`/`style-src` keep `'unsafe-inline'` on purpose (Designer's inline `style=""` everywhere, the
-  tabs/slider/menu elements' own inline `<script>`, and Custom HTML's own script tags all rely on it), so
-  this CSP's real value is blocking an injected `<script src="https://attacker.example/...">` from ever
-  loading (no external host in `script-src`) and blocking exfiltration via `fetch`/`XHR` to a third-party
-  server (`connect-src 'self'`) — not stopping inline script outright. `img-src`/`frame-src` stay open to
+  `style-src` keeps `'unsafe-inline'` (Designer's inline `style=""` everywhere); `script-src` is
+  `'self' 'nonce-…'` (per-response nonce, `x-ucms-csp-nonce` → `cspNonce`; the HTML cache stores a
+  placeholder that middleware.ts swaps). So: every `is:inline` script needs `nonce={cspNonce}`; no inline
+  event-handler attributes (`onload=""` etc. are blocked outright — the Google Fonts link used one and
+  never applied, fixed 2026-10-14 with a nonce'd swap script); and component `<script>`s must stay
+  external files — `astro.config.mjs`'s `assetsInlineLimit` refuses `.js` inlining, since Astro's inlined
+  `<script type="module">` carries no nonce (tabs/announcement/map consent/menu were blocked in prod).
+  Beyond that, blocks an injected `<script src="https://attacker.example/...">` (no external host in
+  `script-src`) and exfiltration via `fetch`/`XHR` to a third-party server (`connect-src 'self'`). `img-src`/`frame-src` stay open to
   any `https:` host since a webmaster can point an image/bgImage/Custom-HTML iframe at any external URL
   by design; `style-src`/`font-src` allow exactly `fonts.googleapis.com`/`fonts.gstatic.com`
   (`BaseLayout.astro`'s Google Fonts `<link>`), nothing broader. `frame-ancestors` (clickjacking
