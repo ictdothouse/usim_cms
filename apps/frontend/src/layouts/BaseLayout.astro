@@ -554,6 +554,58 @@ const fontsHref = allFonts.length
           // Designer with a path past a list's end).
           let stale = false;
 
+          // The dragged node rides under the pointer as a shrunk copy, then
+          // flies into its new slot on drop — before, only the target turned
+          // blue and the element jumped there with nothing in between.
+          const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          const ghostAt = (d, x, y) => `translate(${x - d.offX * d.scale}px, ${y - d.offY * d.scale}px) scale(${d.scale})`;
+          function liftGhost(d, x, y) {
+            const src = visualTarget(d.node);
+            const r = src.getBoundingClientRect();
+            d.w = r.width || 1;
+            const h = r.height || 1;
+            d.scale = Math.min(1, 240 / d.w, 160 / h);
+            d.offX = Math.min(Math.max(d.startX - r.left, 0), d.w);
+            d.offY = Math.min(Math.max(d.startY - r.top, 0), h);
+            const copy = src.cloneNode(true);
+            // Never matched as a real node (findByPath, the sectionCount
+            // query, a radio group's name), and an embed doesn't load a
+            // second time in the copy.
+            for (const n of [copy, ...copy.querySelectorAll("[id],[name],[data-designer-path]")]) {
+              n.removeAttribute("id");
+              n.removeAttribute("name");
+              n.removeAttribute("data-designer-path");
+            }
+            for (const n of copy.querySelectorAll("iframe,video,audio,source")) n.removeAttribute("src");
+            copy.style.margin = "0";
+            const g = document.createElement("div");
+            g.style.cssText = `position:fixed;left:0;top:0;width:${d.w}px;height:${h}px;overflow:hidden;pointer-events:none;z-index:100000;background:#fff;border-radius:6px;outline:2px solid #0f62fe;box-shadow:0 16px 40px rgba(0,0,0,.28);transform-origin:0 0`;
+            g.appendChild(copy);
+            document.body.appendChild(g);
+            g.style.transform = ghostAt(d, x, y);
+            g.animate([{ transform: `translate(${r.left}px, ${r.top}px)` }, { transform: g.style.transform }], { duration: reducedMotion ? 0 : 150, easing: "ease-out" });
+            d.ghost = g;
+          }
+          // placed: fly into the node's (already moved) slot + flash.
+          // cancel: fly back home. pending: a new-section move has no slot on
+          // this page yet — fade out, node stays dimmed until admin's reload.
+          function dropGhost(d, outcome) {
+            const vt = visualTarget(d.node);
+            const to = vt.getBoundingClientRect();
+            const from = d.ghost.style.transform;
+            const frames =
+              outcome === "pending"
+                ? [{ opacity: 1 }, { opacity: 0 }]
+                : [{ transform: from }, { transform: `translate(${to.left}px, ${to.top}px) scale(${to.width / d.w})`, boxShadow: "none" }];
+            d.ghost.animate(frames, { duration: reducedMotion ? 0 : 220, easing: "cubic-bezier(.2,.8,.2,1)", fill: "forwards" }).onfinish = () => {
+              d.ghost.remove();
+              if (outcome === "pending") return;
+              vt.style.opacity = "";
+              if (outcome === "placed" && !reducedMotion)
+                vt.animate([{ boxShadow: "0 0 0 3px rgba(15,98,254,.9)" }, { boxShadow: "0 0 0 3px rgba(15,98,254,0)" }], { duration: 700, easing: "ease-out" });
+            };
+          }
+
           document.addEventListener("pointerdown", (e) => {
             if (stale) return;
             // Slide children are selected/edited by the slider bridge below.
@@ -574,15 +626,17 @@ const fontsHref = allFonts.length
             if (!dragState.moved) {
               if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) < 6) return;
               dragState.moved = true;
+              liftGhost(dragState, e.clientX, e.clientY);
               // visualTarget: an element's own wrapper is display:contents,
               // which renders no opacity/outline of its own.
-              visualTarget(dragState.node).style.opacity = "0.4";
+              visualTarget(dragState.node).style.opacity = "0.3";
               document.body.style.userSelect = "none";
               // Selection badges/grip sit over the page — hidden (so
               // elementFromPoint sees through them) for the drag's length.
               dragState.hidden = spacingHandleEls.map((el) => [el, el.style.visibility]);
               for (const [el] of dragState.hidden) el.style.visibility = "hidden";
             }
+            dragState.ghost.style.transform = ghostAt(dragState, e.clientX, e.clientY);
             const depth = dragState.path.split(".").length;
             // An element drops anywhere — any column (empty ones too), any
             // section, or a new section between two — through the same
@@ -626,7 +680,6 @@ const fontsHref = allFonts.length
 
           document.addEventListener("pointerup", () => {
             if (!dragState) return;
-            visualTarget(dragState.node).style.opacity = "";
             document.body.style.userSelect = "";
             for (const [el, v] of dragState.hidden || []) el.style.visibility = v;
             drawDropIndicator(null);
@@ -637,24 +690,33 @@ const fontsHref = allFonts.length
               justDragged = true;
               setTimeout(() => (justDragged = false), 50);
             }
-            const { node, path, target, hoverNode, hoverPath, hoverPosition, moved } = dragState;
+            const d = dragState;
+            const { node, path, target, hoverNode, hoverPath, hoverPosition, moved } = d;
             dragState = null;
-            // Stale mid-drag: its paths are already out of date.
-            if (!moved || stale) return;
-            // The DOM moves now, not after the save + reload (a second or
-            // more) — the drop used to snap back until then. Admin reloads
-            // after every drag, even one it refuses, which puts this back.
-            if (target) {
+            if (!moved) return;
+            let outcome = "cancel";
+            // Stale mid-drag: its paths are already out of date, so nothing
+            // is sent and the ghost flies home.
+            if (!stale && target) {
+              // The DOM moves now, not after the save + reload (a second or
+              // more) — the drop used to snap back until then. Admin reloads
+              // after every drag, even one it refuses, which puts this back.
+              outcome = "pending";
               if (target.kind === "into-column" && target.colPath.length === 3) {
                 const col = findByPath(target.colPath.join("."));
                 const kids = col ? [...col.children].filter((n) => n.dataset.designerPath) : [];
-                if (col) col.insertBefore(node, kids[target.index] || null);
+                if (col) {
+                  col.insertBefore(node, kids[target.index] || null);
+                  outcome = "placed";
+                }
               }
               parent.postMessage({ type: "designer:moveTo", from: path, target }, targetOrigin);
-            } else if (hoverPath) {
+            } else if (!stale && hoverPath) {
               hoverNode.parentNode.insertBefore(node, hoverPosition === "after" ? hoverNode.nextSibling : hoverNode);
+              outcome = "placed";
               parent.postMessage({ type: "designer:reorder", from: path, to: hoverPath, position: hoverPosition }, targetOrigin);
             }
+            dropGhost(d, outcome);
           });
 
           // Canva-style editing for a slide-nested free-positioned element
@@ -1665,6 +1727,9 @@ const fontsHref = allFonts.length
               document.body.appendChild(dropIndicatorEl);
             }
             dropIndicatorEl.style.display = "block";
+            // Where in the column it lands, not just which column.
+            const line = dropIndicatorEl.firstChild || dropIndicatorEl.appendChild(document.createElement("div"));
+            line.style.cssText = "display:none;position:absolute;left:4px;right:4px;height:4px;border-radius:2px;background:#0f62fe";
             if (target.kind === "new-section") {
               // By exact path match (findByPath), not a NodeList index —
               // an unstamped block type (e.g. GenericBlock) or a
@@ -1691,6 +1756,11 @@ const fontsHref = allFonts.length
                 background: "rgba(15, 98, 254, 0.15)",
                 border: "2px dashed #0f62fe",
               });
+              const kids = [...colNode.children].filter((n) => n.dataset.designerPath);
+              const at = target.index == null ? null : kids[target.index];
+              const last = kids[kids.length - 1];
+              const y = at ? visualTarget(at).getBoundingClientRect().top : last ? visualTarget(last).getBoundingClientRect().bottom : null;
+              if (y != null) Object.assign(line.style, { display: "block", top: `${y - rect.top - 4}px` });
             }
           }
 

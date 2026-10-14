@@ -353,7 +353,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   the moment `blocks` changes: the `structuralTick` effect posts `designer:stale` and the iframe
   refuses new drags until replaced. A second drag there sent old paths; `removeAt` past a list's end
   returned `undefined`, which got inserted as an element and crashed Designer, so `useBlockOps`'s
-  `nodeAt` now no-ops a move whose source no longer exists.
+  `nodeAt` now no-ops a move whose source no longer exists. Drag feedback (`liftGhost`/`dropGhost`):
+  a shrunk clone rides under the pointer and flies into the new slot on drop (back home if
+  cancelled; fades for a new-section move, which has no slot until the reload), and the column
+  drop box draws a line at the exact insertion index.
   `useLiveEditBridge` now reloads the real page after EVERY edit; the old
   `designer:style` shortcut posted BASE props at tablet/mobile. The one exception is typing inside the
   iframe (`skipNextReload`), which re-renders once selection moves away. Iframe free-position drags
