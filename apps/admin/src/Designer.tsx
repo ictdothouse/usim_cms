@@ -388,17 +388,6 @@ export default function Designer({
     });
   }, [sel]);
 
-  // Forces a re-render on window resize so LiveEditToolbar's position (which
-  // reads liveFrame.current.getBoundingClientRect() directly at render time,
-  // not from state) picks up the iframe's new page position even when
-  // selectedRect itself hasn't changed.
-  const [, bumpLayoutTick] = useState(0);
-  useEffect(() => {
-    const onResize = () => bumpLayoutTick((n) => n + 1);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
   const { clipCopy, clipRead, clipHas, styleCopy, styleRead, styleHas } = useClipboard();
 
   const {

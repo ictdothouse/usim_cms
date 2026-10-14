@@ -87,7 +87,6 @@ export interface LiveEditBridgeApi {
   frameARef: React.RefObject<HTMLIFrameElement>;
   frameBRef: React.RefObject<HTMLIFrameElement>;
   liveFrame: React.RefObject<HTMLIFrameElement>;
-  selectedRect: { top: number; left: number; width: number; height: number } | null;
   liveSpacing: LiveSpacing | null;
   enterLive: (cold?: boolean) => Promise<void>;
   toggleLive: () => Promise<void>;
@@ -119,15 +118,6 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const frameBRef = useRef<HTMLIFrameElement>(null);
   const liveFrame = activeSlot === "a" ? frameARef : frameBRef;
 
-  // Reported by BaseLayout.astro's designer:selectedRect message — the
-  // selected node's on-screen box inside the iframe, used to position
-  // LiveEditToolbar. Cleared whenever `sel` itself changes so a stale rect
-  // never positions the toolbar over the wrong element while the new one's
-  // first report is in flight.
-  const [selectedRect, setSelectedRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
-  useEffect(() => {
-    setSelectedRect(null);
-  }, [sel]);
   // The selected node's real rendered padding/margin px, reported by
   // BaseLayout.astro's spacing handles (designer:spacingValues) — the
   // Inspector's BoxModel shows it as an unset side's placeholder. Keyed by
@@ -311,10 +301,6 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
     function onMessage(e: MessageEvent) {
       if (!liveFrame.current || e.source !== liveFrame.current.contentWindow) return;
       if (!liveSrc || e.origin !== new URL(liveSrc, window.location.href).origin) return;
-      if (e.data?.type === "designer:selectedRect") {
-        setSelectedRect(e.data.rect ?? null);
-        return;
-      }
       if (e.data?.type === "designer:spacingValues") {
         setLiveSpacing({ path: String(e.data.path), padding: e.data.padding, margin: e.data.margin });
         return;
@@ -616,5 +602,5 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, sel, liveSrc, sliderInnerSel, sliderSlideIdx, linkedPadding, linkedMargin]);
 
-  return { mode, liveSrc, liveSrcA, liveSrcB, activeSlot, frameARef, frameBRef, liveFrame, selectedRect, liveSpacing, enterLive, toggleLive, handleFrameLoad };
+  return { mode, liveSrc, liveSrcA, liveSrcB, activeSlot, frameARef, frameBRef, liveFrame, liveSpacing, enterLive, toggleLive, handleFrameLoad };
 }

@@ -26,9 +26,13 @@ const { count = "3", columns = "3", eventLayout = "grid", tenantHost, p = {}, bp
 
 const now = Date.now();
 // Keep the requested interval within the API's 400-day maximum while still
-// including events that began yesterday and remain in progress.
-const rangeEnd = new Date(now + 399 * 24 * 60 * 60 * 1000);
-const all = eventLayout === "calendar" ? [] : await getEventsCalendar(tenantHost, new Date(now - 24 * 60 * 60 * 1000), rangeEnd, 300);
+// including events that began yesterday and remain in progress. Day-rounded
+// so the query (= apiGet's cache key) is the same for a whole day, not new
+// on every render.
+const DAY = 24 * 60 * 60 * 1000;
+const today = Math.floor(now / DAY) * DAY;
+const rangeEnd = new Date(today + 399 * DAY);
+const all = eventLayout === "calendar" ? [] : await getEventsCalendar(tenantHost, new Date(today - DAY), rangeEnd, 300);
 const events = all
   .filter((e) => new Date(e.endDate ?? e.startDate).getTime() >= now)
   .sort((a, b) => a.startDate.localeCompare(b.startDate))
