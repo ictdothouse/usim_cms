@@ -568,9 +568,31 @@ const fontsHref = allFonts.length
             if (!dragState.moved) {
               if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) < 6) return;
               dragState.moved = true;
-              dragState.node.style.opacity = "0.4";
+              // visualTarget: an element's own wrapper is display:contents,
+              // which renders no opacity/outline of its own.
+              visualTarget(dragState.node).style.opacity = "0.4";
+              document.body.style.userSelect = "none";
+              // Selection badges/grip sit over the page — hidden (so
+              // elementFromPoint sees through them) for the drag's length.
+              dragState.hidden = spacingHandleEls.map((el) => [el, el.style.visibility]);
+              for (const [el] of dragState.hidden) el.style.visibility = "hidden";
             }
             const depth = dragState.path.split(".").length;
+            // An element drops anywhere — any column (empty ones too), any
+            // section, or a new section between two — through the same
+            // resolver + indicator the palette's drag-to-add uses below,
+            // committed by admin through the same dropIntoColumn/
+            // dropIntoNewSection (designer:moveTo). Used to only ever target
+            // another element, so an empty column or another section's
+            // space was never a drop target. Container children (depth 5+)
+            // stay selection-only in Live Edit (apps/admin/CLAUDE.md).
+            if (depth === 4) {
+              const under = document.elementFromPoint(e.clientX, e.clientY);
+              // Never into itself or its own descendants (a container).
+              dragState.target = under && dragState.node.contains(under) ? null : resolveDropTarget(e.clientX, e.clientY);
+              drawDropIndicator(dragState.target);
+              return;
+            }
             const under = document.elementFromPoint(e.clientX, e.clientY);
             const targetNode = under && under.closest("[data-designer-path]");
             if (dragState.hoverNode && dragState.hoverNode !== targetNode) {
@@ -598,15 +620,24 @@ const fontsHref = allFonts.length
 
           document.addEventListener("pointerup", () => {
             if (!dragState) return;
-            dragState.node.style.opacity = "";
+            visualTarget(dragState.node).style.opacity = "";
+            document.body.style.userSelect = "";
+            for (const [el, v] of dragState.hidden || []) el.style.visibility = v;
+            drawDropIndicator(null);
             if (dragState.hoverNode) dragState.hoverNode.style.outline = "";
-            if (dragState.moved && dragState.hoverPath) {
+            if (dragState.moved) {
+              // Even a drag released over no target: its click must not
+              // select whatever it happened to end over.
               justDragged = true;
+              setTimeout(() => (justDragged = false), 50);
+            }
+            if (dragState.moved && dragState.target) {
+              parent.postMessage({ type: "designer:moveTo", from: dragState.path, target: dragState.target }, targetOrigin);
+            } else if (dragState.moved && dragState.hoverPath) {
               parent.postMessage(
                 { type: "designer:reorder", from: dragState.path, to: dragState.hoverPath, position: dragState.hoverPosition },
                 targetOrigin,
               );
-              setTimeout(() => (justDragged = false), 50);
             }
             dragState = null;
           });
@@ -1299,6 +1330,27 @@ const fontsHref = allFonts.length
             frame.style.cssText = "position:fixed;pointer-events:none;z-index:2147481000;";
             document.body.appendChild(frame);
             spacingHandleEls.push(frame);
+
+            // Drag grip at the box's top-left (Blocks mode's ⠿): starts the
+            // exact drag pressing the content itself does (pointerdown
+            // above), for content that's awkward to grab directly. Inside
+            // the corner for a section, often full-bleed at the viewport's
+            // own edge.
+            const grip = document.createElement("div");
+            grip.style.cssText =
+              "position:absolute;z-index:2;pointer-events:auto;cursor:grab;width:20px;height:20px;border-radius:999px;" +
+              `background:${ACCENT};color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.3);` +
+              (path.length === 1 ? "left:4px;top:4px;" : "left:0;top:0;transform:translate(-50%,-50%);");
+            grip.title = L("move", "Move");
+            grip.setAttribute("aria-label", grip.title);
+            grip.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.8"/><circle cx="15" cy="5" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="19" r="1.8"/><circle cx="15" cy="19" r="1.8"/></svg>';
+            grip.addEventListener("pointerdown", (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              dragState = { path: path.join("."), node, startX: e.clientX, startY: e.clientY, moved: false };
+            });
+            frame.appendChild(grip);
             const groups = { padding: [], margin: [] };
             const edgeGroups = {};
             for (const edge of ["top", "bottom", "left", "right"]) {

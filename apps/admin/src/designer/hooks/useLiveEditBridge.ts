@@ -3,8 +3,8 @@
 // per that spec: the most stateful hook, with the most subtle preserved
 // behaviors (the transient cross-origin postMessage guard, the
 // skipNextReload text-typing guard, the debounced-reload effect), and its message
-// handler reaches into useBlockOps' territory (removeAt/insertAt/
-// moveColumn/moveSection — all plain pure imports from ../../designerTree,
+// handler reaches into useBlockOps' territory (moveColumn/moveSection —
+// plain pure imports from ../../designerTree,
 // not owned by any hook) and useUndoRedo's (undo/redo).
 //
 // Deps grouped into one object rather than ~15 positional params — this
@@ -16,7 +16,7 @@ import type React from "react";
 import * as api from "@/lib/api";
 import { toast } from "sonner";
 import type { Key } from "@/i18n";
-import { moveSection, moveColumn, removeAt, insertAt } from "../../designerTree";
+import { moveSection, moveColumn } from "../../designerTree";
 import { section } from "../blockPath";
 import {
   deleteSlideElement,
@@ -483,28 +483,15 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       } else if (e.data?.type === "designer:reorder") {
         const from = String(e.data.from).split(".").map(Number);
         const to = String(e.data.to).split(".").map(Number);
-        // Path depth is the drag's kind (1=section, 3=column, 4=element) — a
-        // drag can only ever hover a same-depth target (BaseLayout.astro's
+        // Path depth is the drag's kind (1=section, 3=column) — a drag can
+        // only ever hover a same-depth target (BaseLayout.astro's
         // pointermove only sets hoverPath when the target's depth matches
         // dragState's), so a mismatch here means a stale/cross-kind message
-        // and must be a no-op, never a guess at which branch to take.
+        // and must be a no-op, never a guess at which branch to take. An
+        // element (4) drags anywhere instead — designer:moveTo, handled in
+        // useLiveEditPaletteDrag.ts.
         if (from.length !== to.length) return;
-        if (from.length === 4) {
-          if (isSectionLocked(from[0]) || isSectionLocked(to[0])) {
-            toast.error(t("designer-section-locked-toast"));
-            return;
-          }
-          mutate((bs) => {
-            const [tb, tr, tc, te] = to;
-            let idx = te + (e.data.position === "after" ? 1 : 0);
-            // same-column move: removing the source first shifts later indexes
-            // down — same adjustment dropIntoColumn already makes for the
-            // block-canvas drag.
-            if (from[0] === tb && from[1] === tr && from[2] === tc && from[3] < idx) idx--;
-            const el = removeAt(bs, from);
-            insertAt(bs, [tb, tr, tc], el, idx);
-          });
-        } else if (from.length === 3) {
+        if (from.length === 3) {
           // Column reorder is scoped to within its own row — a row's
           // grid-template-columns and each column's span are only meaningful
           // there, same restriction the Layers tree's drag-reorder applies.

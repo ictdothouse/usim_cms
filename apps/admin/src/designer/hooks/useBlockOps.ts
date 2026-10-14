@@ -365,12 +365,17 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
         insertAt(bs, colPath, newEl(d.type, d.propsOverride), index);
         return;
       }
-      const [sb, sr, sc, se] = d.path;
+      // A container dropped into its own children would be detached along
+      // with the very list it's inserted into — gone.
+      if (d.path.every((v, i) => colPath[i] === v)) return;
       let idx = index;
-      // same-column move: removing the source first shifts later indexes down
-      if (idx !== undefined && sb === colPath[0] && sr === colPath[1] && sc === colPath[2] && se < idx) idx--;
+      // same-list move: removing the source first shifts later indexes down
+      const sameList = d.path.length === colPath.length + 1 && colPath.every((v, i) => d.path[i] === v);
+      if (idx !== undefined && sameList && d.path[d.path.length - 1] < idx) idx--;
       const el = removeAt(bs, d.path);
-      insertAt(bs, colPath, el, idx);
+      // Into the list resolved above, not re-resolved by path: removing an
+      // earlier sibling of one of colPath's ancestors (a container) shifts it.
+      children.splice(idx ?? children.length, 0, el);
     });
     setSel(null);
   }
@@ -419,15 +424,13 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
       // since this target was resolved) would otherwise leave colPath
       // pointing at an index past the real array, crashing on the very
       // node this function itself just created.
+      // A move's source comes out FIRST: inserting the new section at or
+      // before the source's own section shifted d.path off its element
+      // (Live Edit drops between any two sections, not just at the end).
+      const el = d.kind === "new" ? newEl(d.type, d.propsOverride) : removeAt(bs, d.path);
       const at = Math.min(afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1, bs.length);
       insertAt(bs, [], newSection(), at);
-      const colPath = [at, 0, 0];
-      if (d.kind === "new") {
-        insertAt(bs, colPath, newEl(d.type, d.propsOverride));
-        return;
-      }
-      const el = removeAt(bs, d.path);
-      insertAt(bs, colPath, el);
+      insertAt(bs, [at, 0, 0], el);
     });
     setSel(null);
   }
