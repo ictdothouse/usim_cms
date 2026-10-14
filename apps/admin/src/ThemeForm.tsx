@@ -231,7 +231,6 @@ export function ThemeForm({
   const [recommendedSystem, setRecommendedSystem] = useState<FontjoyPairing | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-  const settingsRef = useRef<HTMLFormElement>(null);
   const formId = useId();
 
   // Per-site ThemeForm uploads into that tenant's own media library; the
@@ -579,19 +578,6 @@ export function ThemeForm({
     }
   }
 
-  // One combined stylesheet request for every curated font so the dropdown
-  // rows and the live preview panel below can render each one for real,
-  // instead of just naming it — shared across both ThemeForm instances
-  // (Global Theme + per-site Theme), so guard against injecting it twice.
-  useEffect(() => {
-    if (document.getElementById("admin-font-picker-preview")) return;
-    const link = document.createElement("link");
-    link.id = "admin-font-picker-preview";
-    link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`;
-    document.head.appendChild(link);
-  }, []);
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -645,6 +631,24 @@ export function ThemeForm({
   const draftTheme = currentColors();
   const effectiveTheme = mergeEffective(draftTheme);
   const previewTheme = pendingImport ? mergeEffective(pendingImport.candidate) : effectiveTheme;
+  const previewFontHref = [...new Set([
+    previewTheme.fontFamily, previewTheme.headingFont, previewTheme.subHeadingFont,
+    previewTheme.postTitleFont, previewTheme.captionFont,
+  ].filter((font): font is string => Boolean(font) && GOOGLE_FONTS.includes(font)))].map((font) => `family=${encodeURIComponent(font)}`).join("&");
+  // Load only the faces currently used by this preview. The former request
+  // named every picker option, slowing the page and masking a CSP block.
+  useEffect(() => {
+    const existing = document.getElementById("admin-font-picker-preview") as HTMLLinkElement | null;
+    if (!previewFontHref) {
+      existing?.remove();
+      return;
+    }
+    const link = existing ?? document.createElement("link");
+    link.id = "admin-font-picker-preview";
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?${previewFontHref}&display=swap`;
+    if (!existing) document.head.appendChild(link);
+  }, [previewFontHref]);
   const previewValue = (key: string, fallback: string) =>
     /^#[0-9a-f]{6}$/i.test(previewTheme[key] || "") ? previewTheme[key] : fallback;
   const isDirty = THEME_FIELDS.some((key) => (draftTheme[key] || "") !== (savedSettings[key] || ""));
@@ -767,8 +771,8 @@ export function ThemeForm({
         <p className="mt-3 max-w-3xl text-xs leading-relaxed text-slate-300">{previewTenantHost ? t("theme-scope-site") : t("theme-scope-global")}</p>
       </header>
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(340px,0.8fr)_minmax(0,1.2fr)]">
-        <form ref={settingsRef} id={formId} onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6 xl:sticky xl:top-24 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto xl:overscroll-contain`}>
-          <div className="-mx-4 -mt-4 space-y-3 rounded-t-[1.75rem] border-b border-slate-100 bg-white/95 px-4 pb-3 pt-4 backdrop-blur sm:-mx-6 sm:-mt-6 sm:px-6 xl:sticky xl:top-0 xl:z-20">
+        <form id={formId} onSubmit={submit} className={`${card} min-w-0 space-y-5 rounded-[1.75rem] p-4 sm:p-6`}>
+          <div className="space-y-3 border-b border-slate-100 pb-4">
             <p className="text-sm font-bold text-ink">{t("theme-settings-panel")}</p>
             <div role="tablist" aria-label={t("theme-settings-panel")} className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
               {(["colors", "typography", "postdisplay", "branding"] as const).map((tabId) => (
@@ -777,10 +781,7 @@ export function ThemeForm({
                   type="button"
                   role="tab"
                   aria-selected={activeTab === tabId}
-                  onClick={() => {
-                    setActiveTab(tabId);
-                    settingsRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
+                  onClick={() => setActiveTab(tabId)}
                   className={`min-w-max flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${activeTab === tabId ? "bg-white text-ink shadow-sm" : "text-sub hover:text-ink"}`}
                 >
                   {t(`theme-tab-${tabId}`)}
@@ -968,7 +969,7 @@ export function ThemeForm({
             sits in its own box below (not inside the preview) and always
             uses fixed neutral styling, not the theme's own colors — it has
             to stay legible even when the theme it's judging isn't. */}
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-24 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto xl:overscroll-contain xl:pr-2">
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-6 xl:self-start">
         <div ref={previewRef} className="scroll-mt-6 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-bold text-ink">{pendingImport ? t("theme-import-preview") : t("theme-preview-label")}</h3>
@@ -1040,7 +1041,16 @@ export function ThemeForm({
               </p>
             )}
           </div>
+          {pendingImport && (
+            <button type="button" onClick={() => document.getElementById("theme-import-review")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="w-full rounded-xl bg-amber-50 px-4 py-3 text-left text-xs font-semibold text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100">
+              {t("theme-import-review-label")} ↓
+            </button>
+          )}
+        </div>
+        </aside>
+      </div>
 
+      <div className="grid items-start gap-4 xl:grid-cols-2">
           {/* Visual-only mockup of common components in the current
               colors/fonts — never changes real site styling, just an
               at-a-glance preview of the palette+typography in context. */}
@@ -1097,8 +1107,6 @@ export function ThemeForm({
               </div>
             </div>
           </div>
-        </div>
-
         {pendingImport && (
           <section aria-labelledby="theme-import-review" className="space-y-4 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-300/70">
             <div>
@@ -1151,7 +1159,6 @@ export function ThemeForm({
             <button type="button" disabled={!presetName.trim() || Boolean(pendingImport)} onClick={() => void saveToCollection()} className="rounded-xl bg-slate-950 px-3 text-xs font-semibold text-white disabled:opacity-40">{t("theme-add-favourite")}</button>
           </div>
         </div>
-        </aside>
       </div>
 
       {/* "My collection" — personal favourites, not tied to any one site;
