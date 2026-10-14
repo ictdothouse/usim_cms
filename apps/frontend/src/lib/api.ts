@@ -14,6 +14,7 @@ const FETCH_TIMEOUT_MS = 5000;
 // Goal: an API blip never surfaces as a visitor-facing error page, only a
 // slightly stale page.
 const cache = new Map<string, unknown>();
+const CACHE_MAX = 500;
 
 type PageLayout = Array<{ type: string; props?: Record<string, unknown> }>;
 
@@ -155,7 +156,17 @@ async function apiGet<T>(path: string, tenantHost: string, token?: string): Prom
     });
     if (!res.ok) throw new Error(`${path} -> ${res.status}`);
     const data = (await res.json()) as T;
-    cache.set(key, data);
+    // Only anonymous entries are ever read back (the stale fallback below).
+    // Token-keyed ones were stored for nothing, one per preview-token mint
+    // (every Live Edit entry and reload), and nothing ever evicted, so the
+    // SSR heap only grew. The cap covers anonymous keys too: a bot probing
+    // random URLs mints a new ?slug= key per request.
+    if (!token) {
+      cache.delete(key); // re-insert at the end: Map order = oldest first
+      cache.set(key, data);
+      // ponytail: FIFO-by-last-write cap, not true LRU; swap in an LRU if hit rate ever matters.
+      if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string);
+    }
     return data;
   } catch (err) {
     // Stale-cache fallback is for anonymous visitor traffic only (see the
