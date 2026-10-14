@@ -181,6 +181,18 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   // is restored once the reloaded iframe reports back in (handleFrameLoad).
   useEffect(() => {
     if (structuralTick === 0 || mode !== "live") return;
+    // The visible page's paths stop matching `blocks` now, not when the
+    // reload lands — it refuses new drags until replaced (BaseLayout.astro).
+    // ponytail: a second change while a reload is already loading swaps in a
+    // frame one change behind, unflagged; nodeAt() (useBlockOps) still stops
+    // a stale move from crashing. Tag each src with its tick if that bites.
+    if (liveSrc) {
+      try {
+        liveFrame.current?.contentWindow?.postMessage({ type: "designer:stale" }, new URL(liveSrc, window.location.href).origin);
+      } catch {
+        /* transient cross-origin mismatch mid-reload */
+      }
+    }
     const timer = setTimeout(() => {
       pendingScrollRestore.current = lastScrollY.current;
       void enterLive().catch((err) => setError((err as Error).message));
@@ -481,6 +493,8 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
           section(bs, b).rows[r].columns[c].elements[el].props.text = e.data.value ?? "";
         });
       } else if (e.data?.type === "designer:reorder") {
+        // Even a refused move: the iframe already moved its own DOM.
+        bumpStructural();
         const from = String(e.data.from).split(".").map(Number);
         const to = String(e.data.to).split(".").map(Number);
         // Path depth is the drag's kind (1=section, 3=column) — a drag can
@@ -511,7 +525,6 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
           return;
         }
         setSel(null);
-        bumpStructural();
       }
     }
     window.addEventListener("message", onMessage);

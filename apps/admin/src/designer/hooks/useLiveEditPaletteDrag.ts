@@ -34,6 +34,7 @@ export interface LiveEditPaletteDragDeps {
   activeSlotRef: MutableRefObject<"a" | "b">;
   dropIntoColumn: (colPath: number[], index?: number) => void;
   dropIntoNewSection: (afterBlockIndex?: number) => void;
+  bumpStructural: () => void;
 }
 
 export interface LiveEditPaletteDragApi {
@@ -49,7 +50,7 @@ export interface LiveEditPaletteDragApi {
 }
 
 export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditPaletteDragApi {
-  const { drag, frameARef, frameBRef, activeSlotRef, dropIntoColumn, dropIntoNewSection } = deps;
+  const { drag, frameARef, frameBRef, activeSlotRef, dropIntoColumn, dropIntoNewSection, bumpStructural } = deps;
   const [ghostLabel, setGhostLabel] = useState<string | null>(null);
   const ghostElRef = useRef<HTMLDivElement>(null);
   const lastTarget = useRef<DropTarget | null>(null);
@@ -74,9 +75,11 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
   // harmless, this just makes memoization actually hold).
   const dropIntoColumnRef = useRef(dropIntoColumn);
   const dropIntoNewSectionRef = useRef(dropIntoNewSection);
+  const bumpStructuralRef = useRef(bumpStructural);
   useEffect(() => {
     dropIntoColumnRef.current = dropIntoColumn;
     dropIntoNewSectionRef.current = dropIntoNewSection;
+    bumpStructuralRef.current = bumpStructural;
   });
 
   const getActiveFrame = useCallback((): HTMLIFrameElement | null => {
@@ -106,6 +109,8 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
         drag.current = { kind: "move", path: from };
         commitDropTarget((e.data.target as DropTarget | null) ?? null, dropIntoColumnRef.current, dropIntoNewSectionRef.current);
         drag.current = null;
+        // Even a refused move: the iframe already moved its own DOM.
+        bumpStructuralRef.current();
       }
     }
     window.addEventListener("message", onMessage);

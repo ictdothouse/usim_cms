@@ -187,6 +187,17 @@ test("dropIntoNewSection: moving an element into a new section placed BEFORE its
   assert.equal(els(state.blocks[1]).length, 0);
 });
 
+test("a move whose source path no longer exists (stale Live Edit iframe) is a no-op, never inserts undefined", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const before = JSON.stringify(state.blocks);
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "move", path: [0, 0, 0, 7] };
+  ops.dropIntoColumn([0, 0, 0]);
+  ops.drag.current = { kind: "move", path: [5, 0, 0, 0] };
+  ops.dropIntoNewSection();
+  assert.equal(JSON.stringify(state.blocks), before);
+});
+
 test("dropIntoNewSection: a Layout 'new-row' preset creates a fresh section with exactly that column layout, instead of silently no-oping (final review finding)", () => {
   const { deps, state } = makeDeps(sampleBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);

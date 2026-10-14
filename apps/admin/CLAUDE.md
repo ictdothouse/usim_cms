@@ -348,6 +348,12 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   starts the same drag. Text edit is dblclick-only (`designer:requestEditText`) and `contentEditable`
   resets on blur/reselect — auto-edit-on-select made heading/text undraggable. `dragstart` is
   prevented on every `[data-designer-path]` node (an `<img>`/`<a>` native drag hijacked the gesture).
+  A drop moves the iframe's own DOM at once (no snap-back during the save + reload), and admin
+  reloads after every drag even a refused one, which restores it. The visible page's paths go stale
+  the moment `blocks` changes: the `structuralTick` effect posts `designer:stale` and the iframe
+  refuses new drags until replaced. A second drag there sent old paths; `removeAt` past a list's end
+  returned `undefined`, which got inserted as an element and crashed Designer, so `useBlockOps`'s
+  `nodeAt` now no-ops a move whose source no longer exists.
   `useLiveEditBridge` now reloads the real page after EVERY edit; the old
   `designer:style` shortcut posted BASE props at tablet/mobile. The one exception is typing inside the
   iframe (`skipNextReload`), which re-renders once selection moves away. Iframe free-position drags
