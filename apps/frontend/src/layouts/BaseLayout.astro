@@ -1090,11 +1090,17 @@ const fontsHref = allFonts.length
             place();
           }
 
-          // A free image or button contains a natively draggable image/link;
-          // prevent that browser drag from cancelling our pointer gesture.
+          // An <img>/<a> is natively draggable by default — starting the
+          // browser's OWN drag-and-drop (a floating ghost copy, visible in a
+          // screenshot report) hijacks the gesture before the custom pointer
+          // tracking below ever sees a pointermove, so a Gallery/Image/Button/
+          // link element could never be reorder-dragged. Was only prevented
+          // for a slide's own free-positioned children; every element this
+          // page tags for the generic section/column/element reorder drag
+          // (closest("[data-designer-path]") below) needs the same guard.
           document.addEventListener("dragstart", (e) => {
-            const node = e.target.closest && e.target.closest("[data-slide-sel]");
-            if (isSlideFree(node)) e.preventDefault();
+            const slideNode = e.target.closest && e.target.closest("[data-slide-sel]");
+            if (isSlideFree(slideNode) || (e.target.closest && e.target.closest("[data-designer-path]"))) e.preventDefault();
           });
           document.addEventListener("pointerdown", (e) => {
             const node = e.target.closest("[data-slide-sel]");
