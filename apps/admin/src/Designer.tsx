@@ -497,6 +497,7 @@ export default function Designer({
     activeSlotRef,
     dropIntoColumn,
     dropIntoNewSection,
+    bumpStructural,
   });
 
   // Desktop only gets a boxed reading-width canvas (and the backdrop that

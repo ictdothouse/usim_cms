@@ -548,8 +548,14 @@ const fontsHref = allFonts.length
           // below).
           let dragState = null;
           let justDragged = false;
+          // Set by admin (designer:stale) the moment its blocks change: this
+          // page's paths are out of date until the reload replacing it lands,
+          // and a drag sent from here moved the wrong element (or crashed
+          // Designer with a path past a list's end).
+          let stale = false;
 
           document.addEventListener("pointerdown", (e) => {
+            if (stale) return;
             // Slide children are selected/edited by the slider bridge below.
             // Don't let this generic handler turn a press on any of them into
             // a drag of the slider's parent element.
@@ -631,15 +637,24 @@ const fontsHref = allFonts.length
               justDragged = true;
               setTimeout(() => (justDragged = false), 50);
             }
-            if (dragState.moved && dragState.target) {
-              parent.postMessage({ type: "designer:moveTo", from: dragState.path, target: dragState.target }, targetOrigin);
-            } else if (dragState.moved && dragState.hoverPath) {
-              parent.postMessage(
-                { type: "designer:reorder", from: dragState.path, to: dragState.hoverPath, position: dragState.hoverPosition },
-                targetOrigin,
-              );
-            }
+            const { node, path, target, hoverNode, hoverPath, hoverPosition, moved } = dragState;
             dragState = null;
+            // Stale mid-drag: its paths are already out of date.
+            if (!moved || stale) return;
+            // The DOM moves now, not after the save + reload (a second or
+            // more) — the drop used to snap back until then. Admin reloads
+            // after every drag, even one it refuses, which puts this back.
+            if (target) {
+              if (target.kind === "into-column" && target.colPath.length === 3) {
+                const col = findByPath(target.colPath.join("."));
+                const kids = col ? [...col.children].filter((n) => n.dataset.designerPath) : [];
+                if (col) col.insertBefore(node, kids[target.index] || null);
+              }
+              parent.postMessage({ type: "designer:moveTo", from: path, target }, targetOrigin);
+            } else if (hoverPath) {
+              hoverNode.parentNode.insertBefore(node, hoverPosition === "after" ? hoverNode.nextSibling : hoverNode);
+              parent.postMessage({ type: "designer:reorder", from: path, to: hoverPath, position: hoverPosition }, targetOrigin);
+            }
           });
 
           // Canva-style editing for a slide-nested free-positioned element
@@ -1348,6 +1363,7 @@ const fontsHref = allFonts.length
             grip.addEventListener("pointerdown", (e) => {
               e.stopPropagation();
               e.preventDefault();
+              if (stale) return;
               dragState = { path: path.join("."), node, startX: e.clientX, startY: e.clientY, moved: false };
             });
             frame.appendChild(grip);
@@ -1549,31 +1565,12 @@ const fontsHref = allFonts.length
             hoveredNode = null;
           });
 
-          // Reports the selected node's on-screen box so Designer.tsx can
-          // position a floating action toolbar over it — recomputed on
-          // resize (ResizeObserver, covers a live style edit changing the
-          // box, or the iframe's own container resizing) and on scroll
-          // (position-only change, no size change, so ResizeObserver alone
-          // wouldn't fire).
-          function reportSelectedRect() {
-            if (!selectedNode) return;
-            const r = visualTarget(selectedNode).getBoundingClientRect();
-            parent.postMessage(
-              { type: "designer:selectedRect", rect: { top: r.top, left: r.left, width: r.width, height: r.height } },
-              targetOrigin,
-            );
-          }
-          const selectionResizeObserver = new ResizeObserver(reportSelectedRect);
-          // Also reports plain scroll position (independent of any
-          // selection) so Designer.tsx can restore it after a structural
-          // edit forces this iframe to reload — see designer:restoreScroll
-          // below.
+          // Reports scroll position so Designer.tsx can restore it after a
+          // structural edit forces this iframe to reload — see
+          // designer:restoreScroll below.
           window.addEventListener(
             "scroll",
-            () => {
-              reportSelectedRect();
-              parent.postMessage({ type: "designer:scroll", y: window.scrollY }, targetOrigin);
-            },
+            () => parent.postMessage({ type: "designer:scroll", y: window.scrollY }, targetOrigin),
             true,
           );
           // Page's scroll range, for LiveScrollStage.tsx's outer scrollbar
@@ -1647,7 +1644,7 @@ const fontsHref = allFonts.length
             // (SectionBlock.astro) and have no box of their own —
             // visualTarget (defined above) resolves to the real rendered
             // child, the same reason the click/selection-outline code
-            // already needs it (see this file's own reportSelectedRect).
+            // already needs it.
             const measureNode = path.length >= 4 ? visualTarget(node) : node;
             const rect = measureNode.getBoundingClientRect();
             const sectionNode = path.length === 1 ? node : findByPath(String(path[0]));
@@ -1716,6 +1713,11 @@ const fontsHref = allFonts.length
               drawDropIndicator(null);
               return;
             }
+            if (e.data.type === "designer:stale") {
+              stale = true;
+              document.body.style.cursor = "progress";
+              return;
+            }
             if (e.data.type === "designer:restoreScroll") {
               window.scrollTo(0, e.data.y ?? 0);
               return;
@@ -1747,7 +1749,6 @@ const fontsHref = allFonts.length
                 // here, so this is the only reset that path gets.
                 if (prevTarget.isContentEditable) prevTarget.contentEditable = "false";
               }
-              selectionResizeObserver.disconnect();
               destroySpacingHandles();
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
               // Designer names the selected slide child ("slideIdx.r.c.e") —
@@ -1760,8 +1761,6 @@ const fontsHref = allFonts.length
               selectSlideNode(slideChild);
               if (selectedNode) {
                 visualTarget(selectedNode).style.outline = "2px solid #0f62fe";
-                selectionResizeObserver.observe(visualTarget(selectedNode));
-                reportSelectedRect();
                 // Skip when a slide-nested child is the real target (slideChild) —
                 // that child gets its own full gesture chrome from selectSlideNode
                 // above (resize handles, rotate/move, toolbar), anchored to itself.

@@ -25,6 +25,18 @@ const newEl = (type: ElType, propsOverride?: Record<string, string>): El => ({
   props: { ...ELS[type].defaults, ...propsOverride },
 });
 
+// A move's source path can be stale — Live Edit's iframe keeps showing the
+// pre-reload page for a second after a drop, so a second drag there sends
+// old paths. removeAt() past a list's end returns undefined, which then got
+// inserted as an "element" and crashed Designer on its .type.
+function nodeAt(bs: Block[], path: number[]): unknown {
+  try {
+    return getNode(bs, path);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface BlockOpsClipboard {
   clipCopy: (level: ClipLevel, data: unknown) => void;
   clipRead: <T = unknown>(level: ClipLevel) => T | null;
@@ -347,6 +359,7 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
         return;
       }
       if (!Array.isArray(children)) return;
+      if (d.kind !== "new" && !nodeAt(bs, d.path)) return;
       // colPath.length > 3 means the target is a CONTAINER's own children
       // array, not a top-level column — those only accept a curated type
       // subset (ContainerChildrenPanel's own dropdown already enforces this
@@ -427,6 +440,7 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
       // A move's source comes out FIRST: inserting the new section at or
       // before the source's own section shifted d.path off its element
       // (Live Edit drops between any two sections, not just at the end).
+      if (d.kind !== "new" && !nodeAt(bs, d.path)) return;
       const el = d.kind === "new" ? newEl(d.type, d.propsOverride) : removeAt(bs, d.path);
       const at = Math.min(afterBlockIndex === undefined ? bs.length : afterBlockIndex + 1, bs.length);
       insertAt(bs, [], newSection(), at);
