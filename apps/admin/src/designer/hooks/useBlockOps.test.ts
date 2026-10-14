@@ -176,6 +176,17 @@ test("dropIntoNewSection: appends a fresh section with the dragged element at th
   assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
 });
 
+test("dropIntoNewSection: moving an element into a new section placed BEFORE its own section moves that element (not an empty slot)", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "move", path: [0, 0, 0, 0] };
+  ops.dropIntoNewSection(-1);
+  const els = (b: Block) => (b.props as unknown as { rows: { columns: { elements: { id: string }[] }[] }[] }).rows[0].columns[0].elements;
+  assert.equal(state.blocks.length, 2);
+  assert.deepEqual(els(state.blocks[0]).map((e) => e.id), ["e1"]);
+  assert.equal(els(state.blocks[1]).length, 0);
+});
+
 test("dropIntoNewSection: a Layout 'new-row' preset creates a fresh section with exactly that column layout, instead of silently no-oping (final review finding)", () => {
   const { deps, state } = makeDeps(sampleBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);

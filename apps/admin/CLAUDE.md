@@ -339,6 +339,15 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   scrollbar is hidden under `designerEdit` and the canvas column scrolls instead, synced both ways
   via `designer:scrollMax`/`designer:scroll`/`designer:restoreScroll`; the iframe keeps its true
   device height on purpose, auto-height would break vh/sticky/fixed and loop on a 100vh slider).
+  Iframe drag (2026-10-14, BaseLayout.astro): an element (depth 4) drags ANYWHERE — any column incl.
+  empty ones, another section, a new section between two — via the palette drag-to-add's own
+  `resolveDropTarget`/`drawDropIndicator`, posted as `designer:moveTo` and committed in
+  `useLiveEditPaletteDrag.ts` through `dropIntoColumn`/`dropIntoNewSection` (`kind: "move"`).
+  Section/column keep same-depth `designer:reorder` (column within its row). Row has no wrapper, so
+  no row drag in Live Edit. A selected section/column/element gets a ⠿ grip at its top-left that
+  starts the same drag. Text edit is dblclick-only (`designer:requestEditText`) and `contentEditable`
+  resets on blur/reselect — auto-edit-on-select made heading/text undraggable. `dragstart` is
+  prevented on every `[data-designer-path]` node (an `<img>`/`<a>` native drag hijacked the gesture).
   `useLiveEditBridge` now reloads the real page after EVERY edit; the old
   `designer:style` shortcut posted BASE props at tablet/mobile. The one exception is typing inside the
   iframe (`skipNextReload`), which re-renders once selection moves away. Iframe free-position drags
