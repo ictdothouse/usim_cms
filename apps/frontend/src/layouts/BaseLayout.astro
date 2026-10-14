@@ -175,9 +175,10 @@ const fontFamily = typeof theme.fontFamily === "string" ? theme.fontFamily : "";
 const headingFont = typeof theme.headingFont === "string" ? theme.headingFont : "";
 const subHeadingFont = typeof theme.subHeadingFont === "string" ? theme.subHeadingFont : "";
 const postTitleFont = typeof theme.postTitleFont === "string" ? theme.postTitleFont : "";
+const captionFont = typeof theme.captionFont === "string" ? theme.captionFont : "";
 const logoUrl = typeof theme.logoUrl === "string" ? theme.logoUrl : "";
 const faviconUrl = typeof theme.faviconUrl === "string" ? theme.faviconUrl : "";
-const allFonts = [...new Set([fontFamily, headingFont, subHeadingFont, postTitleFont, ...fonts].filter(Boolean))];
+const allFonts = [...new Set([fontFamily, headingFont, subHeadingFont, postTitleFont, captionFont, ...fonts].filter(Boolean))];
 const fontsHref = allFonts.length
   ? `https://fonts.googleapis.com/css2?${allFonts.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`
   : null;

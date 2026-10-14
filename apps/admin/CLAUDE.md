@@ -979,12 +979,14 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `ThemeForm` (Site Theme / Global Theme) offers a swatch picker labelled "UI Themes"
   (daisyUI is the real source of the color data — see `App.tsx`'s `THEME_PRESETS` comment — but the
   brand name and each theme's own name are deliberately not shown in the UI) + a random generator (both
-  built on the same `oklchToHex` conversion), a 4-role Google Font system (Heading/Header-Title,
-  Sub-heading, Blog/Post Title, Body — each a typeable/scrollable `FontField` with live per-row preview,
-  and a "same as Heading font" note when two roles happen to match, since a pairing intentionally sets
-  Heading/Sub-heading/Post-Title to the same face) with a "Generate font pairing" button that fills
-  Heading+Sub-heading+Post-Title+Body from a curated ~30-entry `FONT_PAIRINGS` list (documented
-  typography pairings, not a random freeform combination), a live preview panel, and — in its own box
+  built on the same `oklchToHex` conversion), five editable font roles (Heading/Header-Title,
+  Sub-heading, Blog/Post Title, Body, Caption) via typeable `FontField` controls. "Suggest font set"
+  uses a small MIT-licensed subset of Fontjoy vectors stored in `src/fontjoy-data/` to choose three
+  distinct families: Heading, Sub-heading and Body. Post Title reuses Sub-heading and Caption reuses
+  Body; each field can still be changed manually. The admin loads only the selected Google Fonts CSS
+  families, and `security-headers.conf` explicitly allows `fonts.googleapis.com` in `style-src` and
+  `fonts.gstatic.com` in `font-src` so the preview actually renders those fonts. A live preview panel,
+  and — in its own box
   below the preview, not mixed into it, so it stays legible even when the theme it's judging isn't — an
   automatic WCAG contrast-ratio readability check (`lib/utils.ts`'s `contrastRatio`, worst-case across
   body text vs background and the primary button's label vs its background, shown as a percent +
@@ -1019,8 +1021,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `posts/[slug].astro`'s `<h1>` inline style — and the admin's own live-preview panel got the same
   `lineHeight` style. The form itself is now tabbed (`activeTab` state: Colors/Typography/Post
   Display/Branding, a plain button row, not a routed sub-page) instead of one long column — the "UI
-  Themes" swatch picker/generator stays above the tabs since it's a quick-start action, not a settings
-  category. **Colors** grew from 4 to 9 keys — `tertiaryColor`/`successColor`/`warningColor`/
+  Themes" swatch picker/generator is in Colors. As of 2026-10-14 the tab row sits at the top of the settings form, stays in normal page
+  flow, and the Theme Studio uses one page scrollbar; the compact preview stays sticky beside settings
+  on wide screens, while component/file/import panels follow below the editor. **Colors** grew from 4 to
+  9 keys — `tertiaryColor`/`successColor`/`warningColor`/
   `errorColor`/`infoColor` (semantic palette, same hex validation as the original 4) — each swatch
   (`colorField` helper) now also renders a fixed, non-editable role description underneath (e.g. "Main
   buttons & links") per the user's own "palette + role label" scope call; none of these 5 have a real
