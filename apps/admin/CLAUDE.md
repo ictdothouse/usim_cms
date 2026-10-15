@@ -349,7 +349,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `useLiveEditPaletteDrag.ts` through `dropIntoColumn`/`dropIntoNewSection` (`kind: "move"`).
   Section/column keep same-depth `designer:reorder` (column within its row). Row has no wrapper, so
   no row drag in Live Edit. A selected section/column/element gets a ⠿ grip at its top-left that
-  starts the same drag. Text edit is dblclick-only (`designer:requestEditText`) and `contentEditable`
+  starts the same drag (an element's grip straddles the corner, but slides inside the box where the
+  iframe edge would clip it). Text edit is dblclick-only (`designer:requestEditText`) and `contentEditable`
   resets on blur/reselect — auto-edit-on-select made heading/text undraggable. `dragstart` is
   prevented on every `[data-designer-path]` node (an `<img>`/`<a>` native drag hijacked the gesture).
   A drop moves the iframe's own DOM at once (no snap-back during the save + reload), and admin
