@@ -1324,6 +1324,13 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   .join("")}/>` is emitted once, as the last child inside `<section>` — safe because Astro/JSX evaluates
   children in source order, so every row/column/element beneath it has already run (and pushed into the
   array) by the time it's read.
+  Ids must be unique per rendered page (2026-10-15 fix): header, footer and page sections each number
+  `blockIndex` from 0, so BaseLayout.astro passes SectionBlock `idPrefix="h"`/`"f"` (`hs0`, `fe0-0-0-0`; page
+  ids unprefixed). SectionBlock builds `elId` once and passes it down — ElementBlock/MiscBlock/
+  RepeaterBlock/ContainerBlock/SymbolBlock never re-derive it. Container children use `${elId}.${i}`
+  (their `data-designer-path` stays the dotted path the Live Edit bridge parses), SymbolBlock's counter ids
+  are `${elId}-sym${n}`, and an exclusive accordion's `<details name>` is `ds-acc-${elId}` (that name groups
+  page-wide too).
   A node hidden at the currently-previewed bp is never actually hidden in the Blocks canvas itself
   (Elementor/Webflow convention) — it renders faded (`opacity:0.35`) with a small red "Hidden" badge
   (`HiddenAtBpBadge`) instead, at all 4 levels (Section/Row/Column/Element), so an author can still reach

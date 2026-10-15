@@ -116,6 +116,11 @@ interface Props {
   // valid preview token).
   designerEdit?: boolean;
   blockIndex?: number;
+  // Prefix for every data-vis id below: BaseLayout.astro passes "h" for header
+  // sections and "f" for footer ones. Header, footer and page each number
+  // blockIndex from 0, so without it a page rule like `[data-vis="r0-0"]`
+  // would also hit the header's first row.
+  idPrefix?: string;
   // Page-wide default column gap ([...slug].astro's page.settings.gap) — a
   // row's own `gap` (Row.gap, set in Designer.tsx) always wins over this.
   pageGap?: string;
@@ -169,6 +174,7 @@ const {
   bp: sectionBp,
   designerEdit = false,
   blockIndex = 0,
+  idPrefix = "",
   pageGap,
   pageContentWidth,
   pagePaddingX,
@@ -482,11 +488,11 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
   id={anchorId || undefined}
   style={sectionStyle}
   data-designer-path={designerEdit ? String(blockIndex) : undefined}
-  data-vis={respId(`s${blockIndex}`, { hideDesktop, hideTablet, hideMobile }, sectionBp, baseSectionProps, buildSectionStyle)}
+  data-vis={respId(`${idPrefix}s${blockIndex}`, { hideDesktop, hideTablet, hideMobile }, sectionBp, baseSectionProps, buildSectionStyle)}
 >
   <div class={(width ?? pageContentWidth) === "full" ? "ds-inner ds-full" : "ds-inner"}>
     {rows.map((row, r) => {
-      const rowVisId = respId(`r${blockIndex}-${r}`, row, rowStyleBp(row), rowStyleBase(row, r === 0), (p) => buildRowOverride(row, p));
+      const rowVisId = respId(`${idPrefix}r${blockIndex}-${r}`, row, rowStyleBp(row), rowStyleBase(row, r === 0), (p) => buildRowOverride(row, p));
       // Flex mode's mobile/tablet stack needs each column's own flex-basis
       // reset too (same override the old hardcoded `.ds-row[data-layout=
       // "flex"] > .ds-col` media rule always applied) — a separate rule since
@@ -523,7 +529,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
             data-fill={fill ? "" : undefined}
             style={`${colStyle(col.props) ?? ""}${row.layoutMode === "flex" ? `;flex:${col.span ?? 1} 1 0%;min-width:0` : ""}${fill && (row.flexDirection ?? "row").startsWith("column") ? ";align-self:stretch" : ""}`}
             data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}` : undefined}
-            data-vis={respId(`c${blockIndex}-${r}-${c}`, col.props ?? {}, col.bp, col.props ?? {}, (p) => colStyle(p) ?? "")}
+            data-vis={respId(`${idPrefix}c${blockIndex}-${r}-${c}`, col.props ?? {}, col.bp, col.props ?? {}, (p) => colStyle(p) ?? "")}
           >
             {(col.elements ?? []).map((el, e) => {
               const p = el.props ?? {};
@@ -533,7 +539,7 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
               // `[data-vis="${elId}"] [data-slide-el="..."]` — same id, just
               // needed one statement earlier than the imgWidth/height bp
               // checks below still are.
-              const elId = `e${blockIndex}-${r}-${c}-${e}`;
+              const elId = `${idPrefix}e${blockIndex}-${r}-${c}-${e}`;
               const node = (() => {
               switch (el.type) {
                 // Core single-element cases (heading/text/image/video/
@@ -556,16 +562,16 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                 case "list":
                 case "html":
                 case "gallery":
-                  return <ElementBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <ElementBlock el={el} elId={elId} blockIndex={blockIndex} r={r} c={c} e={e} />;
                 // accordion — extracted to MiscBlock.astro (god-file
                 // breakup); see that file's own comment for why its
                 // local helpers are duplicated there rather than imported
                 // from here or promoted into lib/element-render.ts.
                 case "accordion":
-                  return <MiscBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <MiscBlock el={el} elId={elId} />;
                 case "infobox":
                 case "tabs":
-                  return <MiscBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <MiscBlock el={el} elId={elId} />;
                 case "slider":
                   return <SliderBlock el={el} designerEdit={designerEdit} elId={elId} />;
                 case "menu":
@@ -586,11 +592,11 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                   // The instance's own margin/padding (Inspector BoxModel) go
                   // on SymbolBlock's .ds-symbol wrapper, not the master's node.
                   if (el.bp && Object.keys(el.bp).length > 0) responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"] > .ds-symbol`, el.bp, p, spacingCss));
-                  return <SymbolBlock symbolId={p.symbolId ?? ""} tenantHost={tenantHost} box={spacingCss(p)} />;
+                  return <SymbolBlock symbolId={p.symbolId ?? ""} tenantHost={tenantHost} box={spacingCss(p)} elId={elId} />;
                 case "cardgrid":
                 case "ctabanner":
                 case "announcementbar":
-                  return <MiscBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <MiscBlock el={el} elId={elId} />;
                 case "postlist":
                   return (
                     <PostListBlock
@@ -630,22 +636,22 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
                 case "logocloud":
                 case "timeline":
                 case "documentdownload":
-                  return <RepeaterBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <RepeaterBlock el={el} elId={elId} />;
                 // requireConsent gates the iframe behind a click-to-load
                 // placeholder (audit report 5.3: consent/cookie policy) — no
                 // cookie/localStorage, reappears on reload, same convention
                 // as announcementbar's own dismiss. address always renders
                 // so the map is never the page's only location info.
                 case "googlemap":
-                  return <MiscBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <MiscBlock el={el} elId={elId} />;
                 case "announcementticker":
-                  return <RepeaterBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} />;
+                  return <RepeaterBlock el={el} elId={elId} />;
                 // Recursive container render branch — extracted to
                 // ContainerBlock.astro (god-file breakup); see that file's
                 // own comment for why its SectionBlock-local buildSrcset
                 // helper is duplicated there rather than imported from here.
                 case "container":
-                  return <ContainerBlock el={el} blockIndex={blockIndex} r={r} c={c} e={e} designerEdit={designerEdit} />;
+                  return <ContainerBlock el={el} elId={elId} blockIndex={blockIndex} r={r} c={c} e={e} designerEdit={designerEdit} />;
                 default:
                   return null;
               }

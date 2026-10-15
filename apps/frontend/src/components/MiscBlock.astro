@@ -3,8 +3,8 @@
 // RepeaterBlock's batch) — extracted verbatim out of SectionBlock.astro's
 // own switch (god-file breakup, see SectionBlock.astro's top-of-file
 // comment on why shared *logic* goes through lib/element-render.ts, never
-// another .astro file's frontmatter). Only accordion reads
-// blockIndex/r/c/e (for its exclusive-group name); none read designerEdit.
+// another .astro file's frontmatter). `elId` also names accordion's
+// exclusive group (a page-wide namespace); none read designerEdit.
 import { ICON_PATHS, safeUrl, cls, marginStyle, paddingStyle, renderInline, lengthValue } from "../lib/element-render";
 
 // Local, not imported from SectionBlock.astro's frontmatter — see that
@@ -83,22 +83,18 @@ interface El {
 }
 interface Props {
   el: El;
-  blockIndex: number;
-  r: number;
-  c: number;
-  e: number;
+  elId: string;
 }
-const { el, blockIndex, r, c, e } = Astro.props as Props;
+const { el, elId } = Astro.props as Props;
 const p = el.props ?? {};
 
 // Real per-breakpoint margin/padding override — same bpStyleRules mechanism
 // ElementBlock.astro/ContainerBlock.astro/SymbolBlock.astro use for theirs
 // (duplicated here rather than shared, this codebase's established
-// convention). `elId` matches the `data-vis` id SectionBlock.astro's own
-// wrapper div around this component's output already carries. announcementbar/
+// convention). `elId` is the `data-vis` id SectionBlock.astro's own wrapper
+// div around this component's output carries. announcementbar/
 // googlemap have no margin/padding field of their own (not in scope — nothing
 // to override).
-const elId = `e${blockIndex}-${r}-${c}-${e}`;
 const responsiveRules: string[] = [];
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
   const prefix = `${tier}:`;
@@ -160,7 +156,7 @@ switch (el.type) {
   case "accordion": {
     const items = parsePairs(p.items);
     if (items.length === 0) return null;
-    const groupName = p.exclusive === "true" ? `ds-acc-${blockIndex}-${r}-${c}-${e}` : undefined;
+    const groupName = p.exclusive === "true" ? `ds-acc-${elId}` : undefined;
     return (
       <div class={cls("ds-accordion", p.cssClass)} style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
         {items.map((it) => (

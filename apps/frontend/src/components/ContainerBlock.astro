@@ -52,13 +52,14 @@ interface El {
 
 interface Props {
   el: El;
+  elId: string;
   blockIndex: number;
   r: number;
   c: number;
   e: number;
   designerEdit?: boolean;
 }
-const { el, blockIndex, r, c, e, designerEdit = false } = Astro.props as Props;
+const { el, elId, blockIndex, r, c, e, designerEdit = false } = Astro.props as Props;
 const p = el.props ?? {};
 
 // Heading/text children's own real per-breakpoint typography override —
@@ -66,9 +67,9 @@ const p = el.props ?? {};
 // elements (see that file's comment), duplicated here rather than shared
 // (this codebase's established convention — see this file's own top
 // comment on why shared *logic* goes through lib/element-render.ts, never
-// another .astro file's frontmatter). A container child's own dotted path
-// (`childPath` below) is already unique per node, so it doubles as the
-// data-vis id directly — no separate id scheme needed.
+// another .astro file's frontmatter). A container child's data-vis id is the
+// container's own `elId` plus its child indexes (`visId` below), not its
+// dotted `childPath`: that path restarts at 0 in the header and footer too.
 const responsiveRules: string[] = [];
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
   const prefix = `${tier}:`;
@@ -101,13 +102,13 @@ function bpStyleRules(selector: string, bp: Record<string, string>, base: Record
 // the frontmatter above the closing "---" — renderContainerChild has to
 // live in here (an IIFE, same trick as SectionBlock.astro's own renderSlideEl)
 // rather than up there with the plain helpers.
-const renderContainerChild = (child: El, childPath: string): unknown => {
+const renderContainerChild = (child: El, childPath: string, visId: string): unknown => {
   const cp = child.props ?? {};
   switch (child.type) {
     case "heading": {
       const Tag = headingTag(cp.level) as "h1";
       const hasTypoBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"] .ds-h`, child.bp!, cp, typoStyle));
+      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-h`, child.bp!, cp, typoStyle));
       const headingNode = (
         <Tag
           class={cls("ds-h", `ds-h${cp.level ?? "2"}`, cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
@@ -119,7 +120,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
         />
       );
       return hasTypoBp ? (
-        <div data-vis={childPath} style="display:contents">
+        <div data-vis={visId} style="display:contents">
           {headingNode}
         </div>
       ) : (
@@ -128,7 +129,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
     }
     case "text": {
       const hasTypoBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"] .ds-text`, child.bp!, cp, typoStyle));
+      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-text`, child.bp!, cp, typoStyle));
       const textNode = (
         <p
           class={cls("ds-text", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
@@ -147,7 +148,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
         />
       );
       return hasTypoBp ? (
-        <div data-vis={childPath} style="display:contents">
+        <div data-vis={visId} style="display:contents">
           {textNode}
         </div>
       ) : (
@@ -160,7 +161,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${childPath}"] img`, child.bp!, cp, (mp) =>
+          ...bpStyleRules(`[data-vis="${visId}"] img`, child.bp!, cp, (mp) =>
             [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
               .filter(Boolean)
               .join(";"),
@@ -182,7 +183,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
         />
       ) : null;
       return hasBp && imgNode ? (
-        <div data-vis={childPath} style="display:contents">
+        <div data-vis={visId} style="display:contents">
           {imgNode}
         </div>
       ) : (
@@ -193,14 +194,14 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
-          ...bpStyleRules(`[data-vis="${childPath}"] .ds-btn`, child.bp!, cp, (mp) => elBorderShadowStyle(mp) ?? ""),
+          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-btn`, child.bp!, cp, (mp) => elBorderShadowStyle(mp) ?? ""),
         );
       }
       return cp.label ? (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? childPath : undefined}
+          data-vis={hasBp ? visId : undefined}
           style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         >
           <a
@@ -219,13 +220,13 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
         );
       }
       return (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? childPath : undefined}
+          data-vis={hasBp ? visId : undefined}
           style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         >
           <span class={cls(`ds-badge ds-badge-${cp.variant || "soft"} ds-badge-${cp.scale || "md"}`, cp.cssClass)} style={cp.color ? `color:${cp.color}` : undefined}>
@@ -243,7 +244,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) =>
+          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) =>
             [`height:${lengthValue(mp.height, SPACE, SPACE.md)}`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";"),
           ),
         );
@@ -251,7 +252,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       return (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? childPath : undefined}
+          data-vis={hasBp ? visId : undefined}
           style={[`height:${lengthValue(cp.height, SPACE, SPACE.md)}`, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         />
       );
@@ -259,12 +260,12 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
     case "divider": {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
-        responsiveRules.push(...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
+        responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
       }
       return (
         <hr
           data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? childPath : undefined}
+          data-vis={hasBp ? visId : undefined}
           class="ds-divider"
           style={[marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         />
@@ -276,13 +277,13 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
         );
       }
       return (
         <div
           data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? childPath : undefined}
+          data-vis={hasBp ? visId : undefined}
           style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
         >
           <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={cp.color || "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -296,7 +297,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${childPath}"]`, child.bp!, cp, (mp) =>
+          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) =>
             [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
           ),
         );
@@ -305,7 +306,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
         <div
           class="ds-container"
           data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? childPath : undefined}
+          data-vis={hasBp ? visId : undefined}
           style={[
             "display:flex",
             `flex-direction:${cp.flexDirection || "row"}`,
@@ -322,7 +323,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
             .filter(Boolean)
             .join(";")}
         >
-          {grandchildren.map((gc, gi) => renderContainerChild(gc, `${childPath}.${gi}`))}
+          {grandchildren.map((gc, gi) => renderContainerChild(gc, `${childPath}.${gi}`, `${visId}.${gi}`))}
         </div>
       );
     }
@@ -331,7 +332,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
   }
 };
 const elDottedPath = `${blockIndex}.${r}.${c}.${e}`;
-const containerChildren = (el.children ?? []).map((child, i) => renderContainerChild(child, `${elDottedPath}.${i}`));
+const containerChildren = (el.children ?? []).map((child, i) => renderContainerChild(child, `${elDottedPath}.${i}`, `${elId}.${i}`));
 return (
   <>
     <div

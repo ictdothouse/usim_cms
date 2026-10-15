@@ -54,12 +54,13 @@ interface El {
 }
 interface Props {
   el: El;
+  elId: string;
   blockIndex: number;
   r: number;
   c: number;
   e: number;
 }
-const { el, blockIndex, r, c, e } = Astro.props as Props;
+const { el, elId, blockIndex, r, c, e } = Astro.props as Props;
 const p = el.props ?? {};
 
 // Real per-breakpoint margin/padding/border/shadow/align override — same
@@ -67,15 +68,14 @@ const p = el.props ?? {};
 // SymbolBlock.astro use for theirs (duplicated here rather than shared, this
 // codebase's established convention — see SectionBlock.astro's own top
 // comment on why shared *logic* goes through lib/element-render.ts, never
-// another .astro file's frontmatter). `elId` matches the `data-vis` id
+// another .astro file's frontmatter). `elId` is the `data-vis` id
 // SectionBlock.astro's own wrapper div around this component's output
-// already carries (same `e${blockIndex}-${r}-${c}-${e}` formula) — a CSS
+// carries (passed in, so its header/footer prefix comes along) — a CSS
 // selector matches regardless of which component's <style> tag declares it,
 // so this works without that wrapper needing to know this file's per-type
 // selectors. hoverEffect/entrance/color stay admin-canvas-preview-only for
 // now — those are CSS classes / non-box-model fields, a different mechanism
 // than reusing bpStyleRules against a margin/padding/border/shadow build.
-const elId = `e${blockIndex}-${r}-${c}-${e}`;
 const responsiveRules: string[] = [];
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
   const prefix = `${tier}:`;

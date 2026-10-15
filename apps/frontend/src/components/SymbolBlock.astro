@@ -47,8 +47,11 @@ interface Props {
   // The instance's own margin/padding CSS (SectionBlock.astro) — lives on a
   // .ds-symbol wrapper so it never mixes with the master node's own spacing.
   box?: string;
+  // The instance's own data-vis id (SectionBlock.astro) — prefixes this
+  // file's counter ids so two symbols on one page never both mint `sym0`.
+  elId: string;
 }
-const { symbolId, tenantHost, box } = Astro.props;
+const { symbolId, tenantHost, box, elId } = Astro.props;
 
 const symbol = symbolId ? await getSymbol(tenantHost, symbolId) : null;
 const node = symbol?.node as El | undefined;
@@ -58,7 +61,8 @@ const node = symbol?.node as El | undefined;
 // theirs (duplicated here rather than shared, this codebase's established
 // convention). Nodes here have no dotted path of their own (a symbol's
 // resolved tree isn't individually selectable — see this file's own top
-// comment), so each node needing one gets a small counter-based id instead.
+// comment), so each node needing one gets a small counter-based id instead,
+// prefixed with the instance's own `elId`.
 const responsiveRules: string[] = [];
 let visIdCounter = 0;
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
@@ -98,7 +102,7 @@ const renderNode = (el: El): unknown => {
     case "heading": {
       const Tag = headingTag(p.level) as "h1";
       const hasTypoBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasTypoBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasTypoBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-h`, el.bp!, p, typoStyle));
       const headingNode = (
         <Tag
@@ -119,7 +123,7 @@ const renderNode = (el: El): unknown => {
     }
     case "text": {
       const hasTypoBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasTypoBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasTypoBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-text`, el.bp!, p, typoStyle));
       const textNode = (
         <p
@@ -148,7 +152,7 @@ const renderNode = (el: El): unknown => {
     case "image": {
       const src = safeUrl(p.src);
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"] img`, el.bp!, p, (mp) =>
@@ -179,7 +183,7 @@ const renderNode = (el: El): unknown => {
     }
     case "button": {
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
@@ -202,7 +206,7 @@ const renderNode = (el: El): unknown => {
       const iconPath = p.name ? ICON_PATHS[p.name] : undefined;
       const iconSize = { sm: "14", md: "16", lg: "20" }[p.scale ?? "md"] ?? "16";
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
@@ -223,7 +227,7 @@ const renderNode = (el: El): unknown => {
     }
     case "spacer": {
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       const spacerStyle = (mp: typeof p) =>
         [`height:${lengthValue(mp.height, SPACE, SPACE.md)}`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";");
       if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, spacerStyle));
@@ -231,7 +235,7 @@ const renderNode = (el: El): unknown => {
     }
     case "divider": {
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
       return <hr data-vis={visId} class="ds-divider" style={[marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")} />;
     }
@@ -239,7 +243,7 @@ const renderNode = (el: El): unknown => {
       const iconPath = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
       const iconSize = lengthValue(p.size, { sm: "1rem", md: "1.5rem", lg: "2rem" }, "1.5rem");
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
@@ -256,7 +260,7 @@ const renderNode = (el: El): unknown => {
     case "container": {
       const children = el.children ?? [];
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
-      const visId = hasBp ? `sym${visIdCounter++}` : undefined;
+      const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";")),

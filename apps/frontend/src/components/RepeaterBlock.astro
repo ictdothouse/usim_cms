@@ -4,7 +4,7 @@
 // SectionBlock.astro's top-of-file comment on why shared *logic* goes
 // through lib/element-render.ts, never another .astro file's frontmatter).
 // None of these element types read blockIndex/r/c/e/designerEdit — unlike
-// ContainerBlock/SliderBlock, this one only ever needs `el` itself.
+// ContainerBlock/SliderBlock, this one only needs `el` and its `elId`.
 import { ICON_PATHS, safeUrl, cls, marginStyle, paddingStyle, elBorderShadowStyle } from "../lib/element-render";
 
 // Local, not imported from SectionBlock.astro's frontmatter — see that
@@ -49,12 +49,9 @@ interface El {
 }
 interface Props {
   el: El;
-  blockIndex: number;
-  r: number;
-  c: number;
-  e: number;
+  elId: string;
 }
-const { el, blockIndex, r, c, e } = Astro.props as Props;
+const { el, elId } = Astro.props as Props;
 const p = el.props ?? {};
 
 // Real base margin/padding/border/shadow (never applied at all for these 8
@@ -63,8 +60,8 @@ const p = el.props ?? {};
 // paddingStyle/elBorderShadowStyle) plus the matching per-breakpoint
 // override — same bpStyleRules mechanism ElementBlock.astro/ContainerBlock.
 // astro/SymbolBlock.astro use for theirs (duplicated here rather than
-// shared, this codebase's established convention).
-const elId = `e${blockIndex}-${r}-${c}-${e}`;
+// shared, this codebase's established convention). `elId` is the `data-vis`
+// id SectionBlock.astro's wrapper div around this output carries.
 const boxStyle = (mp: Record<string, string>) => [marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";");
 const responsiveRules: string[] = [];
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
