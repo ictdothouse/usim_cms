@@ -1,10 +1,10 @@
 // One device "screen" shared by Preview (DesignerDevicePreviewModal) and Live
 // Edit (Designer.tsx's live mode), so both always frame the real page at the
 // exact same CSS-pixel viewport. The screen box is ALWAYS the device's true
-// size (393×852 etc.) — vw/vh units, @media breakpoints and every fixed-px
-// free-position element inside the iframe are judged against that real
-// width — and only a visual transform:scale() shrinks it to fit the space
-// available. The old Preview sized its iframe off CSS aspect-ratio plus a
+// width (393 etc.) — @media breakpoints and every fixed-px free-position
+// element inside the iframe are judged against that real width — and only a
+// visual transform:scale() shrinks it to fit the space available. Height is
+// the device's true height too, except under `fill` (Live Edit desktop). The old Preview sized its iframe off CSS aspect-ratio plus a
 // 46rem height cap plus bezel padding, which on a normal laptop left the
 // "mobile" iframe ~315px wide instead of 393px (and Live Edit, the Blocks
 // canvas and a real phone each at a different width again).
@@ -30,10 +30,15 @@ const BEZEL_PAD: Record<Device, number> = { desktop: 0, tablet: 10, mobile: 12 }
 export function DeviceViewport({
   device,
   landscape = false,
+  fill = false,
   children,
 }: {
   device: Device;
   landscape?: boolean;
+  // Fit the width alone and give the screen whatever height that leaves, so
+  // the page fills the space instead of letterboxing a fixed-height screen.
+  // The width, the only thing @media tiers read, stays the device's own.
+  fill?: boolean;
   children: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -49,10 +54,15 @@ export function DeviceViewport({
   }, []);
 
   const dims = DEVICE_DIMS[device];
-  const screen = landscape && device !== "desktop" ? { w: dims.h, h: dims.w } : dims;
   const pad = BEZEL_PAD[device];
+  let screen = landscape && device !== "desktop" ? { w: dims.h, h: dims.w } : dims;
+  let scale = 0;
+  if (avail) {
+    scale = Math.min(1, avail.w / (screen.w + pad * 2));
+    if (!fill) scale = Math.min(scale, avail.h / (screen.h + pad * 2));
+    else if (scale) screen = { w: screen.w, h: Math.max(0, avail.h / scale - pad * 2) };
+  }
   const frame = { w: screen.w + pad * 2, h: screen.h + pad * 2 };
-  const scale = avail ? Math.min(1, avail.w / frame.w, avail.h / frame.h) : 0;
 
   return (
     <div ref={hostRef} className="flex h-full w-full items-center justify-center overflow-hidden">

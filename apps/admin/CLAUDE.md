@@ -331,7 +331,11 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   a normal laptop, not 393px. Both now render through `designer/DeviceViewport.tsx`, which keeps the
   screen box at the device's TRUE size (`DEVICE_DIMS`, now including desktop = 1440×900, so desktop
   never silently drops into the <1025px tablet tier) and only `transform: scale()`s it to fit. Never
-  size that iframe off the available space again. (2) The real-iframe Live Edit JSX had been deleted
+  size that iframe's WIDTH off the available space again. Live Edit desktop passes `fill`
+  (2026-10-15): 1440 is scaled to the stage width alone and the screen height becomes whatever
+  stage height is left at that scale, so the page fills the stage instead of letterboxing a
+  1440×900 box; BaseLayout re-sends `designer:scrollMax` on `resize` because of it. Tablet/mobile
+  Live Edit and Preview keep the true height. (2) The real-iframe Live Edit JSX had been deleted
   in `bf025a2` (2026-07-25); since then the "Live" toggle only restyled the Blocks React canvas,
   which is an approximation (vw-based clamp() font sizes and `@media` rules evaluate against the
   admin window, no Swiper). `Designer.tsx` mounts the double-buffered iframes again inside the same

@@ -320,7 +320,7 @@ export function DesignerCanvas({
       // reading as an accidental leftover margin ("macam island") rather
       // than a deliberate frame. Only the boxed/backdropped case gets
       // that breathing room now.
-      className={`min-w-0 flex-1 overflow-y-auto [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent ${framed ? "bg-canvas p-4" : ""}`}
+      className={`min-w-0 flex-1 overflow-y-auto [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent ${framed ? "bg-zinc-200 p-4" : ""}`}
       onClick={() => setSel(null)}
       style={
         {
@@ -335,7 +335,7 @@ export function DesignerCanvas({
           // Device-sim (tablet/mobile, Blocks mode) moves the theme bg
           // off <main> and onto the framed box below instead, so the
           // area outside the simulated screen reads as canvas backdrop
-          // (bg-canvas above, or pageSettings.canvasColor when the
+          // (bg-zinc-200 above, or pageSettings.canvasColor when the
           // author picked one in Page Settings) rather than looking
           // like unfilled/leftover theme-bg space.
           background: framed ? pageSettings.canvasColor || undefined : "var(--color-bg, #ffffff)",

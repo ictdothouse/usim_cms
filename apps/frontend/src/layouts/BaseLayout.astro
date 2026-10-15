@@ -1644,6 +1644,9 @@ const fontsHref = allFonts.length
             );
           new ResizeObserver(reportScrollMax).observe(document.body);
           window.addEventListener("load", reportScrollMax);
+          // Live Edit's desktop screen height follows the admin stage
+          // (DeviceViewport fill), so the range shifts without body resizing.
+          window.addEventListener("resize", reportScrollMax);
 
           let lastReportedTarget = null;
           let dropIndicatorEl = null;
