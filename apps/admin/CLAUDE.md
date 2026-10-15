@@ -335,7 +335,9 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (2026-10-15): 1440 is scaled to the stage width alone and the screen height becomes whatever
   stage height is left at that scale, so the page fills the stage instead of letterboxing a
   1440×900 box; BaseLayout re-sends `designer:scrollMax` on `resize` because of it. Tablet/mobile
-  Live Edit and Preview keep the true height. (2) The real-iframe Live Edit JSX had been deleted
+  Live Edit and Preview keep the true height. The host clips with `overflow: clip` plus a 1rem
+  `overflow-clip-margin` (both callers' `p-4` gutter), so the screen's drop shadow isn't cut off
+  where the screen fills the space. (2) The real-iframe Live Edit JSX had been deleted
   in `bf025a2` (2026-07-25); since then the "Live" toggle only restyled the Blocks React canvas,
   which is an approximation (vw-based clamp() font sizes and `@media` rules evaluate against the
   admin window, no Swiper). `Designer.tsx` mounts the double-buffered iframes again inside the same
