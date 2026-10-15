@@ -29,7 +29,7 @@ import type { DesignerCtx } from "./context";
 import { BpToggle, BufferedInput } from "./FieldControls";
 import { MARGIN_SIDE_KEYS, PADDING_SIDE_KEYS, gapPx } from "./style";
 import type { Row, SectionProps } from "./types";
-import { FlexIconGroup, FourSideControl, VisibilityToggle } from "./InspectorControls";
+import { FlexIconGroup, FourSideControl, VisibilityToggle, nonNegative } from "./InspectorControls";
 
 export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
   const {
@@ -198,7 +198,7 @@ export function InspectorRowPanel({ ctx }: { ctx: DesignerCtx }) {
         linked={linkedPadding}
         onToggleLink={() => setLinkedPadding((v) => !v)}
         getSide={(side) => (row as unknown as Record<string, string>)[PADDING_SIDE_KEYS[side]] ?? ""}
-        setSide={(side, v) => setRowSide(PADDING_SIDE_KEYS[side], v)}
+        setSide={(side, v) => setRowSide(PADDING_SIDE_KEYS[side], nonNegative(v))}
         bp={bp}
         t={t}
       />

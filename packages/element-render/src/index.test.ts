@@ -6,7 +6,16 @@ import {
   typoStyle,
   elBorderShadowStyle,
   bestTextColor,
+  zIndexValue,
 } from "./index.js";
+
+test("zIndexValue clamps to 0-10 and treats blank/non-numeric as unset", () => {
+  assert.equal(zIndexValue(""), undefined);
+  assert.equal(zIndexValue("abc"), undefined);
+  assert.equal(zIndexValue("3"), 3);
+  assert.equal(zIndexValue("-2"), 0);
+  assert.equal(zIndexValue("99"), 10);
+});
 
 test("computeFreePositionStyle defaults x/y to 50% and omits zIndex when unset", () => {
   const s = computeFreePositionStyle({});

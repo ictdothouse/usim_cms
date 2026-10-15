@@ -18,6 +18,7 @@ import {
   elPaddingStyle as sharedElPaddingStyle,
   elBorderShadowStyle as sharedElBorderShadowStyle,
   typoStyle as sharedTypoStyle,
+  zIndexValue,
 } from "@ucms/element-render";
 export {
   escapeHtml,
@@ -156,6 +157,7 @@ export function colStyle(cp?: Record<string, string>): React.CSSProperties {
     borderRadius: anyRadius
       ? `${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}`
       : undefined,
+    zIndex: zIndexValue(cp.zIndex),
   };
 }
 

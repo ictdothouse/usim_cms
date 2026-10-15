@@ -465,15 +465,18 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         }
         const bpKeyFn = (k: string) => `${bp}:${k}`;
         const linked = fields.length > 1;
+        // Margin may go negative (overlap); padding can't — the iframe clamps
+        // it already, and the API rejects a negative padding outright.
+        const value = fields[0].startsWith("margin") ? px : Math.max(0, px);
         mutate((bs) => {
           if (spacingPath.length === 1) {
-            applySectionSpacingWrite(bs[spacingPath[0]].props as unknown as SectionProps, fields, fields[0], px, linked, bp, bpKeyFn);
+            applySectionSpacingWrite(bs[spacingPath[0]].props as unknown as SectionProps, fields, fields[0], value, linked, bp, bpKeyFn);
           } else if (spacingPath.length === 3) {
             const [b, r, c] = spacingPath;
-            writeDragSideKeys(section(bs, b).rows[r].columns[c], fields, fields[0], px, linked, bp, bpKeyFn);
+            writeDragSideKeys(section(bs, b).rows[r].columns[c], fields, fields[0], value, linked, bp, bpKeyFn);
           } else {
             const [b, r, c, elIdx] = spacingPath;
-            writeDragSideKeys(section(bs, b).rows[r].columns[c].elements[elIdx], fields, fields[0], px, linked, bp, bpKeyFn);
+            writeDragSideKeys(section(bs, b).rows[r].columns[c].elements[elIdx], fields, fields[0], value, linked, bp, bpKeyFn);
           }
         });
         return;

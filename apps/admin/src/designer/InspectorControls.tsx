@@ -251,6 +251,11 @@ export function FourSideControl({
 type Side = "top" | "right" | "bottom" | "left";
 const SIDES: Side[] = ["top", "right", "bottom", "left"];
 
+// Padding can't be negative in CSS (one negative side voids the whole
+// shorthand and every side drops), so a typed "-10" commits as 0. Margin keeps
+// its sign: a negative margin is how boxes are made to overlap.
+export const nonNegative = (v: string) => (v.trim().startsWith("-") ? "0" : v);
+
 // One ring's worth of wiring for BoxModel — same shape FourSideControl's own
 // props already used (getSide/setSide/linked/hasOverride/hasLangOverride),
 // just without the icon/labelKey-render bits BoxModel itself now owns so one
@@ -345,6 +350,7 @@ export function BoxModel({
 }) {
   const livePad = live?.padding;
   const liveMargin = live?.margin;
+  const pad: RingConfig = { ...padding, setSide: (s, v) => padding.setSide(s, nonNegative(v)) };
   return (
     <div className="space-y-2">
       <div className="rounded-xl border border-dashed border-amber-300/70 bg-amber-50/50 p-1">
@@ -355,18 +361,18 @@ export function BoxModel({
           <div />
           <BoxModelInput ring={margin} side="left" live={liveMargin} />
           <div className="w-full rounded-lg border border-sky-300/70 bg-sky-50/70 p-1">
-            <BoxModelRingHeader ring={padding} icon={SquareDashedBottom} bp={bp} t={t} />
+            <BoxModelRingHeader ring={pad} icon={SquareDashedBottom} bp={bp} t={t} />
             <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center justify-items-center gap-0.5">
               <div />
-              <BoxModelInput ring={padding} side="top" live={livePad} />
+              <BoxModelInput ring={pad} side="top" live={livePad} />
               <div />
-              <BoxModelInput ring={padding} side="left" live={livePad} />
+              <BoxModelInput ring={pad} side="left" live={livePad} />
               <div className="flex h-8 w-full items-center justify-center overflow-hidden rounded-md border border-line/30 bg-white text-[9px] font-medium text-sub/60">
                 {t("designer-content")}
               </div>
-              <BoxModelInput ring={padding} side="right" live={livePad} />
+              <BoxModelInput ring={pad} side="right" live={livePad} />
               <div />
-              <BoxModelInput ring={padding} side="bottom" live={livePad} />
+              <BoxModelInput ring={pad} side="bottom" live={livePad} />
               <div />
             </div>
           </div>

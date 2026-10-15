@@ -523,7 +523,12 @@ function validateValue(key: string, value: unknown): string | null {
   // slider itself is edited and re-serialized without the field.
   if (key === "engine") return null;
   if (COLOR_KEYS.has(key)) return HEX_COLOR_RE.test(value) ? null : `${key} must be a hex color`;
-  if (LENGTH_KEYS.has(key)) return LENGTH_RE.test(value) ? null : `${key} must be a plain CSS length`;
+  if (LENGTH_KEYS.has(key)) {
+    if (!LENGTH_RE.test(value)) return `${key} must be a plain CSS length`;
+    // Negative padding isn't valid CSS: one negative side voids the whole `padding` shorthand, so
+    // the browser drops every side. Margin keeps its sign — a negative margin is how boxes overlap.
+    return key.startsWith("padding") && value.startsWith("-") ? `${key} must not be negative` : null;
+  }
   if (ENUM_VALUES[key]) return ENUM_VALUES[key].includes(value) ? null : `${key} has an unrecognized value`;
   return `unknown field "${key}"`;
 }

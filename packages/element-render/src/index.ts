@@ -144,6 +144,16 @@ export function flexWrapFor(direction: string | undefined, wrap: string | undefi
   return direction?.startsWith("column") || wrap === "nowrap" ? "nowrap" : "wrap";
 }
 
+// Layer order (the Inspector's Z-index field) for a Section/Column/Element: an integer clamped to
+// 0-10, higher on top. Enough to reorder overlapping siblings, and still under the site chrome's
+// own stack (menu dropdowns z 20, mobile nav 39-41). No negatives: a negative z-index drops the box
+// behind its section's background — the classic "element vanished" trap. Unset/invalid = auto.
+export function zIndexValue(raw: string | undefined): number | undefined {
+  if (!raw?.trim()) return undefined;
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : undefined;
+}
+
 export interface FreePositionInput {
   x?: string;
   y?: string;

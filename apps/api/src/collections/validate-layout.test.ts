@@ -14,6 +14,14 @@ test("accepts a menu element's props", () => {
   assert.equal(validateLayout(layout), null);
 });
 
+test("rejects negative padding but accepts negative margin", () => {
+  const withProps = (props: Record<string, string>) => [
+    { type: "section", props: { rows: [{ columns: [{ elements: [{ type: "text", props }] }] }] } },
+  ];
+  assert.match(validateLayout(withProps({ paddingTop: "-10px" })) ?? "", /must not be negative/);
+  assert.equal(validateLayout(withProps({ marginTop: "-40px", zIndex: "3" })), null);
+});
+
 test("rejects an invalid menu dropdownTrigger", () => {
   const layout = [
     {

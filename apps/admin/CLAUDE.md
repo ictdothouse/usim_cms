@@ -1704,6 +1704,18 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   OFF (single side); when on, every side's band + px label updates together. A `position:fixed` lock pill above the box toggles them
   via `designer:spacingLink`, same state as the Inspector's chain icon; the
   bridge re-sends `designer:selected` on change, which rebuilds the handles.
+  **Overlap (2026-10-15):** margin may go negative (typed in `BoxModel`, or a
+  Live Edit margin handle dragged past 0 — its band then marks the overlapped
+  strip just inside the edge); padding never does (`nonNegative` in
+  `BoxModel`/Row's `FourSideControl`, the bridge's spacingDrag clamp, and
+  `@ucms/element-schema` rejects `padding*` < 0 — one negative side voided the
+  whole `padding` shorthand, so every side vanished). Stacking order is the
+  `Z_INDEX_FIELD` (Advanced group; Section/Column/top-level Element, not
+  slide/container children), rendered through `zIndexValue` (0-10, clamped:
+  under the site chrome's dropdown z 20, and no negatives — those sink behind
+  the section background). Section gets `position:relative;z-index`; Column
+  just `z-index` (always a grid/flex item); an element's display:contents
+  wrapper carries `--ds-z` + `data-ds-z`, applied to its root by global.css.
   The pill is hidden until a badge is hovered/dragged, then fades out after 3s
   idle (held while hovering the badge or pill); `spacingLockBarKeep` carries
   its visibility across the rebuild a lock click triggers. BaseLayout's editor
