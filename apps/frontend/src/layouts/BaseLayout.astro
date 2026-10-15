@@ -781,6 +781,13 @@ const fontsHref = allFonts.length
             setTimeout(() => (justDragged = false), 50);
           }
           const commitSlide = (node, patch) => postSlide("designer:slideElDrag", node, { patch });
+          // left/top (x/y) place a free element's MARGIN box, while offsetLeft/
+          // Top and rects read its border box — every x/y written below backs
+          // this off, or an element with a margin jumped by it on each gesture.
+          const marginsOf = (node) => {
+            const cs = getComputedStyle(node);
+            return { ml: parseFloat(cs.marginLeft) || 0, mt: parseFloat(cs.marginTop) || 0, mr: parseFloat(cs.marginRight) || 0, mb: parseFloat(cs.marginBottom) || 0 };
+          };
           const actSlide = (node, action, value) => postSlide("designer:slideElAction", node, { action, value });
 
           // pointermove/pointerup on window for the gesture `e` started;
@@ -827,6 +834,7 @@ const fontsHref = allFonts.length
             const halfH = node.offsetHeight / 2;
             const startLeft = node.offsetLeft;
             const startTop = node.offsetTop;
+            const { ml, mt } = marginsOf(node);
             const startX = e.clientX;
             const startY = e.clientY;
             const siblings = freeSiblingRects(node, slide);
@@ -849,8 +857,8 @@ const fontsHref = allFonts.length
                 // freedom as ElPreview's startFreeElDrag); .ds-slider-viewport's
                 // overflow:hidden is the real guard against painting into the
                 // next slide.
-                x = r1(((sx - halfW) / rect.width) * 100);
-                y = r1(((sy - halfH) / rect.height) * 100);
+                x = r1(((sx - halfW - ml) / rect.width) * 100);
+                y = r1(((sy - halfH - mt) / rect.height) * 100);
                 setImp(node, "left", x + "%");
                 setImp(node, "top", y + "%");
               },
@@ -872,6 +880,7 @@ const fontsHref = allFonts.length
             const box = slide.getBoundingClientRect();
             const startL = node.offsetLeft;
             const startT = node.offsetTop;
+            const { ml, mt } = marginsOf(node);
             const startW = node.offsetWidth;
             const startH = node.offsetHeight;
             const startX = e.clientX;
@@ -907,7 +916,7 @@ const fontsHref = allFonts.length
                 }
                 const left = dx === -1 ? startL + startW - w : startL;
                 const top = dy === -1 ? startT + startH - h : startT;
-                out = { x: r1((left / box.width) * 100), y: r1((top / box.height) * 100), w: Math.round(w), h: Math.round(h) };
+                out = { x: r1(((left - ml) / box.width) * 100), y: r1(((top - mt) / box.height) * 100), w: Math.round(w), h: Math.round(h) };
                 setImp(node, "left", out.x + "%");
                 setImp(node, "top", out.y + "%");
                 setImp(node, "width", out.w + "px");
@@ -953,8 +962,11 @@ const fontsHref = allFonts.length
           function alignSlide(node, k) {
             const slide = node.closest(".ds-slide");
             if (!slide) return;
-            const wPct = (node.offsetWidth / slide.clientWidth) * 100;
-            const hPct = (node.offsetHeight / slide.clientHeight) * 100;
+            // Aligns the margin box (what x/y place), so a margin keeps its
+            // distance from the slide edge.
+            const { ml, mt, mr, mb } = marginsOf(node);
+            const wPct = ((node.offsetWidth + ml + mr) / slide.clientWidth) * 100;
+            const hPct = ((node.offsetHeight + mt + mb) / slide.clientHeight) * 100;
             const patch =
               k === "left" ? { x: "0" }
               : k === "center" ? { x: String(r1((100 - wPct) / 2)) }
@@ -1021,12 +1033,24 @@ const fontsHref = allFonts.length
               visualRect = node.querySelector("a")?.getBoundingClientRect() ?? visualRect;
             }
             if (!slideRect.width || !slideRect.height || !visualRect.width || !visualRect.height) return;
+            // x/y place the margin box and posWidth/Height size the border box,
+            // so the node's own margin, border and padding sit between those and
+            // the content measured above — added back, the freed element stays
+            // exactly where it was instead of shifting by them.
+            const cs = getComputedStyle(node);
+            const n = (k) => parseFloat(cs[k]) || 0;
+            const inL = n("borderLeftWidth") + n("paddingLeft");
+            const inT = n("borderTopWidth") + n("paddingTop");
+            // A heading/text box's own top/height already fit its text (only
+            // its width is the column's) — the range's are the font's glyph
+            // box, a few px off the line box.
+            const own = type === "heading" || type === "text" ? node.getBoundingClientRect() : null;
             commitSlide(node, {
               position: "custom",
-              x: String(r1(((visualRect.left - slideRect.left) / slideRect.width) * 100)),
-              y: String(r1(((visualRect.top - slideRect.top) / slideRect.height) * 100)),
-              posWidth: `${Math.round(visualRect.width)}px`,
-              posHeight: `${Math.round(visualRect.height)}px`,
+              x: String(r1(((visualRect.left - slideRect.left - n("marginLeft") - inL) / slideRect.width) * 100)),
+              y: String(r1((((own ? own.top : visualRect.top - inT) - slideRect.top - n("marginTop")) / slideRect.height) * 100)),
+              posWidth: `${Math.round(visualRect.width + inL + n("borderRightWidth") + n("paddingRight"))}px`,
+              posHeight: `${Math.round(own ? own.height : visualRect.height + inT + n("borderBottomWidth") + n("paddingBottom"))}px`,
             });
           }
           function selectSlideNode(node) {
@@ -1309,8 +1333,8 @@ const fontsHref = allFonts.length
           // reimplementing the PAD-table/axis-fallback resolution chain a
           // third time — the browser has already resolved that into the
           // real rendered px, which is the actual source of truth here.
-          // Read off spacingTarget(), the node that actually carries the
-          // element's margin/padding, and drawn as a position:fixed overlay
+          // Read off the nodes that actually carry the element's margin and
+          // padding (paddingTarget()), and drawn as a position:fixed overlay
           // over it rather than appended into it: <img>/<video>/<iframe>/<hr>
           // render no children, a contentEditable heading would take the
           // badge text into its own textContent, and an overflow:hidden
@@ -1360,12 +1384,12 @@ const fontsHref = allFonts.length
             clearTimeout(spacingLockBarTimer);
           }
 
-          // The node whose computed margin/padding IS the element's own: an
-          // image renders its spacing on the <img> inside .ds-img-wrap
-          // (ElementBlock.astro), not on the wrapper visualTarget() picks.
-          function spacingTarget(node) {
-            const box = visualTarget(node);
-            return (box && box.classList.contains("ds-img-wrap") && box.querySelector("img")) || box;
+          // Margin lives on the box visualTarget() picks; padding on the node
+          // that draws it. They differ only for an image: margin on
+          // .ds-img-wrap, padding/border on the <img> inside (ElementBlock.astro
+          // — margin on the <img> itself pushed it past its column).
+          function paddingTarget(box) {
+            return (box.classList.contains("ds-img-wrap") && box.querySelector("img")) || box;
           }
 
           // One badge group per edge, outer (margin) to inner (padding), so an
@@ -1400,8 +1424,17 @@ const fontsHref = allFonts.length
 
           function buildSpacingHandles(node, path) {
             if (![1, 3, 4].includes(path.length)) return;
-            const box = spacingTarget(node);
+            const box = visualTarget(node);
             if (!box) return;
+            const padBox = paddingTarget(box);
+            // Where padBox sits inside the frame (box): a narrow or centered
+            // image doesn't fill its full-width wrapper.
+            const inset = () => {
+              if (padBox === box) return { top: 0, right: 0, bottom: 0, left: 0 };
+              const o = box.getBoundingClientRect();
+              const n = padBox.getBoundingClientRect();
+              return { top: n.top - o.top, right: o.right - n.right, bottom: o.bottom - n.bottom, left: n.left - o.left };
+            };
             spacingHandleBox = box;
             const frame = document.createElement("div");
             frame.style.cssText = "position:fixed;pointer-events:none;z-index:2147481000;";
@@ -1444,6 +1477,7 @@ const fontsHref = allFonts.length
 
             function addHandle(isMargin, edge) {
               const keyMap = isMargin ? MARGIN_KEYS : PADDING_KEYS;
+              const target = isMargin ? box : padBox;
               const key = keyMap[edge];
               const prop = kebab(key);
               const axis = edge === "top" || edge === "bottom" ? "y" : "x";
@@ -1468,7 +1502,7 @@ const fontsHref = allFonts.length
               edgeGroups[edge].appendChild(handle);
 
               function currentPx() {
-                return Math.round(parseFloat(getComputedStyle(box).getPropertyValue(prop)) || 0);
+                return Math.round(parseFloat(getComputedStyle(target).getPropertyValue(prop)) || 0);
               }
               // Band only while hovering/dragging this edge (Blocks mode's
               // hoverBand rule) — showing all 8 on select buries the content.
@@ -1478,14 +1512,18 @@ const fontsHref = allFonts.length
                 if (!px || !showBand) return;
                 // A positive margin's band sits outside the box; a negative one
                 // marks the strip the box now overlaps, just inside its edge.
+                // Padding's sits inside padBox, wherever that is in the frame.
                 const offset = isMargin && px > 0 ? -px : 0;
-                const size = Math.abs(px);
-                if (edge === "top") Object.assign(band.style, { left: "0", right: "0", top: `${offset}px`, bottom: "", height: `${size}px`, width: "" });
-                else if (edge === "bottom")
-                  Object.assign(band.style, { left: "0", right: "0", bottom: `${offset}px`, top: "", height: `${size}px`, width: "" });
-                else if (edge === "left")
-                  Object.assign(band.style, { top: "0", bottom: "0", left: `${offset}px`, right: "", width: `${size}px`, height: "" });
-                else Object.assign(band.style, { top: "0", bottom: "0", right: `${offset}px`, left: "", width: `${size}px`, height: "" });
+                const size = `${Math.abs(px)}px`;
+                const i = isMargin ? { top: 0, right: 0, bottom: 0, left: 0 } : inset();
+                const across = edge === "top" || edge === "bottom" ? ["left", "right"] : ["top", "bottom"];
+                Object.assign(band.style, { top: "", right: "", bottom: "", left: "", width: "", height: "" });
+                Object.assign(band.style, {
+                  [across[0]]: `${i[across[0]]}px`,
+                  [across[1]]: `${i[across[1]]}px`,
+                  [edge]: `${i[edge] + offset}px`,
+                  [across[0] === "left" ? "height" : "width"]: size,
+                });
               }
               render(currentPx(), false);
               const view = { render, currentPx };
@@ -1522,7 +1560,7 @@ const fontsHref = allFonts.length
                     // Margin may go negative (boxes overlap); padding can't — invalid CSS.
                     lastPx = Math.round(startPx + sign * (pos - startPos));
                     if (!isMargin) lastPx = Math.max(0, lastPx);
-                    for (const k of touched) setImp(box, kebab(k), `${lastPx}px`);
+                    for (const k of touched) setImp(target, kebab(k), `${lastPx}px`);
                     show(true, lastPx);
                   },
                   (moved) => {
@@ -1570,10 +1608,12 @@ const fontsHref = allFonts.length
             // Lets the Inspector show the real rendered px as the placeholder
             // of an unset side (a section's default padding, an element's CSS
             // default) instead of a bare "0".
-            const cs = getComputedStyle(box);
-            const readSides = (keys) => Object.fromEntries(Object.entries(keys).map(([s, k]) => [s, Math.round(parseFloat(cs.getPropertyValue(kebab(k))) || 0)]));
+            const readSides = (el, keys) => {
+              const cs = getComputedStyle(el);
+              return Object.fromEntries(Object.entries(keys).map(([s, k]) => [s, Math.round(parseFloat(cs.getPropertyValue(kebab(k))) || 0)]));
+            };
             parent.postMessage(
-              { type: "designer:spacingValues", path: path.join("."), padding: readSides(PADDING_KEYS), margin: readSides(MARGIN_KEYS) },
+              { type: "designer:spacingValues", path: path.join("."), padding: readSides(padBox, PADDING_KEYS), margin: readSides(box, MARGIN_KEYS) },
               targetOrigin,
             );
 

@@ -36,6 +36,7 @@ import {
   elPaddingStyle as sharedElPaddingStyle,
   elBorderShadowStyle as sharedElBorderShadowStyle,
   typoStyle as sharedTypoStyle,
+  imgAlignStyle as sharedImgAlignStyle,
   toCssText,
 } from "@ucms/element-render";
 
@@ -225,6 +226,26 @@ export function marginStyle(p: Record<string, string>): string | null {
 export function paddingStyle(p: Record<string, string>): string | null {
   const s = sharedElPaddingStyle(p);
   return s ? toCssText(s) : null;
+}
+// An image's alignment, set as the <img>'s own margin — its author margin sits
+// on the wrapper around it (see @ucms/element-render's imgAlignStyle).
+export function imgAlignStyle(align?: string): string {
+  return toCssText(sharedImgAlignStyle(align));
+}
+// Row's own margin-top/bottom and padding — SectionBlock.astro's base row style
+// and its tablet/mobile override both build it here. Unset margin-top is the
+// default gap between rows; a field the author cleared ("") renders 0, as it
+// always has. Interpolated raw, a bare "10" was invalid CSS the browser dropped.
+export function rowSpacingStyle(
+  row: { marginTop?: string; marginBottom?: string; paddingTop?: string; paddingRight?: string; paddingBottom?: string; paddingLeft?: string },
+  marginTopDefault: string,
+): string {
+  const v = (x: string | undefined, table: Record<string, string>) => lengthValue(x, table, "0");
+  return [
+    `margin-top:${row.marginTop === undefined ? marginTopDefault : v(row.marginTop, SPACE)}`,
+    `margin-bottom:${v(row.marginBottom, SPACE)}`,
+    `padding:${v(row.paddingTop, PAD)} ${v(row.paddingRight, PAD)} ${v(row.paddingBottom, PAD)} ${v(row.paddingLeft, PAD)}`,
+  ].join(";");
 }
 // Border/shadow escape hatch shared by heading/text/button/image — mirrors
 // apps/admin's elBorderShadowStyle(); returns null (not a stray "border:;")

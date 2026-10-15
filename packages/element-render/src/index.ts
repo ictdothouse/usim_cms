@@ -86,6 +86,16 @@ export function elPaddingStyle(p: Record<string, string>): Record<string, string
   return { padding: `${side("paddingTop")} ${side("paddingRight")} ${side("paddingBottom")} ${side("paddingLeft")}` };
 }
 
+// An image's own box model is split across two nodes: its author margin goes on the wrapper
+// around the <img> (elMarginStyle there), never the <img> itself. A replaced element keeps its
+// own width (intrinsic, imgWidth or max-width:100%), so margins on it can't shrink it — a left
+// margin pushed it past its column and a right margin did nothing. The <img> is display:block,
+// so the wrapper's text-align can't place it either; these auto margins align it instead. One
+// `margin` shorthand covering all four sides, so a breakpoint rule always resets the lot.
+export function imgAlignStyle(align: string | undefined): Record<string, string> {
+  return { margin: align === "center" ? "0 auto" : align === "right" ? "0 0 0 auto" : "0" };
+}
+
 // Border/shadow escape hatch shared by heading/text/button/image — omits an unset key entirely
 // (rather than setting it to undefined) so spreading this into a style object never clobbers a
 // variant's own default border (e.g. button's outline variant) when the author hasn't overridden it.

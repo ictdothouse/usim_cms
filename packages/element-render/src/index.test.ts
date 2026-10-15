@@ -7,7 +7,15 @@ import {
   elBorderShadowStyle,
   bestTextColor,
   zIndexValue,
+  imgAlignStyle,
 } from "./index.js";
+
+test("imgAlignStyle always sets the full margin shorthand, so a breakpoint can undo another's", () => {
+  assert.deepEqual(imgAlignStyle("center"), { margin: "0 auto" });
+  assert.deepEqual(imgAlignStyle("right"), { margin: "0 0 0 auto" });
+  assert.deepEqual(imgAlignStyle("left"), { margin: "0" });
+  assert.deepEqual(imgAlignStyle(undefined), { margin: "0" });
+});
 
 test("zIndexValue clamps to 0-10 and treats blank/non-numeric as unset", () => {
   assert.equal(zIndexValue(""), undefined);

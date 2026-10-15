@@ -24,6 +24,7 @@ import {
   elHoverClass,
   elEntranceClass,
   elRadius,
+  imgAlignStyle,
   cls,
   headingTag,
 } from "../lib/element-render";
@@ -157,37 +158,35 @@ const renderContainerChild = (child: El, childPath: string, visId: string): unkn
     }
     case "image": {
       const cpSrc = safeUrl(cp.src);
-      const cpSrcset = cpSrc ? buildSrcset(cpSrc) : null;
+      if (!cpSrc) return null;
+      const cpSrcset = buildSrcset(cpSrc);
       const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
       if (hasBp) {
         responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => marginStyle(mp) ?? ""),
           ...bpStyleRules(`[data-vis="${visId}"] img`, child.bp!, cp, (mp) =>
-            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp)]
               .filter(Boolean)
               .join(";"),
           ),
         );
       }
-      const imgNode = cpSrc ? (
-        <img
-          class={cls("ds-img", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
-          data-designer-path={designerEdit ? childPath : undefined}
-          src={cpSrc}
-          srcset={cpSrcset?.srcset}
-          sizes={cpSrcset ? cpSrcset.sizes : undefined}
-          alt={cp.alt ?? ""}
-          loading="lazy"
-          style={[`border-radius:${elRadius(cp)}`, cp.imgWidth ? `width:${cp.imgWidth}` : null, marginStyle(cp), paddingStyle(cp), elBorderShadowStyle(cp)]
-            .filter(Boolean)
-            .join(";")}
-        />
-      ) : null;
-      return hasBp && imgNode ? (
-        <div data-vis={visId} style="display:contents">
-          {imgNode}
+      // Same two-node box as ElementBlock.astro's image: margin on the
+      // wrapper, so a row container's image no longer runs past it.
+      return (
+        <div class="ds-img-wrap" data-designer-path={designerEdit ? childPath : undefined} data-vis={hasBp ? visId : undefined} style={marginStyle(cp)}>
+          <img
+            class={cls("ds-img", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
+            src={cpSrc}
+            srcset={cpSrcset?.srcset}
+            sizes={cpSrcset ? cpSrcset.sizes : undefined}
+            alt={cp.alt ?? ""}
+            loading="lazy"
+            style={[`border-radius:${elRadius(cp)}`, cp.imgWidth ? `width:${cp.imgWidth}` : null, imgAlignStyle(cp.align), paddingStyle(cp), elBorderShadowStyle(cp)]
+              .filter(Boolean)
+              .join(";")}
+          />
         </div>
-      ) : (
-        imgNode
       );
     }
     case "button": {

@@ -16,10 +16,21 @@ import {
   cls,
   headingTag,
   safeUrl,
+  rowSpacingStyle,
   PAD,
   SPACE,
   RADIUS,
 } from "./element-render";
+
+test("rowSpacingStyle turns a bare number into px and keeps unset vs cleared apart", () => {
+  assert.equal(
+    rowSpacingStyle({ marginTop: "10", paddingLeft: "8" }, "2.5rem"),
+    "margin-top:10px;margin-bottom:0;padding:0 0 0 8px",
+  );
+  // Unset margin-top = the default gap; a cleared field ("") = 0, as it always rendered.
+  assert.equal(rowSpacingStyle({}, "2.5rem"), "margin-top:2.5rem;margin-bottom:0;padding:0 0 0 0");
+  assert.equal(rowSpacingStyle({ marginTop: "" }, "2.5rem"), "margin-top:0;margin-bottom:0;padding:0 0 0 0");
+});
 
 test("fluidTextSize converts px to a clamp() with a floor and vw term", () => {
   assert.equal(fluidTextSize("40px"), "clamp(22px, 4vw, 40px)");

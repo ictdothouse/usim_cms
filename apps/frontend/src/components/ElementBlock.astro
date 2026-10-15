@@ -23,6 +23,7 @@ import {
   elHoverClass,
   elEntranceClass,
   elRadius,
+  imgAlignStyle,
   cls,
   headingTag,
 } from "../lib/element-render";
@@ -131,11 +132,11 @@ if (hasBp) {
     case "image":
       responsiveRules.push(
         ...bpStyleRules(`${sel} img`, el.bp!, p, (mp) =>
-          [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+          [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp)]
             .filter(Boolean)
             .join(";"),
         ),
-        ...bpStyleRules(`${sel} .ds-img-wrap`, el.bp!, p, (mp) => (mp.align ? `text-align:${mp.align}` : "")),
+        ...bpStyleRules(`${sel} .ds-img-wrap`, el.bp!, p, (mp) => marginStyle(mp) ?? ""),
       );
       break;
     case "video":
@@ -243,8 +244,10 @@ switch (el.type) {
     const isFirst = blockIndex === 0 && r === 0 && c === 0 && e === 0;
     const imgSrc = safeUrl(p.src);
     const imgSrcset = imgSrc ? buildSrcset(imgSrc) : null;
+    // Margin on the wrapper, alignment as the img's own margin — see
+    // @ucms/element-render's imgAlignStyle.
     return imgSrc ? (
-      <div class="ds-img-wrap" style={p.align ? `text-align:${p.align}` : null}>
+      <div class="ds-img-wrap" style={marginStyle(p)}>
         <img
           class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
           src={imgSrc}
@@ -256,7 +259,7 @@ switch (el.type) {
           style={[
             `border-radius:${elRadius(p)}`,
             p.imgWidth ? `width:${p.imgWidth}` : null,
-            marginStyle(p),
+            imgAlignStyle(p.align),
             paddingStyle(p),
             elBorderShadowStyle(p),
           ]
@@ -451,8 +454,10 @@ switch (el.type) {
   .ds-btn-lg {
     font-size: 1.1rem;
   }
+  /* No width:100% — like .ds-video, the column's flex stretch sizes it, and
+     stretch leaves room for the embed's own left/right margin (a fixed 100%
+     pushed it past the column by its left margin). */
   .ds-embed {
-    width: 100%;
     border: 0;
   }
   .ds-list {

@@ -28,6 +28,7 @@ import {
   lengthValue,
   marginStyle,
   paddingStyle,
+  rowSpacingStyle,
   cls,
 } from "../lib/element-render";
 import { flexWrapFor, zIndexValue } from "@ucms/element-render";
@@ -318,8 +319,8 @@ function buildSectionStyle(p: Record<string, string>): string {
   const padRight = lengthValue(p.paddingRight || p.paddingX || pagePaddingX, PAD, "1.5rem");
   const padBottom = lengthValue(p.paddingBottom || p.paddingY, PAD, PAD.md);
   const padLeft = lengthValue(p.paddingLeft || p.paddingX || pagePaddingX, PAD, "1.5rem");
-  // Margin has no X axis (block-flow spacing only) — top/bottom, each falling
-  // back to the shared marginY value, same convention as padding above.
+  // Margin per side, each falling back to the shared marginY/marginX value,
+  // same convention as padding above.
   const marginTopVal = lengthValue(p.marginTop || p.marginY, PAD, "0");
   const marginRightVal = lengthValue(p.marginRight || p.marginX, PAD, "0");
   const marginBottomVal = lengthValue(p.marginBottom || p.marginY, PAD, "0");
@@ -385,10 +386,6 @@ const sectionStyle = buildSectionStyle(baseSectionProps);
 // marginTop's default (2.5rem, matching the old fixed .ds-inner flex gap)
 // is skipped for the first row — that layout never had a leading gap either.
 const rowStyle = (row: Row, isFirst: boolean) => {
-  const pad =
-    row.paddingTop || row.paddingRight || row.paddingBottom || row.paddingLeft
-      ? `padding:${row.paddingTop ?? "0"} ${row.paddingRight ?? "0"} ${row.paddingBottom ?? "0"} ${row.paddingLeft ?? "0"};`
-      : "";
   // Elementor-style flex container mode — unset/"grid" keeps the exact same
   // grid-template-columns output this function always emitted (no visual
   // change for any row saved before this existed). "flex" mode's own mobile
@@ -399,7 +396,7 @@ const rowStyle = (row: Row, isFirst: boolean) => {
     row.layoutMode === "flex"
       ? `display:flex;flex-direction:${row.flexDirection ?? "row"};justify-content:${row.justifyContent ?? "flex-start"};align-items:${row.alignItems ?? "stretch"};flex-wrap:${flexWrapFor(row.flexDirection, row.flexWrap)}`
       : `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")}`;
-  return `${layout};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
+  return `${layout};gap:${row.gap ?? pageGap ?? "2rem"};${rowSpacingStyle(row, isFirst ? "0" : "2.5rem")}`;
 };
 // Column width (Col.span) is edited per-breakpoint in the Inspector (col.bp's
 // "tablet:span"/"mobile:span"), same bag every other Col/El style override
@@ -475,11 +472,9 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
   // flex-wrap follows the tier's direction too — mobile's default stack is a
   // column, which must go single-line (see flexWrapFor).
   const layout = row.layoutMode === "flex" ? `flex-direction:${p.flexDirection};flex-wrap:${flexWrapFor(p.flexDirection, row.flexWrap)}` : buildRowSpans(row, p);
-  const pad =
-    p.paddingTop !== "0" || p.paddingRight !== "0" || p.paddingBottom !== "0" || p.paddingLeft !== "0"
-      ? `padding:${p.paddingTop} ${p.paddingRight} ${p.paddingBottom} ${p.paddingLeft};`
-      : "";
-  return `${layout};gap:${p.gap};margin-top:${p.marginTop};margin-bottom:${p.marginBottom};${pad}`;
+  // Padding always goes out, 0 included: a tier that zeroes it must still beat
+  // the row's own inline padding.
+  return `${layout};gap:${p.gap};${rowSpacingStyle(p, "0")}`;
 }
 ---
 
