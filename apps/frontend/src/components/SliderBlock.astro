@@ -310,13 +310,16 @@ const p = el.props ?? {};
 // own wrapper (`[data-vis="elId"] .ds-slider`) instead of a slide child's
 // `data-slide-el` selector. Previously only `height` was real (every other
 // field here was admin-canvas-preview-only, see this file's CLAUDE.md note).
+// Height goes on .ds-slider-box, which carries the base inline height: on
+// the auto-height outer wrapper a smaller mobile height only shrank the
+// slider's page slot while the box kept its desktop height, so the next
+// section slid under it.
 if (el.bp && Object.keys(el.bp).length > 0) {
   responsiveRules.push(
     ...bpStyleRules(`[data-vis="${elId}"] .ds-slider`, el.bp, p, (mp) =>
-      [`height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
-        .filter(Boolean)
-        .join(";"),
+      [marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
     ),
+    ...bpStyleRules(`[data-vis="${elId}"] .ds-slider-box`, el.bp, p, (mp) => `height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`),
   );
 }
 ---
