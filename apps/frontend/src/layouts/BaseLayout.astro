@@ -1398,6 +1398,11 @@ const fontsHref = allFonts.length
           // inside near the viewport edge. Left/right sit flush inside (a
           // full-bleed section's edge is the viewport's), and go outside only
           // when the box is too narrow to hold both and there's room.
+          // Nothing scrolls past the viewport's sides or the page's top, so a
+          // negative margin that pushes an edge out there took its badges
+          // with it: they stop at that wall instead (still draggable — a drag
+          // is a delta) and center on the part of the box still inside. Never
+          // past the box's far edge, so a box scrolled away takes them along.
           function placeSpacingGroup(group, edge, r) {
             const out = {
               top: r.top >= 34,
@@ -1405,8 +1410,18 @@ const fontsHref = allFonts.length
               left: r.width < 160 && r.left >= 80,
               right: r.width < 160 && r.right <= innerWidth - 80,
             }[edge];
-            const shift = !out ? "0" : edge === "top" || edge === "left" ? "-100%" : "100%";
-            group.style.transform = edge === "top" || edge === "bottom" ? `translate(-50%,${shift})` : `translate(${shift},-50%)`;
+            const W = document.documentElement.clientWidth;
+            const pageTop = -scrollY;
+            const w = group.offsetWidth;
+            const h = group.offsetHeight;
+            let x = (Math.max(r.left, 0) + Math.min(r.right, W) - w) / 2;
+            let y = (Math.max(r.top, pageTop) + r.bottom - h) / 2;
+            if (edge === "top") y = Math.min(Math.max(out ? r.top - h : r.top, pageTop + 4), r.bottom);
+            if (edge === "bottom") y = out ? r.bottom : r.bottom - h;
+            if (edge === "left") x = Math.min(Math.max(out ? r.left - w : r.left, 4), r.right);
+            if (edge === "right") x = Math.max(Math.min(out ? r.right : r.right - w, W - w - 4), r.left - w);
+            group.style.left = `${x - r.left}px`;
+            group.style.top = `${y - r.top}px`;
           }
 
           // Fixed like the badges: a section's own overflow:hidden or the
@@ -1468,8 +1483,7 @@ const fontsHref = allFonts.length
             for (const edge of ["top", "bottom", "left", "right"]) {
               const g = document.createElement("div");
               g.style.cssText =
-                "position:absolute;z-index:1;display:flex;gap:2px;" +
-                (edge === "top" || edge === "bottom" ? `flex-direction:column;left:50%;${edge}:0;` : `top:50%;${edge}:0;`);
+                "position:absolute;z-index:1;display:flex;gap:2px;" + (edge === "top" || edge === "bottom" ? "flex-direction:column;" : "");
               stopBubble(g);
               frame.appendChild(g);
               edgeGroups[edge] = g;
