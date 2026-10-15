@@ -859,6 +859,46 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
   { key: "row-2-1", labelKey: "designer-layout-2to1", icon: PanelRight, drag: { kind: "new-row", spans: [2, 1] } },
 ];
 
+// Elements palette category of every other ElType (container is in
+// LAYOUT_PRESETS). A Record so a new ElType fails typecheck until it has a
+// category, instead of silently missing from the palette. DesignerPalette.tsx
+// renders categories in first-appearance order, types in key order.
+export const PALETTE_CATEGORY: Record<Exclude<ElType, "container">, Key> = {
+  heading: "designer-category-basic",
+  text: "designer-category-basic",
+  image: "designer-category-basic",
+  button: "designer-category-basic",
+  icon: "designer-category-basic",
+  list: "designer-category-basic",
+  badge: "designer-category-basic",
+  divider: "designer-category-basic",
+  spacer: "designer-category-basic",
+  video: "designer-category-media",
+  embed: "designer-category-media",
+  gallery: "designer-category-media",
+  slider: "designer-category-media",
+  googlemap: "designer-category-media",
+  infobox: "designer-category-blocks",
+  cardgrid: "designer-category-blocks",
+  ctabanner: "designer-category-blocks",
+  testimonial: "designer-category-blocks",
+  statscounter: "designer-category-blocks",
+  peoplegrid: "designer-category-blocks",
+  logocloud: "designer-category-blocks",
+  timeline: "designer-category-blocks",
+  documentdownload: "designer-category-blocks",
+  socialicons: "designer-category-blocks",
+  accordion: "designer-category-interactive",
+  tabs: "designer-category-interactive",
+  announcementbar: "designer-category-interactive",
+  announcementticker: "designer-category-interactive",
+  postlist: "designer-category-dynamic",
+  eventlist: "designer-category-dynamic",
+  menu: "designer-category-dynamic",
+  symbol: "designer-category-advanced",
+  html: "designer-category-advanced",
+};
+
 // Container children are curated to types that make sense freely nested and
 // already render generically (no slider/menu/accordion-style special canvas
 // wiring) — a deliberate v1 scope line, not every ElType. Expand this list

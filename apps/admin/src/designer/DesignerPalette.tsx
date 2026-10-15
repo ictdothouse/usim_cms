@@ -15,7 +15,7 @@ import { ChevronDown, ChevronRight, Layers, Lock, Settings } from "lucide-react"
 import { useEffect, useRef, type MutableRefObject } from "react";
 import type { Key } from "@/i18n";
 import { Inspector } from "./Inspector";
-import { ELS, LAYOUT_PRESETS } from "./elements";
+import { ELS, LAYOUT_PRESETS, PALETTE_CATEGORY } from "./elements";
 import type { Block, SectionProps, ElType, Drag } from "./types";
 import type { DesignerCtx } from "./context";
 import type { useSiteChrome } from "./hooks/useSiteChrome";
@@ -219,6 +219,36 @@ export function DesignerPalette({
     }
     setMobilePanel(null);
   }
+  // One palette tile — Layout presets and every element category share the
+  // same click/drag wiring, only the payload differs.
+  const tile = (key: string, Icon: typeof Settings, label: string, payload: Drag) => (
+    <button
+      type="button"
+      key={key}
+      draggable={mode !== "live"}
+      onClick={(ev) => { if (mode !== "live" || ev.detail === 0) addFromPalette(payload); }}
+      onDragStart={
+        mode === "live"
+          ? undefined
+          : (ev) => {
+              drag.current = payload;
+              ev.dataTransfer.effectAllowed = "copy";
+            }
+      }
+      onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
+      onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, payload, label) : undefined}
+      // touch-none: without it, a touch-drag on this item
+      // scrolls the sidebar instead (the browser's own
+      // default touch-scroll gesture wins before pointermove
+      // ever fires), firing pointercancel immediately — the
+      // gesture never gets a chance to start on a touch
+      // device (final review finding).
+      className="touch-none flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-xs font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
+    >
+      <Icon className="h-4 w-4 text-accent" /> {label}
+    </button>
+  );
+  const paletteTypes = Object.keys(PALETTE_CATEGORY) as Exclude<ElType, "container">[];
   return (
     <aside
       id="designer-palette"
@@ -260,67 +290,19 @@ export function DesignerPalette({
           <div className="space-y-1.5">
             <p className="text-xs font-bold uppercase tracking-wider text-sub">{t("designer-category-layout")}</p>
             <div className="grid grid-cols-2 gap-1.5">
-              {LAYOUT_PRESETS.map((preset) => {
-                const Icon = preset.icon;
-                return (
-                  <button
-                    type="button"
-                    key={preset.key}
-                    draggable={mode !== "live"}
-                    onClick={(ev) => { if (mode !== "live" || ev.detail === 0) addFromPalette(preset.drag); }}
-                    onDragStart={
-                      mode === "live"
-                        ? undefined
-                        : (ev) => {
-                            drag.current = preset.drag;
-                            ev.dataTransfer.effectAllowed = "copy";
-                          }
-                    }
-                    onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
-                    onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, preset.drag, t(preset.labelKey)) : undefined}
-                    // touch-none: without it, a touch-drag on this item
-                    // scrolls the sidebar instead (the browser's own
-                    // default touch-scroll gesture wins before pointermove
-                    // ever fires), firing pointercancel immediately — the
-                    // gesture never gets a chance to start on a touch
-                    // device (final review finding).
-                    className="touch-none flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-xs font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
-                  >
-                    <Icon className="h-4 w-4 text-accent" /> {t(preset.labelKey)}
-                  </button>
-                );
-              })}
+              {LAYOUT_PRESETS.map((preset) => tile(preset.key, preset.icon, t(preset.labelKey), preset.drag))}
             </div>
           </div>
-          <div className="space-y-1.5">
-            <p className="text-xs font-bold uppercase tracking-wider text-sub">{t("designer-category-content")}</p>
-            {(Object.keys(ELS) as ElType[])
-              .filter((type) => type !== "container")
-              .map((type) => {
-                const Icon = ELS[type].icon;
-                return (
-                  <button
-                    type="button"
-                    key={type}
-                    draggable={mode !== "live"}
-                    onClick={(ev) => { if (mode !== "live" || ev.detail === 0) addFromPalette({ kind: "new", type }); }}
-                    onDragStart={
-                      mode === "live"
-                        ? undefined
-                        : (ev) => {
-                            drag.current = { kind: "new", type };
-                            ev.dataTransfer.effectAllowed = "copy";
-                          }
-                    }
-                    onDragEnd={mode === "live" ? undefined : () => (drag.current = null)}
-                    onPointerDown={mode === "live" ? (e) => startPaletteDrag(e, { kind: "new", type }, t(ELS[type].labelKey)) : undefined}
-                    className="touch-none flex cursor-grab items-center gap-2 rounded-lg border border-line/30 bg-canvas/60 px-2.5 py-2 text-xs font-medium text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
-                  >
-                    <Icon className="h-3.5 w-3.5 text-accent" /> {t(ELS[type].labelKey)}
-                  </button>
-                );
-              })}
-          </div>
+          {[...new Set(Object.values(PALETTE_CATEGORY))].map((category) => (
+            <div key={category} className="space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-sub">{t(category)}</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {paletteTypes
+                  .filter((type) => PALETTE_CATEGORY[type] === category)
+                  .map((type) => tile(type, ELS[type].icon, t(ELS[type].labelKey), { kind: "new", type }))}
+              </div>
+            </div>
+          ))}
           <p className="pt-2 text-xs leading-relaxed text-sub">{t("designer-drop-hint")}</p>
         </div>
       ) : activeLeftTab === "layers" ? (
