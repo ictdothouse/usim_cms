@@ -135,6 +135,15 @@ export function elEntranceClass(p: Record<string, string>): string | undefined {
   return p.entrance && p.entrance !== "none" ? `ds-entrance-${p.entrance}` : undefined;
 }
 
+// flex-wrap for a Row (flex mode, incl. its mobile stack) or Container. A column-direction box has
+// an auto height, so it never actually wraps — but `wrap` still makes it multi-line, and a
+// multi-line flexbox measures a stretched child's height BEFORE stretching it to full width. A
+// width-dependent child (a width:100% image) is measured narrow, then drawn wide and taller, and
+// overflows onto the next row. Single-line knows the stretched width up front; otherwise identical.
+export function flexWrapFor(direction: string | undefined, wrap: string | undefined): "wrap" | "nowrap" {
+  return direction?.startsWith("column") || wrap === "nowrap" ? "nowrap" : "wrap";
+}
+
 export interface FreePositionInput {
   x?: string;
   y?: string;
