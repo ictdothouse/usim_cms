@@ -76,7 +76,7 @@ export function LiveScrollStage({ activeKey, children }: { activeKey: string; ch
   }
 
   return (
-    <div ref={outerRef} role="region" aria-label="Live Edit" data-testid="designer-live-stage" onScroll={onScroll} className="relative min-w-0 flex-1 overflow-y-auto bg-canvas">
+    <div ref={outerRef} role="region" aria-label="Live Edit" data-testid="designer-live-stage" onScroll={onScroll} className="relative min-w-0 flex-1 overflow-y-auto bg-zinc-200">
       <div className="sticky top-0 h-full p-4">{children}</div>
       <div ref={spacerRef} aria-hidden="true" />
     </div>

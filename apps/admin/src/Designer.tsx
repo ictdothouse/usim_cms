@@ -850,9 +850,10 @@ export default function Designer({
           // Live Edit = the real page (same URL renderer as Preview) framed at
           // the device's exact viewport. Double-buffered: a reload loads into
           // the hidden slot and swaps in on load, so the visible frame never
-          // blinks (useLiveEditBridge's handleFrameLoad).
+          // blinks (useLiveEditBridge's handleFrameLoad). Desktop fills the
+          // stage (still 1440 wide); tablet/mobile keep their real shape.
           <LiveScrollStage activeKey={activeSlot}>
-            <DeviceViewport device={bp}>
+            <DeviceViewport device={bp} fill={bp === "desktop"}>
               <iframe
                 ref={frameARef}
                 src={liveSrcA ?? undefined}
