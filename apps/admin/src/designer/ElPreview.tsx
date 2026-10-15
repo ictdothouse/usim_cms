@@ -72,7 +72,7 @@ import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
   elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, scaledFreeFont, shadowToCss, typoStyle,
 } from "./style";
-import { computeFreePositionStyle, flexWrapFor } from "@ucms/element-render";
+import { computeFreePositionStyle, flexWrapFor, imgAlignStyle } from "@ucms/element-render";
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
@@ -577,6 +577,10 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
               height: p.position === "custom" && p.posHeight ? "100%" : undefined,
               objectFit: p.position === "custom" && p.posHeight ? "cover" : undefined,
               maxWidth: "100%",
+              // The wrapper's textAlign can't move a display:block img — same
+              // fix as the published site (the element's margin is on an
+              // outer wrapper here, so the img's own margin is free).
+              ...imgAlignStyle(p.align),
               ...elBorderShadowStyle(p),
             }}
           />

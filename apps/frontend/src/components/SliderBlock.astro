@@ -38,6 +38,7 @@ import {
   elHoverClass,
   elEntranceClass,
   elRadius,
+  imgAlignStyle,
   cls,
   headingTag,
 } from "../lib/element-render";
@@ -424,13 +425,13 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         );
       } else if (el.type === "image") {
         responsiveRules.push(
-          ...bpStyleRules(outerSel, el.bp, ep, (mp) => [mp.align ? `text-align:${mp.align}` : null, posStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(outerSel, el.bp, ep, (mp) => [mp.align ? `text-align:${mp.align}` : null, posStyle(mp), marginStyle(mp)].filter(Boolean).join(";")),
           ...bpStyleRules(`${outerSel} img`, el.bp, ep, (mp) =>
             [
               `border-radius:${elRadius(mp)}`,
               mp.position === "custom" && mp.posWidth ? "width:100%" : mp.imgWidth ? `width:${mp.imgWidth}` : null,
               mp.position === "custom" && mp.posHeight ? "height:100%;object-fit:cover" : null,
-              marginStyle(mp),
+              imgAlignStyle(mp.align),
               paddingStyle(mp),
               elBorderShadowStyle(mp),
             ]
@@ -522,8 +523,12 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         const freePos = ep.position === "custom";
         const epSrc = safeUrl(ep.src);
         const epSrcset = epSrc ? buildSrcset(epSrc) : null;
+        // Margin on the wrapper, like ElementBlock.astro's image — in flow so
+        // it fits the column, free so the Live Edit chrome framing the
+        // wrapper frames the picture (BaseLayout.astro's slide gestures back
+        // a free box's margin out of x/y).
         return epSrc ? (
-          <div data-slide-el={el.id} {...editAttrs} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep)].filter(Boolean).join(";")}>
+          <div data-slide-el={el.id} {...editAttrs} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep), marginStyle(ep)].filter(Boolean).join(";")}>
             <img
               class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
               src={epSrc}
@@ -535,7 +540,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
                 `border-radius:${elRadius(ep)}`,
                 freePos && ep.posWidth ? "width:100%" : ep.imgWidth ? `width:${ep.imgWidth}` : null,
                 freePos && ep.posHeight ? "height:100%;object-fit:cover" : null,
-                marginStyle(ep),
+                imgAlignStyle(ep.align),
                 paddingStyle(ep),
                 elBorderShadowStyle(ep),
               ]

@@ -1691,11 +1691,12 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   is now the only drag-to-resize surface, Section/Column/Element only (path
   length 1/3/4), never over a selected slide child (that has its own chrome).
   The gesture runs in the iframe and posts one `designer:spacingDrag` on
-  pointerup; `useLiveEditBridge` commits via `spacingDrag.ts`. Handles read and
-  write `spacingTarget()` — `visualTarget()` except an image, whose spacing
-  lives on the `<img>`, not its `.ds-img-wrap` (badges read 0px while the
-  Inspector showed the real value, 2026-10-11). Badges/bands are a
-  `position:fixed` overlay over that box, re-placed every frame — never
+  pointerup; `useLiveEditBridge` commits via `spacingDrag.ts`. Margin handles
+  read and write `visualTarget()`'s box, padding handles `paddingTarget()` —
+  the same box except an image: margin on `.ds-img-wrap`, padding on its
+  `<img>` (2026-10-15, see the margin/fixed-width bullet below); a padding band
+  is offset to wherever the `<img>` sits inside the wrapper. Badges/bands are a
+  `position:fixed` overlay over the margin box, re-placed every frame — never
   appended into it (`<img>`/`<video>`/`<iframe>`/`<hr>` render no children, a
   contentEditable heading took the badge text into its `textContent`,
   `overflow:hidden` clipped margin bands). One badge group per edge, margin +
@@ -1751,3 +1752,33 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   ignored it. Now applied (+ bp rules); a symbol instance's own spacing goes on
   SymbolBlock's `.ds-symbol` wrapper (flex column, so the master node lays out
   as before), never on the master's node.
+- **Margin never goes on a fixed-width box (2026-10-15)**: a box with its own
+  width (an `<img>` at intrinsic/`imgWidth`/`max-width:100%`, an iframe at
+  `width:100%`) can't shrink for its margins — a left margin pushed it past its
+  column and a right margin did nothing (reported: image `marginRight` "10" on
+  mobile had no effect). So an image is a two-node box everywhere it renders
+  (ElementBlock, ContainerBlock and SymbolBlock children, SliderBlock slide
+  children incl. free-positioned): author margin on the `.ds-img-wrap`/
+  `[data-slide-el]` wrapper, radius/`imgWidth`/padding/border/shadow on the
+  `<img>`. Alignment is `imgAlignStyle` (`@ucms/element-render`) — auto side
+  margins on the `<img>`, which is `display:block`, so the wrapper's old
+  `text-align` never moved it (align center/right did nothing before); always
+  one full `margin` shorthand so a bp rule resets it. ElPreview's image uses it
+  too. `.ds-embed` dropped `width:100%`: like `.ds-video` it's a stretched flex
+  item of `.ds-col`, and stretch leaves room for its margins. Row spacing goes
+  through frontend `lib/element-render.ts`'s `rowSpacingStyle` (base row style
+  and its bp override): raw interpolation sent a bare "10" as invalid CSS, an
+  empty side shifted the `padding` shorthand, and the bp override skipped
+  padding when a tier set it to 0. Unset row `marginTop` = the 2.5rem default,
+  a cleared one ("") = 0, as before. `BoxModel`/`FourSideControl` store a typed
+  bare number as px (`withPx`), so new data never relies on render-side
+  `lengthValue` (old bare values still render through it). Live Edit slide
+  gestures (BaseLayout's drag/resize/align, `makeSlideFree`): `left`/`top`
+  place a free box's MARGIN box but `offsetLeft`/rects read its border box —
+  every x/y backs the margin out (`marginsOf`), or a box with a margin jumped by
+  it on each drag; `makeSlideFree` also adds the node's own border/padding back
+  and takes heading/text top/height from the box, not the text range. Checked
+  with Playwright against the built frontend (layout gaps at 1280/375px, plus
+  the Live Edit badges/drag in an iframe). Still open: ElPreview's slide
+  canvas ignores a free child's margin/padding, and the siteChrome Blocks
+  canvas puts an image's padding outside its border (published: inside).

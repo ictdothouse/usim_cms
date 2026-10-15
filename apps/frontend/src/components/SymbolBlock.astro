@@ -25,6 +25,7 @@ import {
   elBorderShadowStyle,
   typoStyle,
   elRadius,
+  imgAlignStyle,
   fluidTextSize,
   lengthValue,
   TEXT_SIZE,
@@ -151,34 +152,32 @@ const renderNode = (el: El): unknown => {
     }
     case "image": {
       const src = safeUrl(p.src);
+      if (!src) return null;
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => marginStyle(mp) ?? ""),
           ...bpStyleRules(`[data-vis="${visId}"] img`, el.bp!, p, (mp) =>
-            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)]
+            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp)]
               .filter(Boolean)
               .join(";"),
           ),
         );
       }
-      const imgNode = src ? (
-        <img
-          class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
-          src={src}
-          alt={p.alt ?? ""}
-          loading="lazy"
-          style={[`border-radius:${elRadius(p)}`, p.imgWidth ? `width:${p.imgWidth}` : null, marginStyle(p), paddingStyle(p), elBorderShadowStyle(p)]
-            .filter(Boolean)
-            .join(";")}
-        />
-      ) : null;
-      return visId && imgNode ? (
-        <div data-vis={visId} style="display:contents">
-          {imgNode}
+      // Same two-node box as ElementBlock.astro's image (margin on the wrapper).
+      return (
+        <div class="ds-img-wrap" data-vis={visId} style={marginStyle(p)}>
+          <img
+            class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+            src={src}
+            alt={p.alt ?? ""}
+            loading="lazy"
+            style={[`border-radius:${elRadius(p)}`, p.imgWidth ? `width:${p.imgWidth}` : null, imgAlignStyle(p.align), paddingStyle(p), elBorderShadowStyle(p)]
+              .filter(Boolean)
+              .join(";")}
+          />
         </div>
-      ) : (
-        imgNode
       );
     }
     case "button": {

@@ -228,7 +228,7 @@ export function FourSideControl({
         <BufferedInput
           className="w-full rounded-lg border border-line/30 bg-white px-2 py-1.5 text-sm"
           value={getSide(sides[0])}
-          onCommit={(v) => sides.forEach((s) => setSide(s, v))}
+          onCommit={(v) => sides.forEach((s) => setSide(s, withPx(v)))}
         />
       ) : (
         <div className={`grid gap-1 ${sides.length === 2 ? "grid-cols-2" : "grid-cols-4"}`}>
@@ -239,7 +239,7 @@ export function FourSideControl({
               value={getSide(s)}
               placeholder={s[0].toUpperCase()}
               title={s}
-              onCommit={(v) => setSide(s, v)}
+              onCommit={(v) => setSide(s, withPx(v))}
             />
           ))}
         </div>
@@ -255,6 +255,10 @@ const SIDES: Side[] = ["top", "right", "bottom", "left"];
 // shorthand and every side drops), so a typed "-10" commits as 0. Margin keeps
 // its sign: a negative margin is how boxes are made to overlap.
 export const nonNegative = (v: string) => (v.trim().startsWith("-") ? "0" : v);
+// A bare number typed into a side input ("10") means px — stored with its unit
+// so the Inspector shows what renders, and so no renderer that forgets
+// lengthValue() can emit it as invalid unitless CSS.
+export const withPx = (v: string) => (/^-?\d+(\.\d+)?$/.test(v.trim()) ? `${v.trim()}px` : v);
 
 // One ring's worth of wiring for BoxModel — same shape FourSideControl's own
 // props already used (getSide/setSide/linked/hasOverride/hasLangOverride),
@@ -319,7 +323,11 @@ function BoxModelInput({ ring, side, corner, live }: { ring: RingConfig; side: S
       // default padding, an element's CSS default), not a misleading "0".
       placeholder={live ? `${live[side]}px` : "0"}
       title={corner ? CORNERS[side].title : side}
-      onCommit={(v) => (ring.linked ? SIDES.forEach((s) => ring.setSide(s, v)) : ring.setSide(side, v))}
+      onCommit={(raw) => {
+        const v = withPx(raw);
+        if (ring.linked) SIDES.forEach((s) => ring.setSide(s, v));
+        else ring.setSide(side, v);
+      }}
     />
   );
 }
