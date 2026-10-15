@@ -54,6 +54,10 @@ export function resolveInsertionIndex(pointerY: number, hoveredRect: { top: numb
 // gets when hovered directly below) so it doesn't swallow most of a tall,
 // content-packed section's own drop-into-column area.
 const SECTION_EDGE_BAND_PX = 12;
+// A container's own edge band (along its parent's axis): inside it the drop
+// goes before/after the container, anywhere else INTO it. Capped at a quarter
+// of the box so a short empty one (3rem) still has a middle.
+const BOX_EDGE_PX = 10;
 
 // The canonical drop-target decision logic, hand-ported as plain JS into
 // apps/frontend/src/layouts/BaseLayout.astro's `designerEdit` script (that
@@ -65,13 +69,17 @@ const SECTION_EDGE_BAND_PX = 12;
 // (null when it can't be resolved) — used for the edge-band fallback below
 // when the hovered node isn't the section itself; `sectionCount` is how
 // many top-level sections the page currently has (needed for the "no
-// node" fallback below).
+// node" fallback below). `opts` only matters for an element-level node:
+// `container` = the hovered node is a container box (its middle means INTO
+// it), `horizontal` = its parent lays children out in a row, so before/after
+// is decided on pointerX against hoveredRect.left/width instead of Y.
 export function resolveDropTargetFromPath(
   path: number[] | null,
   pointerY: number,
-  hoveredRect: { top: number; bottom: number; height: number } | null,
+  hoveredRect: { top: number; bottom: number; height: number; left?: number; width?: number } | null,
   sectionRect: { top: number; bottom: number; height: number } | null,
   sectionCount: number,
+  opts: { container?: boolean; horizontal?: boolean; pointerX?: number } = {},
 ): DropTarget {
   // Nothing with data-designer-path under the pointer at all: either the
   // page has no sections yet (a brand-new page) or the pointer is below
@@ -111,10 +119,19 @@ export function resolveDropTargetFromPath(
   // children): resolve to its PARENT's children array (colPath = its own
   // path minus the last index) and an insertion index relative to its own
   // position there — generic over depth, matching insertAt/childrenOf's
-  // own depth-agnostic behavior (see designerTree.ts).
+  // own depth-agnostic behavior (see designerTree.ts). A container is the
+  // exception away from its edges: it's a drop box, so the drop lands inside
+  // it (appended) — used to always go above/below it.
+  const horizontal = opts.horizontal && opts.pointerX !== undefined && hoveredRect.left !== undefined && hoveredRect.width !== undefined;
+  const pos = horizontal ? opts.pointerX! : pointerY;
+  const box = horizontal ? { top: hoveredRect.left!, height: hoveredRect.width! } : hoveredRect;
+  if (opts.container) {
+    const edge = Math.min(BOX_EDGE_PX, box.height / 4);
+    if (pos > box.top + edge && pos < box.top + box.height - edge) return { kind: "into-column", colPath: path };
+  }
   const colPath = path.slice(0, -1);
   const hoveredIndex = path[path.length - 1];
-  const index = resolveInsertionIndex(pointerY, hoveredRect, hoveredIndex);
+  const index = resolveInsertionIndex(pos, box, hoveredIndex);
   return { kind: "into-column", colPath, index };
 }
 

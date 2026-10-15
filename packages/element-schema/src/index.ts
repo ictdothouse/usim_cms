@@ -109,6 +109,10 @@ export const ENUM_VALUES: Record<string, string[]> = {
   // generic bag validator, so this entry is what stops those from 400ing
   // as an "unknown field".
   span: ["1", "2", "3", "4", "5", "6"],
+  // A container's share of its row-direction parent container's width (the
+  // Layout palette's nested "N Columns" — ContainerBlock.astro). "" = sized
+  // by content; the admin <select> offers it, so it's listed.
+  grow: ["", "1", "2", "3", "4"],
   // accordion/infobox/slider (see Designer.tsx's ELS registry additions).
   exclusive: ["false", "true"],
   iconPosition: ["top", "left"],

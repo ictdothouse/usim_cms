@@ -120,6 +120,37 @@ test("resolveDropTargetFromPath: hovering deep content well inside the section (
   assert.deepEqual(resolveDropTargetFromPath([2, 1, 3, 5], 200, elRect, sectionRect, 5), { kind: "into-column", colPath: [2, 1, 3], index: 6 });
 });
 
+test("resolveDropTargetFromPath: a container's middle drops INTO it, its top/bottom edge band before/after it", () => {
+  const boxRect = { top: 100, bottom: 148, height: 48 };
+  const sectionRect = { top: 0, bottom: 400, height: 400 };
+  const opts = { container: true };
+  assert.deepEqual(resolveDropTargetFromPath([0, 0, 0, 2], 124, boxRect, sectionRect, 1, opts), { kind: "into-column", colPath: [0, 0, 0, 2] });
+  assert.deepEqual(resolveDropTargetFromPath([0, 0, 0, 2], 104, boxRect, sectionRect, 1, opts), { kind: "into-column", colPath: [0, 0, 0], index: 2 });
+  assert.deepEqual(resolveDropTargetFromPath([0, 0, 0, 2], 146, boxRect, sectionRect, 1, opts), { kind: "into-column", colPath: [0, 0, 0], index: 3 });
+});
+
+test("resolveDropTargetFromPath: inside a row-direction parent, the edge band and before/after run along X", () => {
+  const rect = { top: 100, bottom: 200, height: 100, left: 300, width: 200 };
+  const sectionRect = { top: 0, bottom: 400, height: 400 };
+  const column = { container: true, horizontal: true };
+  // A nested V Flex column (child 1 of an H Flex at [0,0,0,0]): middle = into it, left edge = before it.
+  assert.deepEqual(resolveDropTargetFromPath([0, 0, 0, 0, 1], 150, rect, sectionRect, 1, { ...column, pointerX: 400 }), {
+    kind: "into-column",
+    colPath: [0, 0, 0, 0, 1],
+  });
+  assert.deepEqual(resolveDropTargetFromPath([0, 0, 0, 0, 1], 150, rect, sectionRect, 1, { ...column, pointerX: 305 }), {
+    kind: "into-column",
+    colPath: [0, 0, 0, 0],
+    index: 1,
+  });
+  // A plain element in that row: right half = after it, whatever Y says.
+  assert.deepEqual(resolveDropTargetFromPath([0, 0, 0, 0, 1], 110, rect, sectionRect, 1, { horizontal: true, pointerX: 450 }), {
+    kind: "into-column",
+    colPath: [0, 0, 0, 0],
+    index: 2,
+  });
+});
+
 test("resolveDropTargetFromPath: no sectionRect available (edge case) falls back to normal into-column resolution without the edge band", () => {
   const elRect = { top: 5, bottom: 60, height: 55 };
   assert.deepEqual(resolveDropTargetFromPath([2, 1, 3, 5], 5, elRect, null, 5), { kind: "into-column", colPath: [2, 1, 3], index: 5 });

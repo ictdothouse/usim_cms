@@ -774,6 +774,9 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "alignItems", labelKey: "designer-row-align", kind: "select", options: ["flex-start", "center", "flex-end", "stretch"] },
       { key: "flexWrap", labelKey: "designer-row-wrap", kind: "select", options: ["nowrap", "wrap"] },
       { key: "gap", labelKey: "designer-row-gap", kind: "length" },
+      // Width share inside a row-direction parent container (nested "N
+      // Columns", useBlockOps.ts's newColumns) — ignored anywhere else.
+      { key: "grow", labelKey: "designer-f-grow", kind: "select", options: ["", "1", "2", "3", "4"] },
       { key: "bg", labelKey: "designer-s-bg", kind: "color" },
       { key: "borderWidth", labelKey: "designer-s-borderwidth", kind: "text" },
       { key: "borderColor", labelKey: "designer-s-bordercolor", kind: "color" },
@@ -830,9 +833,11 @@ export const CONTENT_KEYS: Record<ElType, string[]> = {
 
 // Webflow-style "Layout" palette category (docs/SliderProblem.pdf's sibling
 // request, screenshot of Webflow's own Add Elements panel) — each entry is a
-// quick-insert structural preset, not its own ElType: "Section"/the
-// row-column presets don't produce an El at all (see types.ts's Drag
-// "new-section"/"new-row", handled by useBlockOps.ts's dropIntoColumn), and
+// quick-insert structural preset, not its own ElType: "Section" inserts a
+// Block, and a row-column preset nests where it's dropped — real Row columns
+// for a lone empty section column or a new section, else an H Flex of V Flex
+// columns (see types.ts's Drag "new-section"/"new-row", handled by
+// useBlockOps.ts's dropIntoColumn/dropIntoNewSection), and
 // "V Flex"/"H Flex" are just the existing "container" ElType with
 // flexDirection pre-set via the "new" kind's propsOverride instead of a
 // second ElType that would otherwise need its own ElPreview/validator/
@@ -898,13 +903,3 @@ export const PALETTE_CATEGORY: Record<Exclude<ElType, "container">, Key> = {
   symbol: "designer-category-advanced",
   html: "designer-category-advanced",
 };
-
-// Container children are curated to types that make sense freely nested and
-// already render generically (no slider/menu/accordion-style special canvas
-// wiring) — a deliberate v1 scope line, not every ElType. Expand this list
-// once each additional type's container-child behavior has actually been
-// checked, rather than opening the picker to all ~30 types up front.
-// Lives here (not in InspectorControls.tsx, its original home) since
-// useBlockOps.ts's Live Edit drop-commit guard needs it too, and a hooks
-// file importing from a component file would be the wrong direction.
-export const CONTAINER_CHILD_TYPES: ElType[] = ["heading", "text", "image", "button", "badge", "spacer", "divider", "icon", "container"];

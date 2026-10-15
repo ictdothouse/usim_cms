@@ -129,14 +129,48 @@ test("dropIntoColumn: dragging a new element with propsOverride merges it onto t
   assert.equal(els[1].props.gap, "1rem", "container's own other defaults still apply, only the overridden key changes");
 });
 
-test("dropIntoColumn: a Layout 'new-row' preset pushes a whole Row onto that column's own section, ignoring the column itself", () => {
+type NestedEl = { type: string; props: Record<string, string>; children?: NestedEl[] };
+
+test("dropIntoColumn: a Layout 'new-row' preset nests an H Flex of V Flex columns at the drop index, not a Row at the section's end", () => {
   const { deps, state } = makeDeps(sampleBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);
   ops.drag.current = { kind: "new-row", spans: [1, 2] };
-  ops.dropIntoColumn([0, 0, 0]);
-  const rows = (state.blocks[0].props as { rows: { columns: { span: number }[] }[] }).rows;
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows[1].columns.map((c) => c.span), [1, 2]);
+  ops.dropIntoColumn([0, 0, 0], 0);
+  const rows = (state.blocks[0].props as { rows: { columns: { elements: NestedEl[] }[] }[] }).rows;
+  assert.equal(rows.length, 1);
+  const [cols, text] = rows[0].columns[0].elements;
+  assert.equal(text.type, "text");
+  assert.equal(cols.type, "container");
+  assert.equal(cols.props.flexDirection, "row");
+  assert.deepEqual(cols.children?.map((c) => [c.type, c.props.flexDirection, c.props.grow]), [
+    ["container", "column", "1"],
+    ["container", "column", "2"],
+  ]);
+});
+
+test("dropIntoColumn: a Layout 'new-row' preset turns a lone empty section column into the preset's real columns", () => {
+  const { deps, state } = makeDeps(twoSectionBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-row", spans: [1, 2] };
+  ops.dropIntoColumn([1, 0, 0]);
+  const rows = (state.blocks[1].props as { rows: { columns: { span: number; elements: unknown[] }[] }[] }).rows;
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].columns.map((c) => [c.span, c.elements.length]), [[1, 0], [2, 0]]);
+});
+
+test("dropIntoColumn: a Layout 'new-row' preset nests inside a container", () => {
+  const blocks: Block[] = [
+    {
+      type: "section",
+      props: { rows: [{ columns: [{ span: 1, elements: [{ id: "c1", type: "container", props: { flexDirection: "column" }, children: [] }] }] }] },
+    } as unknown as Block,
+  ];
+  const { deps, state } = makeDeps(blocks);
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-row", spans: [1, 1, 1] };
+  ops.dropIntoColumn([0, 0, 0, 0]);
+  const box = (state.blocks[0].props as { rows: { columns: { elements: NestedEl[] }[] }[] }).rows[0].columns[0].elements[0];
+  assert.equal(box.children?.[0].children?.length, 3);
 });
 
 test("dropIntoColumn: a Layout 'new-row' preset is rejected on a locked section instead of mutating its own content (pre-existing gap the final review found)", () => {
@@ -230,7 +264,7 @@ test("dropIntoNewSection: a stale afterBlockIndex far past the array end doesn't
   assert.equal(inserted.props.rows[0].columns[0].elements[0].type, "heading");
 });
 
-test("dropIntoColumn: dropping a non-curated element type into a container's own children (colPath length > 3) is rejected, not silently saved invisible", () => {
+test("dropIntoColumn: any element type drops into a container's own children (ContainerBlock.astro renders every type)", () => {
   const blocks: Block[] = [
     {
       type: "section",
@@ -241,12 +275,10 @@ test("dropIntoColumn: dropping a non-curated element type into a container's own
   ];
   const { deps, state } = makeDeps(blocks);
   const ops = __testOnly_blockOpsFns(deps as never);
-  // "slider" is a real ElType but NOT in CONTAINER_CHILD_TYPES — reproduces
-  // the final review's "renders as null after reload" finding.
-  ops.drag.current = { kind: "new", type: "slider" };
+  ops.drag.current = { kind: "new", type: "gallery" };
   ops.dropIntoColumn([0, 0, 0, 0]);
-  const container = (state.blocks[0].props as { rows: { columns: { elements: { children: unknown[] }[] }[] }[] }).rows[0].columns[0].elements[0];
-  assert.equal(container.children.length, 0, "the unsupported type must not be inserted into the container");
+  const container = (state.blocks[0].props as { rows: { columns: { elements: { children: { type: string }[] }[] }[] }[] }).rows[0].columns[0].elements[0];
+  assert.deepEqual(container.children.map((c) => c.type), ["gallery"]);
 });
 
 test("dropIntoColumn: a colPath that doesn't resolve to a real column (e.g. a row deleted since the drop target was computed) no-ops instead of throwing", () => {

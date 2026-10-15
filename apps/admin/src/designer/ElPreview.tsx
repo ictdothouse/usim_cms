@@ -1662,7 +1662,12 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                 className={`relative min-w-0 ${
                   mode !== "live" ? `cursor-pointer rounded ${childSelected ? "outline outline-2 outline-accent outline-offset-2" : ""}` : ""
                 }`}
-                style={{ ...elMarginStyle(childP), ...elPaddingStyle(childP) }}
+                style={{
+                  ...elMarginStyle(childP),
+                  ...elPaddingStyle(childP),
+                  // Nested "N Columns" width share — same rule as ContainerBlock.astro.
+                  ...(child.type === "container" && child.props.grow ? { flex: `${child.props.grow} 1 0%`, minWidth: "min(15rem, 100%)" } : {}),
+                }}
               >
                 <ElPreview ctx={ctx} el={child} path={childPath} />
               </div>

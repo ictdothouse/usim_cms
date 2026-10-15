@@ -16,7 +16,7 @@ import type React from "react";
 import * as api from "@/lib/api";
 import { toast } from "sonner";
 import type { Key } from "@/i18n";
-import { moveSection, moveColumn } from "../../designerTree";
+import { getNode, moveSection, moveColumn } from "../../designerTree";
 import { section } from "../blockPath";
 import {
   deleteSlideElement,
@@ -29,7 +29,7 @@ import {
 import { scaledFreeFont } from "../style";
 import { writeDragSideKeys, applySectionSpacingWrite } from "../spacingDrag";
 import { ELS } from "../elements";
-import type { Block, LiveSpacing, Sel, SectionProps } from "../types";
+import type { Block, El, LiveSpacing, Sel, SectionProps } from "../types";
 
 export interface LiveEditBridgeDeps {
   blocks: Block[];
@@ -58,6 +58,8 @@ export interface LiveEditBridgeDeps {
   // own residual UI state (see reloading's own comment there), set here.
   setReloading: (v: boolean) => void;
   setCtxMenu: (v: { path: number[]; x: number; y: number } | null) => void;
+  // The element picker an empty column/container's "+" opens (designer:addInto).
+  setAddMenu: (v: { path: number[]; x: number; y: number } | null) => void;
   sliderSlideIdx: Record<string, number>;
   setSliderSlideIdx: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   // Read too, not just set: designer:selected re-sends the selected slide
@@ -97,7 +99,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
     tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
-    setError, setReloading, setCtxMenu, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
+    setError, setReloading, setCtxMenu, setAddMenu, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     linkedPadding, linkedMargin, setLinkedPadding, setLinkedMargin,
     structuralTick, bumpStructural, bp,
   } = deps;
@@ -290,6 +292,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       const phLabels = {
         clickToEdit: t("designer-ph-click-edit"),
         typeText: t("designer-ph-type-text"),
+        addElement: t("designer-add-element"),
         el: Object.fromEntries(Object.entries(ELS).map(([k, d]) => [k, t(d.labelKey)])),
       };
       frame.contentWindow.postMessage({ type: "designer:showSlides", map: sliderSlideIdx, labels: phLabels }, new URL(src, window.location.href).origin);
@@ -319,6 +322,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       }
       if (e.data?.type === "designer:iframeClick") {
         setCtxMenu(null);
+        setAddMenu(null);
         return;
       }
       if (e.data?.type === "designer:scroll") {
@@ -348,6 +352,19 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         const scale = liveFrame.current.offsetWidth ? rect.width / liveFrame.current.offsetWidth : 1;
         setSel(p);
         setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0) * scale, y: rect.top + Number(e.data.y ?? 0) * scale });
+        return;
+      }
+      if (e.data?.type === "designer:addInto") {
+        // An empty column (depth 3) or container (4+) "+" (BaseLayout.astro);
+        // x/y = the button's bottom-center in the iframe's own unscaled px.
+        const p = String(e.data.path ?? "")
+          .split(".")
+          .map(Number);
+        if (p.length < 3 || p.some((n) => !Number.isInteger(n) || n < 0) || !liveFrame.current) return;
+        const rect = liveFrame.current.getBoundingClientRect();
+        const scale = liveFrame.current.offsetWidth ? rect.width / liveFrame.current.offsetWidth : 1;
+        setCtxMenu(null);
+        setAddMenu({ path: p, x: rect.left + Number(e.data.x ?? 0) * scale, y: rect.top + Number(e.data.y ?? 0) * scale });
         return;
       }
       if (e.data?.type === "designer:selectSlideEl") {
@@ -486,14 +503,15 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         .map(Number);
       if (e.data?.type === "designer:select" && path.length >= 1) {
         setSel(path);
-      } else if (e.data?.type === "designer:textInput" && path.length === 4) {
-        const [b, r, c, el] = path;
+      } else if (e.data?.type === "designer:textInput" && path.length >= 4) {
         // Already on screen (the author is typing into it) — see
         // skipNextReload's own comment.
         skipNextReload.current = true;
         pendingTextReload.current = true;
+        // getNode, not a [b,r,c,e] tuple: a container's own heading/text
+        // (depth 5+) is double-click editable too.
         mutate((bs) => {
-          section(bs, b).rows[r].columns[c].elements[el].props.text = e.data.value ?? "";
+          (getNode(bs, path) as El).props.text = e.data.value ?? "";
         });
       } else if (e.data?.type === "designer:reorder") {
         // Even a refused move: the iframe already moved its own DOM.

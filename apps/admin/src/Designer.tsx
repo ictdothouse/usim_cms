@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import * as api from "@/lib/api";
 import { GOOGLE_FONTS, clone } from "@/lib/utils";
 import type { Key } from "@/i18n";
-import { moveSection, moveColumn } from "./designerTree";
+import { childrenOf, moveSection, moveColumn } from "./designerTree";
 import { section } from "./designer/blockPath";
 import type { FieldGroupKey, SectionProps, Block, Sel } from "./designer/types";
 import { BASE_LANG, type DesignerCtx } from "./designer/context";
@@ -22,7 +22,7 @@ import { usePersist } from "./designer/hooks/usePersist";
 import { useStableFns } from "./designer/hooks/useStableFn";
 import MediaPickerModal from "./MediaPickerModal";
 import { DesignerTopBar } from "./designer/DesignerTopBar";
-import { DesignerPalette } from "./designer/DesignerPalette";
+import { AddElementMenu, DesignerPalette } from "./designer/DesignerPalette";
 import { DesignerCanvas } from "./designer/DesignerCanvas";
 import { LiveScrollStage } from "./designer/LiveScrollStage";
 import { DesignerTemplatesModal } from "./designer/DesignerTemplatesModal";
@@ -258,6 +258,8 @@ export default function Designer({
     orientation: "portrait" | "landscape";
   } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
+  // Live Edit's "+" element picker for an empty column/container (AddElementMenu).
+  const [addMenu, setAddMenu] = useState<{ path: number[]; x: number; y: number } | null>(null);
   const [iconSearch, setIconSearch] = useState("");
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
@@ -475,6 +477,7 @@ export default function Designer({
     setError,
     setReloading,
     setCtxMenu,
+    setAddMenu,
     setSliderSlideIdx,
     setSliderInnerSel,
   });
@@ -844,6 +847,29 @@ export default function Designer({
           <div ref={ghostElRef} className="pointer-events-none fixed left-0 top-0 z-50 rounded-lg border border-accent bg-white px-2.5 py-1.5 text-xs font-medium text-ink shadow-lg">
             {ghostLabel}
           </div>
+        )}
+
+        {addMenu && (
+          <AddElementMenu
+            x={addMenu.x}
+            y={addMenu.y}
+            t={t}
+            onClose={() => setAddMenu(null)}
+            onPick={(payload) => {
+              // A new element is selected so the Inspector opens on it (an
+              // Image straight to its file picker); a layout preset isn't.
+              let at = -1;
+              try {
+                if (payload.kind === "new") at = childrenOf(blocks, addMenu.path).length;
+              } catch {
+                /* stale path — dropIntoColumn no-ops too */
+              }
+              drag.current = payload;
+              dropIntoColumn(addMenu.path);
+              if (at >= 0) setSel([...addMenu.path, at]);
+              setAddMenu(null);
+            }}
+          />
         )}
 
         {mode === "live" ? (

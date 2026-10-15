@@ -146,7 +146,7 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   // Recursive container's own flex-layout fields (ELS.container) — no
   // dedicated "layout" group exists, "size" is the closest semantic fit
   // among the existing buckets.
-  flexDirection: "size", justifyContent: "size", alignItems: "size", flexWrap: "size", gap: "size",
+  flexDirection: "size", justifyContent: "size", alignItems: "size", flexWrap: "size", gap: "size", grow: "size",
   // Figma-style split: Appearance (opacity/shadow/radius — visual effects)
   // vs Stroke (the actual border color/width/style), each its own card.
   opacity: "appearance", shadow: "appearance", radius: "appearance",

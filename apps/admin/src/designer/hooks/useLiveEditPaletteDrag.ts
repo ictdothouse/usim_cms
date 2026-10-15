@@ -102,10 +102,11 @@ export function useLiveEditPaletteDrag(deps: LiveEditPaletteDragDeps): LiveEditP
       // An existing element dragged inside the iframe (BaseLayout.astro's
       // drag-reorder, element depth): resolved by the same iframe-side
       // resolver as a palette drag, committed through the same functions as
-      // a "move" drag, so any column/section/new section is a valid drop.
+      // a "move" drag, so any column/container/section/new section is a
+      // valid drop. Container children (depth 5+) move the same way.
       if (e.data?.type === "designer:moveTo") {
         const from = String(e.data.from ?? "").split(".").map(Number);
-        if (from.length !== 4 || from.some((n) => !Number.isInteger(n) || n < 0)) return;
+        if (from.length < 4 || from.some((n) => !Number.isInteger(n) || n < 0)) return;
         drag.current = { kind: "move", path: from };
         commitDropTarget((e.data.target as DropTarget | null) ?? null, dropIntoColumnRef.current, dropIntoNewSectionRef.current);
         drag.current = null;

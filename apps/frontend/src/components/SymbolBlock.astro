@@ -97,7 +97,7 @@ function bpStyleRules(selector: string, bp: Record<string, string>, base: Record
 // contain JSX — this whole function has to live inside a template `{}`
 // expression instead, same as SectionBlock.astro's own `const node = (() =>
 // {...})()` IIFE does for its per-element switch.
-const renderNode = (el: El): unknown => {
+const renderNode = (el: El, nested = false): unknown => {
   const p = el.props ?? {};
   switch (el.type) {
     case "heading": {
@@ -275,6 +275,8 @@ const renderNode = (el: El): unknown => {
             `align-items:${p.alignItems || "stretch"}`,
             `flex-wrap:${flexWrapFor(p.flexDirection, p.flexWrap)}`,
             `gap:${p.gap || "1rem"}`,
+            // A nested "N Columns" column's width share — see ContainerBlock.astro's boxStyle.
+            nested && p.grow ? `flex:${p.grow} 1 0%;min-width:min(15rem,100%)` : null,
             p.bg ? `background:${p.bg}` : null,
             `border-radius:${elRadius(p)}`,
             marginStyle(p),
@@ -284,7 +286,7 @@ const renderNode = (el: El): unknown => {
             .filter(Boolean)
             .join(";")}
         >
-          {children.map((child) => renderNode(child))}
+          {children.map((child) => renderNode(child, true))}
         </div>
       );
     }
