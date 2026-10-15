@@ -292,9 +292,11 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   and text's per-bp `size` now gets a real `bpStyleRules` font-size rule. Toolbar labels arrive in
   `designer:selected.labels` (the iframe has no i18n).
   **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab
-  (DesignerPalette.tsx) now renders two groups instead of one flat list — "Layout" (a 2-column icon
-  grid) then "Content" (the pre-existing full-width row list, `container` excluded since it now lives
-  in Layout). `elements.ts`'s new `LAYOUT_PRESETS` array drives the Layout group: Section, Container,
+  (DesignerPalette.tsx) now renders "Layout" then the element categories (2026-10-15: Basic/Media/
+  Content Blocks/Interactive/Dynamic/Advanced, from `elements.ts`'s `PALETTE_CATEGORY` — a
+  `Record<Exclude<ElType, "container">, Key>`, so a new ElType fails typecheck until it gets a
+  category), every group the same 2-column icon-tile grid via one shared `tile()`; `container` lives
+  in Layout only. `elements.ts`'s new `LAYOUT_PRESETS` array drives the Layout group: Section, Container,
   V Flex/H Flex (both just the `container` ElType with `flexDirection` pre-set via a new `Drag.new`
   field `propsOverride`, not a second ElType), and 6 row-column presets (1/2/3/4 even columns, 1:2,
   2:1 — same spans `ROW_PRESETS`'s inline "+add row" buttons already offered, now also draggable).
