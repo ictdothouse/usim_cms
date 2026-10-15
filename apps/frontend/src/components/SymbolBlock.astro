@@ -33,6 +33,7 @@ import {
   elEntranceClass,
   renderInline,
 } from "../lib/element-render";
+import { flexWrapFor } from "@ucms/element-render";
 
 interface El {
   type: string;
@@ -269,7 +270,7 @@ const renderNode = (el: El): unknown => {
             `flex-direction:${p.flexDirection || "row"}`,
             `justify-content:${p.justifyContent || "flex-start"}`,
             `align-items:${p.alignItems || "stretch"}`,
-            `flex-wrap:${p.flexWrap || "wrap"}`,
+            `flex-wrap:${flexWrapFor(p.flexDirection, p.flexWrap)}`,
             `gap:${p.gap || "1rem"}`,
             p.bg ? `background:${p.bg}` : null,
             `border-radius:${elRadius(p)}`,

@@ -30,6 +30,7 @@ import {
   paddingStyle,
   cls,
 } from "../lib/element-render";
+import { flexWrapFor } from "@ucms/element-render";
 
 interface El {
   id?: string;
@@ -380,7 +381,7 @@ const rowStyle = (row: Row, isFirst: boolean) => {
   // (rowFlexBp/rowFlexBase/buildRowOverride), not by anything computed here.
   const layout =
     row.layoutMode === "flex"
-      ? `display:flex;flex-direction:${row.flexDirection ?? "row"};justify-content:${row.justifyContent ?? "flex-start"};align-items:${row.alignItems ?? "stretch"};flex-wrap:${row.flexWrap ?? "wrap"}`
+      ? `display:flex;flex-direction:${row.flexDirection ?? "row"};justify-content:${row.justifyContent ?? "flex-start"};align-items:${row.alignItems ?? "stretch"};flex-wrap:${flexWrapFor(row.flexDirection, row.flexWrap)}`
       : `grid-template-columns:${(row.columns ?? []).map((c) => `${c.span ?? 1}fr`).join(" ")}`;
   return `${layout};gap:${row.gap ?? pageGap ?? "2rem"};margin-top:${row.marginTop ?? (isFirst ? "0" : "2.5rem")};margin-bottom:${row.marginBottom ?? "0"};${pad}`;
 };
@@ -455,7 +456,9 @@ function rowStyleBase(row: Row, isFirst: boolean): Record<string, string> {
   };
 }
 function buildRowOverride(row: Row, p: Record<string, string>): string {
-  const layout = row.layoutMode === "flex" ? `flex-direction:${p.flexDirection}` : buildRowSpans(row, p);
+  // flex-wrap follows the tier's direction too — mobile's default stack is a
+  // column, which must go single-line (see flexWrapFor).
+  const layout = row.layoutMode === "flex" ? `flex-direction:${p.flexDirection};flex-wrap:${flexWrapFor(p.flexDirection, row.flexWrap)}` : buildRowSpans(row, p);
   const pad =
     p.paddingTop !== "0" || p.paddingRight !== "0" || p.paddingBottom !== "0" || p.paddingLeft !== "0"
       ? `padding:${p.paddingTop} ${p.paddingRight} ${p.paddingBottom} ${p.paddingLeft};`

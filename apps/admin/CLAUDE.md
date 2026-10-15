@@ -559,7 +559,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   stack-to-one-column-on-mobile rule). Inspector's Row panel gained a "Layout" section (Grid/Flex toggle,
   then Direction/Justify/Align icon-button groups + a Wrap toggle) using a new local `FlexIconGroup`
   component in `Inspector.tsx` — not a shared/exported control, this one panel is its only caller.
-  Per-breakpoint column-span overrides still only drive grid-template-columns (`buildRowSpans` in
+  A column-direction Row/Container (incl. flex mode's mobile stack) always renders `flex-wrap: nowrap`
+  (`flexWrapFor` in `@ucms/element-render`, every renderer): `wrap` made it a multi-line flexbox, which
+  sizes a stretched column's height before widening it, so a `width:100%` image overflowed onto the next
+  row (2026-10-15). It never wraps anyway (auto height). Per-breakpoint column-span overrides still only drive grid-template-columns (`buildRowSpans` in
   SectionBlock.astro), not flex-grow — a harmless no-op in flex mode, not wired up as a follow-up unless
   actually asked for. **Scoped deliberately to the existing `Row` primitive, not a new arbitrary-nestable
   Container element** (the Webflow/Framer/Figma-Auto-Layout/FlutterFlow model) — that would still need a

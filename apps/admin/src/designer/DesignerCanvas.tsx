@@ -37,6 +37,7 @@ import {
   PAD, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK,
   SPACE, lengthValue, colStyle, overlayColors, shadowToCss, RADIUS, BORDER, RADIUS_CORNER_KEYS,
 } from "./style";
+import { flexWrapFor } from "@ucms/element-render";
 import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./fields";
 import { ElPreview } from "./ElPreview";
 import { DEVICE_DIMS } from "./DeviceViewport";
@@ -495,7 +496,7 @@ export function DesignerCanvas({
                                 flexDirection: rowFlexDirectionAtBp(row, bp) as React.CSSProperties["flexDirection"],
                                 justifyContent: row.justifyContent ?? "flex-start",
                                 alignItems: row.alignItems ?? "stretch",
-                                flexWrap: row.flexWrap ?? "wrap",
+                                flexWrap: flexWrapFor(rowFlexDirectionAtBp(row, bp), row.flexWrap),
                               }
                             : { gridTemplateColumns: rowGridTemplate(row, bp) }),
                           gap: wire ? "0.75rem" : row.gap ?? pageSettings.gap ?? "1rem",

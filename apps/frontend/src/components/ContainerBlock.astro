@@ -27,6 +27,7 @@ import {
   cls,
   headingTag,
 } from "../lib/element-render";
+import { flexWrapFor } from "@ucms/element-render";
 
 const SRCSET_WIDTHS = [400, 800, 1200, 1600];
 function buildSrcset(url: string): { srcset: string; sizes: string } | null {
@@ -310,7 +311,7 @@ const renderContainerChild = (child: El, childPath: string): unknown => {
             `flex-direction:${cp.flexDirection || "row"}`,
             `justify-content:${cp.justifyContent || "flex-start"}`,
             `align-items:${cp.alignItems || "stretch"}`,
-            `flex-wrap:${cp.flexWrap || "wrap"}`,
+            `flex-wrap:${flexWrapFor(cp.flexDirection, cp.flexWrap)}`,
             `gap:${cp.gap || "1rem"}`,
             cp.bg ? `background:${cp.bg}` : null,
             `border-radius:${elRadius(cp)}`,
@@ -340,7 +341,7 @@ return (
         `flex-direction:${p.flexDirection || "row"}`,
         `justify-content:${p.justifyContent || "flex-start"}`,
         `align-items:${p.alignItems || "stretch"}`,
-        `flex-wrap:${p.flexWrap || "wrap"}`,
+        `flex-wrap:${flexWrapFor(p.flexDirection, p.flexWrap)}`,
         `gap:${p.gap || "1rem"}`,
         p.bg ? `background:${p.bg}` : null,
         `border-radius:${elRadius(p)}`,

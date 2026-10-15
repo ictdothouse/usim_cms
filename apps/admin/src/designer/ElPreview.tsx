@@ -72,7 +72,7 @@ import {
   H_SIZE, ICON_SIZE, SLIDER_HEIGHT, SPACE, TEXT_SIZE,
   elBorderShadowStyle, elHoverClass, elMarginStyle, elPaddingStyle, elRadius, headingFontFamily, hexToRgba, lengthValue, renderInline, scaledFreeFont, shadowToCss, typoStyle,
 } from "./style";
-import { computeFreePositionStyle } from "@ucms/element-render";
+import { computeFreePositionStyle, flexWrapFor } from "@ucms/element-render";
 
 const selEq = (sel: Sel, p: number[]) => sel !== null && sel.length === p.length && p.every((v, i) => sel[i] === v);
 
@@ -1632,7 +1632,7 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
             flexDirection: (p.flexDirection as React.CSSProperties["flexDirection"]) || "row",
             justifyContent: p.justifyContent || "flex-start",
             alignItems: p.alignItems || "stretch",
-            flexWrap: (p.flexWrap as React.CSSProperties["flexWrap"]) || "wrap",
+            flexWrap: flexWrapFor(p.flexDirection, p.flexWrap),
             gap: p.gap || "1rem",
             background: p.bg || undefined,
             borderRadius: elRadius(p),
