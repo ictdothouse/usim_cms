@@ -64,8 +64,12 @@ export function DeviceViewport({
   }
   const frame = { w: screen.w + pad * 2, h: screen.h + pad * 2 };
 
+  // clip, not hidden: a screen still one render behind a resize stays
+  // contained, but 1rem out (both callers' p-4 gutter), so the screen's
+  // shadow isn't cut off where it fills the space — always, under fill.
+  // Safari ignores the margin and clips at the edge, as before.
   return (
-    <div ref={hostRef} className="flex h-full w-full items-center justify-center overflow-hidden">
+    <div ref={hostRef} className="flex h-full w-full items-center justify-center overflow-clip [overflow-clip-margin:1rem]">
       {/* Outer box takes the SCALED size so flex centering works; inner box
           is the true size, scaled from its top-left corner. */}
       <div className="relative shrink-0" style={{ width: frame.w * scale, height: frame.h * scale, visibility: avail ? undefined : "hidden" }}>
@@ -82,7 +86,7 @@ export function DeviceViewport({
             className={`relative overflow-hidden bg-white ${
               // ring, not border: a border would sit inside this exact-size
               // box (border-box) and steal 2px from the page's viewport.
-              device === "mobile" ? "rounded-[1.75rem]" : device === "tablet" ? "rounded-xl" : "rounded-lg shadow-sm ring-1 ring-line/30"
+              device === "mobile" ? "rounded-[1.75rem]" : device === "tablet" ? "rounded-xl" : "rounded-lg shadow-[0_4px_20px_rgb(0_0_0/0.15)] ring-1 ring-line/30"
             }`}
             style={{ width: screen.w, height: screen.h }}
           >
