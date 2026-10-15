@@ -1412,12 +1412,13 @@ const fontsHref = allFonts.length
             // exact drag pressing the content itself does (pointerdown
             // above), for content that's awkward to grab directly. Inside
             // the corner for a section, often full-bleed at the viewport's
-            // own edge.
+            // own edge; centered on an element's corner, which place() tucks
+            // back on-screen when the element is flush with an edge too.
             const grip = document.createElement("div");
             grip.style.cssText =
               "position:absolute;z-index:2;pointer-events:auto;cursor:grab;width:20px;height:20px;border-radius:999px;" +
               `background:${ACCENT};color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.3);` +
-              (path.length === 1 ? "left:4px;top:4px;" : "left:0;top:0;transform:translate(-50%,-50%);");
+              (path.length === 1 ? "left:4px;top:4px;" : "");
             grip.title = L("move", "Move");
             grip.setAttribute("aria-label", grip.title);
             grip.innerHTML =
@@ -1548,10 +1549,14 @@ const fontsHref = allFonts.length
             // ponytail: re-measures every frame while selected (one
             // getBoundingClientRect), same as the slide chrome — follows
             // scroll, a lazy image loading in, and the box resizing mid-drag.
+            // tuck: -10 centers the 20px grip on the corner; where the viewport
+            // edge would clip it, it slides inside the box (never past its end).
+            const tuck = (start, size) => `${Math.min(Math.max(-10, 2 - start), size - 10)}px`;
             const place = () => {
               if (spacingHandleBox !== box) return;
               const r = box.getBoundingClientRect();
               Object.assign(frame.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+              if (path.length !== 1) Object.assign(grip.style, { left: tuck(r.left, r.width), top: tuck(r.top, r.height) });
               for (const edge in edgeGroups) placeSpacingGroup(edgeGroups[edge], edge, r);
               placeSpacingLockBar();
               spacingRaf = requestAnimationFrame(place);
