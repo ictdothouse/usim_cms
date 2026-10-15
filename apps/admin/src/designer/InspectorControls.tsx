@@ -26,7 +26,7 @@ import type { Key } from "@/i18n";
 import type { Bp, Block, El, ElType, LiveSpacing, SectionProps } from "./types";
 import type { DesignerCtx } from "./context";
 import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
-import { ELS, CONTAINER_CHILD_TYPES } from "./elements";
+import { ELS } from "./elements";
 import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
 
 // Duplicated from Designer.tsx's own module-level `uid`/`newEl` (designer/
@@ -110,7 +110,7 @@ export function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; pa
           onChange={(ev) => setAddType(ev.target.value as ElType)}
           className="min-w-0 flex-1 rounded-lg border border-line/30 bg-white px-2 py-1 text-sm"
         >
-          {CONTAINER_CHILD_TYPES.map((ty) => (
+          {(Object.keys(ELS) as ElType[]).map((ty) => (
             <option key={ty} value={ty}>
               {t(ELS[ty].labelKey)}
             </option>

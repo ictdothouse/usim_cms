@@ -11,8 +11,7 @@ import { useRef } from "react";
 import { toast } from "sonner";
 import type { Key } from "@/i18n";
 import { getNode, childrenOf, insertAt, removeAt, moveWithin } from "../../designerTree";
-import { ELS, CONTAINER_CHILD_TYPES } from "../elements";
-import { section } from "../blockPath";
+import { ELS } from "../elements";
 import { newRow, newSection } from "../parsers";
 import type { Block, Col, Row, El, ElType, Sel, SectionProps, Drag } from "../types";
 import type { ClipLevel } from "../context";
@@ -23,6 +22,13 @@ const newEl = (type: ElType, propsOverride?: Record<string, string>): El => ({
   id: uid(),
   type,
   props: { ...ELS[type].defaults, ...propsOverride },
+});
+// A Layout "N Columns" preset dropped inside a column/container: an H Flex of
+// V Flex columns, the preset's spans as each column's `grow`
+// (ContainerBlock.astro sizes and wraps them).
+const newColumns = (spans: number[]): El => ({
+  ...newEl("container", { flexDirection: "row" }),
+  children: spans.map((span) => newEl("container", { flexDirection: "column", grow: String(span) })),
 });
 
 // A move's source path can be stale — Live Edit's iframe keeps showing the
@@ -329,16 +335,34 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
       return;
     }
     // Unlike "new-section", a "new-row" preset DOES mutate the hovered
-    // section's own content (pushes onto ITS rows) — a lock check was
-    // missing here (final branch review finding); the server-side
-    // validator already rejected the save either way, but the client
-    // should refuse it the same way every other mutator in this file does.
+    // section's own content — a lock check was missing here (final branch
+    // review finding); the server-side validator already rejected the save
+    // either way, but the client should refuse it the same way every other
+    // mutator in this file does.
     if (d.kind === "new-row") {
       if (isSectionLocked(colPath[0])) {
         toast.error(t("designer-section-locked-toast"));
         return;
       }
-      mutate((bs) => section(bs, colPath[0]).rows.push(newRow(d.spans)));
+      mutate((bs) => {
+        let list: unknown;
+        try {
+          list = childrenOf(bs, colPath);
+        } catch {
+          return;
+        }
+        if (!Array.isArray(list)) return;
+        // A lone empty section column (a fresh Section) becomes the preset's
+        // real columns rather than a box in a box.
+        const row = colPath.length === 3 ? (getNode(bs, colPath.slice(0, 2)) as Row) : null;
+        if (row && row.columns.length === 1 && list.length === 0) {
+          row.columns = newRow(d.spans).columns;
+          return;
+        }
+        // Anywhere else it nests exactly where it was dropped — it used to
+        // append a Row at the section's end whatever the drop indicator said.
+        list.splice(index ?? list.length, 0, newColumns(d.spans));
+      });
       return;
     }
     if (isSectionLocked(colPath[0]) || (d.kind !== "new" && isSectionLocked(d.path[0]))) {
@@ -360,20 +384,6 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
       }
       if (!Array.isArray(children)) return;
       if (d.kind !== "new" && !nodeAt(bs, d.path)) return;
-      // colPath.length > 3 means the target is a CONTAINER's own children
-      // array, not a top-level column — those only accept a curated type
-      // subset (ContainerChildrenPanel's own dropdown already enforces this
-      // in the Inspector). Without this check, Live Edit could drop any
-      // palette type into a container; a non-curated type renders as null
-      // on the published site (SectionBlock.astro's container-child switch
-      // has no case for it) — saved, but invisible after the reload.
-      if (colPath.length > 3) {
-        const droppedType = d.kind === "new" ? d.type : (getNode(bs, d.path) as El).type;
-        if (!CONTAINER_CHILD_TYPES.includes(droppedType)) {
-          toast.error(t("designer-container-child-type-unsupported"));
-          return;
-        }
-      }
       if (d.kind === "new") {
         insertAt(bs, colPath, newEl(d.type, d.propsOverride), index);
         return;

@@ -300,16 +300,31 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   V Flex/H Flex (both just the `container` ElType with `flexDirection` pre-set via a new `Drag.new`
   field `propsOverride`, not a second ElType), and 6 row-column presets (1/2/3/4 even columns, 1:2,
   2:1 — same spans `ROW_PRESETS`'s inline "+add row" buttons already offered, now also draggable).
-  Two of these presets don't produce an `El` at all, so `Drag` gained two kinds: `"new-section"`
-  (insert a fresh Block) and `"new-row"` (push a fresh Row onto the hovered column's own section) —
-  both handled by `useBlockOps.ts`'s `dropIntoColumn` before it falls into the pre-existing
-  El-insert/move branch, dropped onto any existing column (section-insert lands right after that
-  column's section; row-insert ignores which column specifically and appends to that section's
-  `rows`) or onto the canvas's own "+ Add Section" button (always appends to the end, mirroring its
-  click handler). `newSection()`/`newRow()` (parsers.ts) are the one shared factory for both the
-  click buttons and the new drag path — no duplicated object literals. No lock check on either new
-  branch, matching the pre-existing add-row/add-section buttons' own behavior (inserting a sibling
-  row/section never mutates the hovered section's own locked content).
+  `Drag` has two Layout-only kinds, both handled by `useBlockOps.ts`'s `dropIntoColumn`/
+  `dropIntoNewSection` before the El-insert/move branch: `"new-section"` (a fresh Block right after
+  the hovered section, or at a new-section target) and `"new-row"`. **Layout nests where it's dropped
+  (2026-10-15, user report: "2 Columns" showed one box and never went inside a box)** — `"new-row"`
+  used to push a Row onto the END of the hovered section whatever the drop line said. Now: a lone
+  empty section column (a fresh Section) becomes the preset's real Row columns; a new-section target
+  gets a section with that Row; anywhere else (a column with content, any container) it inserts
+  `newColumns(spans)` at the drop index — an H Flex container whose V Flex children carry the spans
+  as `grow` (container field, `ENUM_VALUES.grow`). `ContainerBlock.astro`/`SymbolBlock.astro`/
+  ElPreview render a nested container's `grow` as `flex:<grow> 1 0%;min-width:min(15rem,100%)`, so
+  the columns keep their ratio and wrap onto their own lines when the row is too narrow (that's the
+  mobile stack — no bp rule). Section vs Container: Section is the top-level band (background,
+  padding, contained/full width) holding Rows; Container/V Flex/H Flex are flex boxes inside a
+  column that nest freely ("Container" = H Flex, default row). `newSection()`/`newRow()` (parsers.ts)
+  stay the shared Row factories; lock check on `"new-row"` (it mutates the hovered section).
+  **Live Edit drop boxes + "+" (2026-10-15)**: `resolveDropTargetFromPath` (and its BaseLayout port)
+  takes `opts {container, horizontal, pointerX}` — a hovered container's middle drops INTO it (a 10px
+  edge band, ≤¼ of the box, along the parent's axis still means before/after), and inside a
+  row-direction parent before/after is decided on X; the indicator boxes the `.ds-container` (never its
+  0×0 display:contents wrapper) and draws an upright line in a row box. Every empty column/container
+  gets an editor-only "+" (`[data-ds-add]`, ignored by the empty-box CSS) that posts
+  `designer:addInto {path,x,y}`; Designer opens `AddElementMenu` (DesignerPalette.tsx, the Elements
+  tab's `PaletteGroups` minus Section) there and a pick runs `dropIntoColumn(path)`, selecting a new
+  element so the Inspector opens on it. Container children (depth 5+) also drag anywhere
+  (`designer:moveTo` accepts depth ≥4) and double-click edit (`designer:textInput` via `getNode`).
   **Device-preview modal: real dimensions, rotate, no in-frame scrollbar (2026-09-25)**: the
   mobile/tablet bezel used an arbitrary `aspect-[9/19.5]` ratio capped at a fairly small `max-h`, and
   had no rotate control at all — replaced with named real device viewports (`DEVICE_DIMS`: iPhone
@@ -597,6 +612,14 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   DB+browser can't run inside that step; a separate CI job runs it against isolated PostgreSQL/API
   services. A second smoke case checks Live Edit drag-in. These tests cover key save/render paths, not
   the full Designer interaction surface; see the refactor-design doc for the remaining optional Layer 2.
+  **Update 2026-10-15 — scope lines (1), (2) and (4) below are lifted:** a container child may be
+  ANY ElType (`CONTAINER_CHILD_TYPES` removed; `ContainerBlock.astro` renders every child through the
+  same leaf component + display:contents wrapper — `data-designer-path`/`data-ds-type`/`data-vis`,
+  hide* rules — SectionBlock gives a top-level element, so Live Edit placeholders reach them), Live
+  Edit drops into and drags within containers, and the Inspector's child picker lists every type.
+  Still true: no per-language override for nested children, no spacing handles/context menu past
+  depth 4, and `SymbolBlock.astro`'s own render stays a curated subset (other types inside a symbol
+  master render nothing — pre-existing).
   **Recursive Container element (2026-09-11):** `ElType` gained `"container"` and `El` gained an optional
   `children?: El[]` (`designer/types.ts`) — a flex box that can hold any other element, including another
   container, nested arbitrarily deep. `designerTree.ts`'s `childrenOf()` was extended past its old
@@ -1654,6 +1677,7 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   element type could be dropped into a container's own children, bypassing
   `ContainerChildrenPanel`'s curated list (`CONTAINER_CHILD_TYPES`, moved to
   `elements.ts` so this hook can share it) — saved fine, rendered as nothing.
+  (2026-10-15: list and check removed — every type renders in a container now.)
   The gesture hook's `onMove`/`onUp` closures captured a single resolved
   iframe/src pair at drag-start and never re-resolved it, so a mid-drag
   reload (every drop triggers one) left the rest of that gesture targeting

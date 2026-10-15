@@ -1,47 +1,24 @@
 ---
 // Recursive container (Webflow/Figma-style nested-anywhere box) render
-// branch, extracted verbatim out of SectionBlock.astro's "container" case
-// (god-file breakup, see SectionBlock.astro's own top-of-file comment on why
-// shared *logic* goes through lib/element-render.ts, never another .astro
-// file's frontmatter). v1 scope, curated child types only (mirrors
-// SectionBlock.astro's own renderSlideEl curated set), no real
-// per-breakpoint style override for children yet (admin-preview-only there,
-// same as most Element bp — see apps/admin/CLAUDE.md's "Recursive Container
-// element" section).
-import {
-  SPACE,
-  ICON_PATHS,
-  TEXT_SIZE,
-  ICON_SIZE,
-  fluidTextSize,
-  safeUrl,
-  renderInline,
-  lengthValue,
-  marginStyle,
-  paddingStyle,
-  elBorderShadowStyle,
-  typoStyle,
-  elHoverClass,
-  elEntranceClass,
-  elRadius,
-  imgAlignStyle,
-  cls,
-  headingTag,
-} from "../lib/element-render";
+// branch, extracted out of SectionBlock.astro's "container" case (god-file
+// breakup, see SectionBlock.astro's own top-of-file comment on why shared
+// *logic* goes through lib/element-render.ts, never another .astro file's
+// frontmatter). A child of any element type renders through the same leaf
+// component and display:contents wrapper SectionBlock.astro gives a
+// top-level element (2026-10-15 — was a curated 9-type subset rendered
+// inline), so a nested "N Columns" (a row container of `grow` column
+// containers) holds anything a column does, and Live Edit's placeholders,
+// double-click text edit and drag reach every child.
+import ElementBlock from "./ElementBlock.astro";
+import MiscBlock from "./MiscBlock.astro";
+import SliderBlock from "./SliderBlock.astro";
+import MenuBlock from "./MenuBlock.astro";
+import SymbolBlock from "./SymbolBlock.astro";
+import PostListBlock from "./PostListBlock.astro";
+import EventListBlock from "./EventListBlock.astro";
+import RepeaterBlock from "./RepeaterBlock.astro";
+import { marginStyle, paddingStyle, elBorderShadowStyle, elRadius, cls } from "../lib/element-render";
 import { flexWrapFor } from "@ucms/element-render";
-
-const SRCSET_WIDTHS = [400, 800, 1200, 1600];
-function buildSrcset(url: string): { srcset: string; sizes: string } | null {
-  const m = /[?&]w=(\d+)/.exec(url);
-  if (!m) return null;
-  const width = Number(m[1]);
-  const base = url.split("?")[0];
-  const dot = base.lastIndexOf(".");
-  const stem = dot === -1 ? base : base.slice(0, dot);
-  const candidates = SRCSET_WIDTHS.filter((w) => w < width);
-  const srcset = [...candidates.map((w) => `${stem}-${w}w.webp ${w}w`), `${url} ${width}w`].join(", ");
-  return { srcset, sizes: "(max-width: 768px) 100vw, 50vw" };
-}
 
 interface El {
   id?: string;
@@ -59,18 +36,18 @@ interface Props {
   c: number;
   e: number;
   designerEdit?: boolean;
+  // Menu/post list/event list/symbol children fetch per tenant + language.
+  tenantHost?: string;
+  requestedLang?: string | null;
 }
-const { el, elId, blockIndex, r, c, e, designerEdit = false } = Astro.props as Props;
+const { el, elId, blockIndex, r, c, e, designerEdit = false, tenantHost = "", requestedLang = null } = Astro.props as Props;
 const p = el.props ?? {};
 
-// Heading/text children's own real per-breakpoint typography override —
-// same bpStyleRules mechanism SectionBlock.astro uses for its own top-level
-// elements (see that file's comment), duplicated here rather than shared
-// (this codebase's established convention — see this file's own top
-// comment on why shared *logic* goes through lib/element-render.ts, never
-// another .astro file's frontmatter). A container child's data-vis id is the
-// container's own `elId` plus its child indexes (`visId` below), not its
-// dotted `childPath`: that path restarts at 0 in the header and footer too.
+// A container child's data-vis id is the container's own `elId` plus its
+// child indexes (`visId` below), not its dotted `childPath`: that path
+// restarts at 0 in the header and footer too. Local bpMerge/bpStyleRules,
+// not shared — this codebase's established duplication convention (see the
+// top comment).
 const responsiveRules: string[] = [];
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
   const prefix = `${tier}:`;
@@ -96,266 +73,178 @@ function bpStyleRules(selector: string, bp: Record<string, string>, base: Record
   }
   return out;
 }
+const spacingCss = (cp: Record<string, string>) => [marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";");
+// The Inspector's VisibilityToggle on a child — same @media rules as
+// SectionBlock.astro's respId. True when the child needs its data-vis id.
+function hideRules(cp: Record<string, string>, visId: string): boolean {
+  const sel = `[data-vis="${visId}"]`;
+  if (cp.hideDesktop === "true") responsiveRules.push(`@media (min-width:1025px){${sel}{display:none!important}}`);
+  if (cp.hideTablet === "true") responsiveRules.push(`@media (min-width:641px) and (max-width:1024px){${sel}{display:none!important}}`);
+  if (cp.hideMobile === "true") responsiveRules.push(`@media (max-width:640px){${sel}{display:none!important}}`);
+  return cp.hideDesktop === "true" || cp.hideTablet === "true" || cp.hideMobile === "true";
+}
+// `grow` (a nested "N Columns" column's width share) only means something
+// on a nested box, inside its row-direction parent. The min width makes a
+// row too narrow for its columns wrap them onto their own lines — that's
+// what stacks nested columns on mobile.
+// ponytail: fixed 15rem floor; a per-container min-width field if slim side-by-side columns in a narrow parent are ever needed.
+function boxStyle(cp: Record<string, string>, nested: boolean): string {
+  return [
+    "display:flex",
+    `flex-direction:${cp.flexDirection || "row"}`,
+    `justify-content:${cp.justifyContent || "flex-start"}`,
+    `align-items:${cp.alignItems || "stretch"}`,
+    `flex-wrap:${flexWrapFor(cp.flexDirection, cp.flexWrap)}`,
+    `gap:${cp.gap || "1rem"}`,
+    nested && cp.grow ? `flex:${cp.grow} 1 0%;min-width:min(15rem,100%)` : null,
+    cp.bg ? `background:${cp.bg}` : null,
+    `border-radius:${elRadius(cp)}`,
+    marginStyle(cp),
+    paddingStyle(cp),
+    elBorderShadowStyle(cp),
+  ]
+    .filter(Boolean)
+    .join(";");
+}
 ---
 
 {(() => {
 // JSX only parses inside the template section's `{}` expressions, never in
-// the frontmatter above the closing "---" — renderContainerChild has to
-// live in here (an IIFE, same trick as SectionBlock.astro's own renderSlideEl)
-// rather than up there with the plain helpers.
-const renderContainerChild = (child: El, childPath: string, visId: string): unknown => {
+// the frontmatter above the closing "---" — renderChild has to live in here
+// (an IIFE, same trick as SectionBlock.astro's own renderSlideEl).
+const renderChild = (child: El, childPath: string, visId: string): unknown => {
   const cp = child.props ?? {};
-  switch (child.type) {
-    case "heading": {
-      const Tag = headingTag(cp.level) as "h1";
-      const hasTypoBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-h`, child.bp!, cp, typoStyle));
-      const headingNode = (
-        <Tag
-          class={cls("ds-h", `ds-h${cp.level ?? "2"}`, cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
-          data-designer-path={designerEdit ? childPath : undefined}
-          style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp), typoStyle(cp), elBorderShadowStyle(cp)]
-            .filter(Boolean)
-            .join(";")}
-          set:html={cp.text ? renderInline(cp.text) : ""}
-        />
-      );
-      return hasTypoBp ? (
-        <div data-vis={visId} style="display:contents">
-          {headingNode}
-        </div>
-      ) : (
-        headingNode
+  const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
+  if (child.type === "container") {
+    if (hasBp) {
+      responsiveRules.push(
+        ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) =>
+          [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
+        ),
       );
     }
-    case "text": {
-      const hasTypoBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasTypoBp) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-text`, child.bp!, cp, typoStyle));
-      const textNode = (
-        <p
-          class={cls("ds-text", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
-          data-designer-path={designerEdit ? childPath : undefined}
-          style={[
-            `font-size:${fluidTextSize(lengthValue(cp.size, TEXT_SIZE, TEXT_SIZE.md))}`,
-            cp.align ? `text-align:${cp.align}` : null,
-            marginStyle(cp),
-            paddingStyle(cp),
-            typoStyle(cp),
-            elBorderShadowStyle(cp),
-          ]
-            .filter(Boolean)
-            .join(";")}
-          set:html={renderInline(cp.text ?? "")}
-        />
-      );
-      return hasTypoBp ? (
-        <div data-vis={visId} style="display:contents">
-          {textNode}
-        </div>
-      ) : (
-        textNode
-      );
-    }
-    case "image": {
-      const cpSrc = safeUrl(cp.src);
-      if (!cpSrc) return null;
-      const cpSrcset = buildSrcset(cpSrc);
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => marginStyle(mp) ?? ""),
-          ...bpStyleRules(`[data-vis="${visId}"] img`, child.bp!, cp, (mp) =>
-            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp)]
-              .filter(Boolean)
-              .join(";"),
-          ),
-        );
-      }
-      // Same two-node box as ElementBlock.astro's image: margin on the
-      // wrapper, so a row container's image no longer runs past it.
-      return (
-        <div class="ds-img-wrap" data-designer-path={designerEdit ? childPath : undefined} data-vis={hasBp ? visId : undefined} style={marginStyle(cp)}>
-          <img
-            class={cls("ds-img", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
-            src={cpSrc}
-            srcset={cpSrcset?.srcset}
-            sizes={cpSrcset ? cpSrcset.sizes : undefined}
-            alt={cp.alt ?? ""}
-            loading="lazy"
-            style={[`border-radius:${elRadius(cp)}`, cp.imgWidth ? `width:${cp.imgWidth}` : null, imgAlignStyle(cp.align), paddingStyle(cp), elBorderShadowStyle(cp)]
-              .filter(Boolean)
-              .join(";")}
-          />
-        </div>
-      );
-    }
-    case "button": {
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
-          ...bpStyleRules(`[data-vis="${visId}"] .ds-btn`, child.bp!, cp, (mp) => elBorderShadowStyle(mp) ?? ""),
-        );
-      }
-      return cp.label ? (
-        <div
-          data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? visId : undefined}
-          style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
-        >
-          <a
-            class={cls(cp.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", cp.cssClass, elHoverClass(cp), elEntranceClass(cp))}
-            href={safeUrl(cp.href) ?? "#"}
-            style={[cp.color ? `color:${cp.color}` : null, elBorderShadowStyle(cp)].filter(Boolean).join(";") || undefined}
-          >
-            {cp.label}
-          </a>
-        </div>
-      ) : null;
-    }
-    case "badge": {
-      const badgeIconPath = cp.name ? ICON_PATHS[cp.name] : undefined;
-      const badgeIconSize = { sm: "14", md: "16", lg: "20" }[cp.scale ?? "md"] ?? "16";
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
-        );
-      }
-      return (
-        <div
-          data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? visId : undefined}
-          style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
-        >
-          <span class={cls(`ds-badge ds-badge-${cp.variant || "soft"} ds-badge-${cp.scale || "md"}`, cp.cssClass)} style={cp.color ? `color:${cp.color}` : undefined}>
-            {badgeIconPath && (
-              <svg width={badgeIconSize} height={badgeIconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d={badgeIconPath} />
-              </svg>
-            )}
-            {cp.label}
-          </span>
-        </div>
-      );
-    }
-    case "spacer": {
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) =>
-            [`height:${lengthValue(mp.height, SPACE, SPACE.md)}`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";"),
-          ),
-        );
-      }
-      return (
-        <div
-          data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? visId : undefined}
-          style={[`height:${lengthValue(cp.height, SPACE, SPACE.md)}`, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
-        />
-      );
-    }
-    case "divider": {
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")));
-      }
-      return (
-        <hr
-          data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? visId : undefined}
-          class="ds-divider"
-          style={[marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
-        />
-      );
-    }
-    case "icon": {
-      const iconPath = ICON_PATHS[cp.name ?? "check"] ?? ICON_PATHS.check;
-      const iconSize = lengthValue(cp.size, ICON_SIZE, ICON_SIZE.md);
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
-        );
-      }
-      return (
-        <div
-          data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? visId : undefined}
-          style={[cp.align ? `text-align:${cp.align}` : null, marginStyle(cp), paddingStyle(cp)].filter(Boolean).join(";")}
-        >
-          <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={cp.color || "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d={iconPath} />
-          </svg>
-        </div>
-      );
-    }
-    case "container": {
-      const grandchildren = child.children ?? [];
-      const hasBp = !!child.bp && Object.keys(child.bp).length > 0;
-      if (hasBp) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) =>
-            [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
-          ),
-        );
-      }
-      return (
-        <div
-          class="ds-container"
-          data-designer-path={designerEdit ? childPath : undefined}
-          data-vis={hasBp ? visId : undefined}
-          style={[
-            "display:flex",
-            `flex-direction:${cp.flexDirection || "row"}`,
-            `justify-content:${cp.justifyContent || "flex-start"}`,
-            `align-items:${cp.alignItems || "stretch"}`,
-            `flex-wrap:${flexWrapFor(cp.flexDirection, cp.flexWrap)}`,
-            `gap:${cp.gap || "1rem"}`,
-            cp.bg ? `background:${cp.bg}` : null,
-            `border-radius:${elRadius(cp)}`,
-            marginStyle(cp),
-            paddingStyle(cp),
-            elBorderShadowStyle(cp),
-          ]
-            .filter(Boolean)
-            .join(";")}
-        >
-          {grandchildren.map((gc, gi) => renderContainerChild(gc, `${childPath}.${gi}`, `${visId}.${gi}`))}
-        </div>
-      );
-    }
-    default:
-      return null;
+    const boxVis = hideRules(cp, visId) || hasBp;
+    return (
+      <div
+        class={cls("ds-container", cp.cssClass)}
+        data-designer-path={designerEdit ? childPath : undefined}
+        data-vis={boxVis ? visId : undefined}
+        style={boxStyle(cp, true)}
+      >
+        {(child.children ?? []).map((gc, gi) => renderChild(gc, `${childPath}.${gi}`, `${visId}.${gi}`))}
+      </div>
+    );
   }
+  // Same type -> component mapping as SectionBlock.astro's element switch.
+  const node = (() => {
+    switch (child.type) {
+      case "heading":
+      case "text":
+      case "image":
+      case "video":
+      case "button":
+      case "badge":
+      case "spacer":
+      case "divider":
+      case "embed":
+      case "icon":
+      case "list":
+      case "html":
+      case "gallery":
+        // e={-1}: a nested image is never the page's LCP "first element".
+        return <ElementBlock el={child} elId={visId} blockIndex={blockIndex} r={r} c={c} e={-1} />;
+      case "accordion":
+      case "infobox":
+      case "tabs":
+      case "cardgrid":
+      case "ctabanner":
+      case "announcementbar":
+      case "googlemap":
+        return <MiscBlock el={child} elId={visId} />;
+      case "slider":
+        return <SliderBlock el={child} designerEdit={designerEdit} elId={visId} />;
+      case "menu":
+        return (
+          <MenuBlock
+            menuId={cp.menuId ?? ""}
+            layout={cp.layout as "horizontal" | "vertical" | undefined}
+            dropdownTrigger={cp.dropdownTrigger as "hover" | "click" | undefined}
+            megaMenuWidth={cp.megaMenuWidth as "contained" | "full-width" | undefined}
+            tenantHost={tenantHost}
+            lang={requestedLang}
+            p={cp}
+            bp={child.bp}
+            elId={visId}
+          />
+        );
+      case "symbol":
+        if (hasBp) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] > .ds-symbol`, child.bp!, cp, spacingCss));
+        return <SymbolBlock symbolId={cp.symbolId ?? ""} tenantHost={tenantHost} box={spacingCss(cp)} elId={visId} />;
+      case "postlist":
+        return (
+          <PostListBlock
+            categoryId={cp.categoryId ?? ""}
+            count={cp.count}
+            columns={cp.columns}
+            postLayout={cp.postLayout as "grid" | "list" | undefined}
+            tenantHost={tenantHost}
+            lang={requestedLang}
+            p={cp}
+            bp={child.bp}
+            elId={visId}
+          />
+        );
+      case "eventlist":
+        return (
+          <EventListBlock
+            count={cp.count}
+            columns={cp.columns}
+            eventLayout={cp.eventLayout as "grid" | "list" | "calendar" | undefined}
+            tenantHost={tenantHost}
+            p={cp}
+            bp={child.bp}
+            elId={visId}
+          />
+        );
+      case "testimonial":
+      case "statscounter":
+      case "peoplegrid":
+      case "socialicons":
+      case "logocloud":
+      case "timeline":
+      case "documentdownload":
+      case "announcementticker":
+        return <RepeaterBlock el={child} elId={visId} />;
+      default:
+        return null;
+    }
+  })();
+  // Live Edit's empty-element placeholder (BaseLayout.astro) wears the
+  // child's own margin/padding, same as SectionBlock.astro's elements.
+  if (designerEdit && hasBp) responsiveRules.push(...bpStyleRules(`[data-designer-path="${childPath}"] > [data-ds-ph]`, child.bp!, cp, spacingCss));
+  const vis = hideRules(cp, visId) || hasBp || child.type === "slider";
+  return designerEdit || vis ? (
+    <div
+      data-designer-path={designerEdit ? childPath : undefined}
+      data-ds-type={designerEdit ? child.type : undefined}
+      data-ds-ph-style={designerEdit ? spacingCss(cp) || undefined : undefined}
+      data-vis={vis ? visId : undefined}
+      style="display:contents"
+    >
+      {node}
+    </div>
+  ) : (
+    node
+  );
 };
 const elDottedPath = `${blockIndex}.${r}.${c}.${e}`;
-const containerChildren = (el.children ?? []).map((child, i) => renderContainerChild(child, `${elDottedPath}.${i}`, `${elId}.${i}`));
+const containerChildren = (el.children ?? []).map((child, i) => renderChild(child, `${elDottedPath}.${i}`, `${elId}.${i}`));
 return (
   <>
-    <div
-      class={cls("ds-container", p.cssClass)}
-      style={[
-        "display:flex",
-        `flex-direction:${p.flexDirection || "row"}`,
-        `justify-content:${p.justifyContent || "flex-start"}`,
-        `align-items:${p.alignItems || "stretch"}`,
-        `flex-wrap:${flexWrapFor(p.flexDirection, p.flexWrap)}`,
-        `gap:${p.gap || "1rem"}`,
-        p.bg ? `background:${p.bg}` : null,
-        `border-radius:${elRadius(p)}`,
-        marginStyle(p),
-        paddingStyle(p),
-        elBorderShadowStyle(p),
-      ]
-        .filter(Boolean)
-        .join(";")}
-    >
+    <div class={cls("ds-container", p.cssClass)} style={boxStyle(p, false)}>
       {containerChildren}
     </div>
     {responsiveRules.length > 0 && <style set:html={responsiveRules.join("")} />}
   </>
 );
 })()}
-

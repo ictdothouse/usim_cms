@@ -12,13 +12,86 @@
 // Holds no hooks of its own — deliberately NOT wrapped in React.memo (this
 // region wasn't memoized before the split either).
 import { ChevronDown, ChevronRight, Layers, Lock, Settings } from "lucide-react";
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject, type ReactNode } from "react";
 import type { Key } from "@/i18n";
 import { Inspector } from "./Inspector";
-import { ELS, LAYOUT_PRESETS, PALETTE_CATEGORY } from "./elements";
+import { ELS, LAYOUT_PRESETS, PALETTE_CATEGORY, type LayoutPreset } from "./elements";
 import type { Block, SectionProps, ElType, Drag } from "./types";
 import type { DesignerCtx } from "./context";
 import type { useSiteChrome } from "./hooks/useSiteChrome";
+
+type Tile = (key: string, Icon: typeof Settings, label: string, payload: Drag) => ReactNode;
+const paletteTypes = Object.keys(PALETTE_CATEGORY) as Exclude<ElType, "container">[];
+
+// Layout presets, then every element category — one labelled tile grid each.
+// Shared by the Elements tab and the "+" picker (AddElementMenu); `tile`
+// decides what a click/drag does.
+function PaletteGroups({ t, tile, layout = LAYOUT_PRESETS, grid }: { t: (k: Key) => string; tile: Tile; layout?: LayoutPreset[]; grid: string }) {
+  const groups: [Key, ReactNode[]][] = [
+    ["designer-category-layout", layout.map((preset) => tile(preset.key, preset.icon, t(preset.labelKey), preset.drag))],
+    ...[...new Set(Object.values(PALETTE_CATEGORY))].map((category): [Key, ReactNode[]] => [
+      category,
+      paletteTypes.filter((type) => PALETTE_CATEGORY[type] === category).map((type) => tile(type, ELS[type].icon, t(ELS[type].labelKey), { kind: "new", type })),
+    ]),
+  ];
+  return (
+    <>
+      {groups.map(([label, tiles]) => (
+        <div key={label} className="space-y-1.5">
+          <p className="text-xs font-bold uppercase tracking-wider text-sub">{t(label)}</p>
+          <div className={grid}>{tiles}</div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// Live Edit's "+" in an empty column/container (designer:addInto) opens this
+// at the button: the Elements tab's groups minus Section (a section never
+// goes inside a box); a click inserts into that box.
+export function AddElementMenu({ x, y, t, onPick, onClose }: { x: number; y: number; t: (k: Key) => string; onPick: (payload: Drag) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    ref.current?.querySelector("button")?.focus();
+    const outside = (e: Event) => !ref.current?.contains(e.target as Node) && close.current();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("scroll", outside, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", outside);
+      window.removeEventListener("scroll", outside, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+  const width = 320;
+  const height = Math.min(440, window.innerHeight - 16);
+  const left = Math.max(8, Math.min(x - width / 2, window.innerWidth - width - 8));
+  const top = y + 8 + height > window.innerHeight ? Math.max(8, y - height - 40) : y + 8;
+  const tile: Tile = (key, Icon, label, payload) => (
+    <button
+      type="button"
+      key={key}
+      onClick={() => onPick(payload)}
+      className="flex flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-1 py-2 text-center text-xs font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white"
+    >
+      <Icon className="h-4 w-4 text-accent" /> {label}
+    </button>
+  );
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={t("designer-add-element")}
+      className="fixed z-50 space-y-3 overflow-y-auto rounded-xl border border-line/30 bg-white p-3 shadow-xl"
+      style={{ left, top, width, maxHeight: height }}
+    >
+      <PaletteGroups t={t} tile={tile} layout={LAYOUT_PRESETS.filter((preset) => preset.drag.kind !== "new-section")} grid="grid grid-cols-3 gap-1.5" />
+    </div>
+  );
+}
 
 export function LayersTreeView({
   blocks, treeDropHint, rowDragProps, expanded, selEq, pick, toggleExpand, t,
@@ -221,7 +294,7 @@ export function DesignerPalette({
   }
   // One palette tile — Layout presets and every element category share the
   // same click/drag wiring, only the payload differs.
-  const tile = (key: string, Icon: typeof Settings, label: string, payload: Drag) => (
+  const tile: Tile = (key, Icon, label, payload) => (
     <button
       type="button"
       key={key}
@@ -248,7 +321,6 @@ export function DesignerPalette({
       <Icon className="h-4 w-4 text-accent" /> {label}
     </button>
   );
-  const paletteTypes = Object.keys(PALETTE_CATEGORY) as Exclude<ElType, "container">[];
   return (
     <aside
       id="designer-palette"
@@ -287,22 +359,7 @@ export function DesignerPalette({
       </div>
       {activeLeftTab === "elements" ? (
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <p className="text-xs font-bold uppercase tracking-wider text-sub">{t("designer-category-layout")}</p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {LAYOUT_PRESETS.map((preset) => tile(preset.key, preset.icon, t(preset.labelKey), preset.drag))}
-            </div>
-          </div>
-          {[...new Set(Object.values(PALETTE_CATEGORY))].map((category) => (
-            <div key={category} className="space-y-1.5">
-              <p className="text-xs font-bold uppercase tracking-wider text-sub">{t(category)}</p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {paletteTypes
-                  .filter((type) => PALETTE_CATEGORY[type] === category)
-                  .map((type) => tile(type, ELS[type].icon, t(ELS[type].labelKey), { kind: "new", type }))}
-              </div>
-            </div>
-          ))}
+          <PaletteGroups t={t} tile={tile} grid="grid grid-cols-2 gap-1.5" />
           <p className="pt-2 text-xs leading-relaxed text-sub">{t("designer-drop-hint")}</p>
         </div>
       ) : activeLeftTab === "layers" ? (
