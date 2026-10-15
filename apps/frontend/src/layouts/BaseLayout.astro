@@ -301,7 +301,7 @@ const fontsHref = allFonts.length
       >
         {chromeLayout(headerChrome).map((block, b) =>
           block.type === "section" ? (
-            <SectionBlock {...(block.props ?? {})} blockIndex={b} tenantHost={tenantHost} requestedLang={requestedLang} />
+            <SectionBlock {...(block.props ?? {})} blockIndex={b} idPrefix="h" tenantHost={tenantHost} requestedLang={requestedLang} />
           ) : (
             <GenericBlock type={block.type} props={block.props} />
           ),
@@ -354,7 +354,7 @@ const fontsHref = allFonts.length
       <footer>
         {chromeLayout(footerChrome).map((block, b) =>
           block.type === "section" ? (
-            <SectionBlock {...(block.props ?? {})} blockIndex={b} tenantHost={tenantHost} requestedLang={requestedLang} />
+            <SectionBlock {...(block.props ?? {})} blockIndex={b} idPrefix="f" tenantHost={tenantHost} requestedLang={requestedLang} />
           ) : (
             <GenericBlock type={block.type} props={block.props} />
           ),
