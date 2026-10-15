@@ -1702,7 +1702,14 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `overflow:hidden` clipped margin bands). One badge group per edge, margin +
   padding side by side outer→inner, so they can't overlap: top/bottom fully
   outside the box (flip inside near the viewport edge), left/right flush
-  inside (outside only on a box <160px wide with room). Each build also posts
+  inside (outside only on a box <160px wide with room). **Walls (2026-10-15):**
+  `placeSpacingGroup` stops each group 4px inside the viewport's sides and the
+  page's top, which nothing scrolls past — a negative margin pushing an edge
+  out there took its badges with it (user report: `-65px` vanished off the
+  left). Across the edge a group centers on the part of the box still inside;
+  it never passes the box's far edge, so a box scrolled away (or wholly past a
+  wall — reach it via Layers + Inspector) takes it along. Drags are deltas, so
+  a pinned badge still drags. Each build also posts
   `designer:spacingValues` (the box's computed px); `useLiveEditBridge` keeps it
   as `liveSpacing`, Designer passes it as `ctx.liveSpacing` only while it
   matches `sel`, and `BoxModel` shows it as an unset side's placeholder (a
