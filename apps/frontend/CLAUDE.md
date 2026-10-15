@@ -17,6 +17,17 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   (`astro.config.mjs`) and one global stylesheet (`src/styles/global.css`) imported by
   `BaseLayout.astro` — compile-time only, no client-side JS added, consistent with this project's
   "avoid heavy dependencies" constraint.
+- **No sideways page scroll (2026-10-15):** `global.css` sets `html, body { overflow-x: clip }` —
+  anything crossing the viewport's side (a negative margin, `.ds-mega-full`'s 100vw, a too-wide
+  element) is cut at the edge instead of letting a phone pan the whole page (user report: the
+  device-frame Preview scrolled off-screen). `clip`, never `hidden`: no scroll container, so a future
+  `position:sticky` header still sticks and margins still collapse. html's value goes to the
+  viewport, body's then clips body itself. The cost is that wide content can't spill out anymore, so
+  it scrolls inside its own box: `.ds-html table` (GitHub's `display:block;width:max-content;
+  max-width:100%;overflow-x:auto`) and `.ds-html pre`; `.ds-html` is the Custom HTML element and a
+  post's body (`posts/[slug].astro`). `body { overflow-wrap: break-word }` wraps a long URL instead.
+  Any new element that can be legitimately wider than a phone (an embed, a wide chart) needs the
+  same own-box scroll, or it will be silently cut.
 - **Security response headers** (`server.mjs`'s `setSecurityHeaders`, added after a security audit
   found none set anywhere): `X-Content-Type-Options: nosniff` and `Referrer-Policy:
   strict-origin-when-cross-origin` on every response, plus a real `Content-Security-Policy` (added

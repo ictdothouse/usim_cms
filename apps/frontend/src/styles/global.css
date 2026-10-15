@@ -34,6 +34,31 @@ h2, h3, h4, h5, h6 {
 body {
   font-size: var(--font-body-size, inherit);
   line-height: var(--font-body-line-height, inherit);
+  /* A long URL/word wraps instead of running past the screen's edge, where
+     the clip below would cut it off. */
+  overflow-wrap: break-word;
+}
+/* A page never scrolls sideways — on a phone that's the whole page panning
+   off-screen. A negative margin, a 100vw breakout (.ds-mega-full) or anything
+   else crossing the viewport's side is cut there instead. clip, not hidden:
+   no scroll container, so position:sticky still works and margins still
+   collapse. html's value goes to the viewport; body's then clips body
+   itself, leaving no overflow for a phone to pan or zoom out to. */
+html,
+body {
+  overflow-x: clip;
+}
+/* ...so content that really is wider — a data table, a code block — scrolls
+   inside its own box instead of being cut off (GitHub's markdown table
+   pattern). .ds-html: the Custom HTML element and a post's body. */
+.ds-html table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.ds-html pre {
+  overflow-x: auto;
 }
 /* Author opts an element into the caption role explicitly (e.g. an image
    credit/small print) — no bare tag selector for this one, unlike h1-h6,
