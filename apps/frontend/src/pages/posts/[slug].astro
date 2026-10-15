@@ -147,7 +147,7 @@ const jsonLd = post
           </p>
         )}
         {/* Sanitize at render too, so old rows and restored backups stay inert. */}
-        <div set:html={sanitizeCustomHtml(content.body)} />
+        <div class="ds-html" set:html={sanitizeCustomHtml(content.body)} />
       </article>
     </>
   )}
