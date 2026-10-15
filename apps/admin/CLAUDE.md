@@ -408,10 +408,12 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   fallbacks.
   **Slider height** (`p.height`, the element's own top-level field, unrelated to per-slide `rows`) was
   the first Element-level field with a REAL per-breakpoint override, before the round above generalized
-  the pattern to nested elements too. `SectionBlock.astro` pushes a `bpStyleRules` rule scoped to
-  `[data-vis="elId"] .ds-slider` (mirroring the pre-existing `imgWidth` per-breakpoint-image-width
-  pattern right next to it) so a tablet/mobile-only height set via the Inspector's BpToggle actually
-  renders on the published site, not just in the admin canvas.
+  the pattern to nested elements too. `SliderBlock.astro` pushes a `bpStyleRules` rule scoped to
+  `[data-vis="elId"] .ds-slider-box` so a tablet/mobile-only height set via the Inspector's BpToggle
+  actually renders on the published site, not just in the admin canvas. It must target the box, which
+  carries the base inline height since the nav/pagination rework — it used to target the auto-height
+  outer `.ds-slider`, so a smaller mobile height shrank only the slider's page slot while the box kept
+  its desktop height, and the next section slid under the slider.
   **Corner radius**: `image`/`embed`/`gallery` no longer default to a rounded corner —
   `elRadius()` (`style.ts`/`SectionBlock.astro`) now falls back to `RADIUS.none` like Section/Column
   already did, and those 3 element types' own `radius` default was changed from `"md"` to `""`. A
