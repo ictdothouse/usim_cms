@@ -30,7 +30,7 @@ import {
   paddingStyle,
   cls,
 } from "../lib/element-render";
-import { flexWrapFor } from "@ucms/element-render";
+import { flexWrapFor, zIndexValue } from "@ucms/element-render";
 
 interface El {
   id?: string;
@@ -100,6 +100,8 @@ interface Props {
   radiusBottomLeft?: string;
   anchorId?: string;
   cssClass?: string;
+  // Layer order (Inspector "Z-index", 0-10 — see @ucms/element-render's zIndexValue).
+  zIndex?: string;
   rows?: Row[];
   bp?: Record<string, string>;
   hideDesktop?: string;
@@ -162,6 +164,7 @@ const {
   radiusBottomLeft,
   anchorId,
   cssClass,
+  zIndex,
   rows = [],
   bp: sectionBp,
   designerEdit = false,
@@ -273,6 +276,7 @@ function colStyle(cp?: Record<string, string>) {
   const padSide = (per: string) => lengthValue(cp[per] || cp.padding, PAD, "0");
   const anyRadius = cp.radius || cp.radiusTopLeft || cp.radiusTopRight || cp.radiusBottomRight || cp.radiusBottomLeft;
   const radCorner = (per: string) => lengthValue(cp[per] || cp.radius, RADIUS, RADIUS.none);
+  const z = zIndexValue(cp.zIndex);
   return [
     cp.bg ? `background:${cp.bg}` : null,
     anyPadding ? `padding:${padSide("paddingTop")} ${padSide("paddingRight")} ${padSide("paddingBottom")} ${padSide("paddingLeft")}` : null,
@@ -283,6 +287,8 @@ function colStyle(cp?: Record<string, string>) {
     cp.border ? `border:${BORDER[cp.border]}` : null,
     shadowToCss(cp.shadow) ? `box-shadow:${shadowToCss(cp.shadow)}` : null,
     anyRadius ? `border-radius:${radCorner("radiusTopLeft")} ${radCorner("radiusTopRight")} ${radCorner("radiusBottomRight")} ${radCorner("radiusBottomLeft")}` : null,
+    // A column is always a grid/flex item, where z-index works without a position.
+    z !== undefined ? `z-index:${z}` : null,
   ]
     .filter(Boolean)
     .join(";");
@@ -316,6 +322,7 @@ function buildSectionStyle(p: Record<string, string>): string {
   const radTopRight = lengthValue(p.radiusTopRight || p.radius, RADIUS, RADIUS.none);
   const radBottomRight = lengthValue(p.radiusBottomRight || p.radius, RADIUS, RADIUS.none);
   const radBottomLeft = lengthValue(p.radiusBottomLeft || p.radius, RADIUS, RADIUS.none);
+  const z = zIndexValue(p.zIndex);
   return [
     p.bgImage && safeCssUrl(p.bgImage) ? `background:url('${safeCssUrl(p.bgImage)}') center/cover no-repeat` : p.bg ? `background:${p.bg}` : null,
     p.textColor ? `color:${p.textColor}` : null,
@@ -332,6 +339,8 @@ function buildSectionStyle(p: Record<string, string>): string {
     shadowToCss(p.shadow) ? `box-shadow:${shadowToCss(p.shadow)}` : null,
     `border-radius:${radTopLeft} ${radTopRight} ${radBottomRight} ${radBottomLeft}`,
     p.opacity ? `opacity:${Math.max(0, Math.min(100, Number(p.opacity))) / 100}` : null,
+    // A section is a plain block (not a flex/grid item), so z-index needs a position.
+    z !== undefined ? `position:relative;z-index:${z}` : null,
   ]
     .filter(Boolean)
     .join(";");
@@ -363,6 +372,7 @@ const baseSectionProps: Record<string, string> = {
   radiusTopRight: radiusTopRight ?? "",
   radiusBottomRight: radiusBottomRight ?? "",
   radiusBottomLeft: radiusBottomLeft ?? "",
+  zIndex: zIndex ?? "",
 };
 const sectionStyle = buildSectionStyle(baseSectionProps);
 
@@ -661,13 +671,21 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
               // the element's own margin/padding, so its spacing badges match
               // the Inspector even before the element renders anything.
               if (designerEdit && hasBp) responsiveRules.push(...bpStyleRules(`[data-designer-path="${blockIndex}.${r}.${c}.${e}"] > [data-ds-ph]`, el.bp!, p, spacingCss));
-              return designerEdit || elVisId ? (
+              // Layer order (Inspector "Z-index"): this display:contents
+              // wrapper has no box of its own, so it hands the value to the
+              // element's root as --ds-z (global.css's [data-ds-z] rule).
+              const z = zIndexValue(p.zIndex);
+              const zBp = hasBp && Object.keys(el.bp!).some((k) => k.endsWith(":zIndex"));
+              if (zBp) responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"]`, el.bp!, p, (mp) => (zIndexValue(mp.zIndex) === undefined ? "" : `--ds-z:${zIndexValue(mp.zIndex)}`)));
+              const hasZ = z !== undefined || zBp;
+              return designerEdit || elVisId || hasZ ? (
                 <div
                   data-designer-path={designerEdit ? `${blockIndex}.${r}.${c}.${e}` : undefined}
                   data-ds-type={designerEdit ? el.type : undefined}
                   data-ds-ph-style={designerEdit ? spacingCss(p) || undefined : undefined}
                   data-vis={elVisId}
-                  style="display:contents"
+                  data-ds-z={hasZ ? "" : undefined}
+                  style={z !== undefined ? `display:contents;--ds-z:${z}` : "display:contents"}
                 >
                   {node}
                 </div>

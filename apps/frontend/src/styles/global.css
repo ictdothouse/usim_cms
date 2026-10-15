@@ -278,6 +278,13 @@ body {
   height: auto;
   display: block;
 }
+/* Element layer order (Inspector "Z-index"): SectionBlock.astro's
+   display:contents wrapper has no box, so it passes the value as --ds-z to
+   the element's root — a flex item of .ds-col, where z-index needs no
+   position. */
+[data-ds-z] > * {
+  z-index: var(--ds-z);
+}
 .ds-btn {
   display: inline-block;
   padding: 0.65em 1.6em;

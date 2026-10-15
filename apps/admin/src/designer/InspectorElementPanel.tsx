@@ -10,7 +10,7 @@ import { ArrowDown, ArrowUp, Clipboard, ClipboardPaste, Copy, Move, Paintbrush, 
 import { BASE_LANG, type DesignerCtx } from "./context";
 import { BpToggle, BufferedInput } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
-import { CSS_CLASS_FIELD, FIELD_GROUP_BY_KEY } from "./fields";
+import { CSS_CLASS_FIELD, FIELD_GROUP_BY_KEY, Z_INDEX_FIELD } from "./fields";
 import { parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS } from "./style";
 import { ELS } from "./elements";
@@ -82,7 +82,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
   const el = sp.rows[r]?.columns[c]?.elements[e];
   if (!el) return null;
   const def = ELS[el.type];
-  const elFields = [...def.fields, CSS_CLASS_FIELD];
+  const elFields = [...def.fields, CSS_CLASS_FIELD, Z_INDEX_FIELD];
   const hasContentFields = elFields.some((f) => (FIELD_GROUP_BY_KEY[f.key] ?? "content") === "content");
   // A slider element with a nested element selected (clicked inside its
   // currently-previewed slide's mini-canvas, see ElPreview.tsx's slider

@@ -1476,13 +1476,16 @@ const fontsHref = allFonts.length
                 handle.textContent = `${px}px`;
                 band.style.display = px && showBand ? "block" : "none";
                 if (!px || !showBand) return;
-                const offset = isMargin ? -px : 0;
-                if (edge === "top") Object.assign(band.style, { left: "0", right: "0", top: `${offset}px`, bottom: "", height: `${px}px`, width: "" });
+                // A positive margin's band sits outside the box; a negative one
+                // marks the strip the box now overlaps, just inside its edge.
+                const offset = isMargin && px > 0 ? -px : 0;
+                const size = Math.abs(px);
+                if (edge === "top") Object.assign(band.style, { left: "0", right: "0", top: `${offset}px`, bottom: "", height: `${size}px`, width: "" });
                 else if (edge === "bottom")
-                  Object.assign(band.style, { left: "0", right: "0", bottom: `${offset}px`, top: "", height: `${px}px`, width: "" });
+                  Object.assign(band.style, { left: "0", right: "0", bottom: `${offset}px`, top: "", height: `${size}px`, width: "" });
                 else if (edge === "left")
-                  Object.assign(band.style, { top: "0", bottom: "0", left: `${offset}px`, right: "", width: `${px}px`, height: "" });
-                else Object.assign(band.style, { top: "0", bottom: "0", right: `${offset}px`, left: "", width: `${px}px`, height: "" });
+                  Object.assign(band.style, { top: "0", bottom: "0", left: `${offset}px`, right: "", width: `${size}px`, height: "" });
+                else Object.assign(band.style, { top: "0", bottom: "0", right: `${offset}px`, left: "", width: `${size}px`, height: "" });
               }
               render(currentPx(), false);
               const view = { render, currentPx };
@@ -1516,7 +1519,9 @@ const fontsHref = allFonts.length
                   e,
                   (ev) => {
                     const pos = axis === "y" ? ev.clientY : ev.clientX;
-                    lastPx = Math.max(0, Math.round(startPx + sign * (pos - startPos)));
+                    // Margin may go negative (boxes overlap); padding can't — invalid CSS.
+                    lastPx = Math.round(startPx + sign * (pos - startPos));
+                    if (!isMargin) lastPx = Math.max(0, lastPx);
                     for (const k of touched) setImp(box, kebab(k), `${lastPx}px`);
                     show(true, lastPx);
                   },

@@ -37,7 +37,7 @@ import {
   PAD, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK,
   SPACE, lengthValue, colStyle, overlayColors, shadowToCss, RADIUS, BORDER, RADIUS_CORNER_KEYS,
 } from "./style";
-import { flexWrapFor } from "@ucms/element-render";
+import { flexWrapFor, zIndexValue } from "@ucms/element-render";
 import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./fields";
 import { ElPreview } from "./ElPreview";
 import { DEVICE_DIMS } from "./DeviceViewport";
@@ -164,6 +164,7 @@ export function DesignerCanvas({
       boxShadow: shadowToCss(shadow),
       borderRadius: `${corner("top")} ${corner("right")} ${corner("bottom")} ${corner("left")}`,
       opacity: opacity ? Math.max(0, Math.min(100, Number(opacity))) / 100 : undefined,
+      zIndex: zIndexValue(v("zIndex")),
     };
   }
   function bpColStyle(col: Col): React.CSSProperties {
@@ -412,7 +413,7 @@ export function DesignerCanvas({
           // edge by design (see the -left-2/-top-2 offsets below); the old
           // single overflow-hidden div clipped those badges away entirely
           // whenever there wasn't enough padding to absorb the overhang.
-          const { padding: sectionPadding, margin: sectionMargin, color: sectionColor, opacity: sectionOpacity, ...sectionBgStyle } = sectionBpStyle(sp);
+          const { padding: sectionPadding, margin: sectionMargin, color: sectionColor, opacity: sectionOpacity, zIndex: sectionZ, ...sectionBgStyle } = sectionBpStyle(sp);
           const sectionEffectiveBg = (!wire && sp.bg) || (!wire && effectiveTheme?.backgroundColor) || "#ffffff";
           const sectionOverlay = overlayColors(sectionEffectiveBg);
           // Real stroke set (new fields or the legacy preset) already
@@ -425,7 +426,7 @@ export function DesignerCanvas({
             <div
               key={b}
               className={`group relative ${mode === "live" ? "" : "rounded-xl"} ${selCls([b])}`}
-              style={{ opacity: sectionHiddenAtBp ? 0.35 : sectionOpacity }}
+              style={{ opacity: sectionHiddenAtBp ? 0.35 : sectionOpacity, zIndex: sectionZ }}
               onClick={(ev) => pick(ev, [b])}
               onContextMenu={(ev) => {
                 ev.preventDefault();
@@ -609,7 +610,12 @@ export function DesignerCanvas({
                                 setCtxMenu({ path: [b, r, c, e], x: ev.clientX, y: ev.clientY });
                               }}
                               className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
-                              style={{ ...bpMarginStyle(el), ...bpPaddingStyle(el), opacity: hiddenAtBp(el.props) ? 0.35 : undefined }}
+                              style={{
+                                ...bpMarginStyle(el),
+                                ...bpPaddingStyle(el),
+                                opacity: hiddenAtBp(el.props) ? 0.35 : undefined,
+                                zIndex: wire ? undefined : zIndexValue(bpGetValue(el.props.zIndex, el.bp, "zIndex")),
+                              }}
                             >
                               <HiddenAtBpBadge hidden={hiddenAtBp(el.props)} bp={bp} t={t} />
                               {selEq([b, r, c, e]) && (

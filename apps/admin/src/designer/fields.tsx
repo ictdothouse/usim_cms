@@ -18,6 +18,7 @@ import {
   Heading1,
   Image as ImageIcon,
   Images,
+  Layers,
   Link,
   List,
   Maximize2,
@@ -37,6 +38,12 @@ import {
 import type { Key } from "@/i18n";
 import type { Field, FieldGroupKey } from "./types";
 
+// Layer order for overlapping boxes (e.g. pulled together with a negative
+// margin) — Section/Column/top-level Element. 0-10, higher on top; render
+// clamps it too (@ucms/element-render's zIndexValue), since a typed value can
+// go past the slider.
+export const Z_INDEX_FIELD: Field = { key: "zIndex", labelKey: "designer-f-zindex", kind: "drag-number", min: 0, max: 10, step: 1 };
+
 // Shared across heading/text/list — full typography control. fontFamily is
 // any Google Font name; see the useEffect near Designer()'s own body that
 // keeps a matching <link> synced into document.head for canvas preview.
@@ -55,6 +62,7 @@ export const SECTION_FIELDS: Field[] = [
   { key: "borderStyle", labelKey: "designer-s-borderstyle", kind: "select", options: ["solid", "dashed", "dotted"] },
   { key: "anchorId", labelKey: "designer-f-anchorid", kind: "text" },
   { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+  Z_INDEX_FIELD,
 ];
 
 // Column-level style escape hatch (see Col.props) — a column becomes a
@@ -68,6 +76,7 @@ export const COLUMN_FIELDS: Field[] = [
   { key: "border", labelKey: "designer-s-border", kind: "select", options: ["none", "thin", "thick"] },
   { key: "shadow", labelKey: "designer-s-shadow", kind: "shadow" },
   { key: "cssClass", labelKey: "designer-f-cssclass", kind: "text" },
+  Z_INDEX_FIELD,
 ];
 // Bp-merge list for bpColStyle() — covers the base padding/radius fields plus
 // their per-side/per-corner overrides, none of which are in COLUMN_FIELDS
@@ -142,7 +151,7 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   // vs Stroke (the actual border color/width/style), each its own card.
   opacity: "appearance", shadow: "appearance", radius: "appearance",
   border: "border", borderWidth: "border", borderColor: "border", borderStyle: "border",
-  anchorId: "advanced", cssClass: "advanced",
+  anchorId: "advanced", cssClass: "advanced", zIndex: "advanced",
 };
 
 export const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type }[] = [
@@ -182,6 +191,7 @@ const FIELD_ICONS: Partial<Record<Key, typeof Check>> = {
   "designer-f-radius": SquareDashedBottom,
   "designer-f-anchorid": Anchor,
   "designer-f-cssclass": Hash,
+  "designer-f-zindex": Layers,
   "designer-f-valign": AlignVerticalJustifyCenter,
   "designer-col-span": Columns,
   "designer-f-text": Type,
