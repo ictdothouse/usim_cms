@@ -17,6 +17,7 @@ import {
   Plus,
   Smartphone,
   SquareDashedBottom,
+  SquareRoundCorner,
   Tablet,
   Trash2,
 } from "lucide-react";
@@ -290,30 +291,42 @@ function BoxModelRingHeader({ ring, icon: Icon, bp, t }: { ring: RingConfig; ico
   );
 }
 
+// Radius rides the same Side keys in CSS shorthand order (style.ts's
+// RADIUS_CORNER_KEYS: top=top-left ... left=bottom-left); the glyph draws
+// which corner each input sets.
+const CORNERS: Record<Side, { title: string; glyph: string }> = {
+  top: { title: "top-left", glyph: "rounded-tl-[3px] border-l-2 border-t-2" },
+  right: { title: "top-right", glyph: "rounded-tr-[3px] border-r-2 border-t-2" },
+  bottom: { title: "bottom-right", glyph: "rounded-br-[3px] border-b-2 border-r-2" },
+  left: { title: "bottom-left", glyph: "rounded-bl-[3px] border-b-2 border-l-2" },
+};
+
 function BoxModelInput({ ring, side, corner, live }: { ring: RingConfig; side: Side; corner?: boolean; live?: Record<Side, number> }) {
   return (
     <BufferedInput
       className={
         corner
-          ? "w-7 rounded border border-line/40 bg-white px-0.5 py-0.5 text-center text-[9px] text-ink shadow-sm"
-          : "w-9 rounded border border-line/30 bg-white px-0.5 py-0.5 text-center text-xs text-ink"
+          ? "w-full min-w-0 rounded-md border border-line/30 bg-white px-1 py-0.5 text-center text-xs text-ink"
+          : "w-10 rounded-md border border-transparent bg-white/70 px-0.5 py-0.5 text-center text-xs text-ink hover:border-line/40 focus:bg-white"
       }
       value={ring.getSide(side)}
       // Unset side: show what Live Edit actually renders (a section's
       // default padding, an element's CSS default), not a misleading "0".
       placeholder={live ? `${live[side]}px` : "0"}
-      title={side}
+      title={corner ? CORNERS[side].title : side}
       onCommit={(v) => (ring.linked ? SIDES.forEach((s) => ring.setSide(s, v)) : ring.setSide(side, v))}
     />
   );
 }
 
 // Chrome-DevTools-style nested box-model diagram: a dashed Margin ring around
-// a solid Padding ring around a Content box, with optional corner-radius
-// handles floating on the content box's own 4 corners — replaces what used
-// to be 2-3 separate FourSideControl rows (a flat stack of labeled 4-input
-// grids) with one spatial diagram, so which number affects which side of the
-// element reads visually instead of needing the label text to disambiguate.
+// a solid Padding ring around a Content box — replaces what used to be 2-3
+// separate FourSideControl rows with one spatial diagram, so which number
+// affects which side of the element reads visually. Side columns are exactly
+// one input wide and rows size to the input (index.css gives Inspector inputs
+// a 2.25rem+ min-height): fixed rows smaller than that, plus radius handles
+// floating on the content box's corners, overlapped each other in the 18rem
+// panel. Radius gets its own row of corner inputs under the diagram instead.
 export function BoxModel({
   padding,
   margin,
@@ -333,39 +346,23 @@ export function BoxModel({
   const livePad = live?.padding;
   const liveMargin = live?.margin;
   return (
-    <div className="space-y-1.5">
-      <div className="rounded-lg border border-dashed border-amber-300/60 bg-amber-50/40 p-1.5">
+    <div className="space-y-2">
+      <div className="rounded-xl border border-dashed border-amber-300/70 bg-amber-50/50 p-1">
         <BoxModelRingHeader ring={margin} icon={Frame} bp={bp} t={t} />
-        <div className="grid grid-cols-[2rem_1fr_2rem] grid-rows-[2rem_auto_2rem] items-center justify-items-center gap-1 pt-1">
+        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center justify-items-center gap-0.5">
           <div />
           <BoxModelInput ring={margin} side="top" live={liveMargin} />
           <div />
           <BoxModelInput ring={margin} side="left" live={liveMargin} />
-          <div className="col-start-2 row-start-2 w-full rounded-lg border border-sky-300/60 bg-sky-50/50 p-1.5">
+          <div className="w-full rounded-lg border border-sky-300/70 bg-sky-50/70 p-1">
             <BoxModelRingHeader ring={padding} icon={SquareDashedBottom} bp={bp} t={t} />
-            <div className="grid grid-cols-[1.75rem_1fr_1.75rem] grid-rows-[1.75rem_auto_1.75rem] items-center justify-items-center gap-1 pt-1">
+            <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-center justify-items-center gap-0.5">
               <div />
               <BoxModelInput ring={padding} side="top" live={livePad} />
               <div />
               <BoxModelInput ring={padding} side="left" live={livePad} />
-              <div className="relative col-start-2 row-start-2 flex h-10 w-full items-center justify-center rounded bg-white text-[9px] font-medium text-sub/60">
+              <div className="flex h-8 w-full items-center justify-center overflow-hidden rounded-md border border-line/30 bg-white text-[9px] font-medium text-sub/60">
                 {t("designer-content")}
-                {radius && (
-                  <>
-                    <div className="absolute -left-2 -top-2">
-                      <BoxModelInput ring={radius} side="top" corner />
-                    </div>
-                    <div className="absolute -right-2 -top-2">
-                      <BoxModelInput ring={radius} side="right" corner />
-                    </div>
-                    <div className="absolute -bottom-2 -right-2">
-                      <BoxModelInput ring={radius} side="bottom" corner />
-                    </div>
-                    <div className="absolute -bottom-2 -left-2">
-                      <BoxModelInput ring={radius} side="left" corner />
-                    </div>
-                  </>
-                )}
               </div>
               <BoxModelInput ring={padding} side="right" live={livePad} />
               <div />
@@ -379,7 +376,19 @@ export function BoxModel({
           <div />
         </div>
       </div>
-      {radius && <BoxModelRingHeader ring={radius} icon={SquareDashedBottom} bp={bp} t={t} />}
+      {radius && (
+        <div className="rounded-xl border border-line/30 p-1">
+          <BoxModelRingHeader ring={radius} icon={SquareRoundCorner} bp={bp} t={t} />
+          <div className="grid grid-cols-4 gap-1">
+            {SIDES.map((side) => (
+              <label key={side} className="flex min-w-0 items-center gap-1">
+                <span aria-hidden className={`h-2.5 w-2.5 shrink-0 border-sub/50 ${CORNERS[side].glyph}`} />
+                <BoxModelInput ring={radius} side={side} corner />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
