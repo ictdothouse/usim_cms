@@ -10,7 +10,7 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Minus, Plus, Trash2 } from "lucide-react";
 import type { Menu, Category, Symbol } from "@/lib/api";
 import type { Key } from "@/i18n";
-import type { Field, Bp, SlideItem, Block, SectionProps } from "./types";
+import type { Field, Bp, SlideItem, Block, SectionProps, El } from "./types";
 import { SHADOW_DEFAULT_PARTS } from "./fields";
 import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, DragNumber } from "./FieldControls";
 import {
@@ -28,9 +28,50 @@ import {
   deleteSlideElement,
   deleteSlideRow,
   applySlidePreset,
+  buildSlidePreset,
+  lengthPx,
+  SLIDE_PRESETS,
+  type SlidePresetId,
 } from "./parsers";
 import { ELS } from "./elements";
-import { LEGACY_SHADOW } from "./style";
+import { LEGACY_SHADOW, SLIDER_HEIGHT } from "./style";
+
+// The slides editor's layout picture grid (parsers.ts's SLIDE_PRESETS) — each
+// thumbnail is buildSlidePreset's own desktop output drawn small: bars for
+// heading/text, a pill for the button, a dashed box for the image slot.
+const PRESET_LABEL: Record<SlidePresetId, Key> = {
+  center: "designer-slide-preset-center",
+  left: "designer-slide-preset-left",
+  right: "designer-slide-preset-right",
+  split: "designer-slide-preset-split",
+  "split-reverse": "designer-slide-preset-split-reverse",
+  bottom: "designer-slide-preset-bottom",
+};
+const PRESET_THUMBS = SLIDE_PRESETS.map((p) => ({ id: p.id, els: buildSlidePreset(p.id) }));
+function SlidePresetThumb({ els }: { els: El[] }) {
+  return (
+    <div aria-hidden className="relative aspect-[21/9] w-full overflow-hidden rounded bg-ink">
+      {els.map((el, i) => {
+        const p = el.props;
+        const box = { left: `${p.x}%`, top: `${p.y}%`, width: p.posWidth || "12%" };
+        if (el.type === "image") {
+          return <div key={i} className="absolute rounded-sm border border-dashed border-white/40 bg-white/10" style={{ ...box, height: p.posHeight }} />;
+        }
+        if (el.type === "button") return <div key={i} className="absolute h-[8%] rounded-full bg-accent" style={box} />;
+        const title = el.type === "heading" && p.level === "2";
+        return (
+          <div
+            key={i}
+            className="absolute flex items-center"
+            style={{ ...box, height: title ? "8.6%" : "5%", justifyContent: p.align === "center" ? "center" : p.align === "right" ? "flex-end" : "flex-start" }}
+          >
+            <div className={`h-3/4 rounded-sm ${title ? "w-3/5 bg-white" : el.type === "heading" ? "w-2/5 bg-white/70" : "w-4/5 bg-white/40"}`} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // FieldInputProps was sketched in the Layer 1a plan from a closure audit
 // that wasn't character-exact — several of the following were confirmed (and
@@ -709,12 +750,11 @@ export function FieldInput({
     // its nested Text/Button/Image/Row layers, auto-switches the canvas
     // preview to that same slide, so what you're editing is always what
     // you're looking at.
-    const activeSliderElId =
+    const activeSliderEl =
       sel && sel.length === 4
-        ? (blocks[sel[0]]?.props as unknown as SectionProps)?.rows?.[sel[1]]?.columns?.[sel[2]]?.elements?.[
-            sel[3]
-          ]?.id
+        ? (blocks[sel[0]]?.props as unknown as SectionProps)?.rows?.[sel[1]]?.columns?.[sel[2]]?.elements?.[sel[3]]
         : undefined;
+    const activeSliderElId = activeSliderEl?.id;
     const setItems = (next: SlideItem[]) => onChange(stringifySlides(next));
     const replaceSlide = (i: number, next: SlideItem) => setItems(items.map((x, j) => (j === i ? next : x)));
     const patchSlide = (i: number, patch: Partial<SlideItem>) => replaceSlide(i, { ...items[i], ...patch });
@@ -730,6 +770,34 @@ export function FieldInput({
       if (activeSliderElId) setSliderInnerSel((m) => ({ ...m, [activeSliderElId]: null }));
     };
     const innerSel = activeSliderElId ? (sliderInnerSel[activeSliderElId] ?? null) : null;
+    // A layout preset stacks for the box it'll actually sit in: the slider's
+    // own height, and its mobile override if it has one.
+    const heightPx = (v: string | undefined) => lengthPx(SLIDER_HEIGHT[v || "md"] ?? v);
+    const presetH = heightPx(activeSliderEl?.props.height);
+    const presetMobileH = activeSliderEl?.bp?.["mobile:height"] ? heightPx(activeSliderEl.bp["mobile:height"]) : presetH;
+    const presetGrid = (i: number, s: SlideItem) => (
+      <div className="grid grid-cols-2 gap-1.5">
+        {PRESET_THUMBS.map(({ id, els }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              void (async () => {
+                // Replaces every element on the slide — confirm unless it's empty.
+                const hasContent = s.rows.some((r) => r.columns.some((c) => c.elements.length > 0));
+                if (hasContent && (!confirmAction || !(await confirmAction(t("designer-slide-layout-replace-confirm"))))) return;
+                replaceSlide(i, applySlidePreset(s, id, presetH, presetMobileH));
+                clearInner();
+              })();
+            }}
+            className="group space-y-1 rounded-md border border-line/30 bg-white p-1 text-left hover:border-accent"
+          >
+            <SlidePresetThumb els={els} />
+            <span className="block truncate text-[11px] font-medium text-sub group-hover:text-accent">{t(PRESET_LABEL[id])}</span>
+          </button>
+        ))}
+      </div>
+    );
     return (
       <div className="space-y-2">
         {items.map((s, i) => {
@@ -853,32 +921,19 @@ export function FieldInput({
                 </label>
               </div>
               {/* This slide's own mini-canvas content — nothing by default,
-                  just Text/Button/Image/Row add buttons, matching how
-                  `buttons` was already opt-in before this rework. Clicking a
+                  just the layout picture grid (presetGrid, also under "Change
+                  layout" once there's content) and Text/Button/Image/Row add
+                  buttons, matching how `buttons` was already opt-in before
+                  this rework. Clicking a
                   layer selects it for editing (Inspector shows that
                   element's own Content/Style fields — see Inspector.tsx's
                   slider-inner-selection branch); the × here deletes it
                   without needing to select it first. */}
               <div className="space-y-1 rounded-lg border border-line/20 p-1.5">
                 {s.rows.length === 0 ? (
-                  <div className="space-y-1 px-1 py-2 text-center">
-                    <p className="text-xs italic text-sub">{t("designer-slide-empty")}</p>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => replaceSlide(i, applySlidePreset(s, "stack"))}
-                        className="rounded border border-accent/40 px-2 py-1 text-xs font-semibold text-accent"
-                      >
-                        {t("designer-slide-preset-stack")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => replaceSlide(i, applySlidePreset(s, "split"))}
-                        className="rounded border border-accent/40 px-2 py-1 text-xs font-semibold text-accent"
-                      >
-                        {t("designer-slide-preset-split")}
-                      </button>
-                    </div>
+                  <div className="space-y-1.5 px-1 py-1.5">
+                    <p className="text-center text-xs italic text-sub">{t("designer-slide-empty")}</p>
+                    {presetGrid(i, s)}
                   </div>
                 ) : (
                   s.rows.map((row, r) => (
@@ -964,6 +1019,12 @@ export function FieldInput({
                     {t("designer-slide-add-row")}
                   </button>
                 </div>
+                {s.rows.length > 0 && (
+                  <details className="pt-0.5">
+                    <summary className="cursor-pointer text-xs font-semibold text-accent">{t("designer-slide-change-layout")}</summary>
+                    <div className="pt-1.5">{presetGrid(i, s)}</div>
+                  </details>
+                )}
               </div>
             </div>
           );

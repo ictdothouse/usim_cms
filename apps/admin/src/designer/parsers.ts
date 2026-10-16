@@ -172,8 +172,18 @@ export function newSlide(): SlideItem {
 // first column if one already exists, otherwise a freshly-created single
 // row/column — appending to the end (not always row 0) so "Add Row" then
 // "Add Text" reads naturally, the content lands in the row just created.
+// Free-positioned from the start (2026-10-16): drag it straight away, lock it
+// from its floating toolbar. Each add lands 12% below the last (wrapping
+// after 5), so Header, Text, Button read as a stack instead of piling up.
+const ADD_BOX: Partial<Record<ElType, Record<string, string>>> = {
+  heading: { align: "center", x: "10", posWidth: "80%" },
+  text: { align: "center", x: "15", posWidth: "70%" },
+  button: { x: "44" },
+  image: { x: "30", y: "25", posWidth: "40%", posHeight: "50%" },
+};
 export function addSlideElement(slide: SlideItem, type: ElType, defaults: Record<string, string>): SlideItem {
-  const el = slideEl(type, { ...defaults });
+  const count = slide.rows.reduce((n, r) => n + r.columns.reduce((m, c) => m + c.elements.length, 0), 0);
+  const el = slideEl(type, { ...defaults, position: "custom", y: String(20 + (count % 5) * 12), ...ADD_BOX[type] });
   const rows = slide.rows.length > 0 ? slide.rows.map((r) => ({ ...r, columns: r.columns.map((c) => ({ ...c })) })) : [{ columns: [{ span: 12, elements: [] }] }];
   const last = rows[rows.length - 1];
   last.columns[0].elements = [...last.columns[0].elements, el];
@@ -198,39 +208,165 @@ export function newRow(spans: number[]): Row {
   return { columns: spans.map((span) => ({ span, elements: [] })) };
 }
 
-// Quick-start presets — build a slide's whole rows tree in one click instead
-// of Add Text/Add Button one at a time. Only offered while a slide has no
-// rows yet (see FieldInput.tsx's call site) since both REPLACE rows outright.
-function presetTextStack(align: "left" | "center"): El[] {
-  return [
-    slideEl("heading", { text: "Heading", level: "2", align }),
-    slideEl("heading", { text: "Sub header", level: "4", align }),
-    slideEl("text", { text: "Supporting text goes here.", size: "1rem", align }),
-    slideEl("button", { label: "Button", href: "#", variant: "primary", align }),
-  ];
+// Slide layout presets (2026-10-16) — a whole slide in one click, picked from
+// the slides editor's picture grid (FieldInput.tsx draws each thumbnail from
+// buildSlidePreset's own output). Every element is free-positioned, not
+// stacked in flow: drag it straight away, lock it from its floating toolbar.
+// x/width are % of the slide, so a preset fits any slider width; y is stacked
+// from the slider's real height (rough px line heights + fixed gaps, stackY),
+// so a 24rem banner and a 100vh hero both get one tight block instead of the
+// same % spread. Mobile gets its own x/y/width (`mobile:*` bp keys); tablet
+// inherits desktop.
+export type SlidePresetId = "center" | "left" | "right" | "split" | "split-reverse" | "bottom";
+type PresetRole = "title" | "sub" | "body" | "button";
+// w = posWidth %; none = the button's own width (left-anchored layouts). A
+// role with a width on desktop needs one on mobile too — an empty bp
+// override can't unset a base width (the @media rule just omits it).
+type PresetPlace = { x: number; w?: number };
+interface PresetDevice {
+  // Top to bottom; roles sharing a row share a line (centered on it).
+  rows: Partial<Record<PresetRole, PresetPlace>>[];
+  band?: [number, number]; // % of slide height the stack sits in — default the whole slide
+  anchor?: "middle" | "end";
+  image?: { x: number; y: number; w: number; h: number }; // % box, outside the stack
 }
-
-// Preset "stack": single column, everything centered — Heading + Sub header +
-// Text + Button.
-export function slidePresetStack(): Row[] {
-  return [{ columns: [{ span: 12, elements: presetTextStack("center") }] }];
+interface SlidePreset {
+  id: SlidePresetId;
+  align: "left" | "center" | "right";
+  desktop: PresetDevice;
+  mobile: PresetDevice;
 }
-
-// Preset "split": 2 columns — the same text stack on the left, an empty Image
-// slot (author uploads their own) on the right.
-export function slidePresetSplit(): Row[] {
-  return [
-    {
-      columns: [
-        { span: 6, elements: presetTextStack("left") },
-        { span: 6, elements: [slideEl("image", { src: "", alt: "", radius: "", imgWidth: "", align: "left" })] },
-      ],
+const PRESET_SAMPLE: Record<PresetRole, [ElType, Record<string, string>]> = {
+  title: ["heading", { text: "Heading", level: "2" }],
+  sub: ["heading", { text: "Sub header", level: "4" }],
+  body: ["text", { text: "Supporting text goes here.", size: "1rem" }],
+  button: ["button", { label: "Button", href: "#", variant: "primary" }],
+};
+// One line of each sample in px, [desktop, mobile] — .ds-h2/.ds-h4 are fluid
+// (global.css), body is 1rem text, a .ds-btn pill is ~2.75rem tall.
+const PRESET_LINE_PX: Record<PresetRole, [number, number]> = { title: [44, 32], sub: [24, 22], body: [28, 25], button: [44, 42] };
+const stackAt = (x: number, w: number, button: PresetPlace = { x }): PresetDevice["rows"] => [
+  { title: { x, w } },
+  { sub: { x, w } },
+  { body: { x, w } },
+  { button },
+];
+// Image on top, text below — both split layouts on a phone.
+const SPLIT_MOBILE: PresetDevice = { rows: stackAt(8, 84), band: [40, 98], image: { x: 8, y: 6, w: 84, h: 30 } };
+export const SLIDE_PRESETS: SlidePreset[] = [
+  {
+    id: "center",
+    align: "center",
+    desktop: { rows: [{ title: { x: 10, w: 80 } }, { sub: { x: 10, w: 80 } }, { body: { x: 15, w: 70 } }, { button: { x: 42, w: 16 } }] },
+    mobile: { rows: [{ title: { x: 6, w: 88 } }, { sub: { x: 6, w: 88 } }, { body: { x: 8, w: 84 } }, { button: { x: 28, w: 44 } }] },
+  },
+  {
+    id: "left",
+    align: "left",
+    desktop: { rows: [{ title: { x: 8, w: 46 } }, { sub: { x: 8, w: 46 } }, { body: { x: 8, w: 42 } }, { button: { x: 8 } }] },
+    mobile: { rows: stackAt(8, 84) },
+  },
+  {
+    id: "right",
+    align: "right",
+    desktop: { rows: [{ title: { x: 46, w: 46 } }, { sub: { x: 46, w: 46 } }, { body: { x: 50, w: 42 } }, { button: { x: 78, w: 14 } }] },
+    mobile: { rows: stackAt(8, 84, { x: 52, w: 40 }) },
+  },
+  {
+    id: "split",
+    align: "left",
+    desktop: { rows: stackAt(7, 40), image: { x: 53, y: 14, w: 40, h: 72 } },
+    mobile: SPLIT_MOBILE,
+  },
+  {
+    id: "split-reverse",
+    align: "left",
+    desktop: { rows: stackAt(53, 40), image: { x: 7, y: 14, w: 40, h: 72 } },
+    mobile: SPLIT_MOBILE,
+  },
+  {
+    id: "bottom",
+    align: "left",
+    desktop: {
+      rows: [{ sub: { x: 6, w: 56 } }, { title: { x: 6, w: 56 } }, { body: { x: 6, w: 52 }, button: { x: 80, w: 14 } }],
+      band: [0, 86],
+      anchor: "end",
     },
-  ];
+    mobile: {
+      rows: [{ sub: { x: 6, w: 88 } }, { title: { x: 6, w: 88 } }, { body: { x: 6, w: 88 } }, { button: { x: 6, w: 44 } }],
+      band: [0, 88],
+      anchor: "end",
+    },
+  },
+];
+
+// Each role's top edge as % of `heightPx`: 24px above a buttons-only row,
+// 12px between the rest; a stack taller than its band pins to the band's top.
+function stackY(device: PresetDevice, d: 0 | 1, heightPx: number): Partial<Record<PresetRole, number>> {
+  const roles = (row: PresetDevice["rows"][number]) => Object.keys(row) as PresetRole[];
+  const rowH = device.rows.map((row) => Math.max(...roles(row).map((k) => PRESET_LINE_PX[k][d])));
+  const gap = device.rows.map((row, i) => (i === 0 ? 0 : roles(row).every((k) => k === "button") ? 24 : 12));
+  const total = [...rowH, ...gap].reduce((a, b) => a + b, 0);
+  const [lo, hi] = (device.band ?? [0, 100]).map((p) => (p / 100) * heightPx);
+  let top = Math.max(lo, device.anchor === "end" ? hi - total : lo + (hi - lo - total) / 2);
+  const y: Partial<Record<PresetRole, number>> = {};
+  device.rows.forEach((row, i) => {
+    top += gap[i];
+    for (const k of roles(row)) y[k] = Math.round(((top + (rowH[i] - PRESET_LINE_PX[k][d]) / 2) / heightPx) * 1000) / 10;
+    top += rowH[i];
+  });
+  return y;
 }
 
-export function applySlidePreset(slide: SlideItem, kind: "stack" | "split"): SlideItem {
-  return { ...slide, rows: kind === "stack" ? slidePresetStack() : slidePresetSplit() };
+export function buildSlidePreset(id: SlidePresetId, heightPx = 512, mobileHeightPx = heightPx): El[] {
+  const preset = SLIDE_PRESETS.find((p) => p.id === id) ?? SLIDE_PRESETS[0];
+  const yD = stackY(preset.desktop, 0, heightPx);
+  const yM = stackY(preset.mobile, 1, mobileHeightPx);
+  const placeOf = (dev: PresetDevice, role: PresetRole) => dev.rows.find((row) => row[role])?.[role] ?? { x: 0 };
+  // Only what actually differs on a phone becomes a `mobile:*` override.
+  const withMobile = (el: El, mobile: Record<string, string>): El => {
+    const bp = Object.fromEntries(Object.entries(mobile).filter(([k, v]) => el.props[k] !== v).map(([k, v]) => [`mobile:${k}`, v]));
+    return Object.keys(bp).length > 0 ? { ...el, bp } : el;
+  };
+  const els = preset.desktop.rows
+    .flatMap((row) => Object.keys(row) as PresetRole[])
+    .map((role) => {
+      const d = placeOf(preset.desktop, role);
+      const m = placeOf(preset.mobile, role);
+      const [type, sample] = PRESET_SAMPLE[role];
+      const el = slideEl(type, {
+        ...sample,
+        // A fixed-width pill centers its label; text follows the layout.
+        align: role === "button" ? "center" : preset.align,
+        position: "custom",
+        x: String(d.x),
+        y: String(yD[role]),
+        posWidth: d.w ? `${d.w}%` : "",
+      });
+      return withMobile(el, { x: String(m.x), y: String(yM[role]), posWidth: m.w ? `${m.w}%` : "" });
+    });
+  const di = preset.desktop.image;
+  const mi = preset.mobile.image;
+  if (di && mi) {
+    const box = (b: typeof di) => ({ x: String(b.x), y: String(b.y), posWidth: `${b.w}%`, posHeight: `${b.h}%` });
+    els.push(withMobile(slideEl("image", { src: "", alt: "", radius: "", imgWidth: "", align: "left", position: "custom", ...box(di) }), box(mi)));
+  }
+  return els;
+}
+
+// Replaces the slide's whole rows tree — FieldInput.tsx confirms first when
+// the slide already has content.
+export function applySlidePreset(slide: SlideItem, id: SlidePresetId, heightPx?: number, mobileHeightPx?: number): SlideItem {
+  return { ...slide, rows: [{ columns: [{ span: 12, elements: buildSlidePreset(id, heightPx, mobileHeightPx) }] }] };
+}
+
+// A resolved slider height ("32rem", "480px", "100vh") in px, for
+// buildSlidePreset — vh assumes an ~800px-tall window, anything else 512.
+export function lengthPx(v: string | undefined): number {
+  const m = /^(\d+(?:\.\d+)?)(px|rem|em|vh)?$/.exec(v ?? "");
+  if (!m) return 512;
+  const n = Number(m[1]);
+  return m[2] === "rem" || m[2] === "em" ? n * 16 : m[2] === "vh" ? n * 8 : n;
 }
 
 // Removes one nested element at (r, c, e) — used by the slides editor's

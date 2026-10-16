@@ -125,7 +125,7 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   given) previews the override on canvas for free. **Free positioning**: a nested element's own
   `position` prop (`"flow"`, the default/absent, vs `"custom"`) opts it out of the row/column stack and
   into `position:absolute` — `x`/`y` (percent) and optional `posWidth`/`posHeight`, all real per-bp
-  fields too. Toggled via the Inspector's "Free position" block (`ElPreview.tsx`'s slider case, `Move`
+  fields too. Toggled via the Inspector's "Free position" block (toggle removed 2026-10-16 — slide children are now free by default, see "Free by default + layout presets" below; `ElPreview.tsx`'s slider case, `Move`
   icon); a free element is also drag-to-move directly on the canvas (`startFreeElDrag`, plain imperative
   pointer listeners — `ElPreview` holds no hooks of its own and is called as a plain function, so this
   can't be a `useState`/`useRef`-driven drag the way a real component's would be) — resize stays
@@ -291,6 +291,22 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `min-width:min-content` so their resize outline cannot clip an unbreakable word,
   and text's per-bp `size` now gets a real `bpStyleRules` font-size rule. Toolbar labels arrive in
   `designer:selected.labels` (the iframe has no i18n).
+  **Free by default + layout presets (2026-10-16)**: the Inspector's Free/Locked toggle is gone —
+  every slide child is free-positioned from creation (`parsers.ts`'s `addSlideElement` writes
+  `position:"custom"` + x/y/posWidth, y stepping 12% per add) and lock lives only on the canvas
+  floating toolbar (`props.locked`). A legacy in-flow child is freed by Live Edit's toolbar Move
+  button (`makeSlideFree`); the Inspector shows its Free position block for free children only. The
+  two text preset buttons became a picture grid of 6 layouts (`SLIDE_PRESETS`: center/left/right/
+  split/split-reverse/bottom) in the slides editor — on an empty slide, or under "Change layout"
+  (confirm, replaces the slide's elements) once it has content. `buildSlidePreset` writes x/posWidth
+  as % of the slide, stacks y from the slider's real height (`lengthPx` of `height` and its
+  `mobile:height`; px line estimates + fixed gaps, so a 100vh hero stays one tight block) and adds
+  `mobile:x/y/posWidth` overrides; tablet inherits desktop. A desktop posWidth always has a mobile
+  one — an empty bp override can't unset a base width. Thumbnails draw `buildSlidePreset`'s own
+  output (FieldInput.tsx `SlidePresetThumb`). `SliderBlock.astro` renders an editor-only dashed box
+  for an image with no src under designerEdit, so a preset's image slot can be selected/dragged in
+  Live Edit (published renders nothing); ElPreview's `freeLenPx` resolves % sizes for its snap/
+  toolbar math.
   **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab
   (DesignerPalette.tsx) now renders "Layout" then the element categories (2026-10-15: Basic/Media/
   Content Blocks/Interactive/Dynamic/Advanced, from `elements.ts`'s `PALETTE_CATEGORY` — a

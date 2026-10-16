@@ -118,19 +118,6 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
             ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { [key]: v })
             : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:${key}`]: v }),
         );
-      // Same bp routing as childSetValue, batched into one mutate — used by
-      // the free-position toggle below to write position+x+y atomically
-      // (one undo step, and x/y never briefly resolve against a stale
-      // "position" value mid-mutation).
-      const childSetValues = (patch: Record<string, string>) =>
-        withChildSlide((s0) =>
-          bp === "desktop"
-            ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, patch)
-            : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, {
-                ...(childEl.bp ?? {}),
-                ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [`${bp}:${k}`, v])),
-              }),
-        );
       const childToggleOverride = (keys: string[]) =>
         withChildSlide((s0) => updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, toggleBpKeys(childEl.bp, keys)));
       const childFieldGroupsProps = {
@@ -195,102 +182,15 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
           )}
           {(!childHasContent || inspectorTab === "style") && (
             <>
-              <div className="space-y-1.5 rounded-lg border border-line/20 bg-canvas/40 p-2">
-                <div className="flex items-center justify-between text-sm font-medium text-body">
-                  <span className="flex items-center gap-1.5">
+              {/* Slide children are free by default (2026-10-16) — no flow/free
+                  toggle here any more; lock lives on the canvas's floating
+                  toolbar. A legacy in-flow child gets freed from that
+                  toolbar's Move button (Live Edit). */}
+              {childIsFree && (
+                <div className="space-y-1.5 rounded-lg border border-line/20 bg-canvas/40 p-2">
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-body">
                     <Move className="h-3.5 w-3.5" /> {t("designer-slide-free-position")}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (childIsFree) {
-                        childSetValue("position", "");
-                        return;
-                      }
-                      // Measure the child's REAL rendered position AND size (relative
-                      // to its slide's own canvas box) before switching it to
-                      // position:absolute — whatever the canvas is currently
-                      // previewing (desktop/tablet/mobile bp all resolve through the
-                      // same real DOM rect), so unlocking never visibly moves it.
-                      // Size matters too, not just x/y: a flow element with no
-                      // explicit width renders at its column's full width, but an
-                      // absolutely-positioned one with posWidth/posHeight left unset
-                      // defaults to shrink-to-content — without capturing the
-                      // pre-toggle pixel size into posWidth/posHeight here, the box
-                      // (and any text alignment inside it) visibly snaps to a
-                      // different size the instant free position turns on, reading
-                      // as a jump even though x/y alone were correct. Falls back to
-                      // dead-center/auto-size only if the canvas isn't mounted (e.g.
-                      // Inspector open without a live canvas), same fallback
-                      // ElPreview's own render already uses for an unset x/y.
-                      const box = document.querySelector<HTMLElement>(`[data-slide-box="${el.id}:${slideIdx}"]`);
-                      const node = box?.querySelector<HTMLElement>(`[data-child-el="${childEl.id}"]`);
-                      let x = "50";
-                      let y = "50";
-                      let posWidth = "";
-                      let posHeight = "";
-                      if (box && node) {
-                        const boxRect = box.getBoundingClientRect();
-                        // heading/text renders as a plain block with no explicit
-                        // width, so it stretches to its column's full width in flow
-                        // regardless of how short the text actually is — capturing
-                        // THAT as posWidth "preserves size" technically, but for a
-                        // short heading/subheader it just freezes a box far wider
-                        // than the text, with no way back to a content-fit size
-                        // except a manual drag. Range's content-only bounding box
-                        // (ignores the block's own layout width — the standard no-
-                        // dependency text-measurement trick) gives the actual glyph
-                        // extent instead, so a heading/text starts free-positioned
-                        // already hugging its own text.
-                        // button/image used to keep `node`'s own rect on the
-                        // (once-true) assumption that "their rendered box IS the
-                        // real thing to preserve" — no longer true for button since
-                        // its flow wrapper became a deliberately full-width
-                        // text-align div (matching SectionBlock.astro's own real
-                        // render), so `node` here is column-width, not pill-width;
-                        // the same full-width-wrapper reasoning applies to a flow
-                        // image's own align wrapper. Measuring the actual rendered
-                        // pill/picture (one level — or two, for button — further in)
-                        // instead of the wrapper fixes the same "Free snaps to a
-                        // much bigger box" jump Range already fixed for text.
-                        const innerRect =
-                          childEl.type === "button"
-                            ? node.querySelector("span")?.getBoundingClientRect()
-                            : childEl.type === "image"
-                              ? node.querySelector("img")?.getBoundingClientRect()
-                              : undefined;
-                        // visualRect drives x/y too, not just size — the wrapper's
-                        // own rect (node) spans the full column (left edge == column
-                        // left edge) while the real pill/text sits centered inside
-                        // it, so anchoring x/y off the wrapper snapped a centered
-                        // button to the column's left edge instead of its own visible
-                        // spot (reported live: locked-centered button jumped to
-                        // x≈29% on toggling Free instead of staying ≈center).
-                        const visualRect =
-                          childEl.type === "heading" || childEl.type === "text"
-                            ? (() => {
-                                const range = document.createRange();
-                                range.selectNodeContents(node);
-                                return range.getBoundingClientRect();
-                              })()
-                            : (innerRect ?? node.getBoundingClientRect());
-                        if (boxRect.width > 0 && boxRect.height > 0) {
-                          x = String(Math.max(0, Math.min(100, Math.round(((visualRect.left - boxRect.left) / boxRect.width) * 1000) / 10)));
-                          y = String(Math.max(0, Math.min(100, Math.round(((visualRect.top - boxRect.top) / boxRect.height) * 1000) / 10)));
-                        }
-                        if (visualRect.width > 0) posWidth = `${Math.round(visualRect.width)}px`;
-                        if (visualRect.height > 0) posHeight = `${Math.round(visualRect.height)}px`;
-                      }
-                      childSetValues({ position: "custom", x, y, posWidth, posHeight });
-                    }}
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      childIsFree ? "bg-accent text-white" : "bg-white text-sub"
-                    }`}
-                  >
-                    {t(childIsFree ? "designer-slide-free-on" : "designer-slide-free-off")}
-                  </button>
-                </div>
-                {childIsFree && (
+                  </p>
                   <div className="grid grid-cols-2 gap-1.5">
                     {(["x", "y", "posWidth", "posHeight", "rotate"] as const).map((key) => (
                       <label key={key} className="space-y-0.5 text-xs text-sub">
@@ -311,8 +211,6 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                       </label>
                     ))}
                   </div>
-                )}
-                {childIsFree && (
                   <div className="flex gap-1.5">
                     <button
                       type="button"
@@ -357,30 +255,28 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
                       {t("designer-slide-send-back")}
                     </button>
                   </div>
-                )}
-                {childIsFree && bp !== "desktop" && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      withChildSlide((s0) =>
-                        updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, {
-                          ...(childEl.bp ?? {}),
-                          [`${bp}:x`]: childEl.props.x || "50",
-                          [`${bp}:y`]: childEl.props.y || "50",
-                          [`${bp}:posWidth`]: childEl.props.posWidth || "",
-                          [`${bp}:posHeight`]: childEl.props.posHeight || "",
-                        }),
-                      )
-                    }
-                    className="w-full rounded-lg border border-dashed border-line/40 py-1 text-xs font-semibold text-accent"
-                  >
-                    {t("designer-slide-copy-desktop-pos")}
-                  </button>
-                )}
-                {childIsFree && (
+                  {bp !== "desktop" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        withChildSlide((s0) =>
+                          updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, {
+                            ...(childEl.bp ?? {}),
+                            [`${bp}:x`]: childEl.props.x || "50",
+                            [`${bp}:y`]: childEl.props.y || "50",
+                            [`${bp}:posWidth`]: childEl.props.posWidth || "",
+                            [`${bp}:posHeight`]: childEl.props.posHeight || "",
+                          }),
+                        )
+                      }
+                      className="w-full rounded-lg border border-dashed border-line/40 py-1 text-xs font-semibold text-accent"
+                    >
+                      {t("designer-slide-copy-desktop-pos")}
+                    </button>
+                  )}
                   <p className="text-xs italic text-sub/70">{t("designer-align-inert-free")}</p>
-                )}
-              </div>
+                </div>
+              )}
               <BoxModel
                 padding={{
                   labelKey: "designer-s-padding",
