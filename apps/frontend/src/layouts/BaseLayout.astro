@@ -260,21 +260,74 @@ const fontsHref = allFonts.length
           min-height: 3rem;
           outline-color: rgba(15, 98, 254, 0.5);
         }
-        [data-ds-add] {
-          margin: auto;
-          width: 28px;
-          height: 28px;
+        /* Quiet at rest, full strength on hover/focus: the placeholder's own
+           square "+" icon, in the section's text color (a fixed gray would
+           vanish on a dark or brand-colored section). 0.55 keeps it at 3:1
+           contrast against the section background for typical text colors.
+           The page-end zone's buttons ([data-ds-end], the script) match. */
+        [data-ds-add],
+        [data-ds-end] button {
+          display: grid;
+          place-items: center;
+          width: 32px;
+          height: 32px;
           padding: 0;
           border: 0;
-          border-radius: 999px;
-          background: #0f62fe;
-          color: #fff;
-          font: 600 20px/1 system-ui, sans-serif;
+          border-radius: 6px;
+          background: transparent;
+          color: inherit;
+          opacity: 0.55;
           cursor: pointer;
-          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+          transition: opacity 0.12s, background-color 0.12s;
         }
-        [data-ds-add]:hover {
-          background: #0b4fd1;
+        [data-ds-add] {
+          margin: auto;
+        }
+        .ds-col:hover > [data-ds-add],
+        .ds-container:hover > [data-ds-add] {
+          opacity: 0.8;
+        }
+        [data-ds-add]:hover,
+        [data-ds-add]:focus-visible,
+        [data-ds-end] button:hover,
+        [data-ds-end] button:focus-visible {
+          opacity: 1;
+          background: color-mix(in srgb, currentColor 10%, transparent);
+        }
+        [data-ds-add]:focus-visible,
+        [data-ds-end] button:focus-visible {
+          outline: 2px solid #0f62fe;
+          outline-offset: 2px;
+        }
+        /* Elementor-style page-end zone: add a section, insert a template,
+           or drop a dragged element there (a new last section). */
+        [data-ds-end] {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          margin: 24px 16px;
+          padding: 20px 16px;
+          border: 1px dashed color-mix(in srgb, currentColor 30%, transparent);
+          border-radius: 8px;
+          font: 500 12px/1.3 system-ui, sans-serif;
+        }
+        [data-ds-end] > div {
+          display: flex;
+          gap: 8px;
+        }
+        [data-ds-end] > span {
+          opacity: 0.7;
+        }
+        /* Column/container hover toolbar (the script's boxBar): a dark pill,
+           so it needs its own hover — chromeBtn's inline background wins
+           over anything without !important. */
+        [data-ds-boxbar] button:hover {
+          background: rgba(255, 255, 255, 0.18) !important;
+        }
+        [data-ds-boxbar] button:focus-visible {
+          outline: 2px solid #fff;
+          outline-offset: -2px;
         }
         /* Empty heading/text hint — --ds-ph-text is set from the admin's
            i18n labels by the designerEdit script's refreshPlaceholders(). */
@@ -1003,6 +1056,8 @@ const fontsHref = allFonts.length
             link: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><path d="M8 12h8"/>',
             rotate: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
             move: '<path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/><path d="M19 9l3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>',
+            edit: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>',
+            addColumn: '<rect x="3" y="3" width="8" height="18" rx="1"/><path d="M17 8v8"/><path d="M13 12h8"/>',
           };
           const chromeCss = document.createElement("style");
           chromeCss.textContent = "[data-slide-chrome] button:hover:not(:disabled){background:#eef2f7}";
@@ -1355,7 +1410,7 @@ const fontsHref = allFonts.length
             const add = document.createElement("button");
             add.type = "button";
             add.dataset.dsAdd = "";
-            add.textContent = "+";
+            add.innerHTML = PH_PLUS;
             add.title = L("addElement", "Tambah elemen");
             add.setAttribute("aria-label", add.title);
             // Not a drag start or a select of the box behind it.
@@ -1369,6 +1424,28 @@ const fontsHref = allFonts.length
             });
             box.appendChild(add);
           });
+          // Elementor-style page-end zone: "+" opens admin's structure picker
+          // for a new last section (designer:addSection), the template icon
+          // its Templates (designer:openTemplates). A palette or element drag
+          // released over it already lands in a new last section
+          // (resolveDropTarget's no-path fallback).
+          const PH_TEMPLATE =
+            '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="1"/><rect x="3" y="14" width="9" height="7" rx="1"/><rect x="16" y="14" width="5" height="7" rx="1"/></svg>';
+          const pageEnd = document.createElement("div");
+          pageEnd.dataset.dsEnd = "";
+          pageEnd.innerHTML = `<div><button type="button">${PH_PLUS}</button><button type="button">${PH_TEMPLATE}</button></div><span></span>`;
+          const [endAdd, endTemplates] = pageEnd.querySelectorAll("button");
+          stopBubble(endAdd);
+          stopBubble(endTemplates);
+          endAdd.addEventListener("click", () => {
+            if (stale) return;
+            const r = endAdd.getBoundingClientRect();
+            parent.postMessage({ type: "designer:addSection", x: r.left + r.width / 2, y: r.bottom }, targetOrigin);
+          });
+          endTemplates.addEventListener("click", () => parent.postMessage({ type: "designer:openTemplates" }, targetOrigin));
+          const mainEl = document.getElementById("main-content");
+          if (mainEl) mainEl.appendChild(pageEnd);
+          refreshPlaceholders();
           function refreshPlaceholders() {
             document.querySelectorAll("[data-ds-ph]").forEach((ph) => {
               ph.querySelector("span").textContent = phLabel(ph.dataset.dsPh);
@@ -1377,6 +1454,10 @@ const fontsHref = allFonts.length
               add.title = L("addElement", "Tambah elemen");
               add.setAttribute("aria-label", add.title);
             });
+            endAdd.title = L("addSection", "Tambah seksyen");
+            endTemplates.title = L("templates", "Templat");
+            for (const b of [endAdd, endTemplates]) b.setAttribute("aria-label", b.title);
+            pageEnd.querySelector("span").textContent = L("dropHere", "Seret elemen ke sini");
             document.documentElement.style.setProperty("--ds-ph-text", JSON.stringify(L("typeText", "Klik untuk tulis teks…")));
           }
 
@@ -1749,6 +1830,91 @@ const fontsHref = allFonts.length
             hoveredNode = null;
           });
 
+          // Avada-style toolbar for the hovered column/container — the
+          // innermost box under the pointer, so hovering a heading shows its
+          // column's: Edit (selects it), Add column (an empty sibling: a
+          // section column, or a column of a nested "N Columns"), Duplicate,
+          // Delete; all but Edit post designer:boxAction. A dark pill just
+          // above the box's top-left corner, clear of its content (an empty
+          // box's "+" included). Never on the selected box (its grip and
+          // badges sit there) or mid-drag.
+          const BOX = ".ds-col[data-designer-path], .ds-container";
+          // The page's own column/container `n` sits in. A symbol's or
+          // slider's own boxes aren't this page's to edit (the "+" above
+          // skips them too), so those defer to the box around them.
+          function boxOf(n) {
+            let box = n instanceof Element ? n.closest(BOX) : null;
+            while (box) {
+              const owner = box.closest("[data-designer-path]");
+              if (!owner) return null;
+              if (!owner.dataset.dsType || owner.dataset.dsType === "container") return owner;
+              box = owner.parentElement && owner.parentElement.closest(BOX);
+            }
+            return null;
+          }
+          const BOX_ACTIONS = { edit: ["edit", "Edit"], addColumn: ["addColumn", "Add column"], duplicate: ["copy", "Duplicate"], delete: ["trash", "Delete"] };
+          const boxBar = document.createElement("div");
+          boxBar.dataset.dsBoxbar = "";
+          boxBar.style.cssText =
+            "position:fixed;z-index:2147480000;display:none;gap:2px;padding:2px;border-radius:999px;" +
+            "background:#1f2937;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);";
+          stopBubble(boxBar);
+          const boxBtns = {};
+          let boxBarFor = null;
+          let boxBarTimer = 0;
+          for (const [action, [icon]] of Object.entries(BOX_ACTIONS)) {
+            const b = chromeBtn(icon, "");
+            b.addEventListener("click", () => {
+              if (!boxBarFor || stale) return;
+              const path = boxBarFor.dataset.designerPath;
+              parent.postMessage(action === "edit" ? { type: "designer:select", path } : { type: "designer:boxAction", path, action }, targetOrigin);
+              showBoxBar(null);
+            });
+            boxBtns[action] = b;
+            boxBar.appendChild(b);
+          }
+          document.body.appendChild(boxBar);
+          function placeBoxBar() {
+            if (!boxBarFor) return;
+            const r = visualTarget(boxBarFor).getBoundingClientRect();
+            const h = boxBar.offsetHeight;
+            // Overlaps the box's top edge by 2px so the pointer goes straight
+            // from the box onto it; inside the box when there's no room above.
+            const above = r.top - h + 2;
+            boxBar.style.top = `${above >= 4 ? above : Math.min(Math.max(r.top, 0) + 4, r.bottom - h)}px`;
+            boxBar.style.left = `${Math.max(4, Math.min(r.left, innerWidth - boxBar.offsetWidth - 4))}px`;
+          }
+          function showBoxBar(owner) {
+            clearTimeout(boxBarTimer);
+            if (owner === selectedNode) owner = null;
+            if (owner === boxBarFor) return;
+            boxBarFor = owner;
+            boxBar.style.display = owner ? "flex" : "none";
+            if (!owner) return;
+            const path = owner.dataset.designerPath.split(".").map(Number);
+            const parentBox = path.length > 4 ? dropBox(path.slice(0, -1)) : null;
+            const column = path.length === 3 || Boolean(parentBox && getComputedStyle(parentBox).flexDirection.startsWith("row"));
+            boxBtns.addColumn.style.display = column ? "flex" : "none";
+            for (const [action, [, fallback]] of Object.entries(BOX_ACTIONS)) {
+              boxBtns[action].title = L(action, fallback);
+              boxBtns[action].setAttribute("aria-label", boxBtns[action].title);
+            }
+            placeBoxBar();
+          }
+          document.addEventListener("pointerover", (e) => {
+            clearTimeout(boxBarTimer);
+            if (boxBar.contains(e.target)) return;
+            const owner = dragState || stale ? null : boxOf(e.target);
+            // A short grace before leaving a box: the pointer heading up to
+            // its toolbar may cross a neighbour or the section's padding first.
+            if (boxBarFor && owner !== boxBarFor && !dragState) boxBarTimer = setTimeout(() => showBoxBar(owner), 300);
+            else showBoxBar(owner);
+          });
+          document.addEventListener("pointerout", (e) => {
+            if (!e.relatedTarget) showBoxBar(null);
+          });
+          window.addEventListener("scroll", placeBoxBar, true);
+
           // Reports scroll position so Designer.tsx can restore it after a
           // structural edit forces this iframe to reload — see
           // designer:restoreScroll below.
@@ -1922,6 +2088,7 @@ const fontsHref = allFonts.length
             // dropIndicatorEl is a single reused <div>, created lazily on
             // first use and repositioned on every move rather than recreated.
             if (e.data.type === "designer:paletteDragMove") {
+              showBoxBar(null);
               const target = resolveDropTarget(e.data.x, e.data.y);
               const changed = JSON.stringify(target) !== JSON.stringify(lastReportedTarget);
               lastReportedTarget = target;
@@ -1971,6 +2138,8 @@ const fontsHref = allFonts.length
                 if (prevTarget.isContentEditable) prevTarget.contentEditable = "false";
               }
               destroySpacingHandles();
+              // The selected box shows its grip/badges at that corner instead.
+              showBoxBar(null);
               selectedNode = e.data.path ? findByPath(e.data.path) : null;
               // Designer names the selected slide child ("slideIdx.r.c.e") —
               // re-attaches its chrome after every reload, and drops it when

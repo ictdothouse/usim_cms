@@ -20,18 +20,33 @@ import type { Block, SectionProps, ElType, Drag } from "./types";
 import type { DesignerCtx } from "./context";
 import type { useSiteChrome } from "./hooks/useSiteChrome";
 
-type Tile = (key: string, Icon: typeof Settings, label: string, payload: Drag) => ReactNode;
+type Tile = (key: string, icon: ReactNode, label: string, payload: Drag) => ReactNode;
 const paletteTypes = Object.keys(PALETTE_CATEGORY) as Exclude<ElType, "container">[];
+const tileIcon = (Icon: typeof Settings) => <Icon className="h-4 w-4 text-accent" />;
+
+// A column preset draws its own columns, each bar as wide as its span
+// (Elementor's "Select your structure") — read at a glance where a generic
+// icon didn't. DesignerCanvas.tsx's "add row" buttons draw the same.
+function presetIcon(preset: LayoutPreset): ReactNode {
+  if (preset.drag.kind !== "new-row") return preset.icon && tileIcon(preset.icon);
+  return (
+    <span aria-hidden className="flex h-4 w-8 gap-0.5">
+      {preset.drag.spans.map((span, i) => (
+        <span key={i} className="rounded-sm bg-accent/60" style={{ flex: `${span} 1 0` }} />
+      ))}
+    </span>
+  );
+}
 
 // Layout presets, then every element category — one labelled tile grid each.
 // Shared by the Elements tab and the "+" picker (AddElementMenu); `tile`
-// decides what a click/drag does.
-function PaletteGroups({ t, tile, layout = LAYOUT_PRESETS, grid }: { t: (k: Key) => string; tile: Tile; layout?: LayoutPreset[]; grid: string }) {
+// decides what a click/drag does. `elements={false}`: the Layout group only.
+function PaletteGroups({ t, tile, layout = LAYOUT_PRESETS, grid, elements = true }: { t: (k: Key) => string; tile: Tile; layout?: LayoutPreset[]; grid: string; elements?: boolean }) {
   const groups: [Key, ReactNode[]][] = [
-    ["designer-category-layout", layout.map((preset) => tile(preset.key, preset.icon, t(preset.labelKey), preset.drag))],
-    ...[...new Set(Object.values(PALETTE_CATEGORY))].map((category): [Key, ReactNode[]] => [
+    ["designer-category-layout", layout.map((preset) => tile(preset.key, presetIcon(preset), t(preset.labelKey), preset.drag))],
+    ...(elements ? [...new Set(Object.values(PALETTE_CATEGORY))] : []).map((category): [Key, ReactNode[]] => [
       category,
-      paletteTypes.filter((type) => PALETTE_CATEGORY[type] === category).map((type) => tile(type, ELS[type].icon, t(ELS[type].labelKey), { kind: "new", type })),
+      paletteTypes.filter((type) => PALETTE_CATEGORY[type] === category).map((type) => tile(type, tileIcon(ELS[type].icon), t(ELS[type].labelKey), { kind: "new", type })),
     ]),
   ];
   return (
@@ -48,8 +63,10 @@ function PaletteGroups({ t, tile, layout = LAYOUT_PRESETS, grid }: { t: (k: Key)
 
 // Live Edit's "+" in an empty column/container (designer:addInto) opens this
 // at the button: the Elements tab's groups minus Section (a section never
-// goes inside a box); a click inserts into that box.
-export function AddElementMenu({ x, y, t, onPick, onClose }: { x: number; y: number; t: (k: Key) => string; onPick: (payload: Drag) => void; onClose: () => void }) {
+// goes inside a box); a click inserts into that box. `structures` (the
+// page-end zone's "+", designer:addSection): only the column presets, for a
+// new last section.
+export function AddElementMenu({ x, y, t, onPick, onClose, structures = false }: { x: number; y: number; t: (k: Key) => string; onPick: (payload: Drag) => void; onClose: () => void; structures?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -70,25 +87,31 @@ export function AddElementMenu({ x, y, t, onPick, onClose }: { x: number; y: num
   const height = Math.min(440, window.innerHeight - 16);
   const left = Math.max(8, Math.min(x - width / 2, window.innerWidth - width - 8));
   const top = y + 8 + height > window.innerHeight ? Math.max(8, y - height - 40) : y + 8;
-  const tile: Tile = (key, Icon, label, payload) => (
+  const tile: Tile = (key, icon, label, payload) => (
     <button
       type="button"
       key={key}
       onClick={() => onPick(payload)}
       className="flex flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-1 py-2 text-center text-xs font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white"
     >
-      <Icon className="h-4 w-4 text-accent" /> {label}
+      {icon} {label}
     </button>
   );
   return (
     <div
       ref={ref}
       role="dialog"
-      aria-label={t("designer-add-element")}
+      aria-label={t(structures ? "designer-add-section" : "designer-add-element")}
       className="fixed z-50 space-y-3 overflow-y-auto rounded-xl border border-line/30 bg-white p-3 shadow-xl"
       style={{ left, top, width, maxHeight: height }}
     >
-      <PaletteGroups t={t} tile={tile} layout={LAYOUT_PRESETS.filter((preset) => preset.drag.kind !== "new-section")} grid="grid grid-cols-3 gap-1.5" />
+      <PaletteGroups
+        t={t}
+        tile={tile}
+        layout={LAYOUT_PRESETS.filter((preset) => (structures ? preset.drag.kind === "new-row" : preset.drag.kind !== "new-section"))}
+        elements={!structures}
+        grid="grid grid-cols-3 gap-1.5"
+      />
     </div>
   );
 }
@@ -294,7 +317,7 @@ export function DesignerPalette({
   }
   // One palette tile — Layout presets and every element category share the
   // same click/drag wiring, only the payload differs.
-  const tile: Tile = (key, Icon, label, payload) => (
+  const tile: Tile = (key, icon, label, payload) => (
     <button
       type="button"
       key={key}
@@ -318,7 +341,7 @@ export function DesignerPalette({
       // device (final review finding).
       className="touch-none flex cursor-grab flex-col items-center gap-1 rounded-lg border border-line/30 bg-canvas/60 px-2 py-2.5 text-center text-xs font-medium leading-tight text-ink hover:border-accent/50 hover:bg-white active:cursor-grabbing"
     >
-      <Icon className="h-4 w-4 text-accent" /> {label}
+      {icon} {label}
     </button>
   );
   return (

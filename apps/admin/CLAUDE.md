@@ -296,10 +296,14 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   Content Blocks/Interactive/Dynamic/Advanced, from `elements.ts`'s `PALETTE_CATEGORY` — a
   `Record<Exclude<ElType, "container">, Key>`, so a new ElType fails typecheck until it gets a
   category), every group the same 2-column icon-tile grid via one shared `tile()`; `container` lives
-  in Layout only. `elements.ts`'s new `LAYOUT_PRESETS` array drives the Layout group: Section, Container,
+  in Layout only. `elements.ts`'s new `LAYOUT_PRESETS` array drives the Layout group: Section,
   V Flex/H Flex (both just the `container` ElType with `flexDirection` pre-set via a new `Drag.new`
   field `propsOverride`, not a second ElType), and 6 row-column presets (1/2/3/4 even columns, 1:2,
   2:1 — same spans `ROW_PRESETS`'s inline "+add row" buttons already offered, now also draggable).
+  **Structure thumbnails (2026-10-16, Elementor's "Select your structure")**: a column preset has no
+  icon (`LayoutPreset.icon` is optional) — `DesignerPalette.tsx`'s `presetIcon` draws its columns as
+  bars sized by span; V/H Flex show ↓/→ arrows. The separate "Container" tile was dropped: container
+  defaults to `flexDirection: "row"`, so it was H Flex twice.
   `Drag` has two Layout-only kinds, both handled by `useBlockOps.ts`'s `dropIntoColumn`/
   `dropIntoNewSection` before the El-insert/move branch: `"new-section"` (a fresh Block right after
   the hovered section, or at a new-section target) and `"new-row"`. **Layout nests where it's dropped
@@ -312,19 +316,33 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   ElPreview render a nested container's `grow` as `flex:<grow> 1 0%;min-width:min(15rem,100%)`, so
   the columns keep their ratio and wrap onto their own lines when the row is too narrow (that's the
   mobile stack — no bp rule). Section vs Container: Section is the top-level band (background,
-  padding, contained/full width) holding Rows; Container/V Flex/H Flex are flex boxes inside a
-  column that nest freely ("Container" = H Flex, default row). `newSection()`/`newRow()` (parsers.ts)
+  padding, contained/full width) holding Rows; V Flex/H Flex (the `container` ElType) are flex boxes
+  inside a column that nest freely. `newSection()`/`newRow()` (parsers.ts)
   stay the shared Row factories; lock check on `"new-row"` (it mutates the hovered section).
   **Live Edit drop boxes + "+" (2026-10-15)**: `resolveDropTargetFromPath` (and its BaseLayout port)
   takes `opts {container, horizontal, pointerX}` — a hovered container's middle drops INTO it (a 10px
   edge band, ≤¼ of the box, along the parent's axis still means before/after), and inside a
   row-direction parent before/after is decided on X; the indicator boxes the `.ds-container` (never its
   0×0 display:contents wrapper) and draws an upright line in a row box. Every empty column/container
-  gets an editor-only "+" (`[data-ds-add]`, ignored by the empty-box CSS) that posts
+  gets an editor-only "+" (`[data-ds-add]`, ignored by the empty-box CSS; since 2026-10-16 the
+  placeholder's own square-plus icon in the section's inherited text color at 55% opacity, full on
+  hover — was a filled brand-blue circle, which the user found too loud) that posts
   `designer:addInto {path,x,y}`; Designer opens `AddElementMenu` (DesignerPalette.tsx, the Elements
   tab's `PaletteGroups` minus Section) there and a pick runs `dropIntoColumn(path)`, selecting a new
   element so the Inspector opens on it. Container children (depth 5+) also drag anywhere
   (`designer:moveTo` accepts depth ≥4) and double-click edit (`designer:textInput` via `getNode`).
+  **Avada + Elementor canvas chrome (2026-10-16)**: hovering any column/container (the innermost box
+  under the pointer; a symbol's/slider's own boxes defer to the one around them) shows a dark pill
+  just above its top-left corner (BaseLayout.astro's `boxBar`, 300ms grace so the pointer can reach
+  it): Edit (`designer:select`), Add column (only on a section column or a column of a nested "N
+  Columns" — its parent box lays out in a row), Duplicate, Delete — the last three post
+  `designer:boxAction {path, action}` to `useBlockOps.ts`'s `boxAction` (any depth ≥3 via
+  designerTree's generic walkers, lock-checked, a row goes with its last column). Hidden on the
+  selected box (its grip/badges own that corner) and mid-drag. A page-end zone (`[data-ds-end]`,
+  appended to `<main>`) has the same quiet "+" — `designer:addSection {x,y}` opens `AddElementMenu`
+  with `structures` (column presets only; `addMenu.path` is `[]`, picked via `dropIntoNewSection`)
+  — and a Templates button (`designer:openTemplates`; a section template appends at the end).
+  Labels ride on `designer:showSlides`'s `labels`.
   **Device-preview modal: real dimensions, rotate, no in-frame scrollbar (2026-09-25)**: the
   mobile/tablet bezel used an arbitrary `aspect-[9/19.5]` ratio capped at a fairly small `max-h`, and
   had no rotate control at all — replaced with named real device viewports (`DEVICE_DIMS`: iPhone
