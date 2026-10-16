@@ -35,6 +35,11 @@ test("every value the slider Navigation panel writes passes element-schema", () 
     navSize: "40px",
     paginationBulletSize: "0.75rem",
   });
+  // "More settings" values typed while the toolbar is on Tablet/Mobile land in El.bp.
+  assert.equal(
+    validateElement({ type: "slider", props: {}, bp: { "mobile:navSize": "24px", "tablet:navOffset": "0.5rem", "mobile:paginationColor": "#ffffff" } }, "el"),
+    null,
+  );
 });
 
 for (const [type, def] of Object.entries(ELS)) {

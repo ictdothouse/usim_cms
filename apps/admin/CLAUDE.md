@@ -316,8 +316,12 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   - `autoplay` (now any number of seconds — element-schema moved it from `ENUM_VALUES` to
     `LENGTH_KEYS`), `pauseOnHover` and `loop` (absent = on), and `speed` (slow/normal/fast)
   Switch off = `"none"` / `autoplay "0"`. Color/size/offset/placement sit under "More settings"
-  through `FieldInput`'s own color/length controls. The panel writes base props only, since
-  `SliderBlock.astro` reads no bp/lang override for these. Option lists are `SLIDER_ARROW_STYLES`/
+  through `FieldInput`'s own color/length controls. Those color/size/offset fields are per-breakpoint
+  (asked for: arrow size per screen, desktop by default): they read/write through the Inspector's
+  own bp-aware `getValue`/`setValue` + `BpToggle` (passed in `inputProps`), so a Tablet/Mobile edit
+  lands in `El.bp`; SliderBlock's `navVars()` builds the `--ds-nav-*`/`--ds-dot-*` custom properties
+  for both the inline base style and the `.ds-slider` bp rule. Everything else in the panel
+  (designs, switches, placement, alignment, autoplay/loop/speed) writes base props only. Option lists are `SLIDER_ARROW_STYLES`/
   `SLIDER_DOT_STYLES`/`SLIDER_NAV_ICONS` (elements.ts). `elements.test.ts` validates every panel
   value through `validateElement`, because the per-field cross-check no longer sees them. The 9
   power-user carousel knobs (direction … slideToClickedSlide) moved to the Style tab's Advanced
@@ -1823,7 +1827,12 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   wrapper carries `--ds-z` + `data-ds-z`, applied to its root by global.css.
   The pill is hidden until a badge is hovered/dragged, then fades out after 3s
   idle (held while hovering the badge or pill); `spacingLockBarKeep` carries
-  its visibility across the rebuild a lock click triggers. BaseLayout's editor
+  its visibility across the rebuild a lock click triggers. **Hover-only badges
+  (2026-10-16):** the edge badge groups start hidden too; `place()` shows them
+  while the selected node, the frame (grip/badges) or the pill is `:hover`ed or
+  a handle is `data-dragging`, with a 400ms grace so the pointer can reach a
+  badge sitting outside the box. The grip stays. Asked for because the px
+  labels cluttered the page while just viewing it. BaseLayout's editor
   CSS detects an empty column/container with `:not(:has(> *))` (not `:empty`,
   which whitespace text nodes defeat). Same editor-only CSS draws a faint dashed guide on every
   `.ds-section`/`.ds-col`/`.ds-container` (class added in ContainerBlock.astro);
