@@ -18,7 +18,7 @@
     "@ucms/element-style": "workspace:*",
     "astro": "^7.4.0",
     "daisyui": "^5.7.50",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "sanitize-html": "^2.18.1",
     "swiper": "^12.2.0",
     "tailwindcss": "^4.3.3"
