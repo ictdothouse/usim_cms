@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { produce } from "immer";
 import { __testOnly_blockOpsFns } from "./useBlockOps";
+import { childrenOf, getNode } from "../../designerTree";
 import type { Block } from "../types";
 
 function makeDeps(blocks: Block[]) {
@@ -8,10 +10,12 @@ function makeDeps(blocks: Block[]) {
   const clip = new Map<string, string>();
   const clipStyle = new Map<string, string>();
   const calls = { structural: 0 };
+  // useUndoRedo's own mutate: Immer's produce(), whose result is frozen — so
+  // a write outside the draft throws here just as it does in the browser.
   const mutate = (fn: (next: Block[]) => void) => {
-    const next = JSON.parse(JSON.stringify(state.blocks));
-    fn(next);
-    state.blocks = next;
+    state.blocks = produce(state.blocks, (draft) => {
+      fn(draft);
+    });
   };
   const deps = {
     get blocks() {
@@ -171,6 +175,18 @@ test("dropIntoColumn: a Layout 'new-row' preset nests inside a container", () =>
   ops.dropIntoColumn([0, 0, 0, 0]);
   const box = (state.blocks[0].props as { rows: { columns: { elements: NestedEl[] }[] }[] }).rows[0].columns[0].elements[0];
   assert.equal(box.children?.[0].children?.length, 3);
+});
+
+test("a nested 'N Columns' column reads fine from committed, frozen state (Live Edit's Edit / Add element crashed: 'Cannot assign to read only property children')", () => {
+  const { deps, state } = makeDeps(sampleBlocks());
+  const ops = __testOnly_blockOpsFns(deps as never);
+  ops.drag.current = { kind: "new-row", spans: [1, 1] };
+  ops.dropIntoColumn([0, 0, 0], 0);
+  assert.ok(Object.isFrozen(state.blocks[0]));
+  // InspectorNestedPanel's render-time getNode() of the selected V Flex column…
+  assert.equal((getNode(state.blocks, [0, 0, 0, 0, 1]) as NestedEl).props.grow, "1");
+  // …and Designer's "+" picker counting that still child-less column's children.
+  assert.deepEqual(childrenOf(state.blocks, [0, 0, 0, 0, 1]), []);
 });
 
 test("dropIntoColumn: a Layout 'new-row' preset is rejected on a locked section instead of mutating its own content (pre-existing gap the final review found)", () => {

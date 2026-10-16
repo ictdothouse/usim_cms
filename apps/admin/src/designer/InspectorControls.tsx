@@ -28,6 +28,7 @@ import type { DesignerCtx } from "./context";
 import { BufferedInput, BpToggle, LangToggle } from "./FieldControls";
 import { ELS } from "./elements";
 import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
+import { clone } from "@/lib/utils";
 
 // Duplicated from Designer.tsx's own module-level `uid`/`newEl` (designer/
 // files can't import back from Designer.tsx — see designer/types.ts's own
@@ -82,7 +83,7 @@ export function ContainerChildrenPanel({ ctx, path, el }: { ctx: DesignerCtx; pa
                     mutate((bs) => {
                       const parent = getNode(bs, path) as El;
                       parent.children = parent.children ?? [];
-                      insertAt(bs, path, structuredClone(parent.children[i]), i + 1);
+                      insertAt(bs, path, clone(parent.children[i]), i + 1);
                     })
                   }
                   aria-label={t("designer-duplicate")}
