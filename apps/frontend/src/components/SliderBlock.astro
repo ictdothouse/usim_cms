@@ -114,6 +114,26 @@ const HEX_RE = /^#[0-9a-f]{6}$/i;
 // bestTextColor is now single-sourced in @ucms/element-render (imported
 // above) — this used to be a hand-copied byte-for-byte port, the exact drift
 // risk that package's design closes.
+// Arrow/pagination knobs as CSS custom properties: the .ds-slider inline
+// style builds them from the base props, the tablet/mobile @media rules
+// (bpStyleRules, below) from that tier's merged props.
+function navVars(mp: Record<string, string>): string {
+  const navColor = mp.navColor && HEX_RE.test(mp.navColor) ? mp.navColor : null;
+  const dotColor = mp.paginationColor && HEX_RE.test(mp.paginationColor) ? mp.paginationColor : null;
+  return [
+    navColor ? `--ds-nav-color:${navColor}` : null,
+    // Icon color on a filled button that took navColor as its fill.
+    navColor ? `--ds-nav-fg:${bestTextColor(navColor)}` : null,
+    mp.navSize ? `--ds-nav-size:${mp.navSize}` : null,
+    mp.navOffset ? `--ds-nav-offset:${mp.navOffset}` : null,
+    dotColor ? `--ds-dot-color:${dotColor}` : null,
+    mp.paginationOffset ? `--ds-dot-offset:${mp.paginationOffset}` : null,
+    mp.paginationBulletSize ? `--ds-dot-size:${mp.paginationBulletSize}` : null,
+    mp.paginationBulletGap ? `--ds-dot-gap:${mp.paginationBulletGap}` : null,
+  ]
+    .filter(Boolean)
+    .join(";");
+}
 // Slide-nested element free positioning (props.position === "custom") — opts
 // an element out of the row/column stack and into position:absolute inside
 // `.ds-slide-content` (already `position:relative` for its own z-index — see
@@ -318,6 +338,8 @@ const p = el.props ?? {};
 // own wrapper (`[data-vis="elId"] .ds-slider`) instead of a slide child's
 // `data-slide-el` selector. Previously only `height` was real (every other
 // field here was admin-canvas-preview-only, see this file's CLAUDE.md note).
+// The Navigation panel's sizes/offsets/colors ride the same rule as
+// navVars' custom properties (an !important rule beats the inline base).
 // Height goes on .ds-slider-box, which carries the base inline height: on
 // the auto-height outer wrapper a smaller mobile height only shrank the
 // slider's page slot while the box kept its desktop height, so the next
@@ -325,7 +347,7 @@ const p = el.props ?? {};
 if (el.bp && Object.keys(el.bp).length > 0) {
   responsiveRules.push(
     ...bpStyleRules(`[data-vis="${elId}"] .ds-slider`, el.bp, p, (mp) =>
-      [marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
+      [marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp), navVars(mp)].filter(Boolean).join(";"),
     ),
     ...bpStyleRules(`[data-vis="${elId}"] .ds-slider-box`, el.bp, p, (mp) => `height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`),
   );
@@ -340,12 +362,10 @@ if (el.bp && Object.keys(el.bp).length > 0) {
   const dotsStyle = p.dotsStyle || "dots";
   const transition = p.transition || "slide";
   // Nav/pagination module customization — CSS custom
-  // properties + a data attribute per knob, all optional
-  // (empty = keep the existing hand-rolled default below).
-  const navColor = p.navColor && HEX_RE.test(p.navColor) ? p.navColor : null;
+  // properties (navVars) + a data attribute per knob, all
+  // optional (empty = keep the existing hand-rolled default below).
   const navPlacement = p.navPlacement === "outside" ? "outside" : "inside";
   const navIconSvg = NAV_ICON_SVG[p.navIcon ?? ""] ?? NAV_ICON_SVG.chevron;
-  const paginationColor = p.paginationColor && HEX_RE.test(p.paginationColor) ? p.paginationColor : null;
   const paginationPlacement = p.paginationPlacement === "outside" ? "outside" : "inside";
   const paginationPosition = ["start", "end"].includes(p.paginationPosition as string) ? p.paginationPosition : "center";
   // Renders one nested element inside a slide's own mini
@@ -638,21 +658,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
   return (
     <div
       class={cls("ds-slider", p.cssClass)}
-      style={[
-        marginStyle(p),
-        paddingStyle(p),
-        navColor ? `--ds-nav-color:${navColor}` : null,
-        // Icon color on a filled button that took navColor as its fill.
-        navColor ? `--ds-nav-fg:${bestTextColor(navColor)}` : null,
-        p.navSize ? `--ds-nav-size:${p.navSize}` : null,
-        p.navOffset ? `--ds-nav-offset:${p.navOffset}` : null,
-        paginationColor ? `--ds-dot-color:${paginationColor}` : null,
-        p.paginationOffset ? `--ds-dot-offset:${p.paginationOffset}` : null,
-        p.paginationBulletSize ? `--ds-dot-size:${p.paginationBulletSize}` : null,
-        p.paginationBulletGap ? `--ds-dot-gap:${p.paginationBulletGap}` : null,
-      ]
-        .filter(Boolean)
-        .join(";")}
+      style={[marginStyle(p), paddingStyle(p), navVars(p)].filter(Boolean).join(";")}
       data-nav-placement={navPlacement}
       data-nav-mobile={p.navHideMobile === "true" ? "hide" : undefined}
     >

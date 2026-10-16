@@ -1629,8 +1629,10 @@ const fontsHref = allFonts.length
             const edgeGroups = {};
             for (const edge of ["top", "bottom", "left", "right"]) {
               const g = document.createElement("div");
+              // Hidden until place() sees the pointer on the box (below).
               g.style.cssText =
-                "position:absolute;z-index:1;display:flex;gap:2px;" + (edge === "top" || edge === "bottom" ? "flex-direction:column;" : "");
+                "position:absolute;z-index:1;display:flex;gap:2px;opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s;" +
+                (edge === "top" || edge === "bottom" ? "flex-direction:column;" : "");
               stopBubble(g);
               frame.appendChild(g);
               edgeGroups[edge] = g;
@@ -1757,12 +1759,26 @@ const fontsHref = allFonts.length
             // tuck: -10 centers the 20px grip on the corner; where the viewport
             // edge would clip it, it slides inside the box (never past its end).
             const tuck = (start, size) => `${Math.min(Math.max(-10, 2 - start), size - 10)}px`;
+            // Badges show only while the pointer is on the selected box, its
+            // grip/badges or the lock pill, or mid-drag; just viewing the page
+            // leaves the grip alone. The 400ms grace carries the pointer from
+            // the box out to a badge sitting outside it. visibility "" inherits,
+            // so the frame's own hide during an element drag still wins.
+            let hoverAt = -Infinity;
+            let badgesOn = false;
             const place = () => {
               if (spacingHandleBox !== box) return;
               const r = box.getBoundingClientRect();
               Object.assign(frame.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
               if (path.length !== 1) Object.assign(grip.style, { left: tuck(r.left, r.width), top: tuck(r.top, r.height) });
               for (const edge in edgeGroups) placeSpacingGroup(edgeGroups[edge], edge, r);
+              const now = performance.now();
+              if (node.matches(":hover") || frame.matches(":hover") || bar.matches(":hover") || frame.querySelector("[data-dragging]")) hoverAt = now;
+              const on = now - hoverAt < 400;
+              if (on !== badgesOn) {
+                badgesOn = on;
+                for (const edge in edgeGroups) Object.assign(edgeGroups[edge].style, { opacity: on ? "1" : "0", visibility: on ? "" : "hidden" });
+              }
               placeSpacingLockBar();
               spacingRaf = requestAnimationFrame(place);
             };

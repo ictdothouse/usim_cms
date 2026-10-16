@@ -2,12 +2,14 @@
 // slides editor): arrows, pagination, autoplay, loop and speed as switches +
 // picture grids — these used to be 14 raw <select>/length fields in one long
 // list. SliderBlock.astro is the only renderer (real site, and Live Edit,
-// which reloads on every change); none of these props has a per-breakpoint or
-// per-language render path, so the panel always writes the base props.
+// which reloads on every change). The "More settings" sizes/offsets/colors
+// follow the toolbar's Desktop/Tablet/Mobile like any Inspector field (El.bp,
+// rendered as @media rules); everything else always writes the base props.
 import type { ReactNode } from "react";
 import { AlignCenter, AlignLeft, AlignRight } from "lucide-react";
 import type { Key } from "@/i18n";
-import { DragNumber } from "./FieldControls";
+import { BpToggle, DragNumber } from "./FieldControls";
+import type { FieldGroupsProps } from "./FieldGroups";
 import { FieldInput, type FieldInputProps } from "./FieldInput";
 import { SLIDER_ARROW_STYLES, SLIDER_DOT_STYLES, SLIDER_NAV_ICONS } from "./elements";
 
@@ -181,10 +183,13 @@ function Segmented({ value, options, onChange }: { value: string; options: { val
   );
 }
 
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
+function Labeled({ label, toggle, children }: { label: string; toggle?: ReactNode; children: ReactNode }) {
   return (
     <div className="space-y-1">
-      <p className="text-xs font-medium text-sub">{label}</p>
+      <p className="flex items-center gap-1 text-xs font-medium text-sub">
+        {label}
+        {toggle}
+      </p>
       {children}
     </div>
   );
@@ -201,8 +206,10 @@ export function SliderNavPanel({
   p: Record<string, string>;
   set: (patch: Record<string, string>) => void;
   t: (k: Key) => string;
-  // FieldInput's own color/length controls, reused for the "More settings" knobs.
-  inputProps: Omit<FieldInputProps, "field" | "value" | "onChange">;
+  // FieldInput's own color/length controls, reused for the "More settings"
+  // knobs, read/written through the Inspector's bp-aware getValue/setValue.
+  inputProps: Omit<FieldInputProps, "field" | "value" | "onChange"> &
+    Pick<FieldGroupsProps, "getValue" | "setValue" | "hasOverride" | "onToggleOverride">;
 }) {
   const arrowsOn = p.navStyle !== "none";
   const navStyle = pick(SLIDER_ARROW_STYLES, p.navStyle, "arrows");
@@ -210,11 +217,18 @@ export function SliderNavPanel({
   const dotsOn = p.dotsStyle !== "none";
   const dotsStyle = pick(SLIDER_DOT_STYLES, p.dotsStyle, "dots");
   const autoplayOn = Number(p.autoplay) > 0;
-  const field = (key: string, labelKey: Key, kind: "color" | "length") => (
-    <Labeled label={t(labelKey)}>
-      {FieldInput({ ...inputProps, field: { key, labelKey, kind }, value: p[key] ?? "", onChange: (v) => set({ [key]: v }) })}
-    </Labeled>
-  );
+  const { getValue, setValue, hasOverride, onToggleOverride } = inputProps;
+  const field = (key: string, labelKey: Key, kind: "color" | "length") => {
+    const f = { key, labelKey, kind };
+    return (
+      <Labeled
+        label={t(labelKey)}
+        toggle={hasOverride && onToggleOverride && <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={inputProps.bp} t={t} />}
+      >
+        {FieldInput({ ...inputProps, field: f, value: getValue(f), onChange: (v) => setValue(f, v) })}
+      </Labeled>
+    );
+  };
   const placement = (key: "navPlacement" | "paginationPlacement", labelKey: Key) => (
     <Labeled label={t(labelKey)}>
       <Segmented
