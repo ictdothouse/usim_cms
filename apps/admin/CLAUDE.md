@@ -1758,7 +1758,11 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   left). Across the edge a group centers on the part of the box still inside;
   it never passes the box's far edge, so a box scrolled away (or wholly past a
   wall — reach it via Layers + Inspector) takes it along. Drags are deltas, so
-  a pinned badge still drags. Each build also posts
+  a pinned badge still drags. **Magnet at 0 (2026-10-16):** `toDetent`/
+  `fromDetent` add a dead zone around 0 — a drag hits 0 at the usual spot, holds
+  it for 16px more travel, then goes negative (8px to pull free when starting
+  at 0); 1:1 either side, so no value is unreachable. Asked for because a drag
+  toward a wall overshot into an unwanted negative margin. Each build also posts
   `designer:spacingValues` (the box's computed px); `useLiveEditBridge` keeps it
   as `liveSpacing`, Designer passes it as `ctx.liveSpacing` only while it
   matches `sel`, and `BoxModel` shows it as an unset side's placeholder (a
