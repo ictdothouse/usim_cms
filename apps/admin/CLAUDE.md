@@ -307,6 +307,27 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   for an image with no src under designerEdit, so a preset's image slot can be selected/dragged in
   Live Edit (published renders nothing); ElPreview's `freeLenPx` resolves % sizes for its snap/
   toolbar math.
+  **Slider Navigation panel (2026-10-16)**: the 14 raw nav/pagination/autoplay fields left
+  `ELS.slider.fields`. `SliderNavPanel.tsx` (Content tab, under the slides editor, rendered by
+  `InspectorElementPanel`) edits them as on/off switches + picture grids:
+  - arrows: 7 `navStyle` designs (arrows=circle/square/outline/dark/minimal/bar/corner), a
+    `navIcon` (chevron/arrow/caret) and `navHideMobile`
+  - pagination: 6 `dotsStyle` designs (dots/pill/lines/numbers/fraction/progress)
+  - `autoplay` (now any number of seconds — element-schema moved it from `ENUM_VALUES` to
+    `LENGTH_KEYS`), `pauseOnHover` and `loop` (absent = on), and `speed` (slow/normal/fast)
+  Switch off = `"none"` / `autoplay "0"`. Color/size/offset/placement sit under "More settings"
+  through `FieldInput`'s own color/length controls. The panel writes base props only, since
+  `SliderBlock.astro` reads no bp/lang override for these. Option lists are `SLIDER_ARROW_STYLES`/
+  `SLIDER_DOT_STYLES`/`SLIDER_NAV_ICONS` (elements.ts). `elements.test.ts` validates every panel
+  value through `validateElement`, because the per-field cross-check no longer sees them. The 9
+  power-user carousel knobs (direction … slideToClickedSlide) moved to the Style tab's Advanced
+  group (fields.tsx).
+  Frontend details:
+  - arrows are inline SVG (prev mirrors the glyph); `--ds-nav-fg` = `bestTextColor(navColor)`
+  - dots are `<button>`s; the script syncs the fraction number / progress `--p`
+  - loop off disables the end arrows
+  - `speed` absent = 500ms, so existing slide-transition sliders went 300→500ms
+  - autoplay never runs in Live Edit, and the panel says so
   **Elements palette "Layout" category, Webflow-style (2026-10-02)**: the Elements tab
   (DesignerPalette.tsx) now renders "Layout" then the element categories (2026-10-15: Basic/Media/
   Content Blocks/Interactive/Dynamic/Advanced, from `elements.ts`'s `PALETTE_CATEGORY` — a

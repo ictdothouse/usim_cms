@@ -116,9 +116,9 @@ export const ENUM_VALUES: Record<string, string[]> = {
   // accordion/infobox/slider (see Designer.tsx's ELS registry additions).
   exclusive: ["false", "true"],
   iconPosition: ["top", "left"],
-  autoplay: ["0", "3", "5", "8"],
-  navStyle: ["arrows", "minimal", "none"],
-  dotsStyle: ["dots", "lines", "numbers", "none"],
+  // Slider Navigation panel's picture grids (apps/admin SliderNavPanel.tsx).
+  navStyle: ["arrows", "square", "outline", "dark", "minimal", "bar", "corner", "none"],
+  dotsStyle: ["dots", "pill", "lines", "numbers", "fraction", "progress", "none"],
   transition: ["slide", "fade", "coverflow", "cube", "flip", "cards"],
   slidesPerView: ["1", "2", "3", "4"],
   // Slider layout/behaviour + nav/pagination module customization
@@ -131,9 +131,14 @@ export const ENUM_VALUES: Record<string, string[]> = {
   grabCursor: ["true", "false"],
   slideToClickedSlide: ["true", "false"],
   navPlacement: ["inside", "outside"],
-  navIcon: ["chevron", "arrow"],
+  navIcon: ["chevron", "arrow", "caret"],
   paginationPlacement: ["inside", "outside"],
   paginationPosition: ["start", "center", "end"],
+  // Navigation panel switches — absent means on for loop/pauseOnHover, off
+  // for navHideMobile. The slider's transition speed reuses `speed` below.
+  loop: ["true", "false"],
+  pauseOnHover: ["true", "false"],
+  navHideMobile: ["true", "false"],
   // menu element fields (Task 9: Designer.tsx menu integration)
   layout: ["horizontal", "vertical"],
   dropdownTrigger: ["hover", "click"],
@@ -197,6 +202,9 @@ export const LENGTH_KEYS = new Set([
   // paginationBulletGap) — all plain px lengths or bare indices, same
   // LENGTH_RE unit-less branch as x/y below.
   "spaceBetween", "initialSlide", "navSize", "navOffset", "paginationOffset", "paginationBulletSize", "paginationBulletGap",
+  // Slider autoplay delay in seconds (was a closed 0/3/5/8 select) — bare
+  // number; SliderBlock.astro treats anything not > 0 as off.
+  "autoplay",
   // image element's own resizable width (Designer.tsx canvas drag handle +
   // Inspector length field) — "" means natural/auto size. Named "imgWidth",
   // not "width": ENUM_VALUES.width below is Section's own contained/full

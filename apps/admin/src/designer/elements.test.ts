@@ -12,8 +12,30 @@
 // into a red test instead of a live 400 on someone's first save/publish.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ELS } from "./elements";
-import { LENGTH_KEYS, COLOR_KEYS, ENUM_VALUES, REPEATER_SCHEMAS } from "@ucms/element-schema";
+import { ELS, SLIDER_ARROW_STYLES, SLIDER_DOT_STYLES, SLIDER_NAV_ICONS } from "./elements";
+import { LENGTH_KEYS, COLOR_KEYS, ENUM_VALUES, REPEATER_SCHEMAS, validateElement } from "@ucms/element-schema";
+
+// The slider Navigation panel (SliderNavPanel.tsx) writes props that are no
+// longer ELS fields, so the per-field loop below can't see them.
+test("every value the slider Navigation panel writes passes element-schema", () => {
+  const ok = (props: Record<string, string>) => assert.equal(validateElement({ type: "slider", props }, "el"), null, JSON.stringify(props));
+  for (const navStyle of [...SLIDER_ARROW_STYLES, "none"]) ok({ navStyle });
+  for (const dotsStyle of [...SLIDER_DOT_STYLES, "none"]) ok({ dotsStyle });
+  for (const navIcon of SLIDER_NAV_ICONS) ok({ navIcon });
+  ok({
+    autoplay: "4.5",
+    pauseOnHover: "false",
+    loop: "false",
+    speed: "slow",
+    navHideMobile: "true",
+    navPlacement: "outside",
+    paginationPlacement: "outside",
+    paginationPosition: "end",
+    navColor: "#112233",
+    navSize: "40px",
+    paginationBulletSize: "0.75rem",
+  });
+});
 
 for (const [type, def] of Object.entries(ELS)) {
   for (const field of def.fields) {

@@ -17,6 +17,7 @@ import { ELS } from "./elements";
 import { ICONS } from "./icons";
 import type { Field, SectionProps } from "./types";
 import { BoxModel, ContainerChildrenPanel, VisibilityToggle } from "./InspectorControls";
+import { SliderNavPanel } from "./SliderNavPanel";
 
 export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
   const {
@@ -493,6 +494,18 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         </>
       )}
       {hasContentFields && inspectorTab === "content" && <FieldGroups {...fieldGroupsProps} only="content" />}
+      {el.type === "slider" && inspectorTab === "content" && (
+        <SliderNavPanel
+          p={el.props}
+          set={(patch) =>
+            mutate((bs) => {
+              Object.assign((bs[b].props as unknown as SectionProps).rows[r].columns[c].elements[e].props, patch);
+            })
+          }
+          t={t}
+          inputProps={fieldGroupsProps}
+        />
+      )}
       {el.type === "container" && (
         <ContainerChildrenPanel ctx={ctx} path={[b, r, c, e]} el={el} />
       )}

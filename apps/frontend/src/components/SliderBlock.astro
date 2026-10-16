@@ -127,6 +127,13 @@ function posStyle(mp: Record<string, string>): string | null {
     ? toCssText(computeFreePositionStyle({ x: mp.x, y: mp.y, posWidth: mp.posWidth, posHeight: mp.posHeight, zIndex: mp.zIndex, rotate: mp.rotate }))
     : null;
 }
+// Prev/next glyphs (navIcon), 24×24 — the admin Navigation panel's thumbnails
+// draw the same paths. The prev button mirrors the same glyph in CSS.
+const NAV_ICON_SVG: Record<string, string> = {
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  arrow: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  caret: '<path d="M8 5.5v13l10-6.5z" fill="currentColor"/>',
+};
 
 interface El {
   id?: string;
@@ -337,7 +344,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
   // (empty = keep the existing hand-rolled default below).
   const navColor = p.navColor && HEX_RE.test(p.navColor) ? p.navColor : null;
   const navPlacement = p.navPlacement === "outside" ? "outside" : "inside";
-  const navIcon = p.navIcon === "arrow" ? "arrow" : "chevron";
+  const navIconSvg = NAV_ICON_SVG[p.navIcon ?? ""] ?? NAV_ICON_SVG.chevron;
   const paginationColor = p.paginationColor && HEX_RE.test(p.paginationColor) ? p.paginationColor : null;
   const paginationPlacement = p.paginationPlacement === "outside" ? "outside" : "inside";
   const paginationPosition = ["start", "end"].includes(p.paginationPosition as string) ? p.paginationPosition : "center";
@@ -604,18 +611,29 @@ if (el.bp && Object.keys(el.bp).length > 0) {
   // (paginationPlacement "outside"), so the box's own height
   // never has to change shape for outside-mode nav buttons'
   // sake (they stay put, centered on the box either way).
+  // fraction/progress have no per-slide target: the <script>
+  // updates their current number / fill instead.
   const dotsEl = dotsStyle !== "none" && (
     <div
       class={cls("ds-slider-dots", paginationPlacement === "outside" ? "ds-slider-dots-outside" : undefined)}
       data-style={dotsStyle}
       data-position={paginationPosition}
     >
-      {slides.map((_, i) => (
-        <span class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} data-idx={i}>
-          {dotsStyle === "numbers" ? i + 1 : ""}
-        </span>
-      ))}
+      {dotsStyle === "fraction" ? (
+        <span class="ds-slider-frac"><span data-frac-cur>1</span> / {slides.length}</span>
+      ) : dotsStyle === "progress" ? (
+        <span class="ds-slider-progress" style={`--p:${1 / slides.length}`} />
+      ) : (
+        slides.map((_, i) => (
+          <button type="button" class={cls("ds-slider-dot", i === 0 ? "is-active" : undefined)} aria-label={`Go to slide ${i + 1}`}>
+            {dotsStyle === "numbers" ? i + 1 : ""}
+          </button>
+        ))
+      )}
     </div>
+  );
+  const navGlyph = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={navIconSvg} />
   );
   return (
     <div
@@ -624,6 +642,8 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         marginStyle(p),
         paddingStyle(p),
         navColor ? `--ds-nav-color:${navColor}` : null,
+        // Icon color on a filled button that took navColor as its fill.
+        navColor ? `--ds-nav-fg:${bestTextColor(navColor)}` : null,
         p.navSize ? `--ds-nav-size:${p.navSize}` : null,
         p.navOffset ? `--ds-nav-offset:${p.navOffset}` : null,
         paginationColor ? `--ds-dot-color:${paginationColor}` : null,
@@ -634,11 +654,15 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         .filter(Boolean)
         .join(";")}
       data-nav-placement={navPlacement}
+      data-nav-mobile={p.navHideMobile === "true" ? "hide" : undefined}
     >
       <div
         class="ds-slider-box"
         style={`height:${lengthValue(p.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`}
         data-autoplay={autoplayMs > 0 ? autoplayMs : undefined}
+        data-pause-hover={p.pauseOnHover === "false" ? "false" : undefined}
+        data-loop={p.loop === "false" ? "false" : undefined}
+        data-speed={p.speed || undefined}
         data-nav={navStyle}
         data-transition={transition}
         data-slides-per-view={p.slidesPerView || "1"}
@@ -739,8 +763,8 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         <>
           {navStyle !== "none" && (
             <>
-              <button type="button" class="ds-slider-prev" aria-label="Previous slide">{navIcon === "arrow" ? "←" : "‹"}</button>
-              <button type="button" class="ds-slider-next" aria-label="Next slide">{navIcon === "arrow" ? "→" : "›"}</button>
+              <button type="button" class="ds-slider-prev" aria-label="Previous slide">{navGlyph()}</button>
+              <button type="button" class="ds-slider-next" aria-label="Next slide">{navGlyph()}</button>
             </>
           )}
           {paginationPlacement === "inside" && dotsEl}
@@ -837,15 +861,37 @@ if (el.bp && Object.keys(el.bp).length > 0) {
     position: absolute;
     top: 50%;
     z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: var(--ds-nav-size, 2.25rem);
     height: var(--ds-nav-size, 2.25rem);
+    padding: 0;
     transform: translateY(-50%);
     border: none;
     border-radius: 9999px;
     background: var(--ds-nav-color, rgba(255, 255, 255, 0.85));
-    font-size: 1.25rem;
-    line-height: 1;
+    color: var(--ds-nav-fg, #111827);
     cursor: pointer;
+    transition: opacity 0.2s ease;
+  }
+  .ds-slider-prev svg,
+  .ds-slider-next svg {
+    width: 55%;
+    height: 55%;
+  }
+  .ds-slider-prev svg {
+    transform: scaleX(-1);
+  }
+  .ds-slider-prev:hover,
+  .ds-slider-next:hover {
+    opacity: 0.8;
+  }
+  /* loop off: the <script> disables prev on the first slide, next on the last. */
+  .ds-slider-prev:disabled,
+  .ds-slider-next:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
   .ds-slider-prev {
     left: var(--ds-nav-offset, 1rem);
@@ -890,19 +936,88 @@ if (el.bp && Object.keys(el.bp).length > 0) {
   .ds-slider-dot {
     width: var(--ds-dot-size, 0.5rem);
     height: var(--ds-dot-size, 0.5rem);
+    padding: 0;
     border: none;
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.5);
     cursor: pointer;
+    transition: width 0.3s ease, background-color 0.3s ease;
   }
   .ds-slider-dot.is-active {
     background: var(--ds-dot-color, #fff);
+  }
+  /* Arrow designs (navStyle) — "arrows" is the base rule above. They come
+     after the outside-placement rules so bar/corner override that position. */
+  .ds-slider-box[data-nav="square"] .ds-slider-prev,
+  .ds-slider-box[data-nav="square"] .ds-slider-next {
+    border-radius: 0.375rem;
+  }
+  .ds-slider-box[data-nav="outline"] .ds-slider-prev,
+  .ds-slider-box[data-nav="outline"] .ds-slider-next {
+    background: transparent;
+    border: 2px solid currentColor;
+    color: var(--ds-nav-color, #fff);
+  }
+  .ds-slider-box[data-nav="dark"] .ds-slider-prev,
+  .ds-slider-box[data-nav="dark"] .ds-slider-next {
+    background: var(--ds-nav-color, rgba(17, 24, 39, 0.6));
+    color: var(--ds-nav-fg, #fff);
   }
   .ds-slider-box[data-nav="minimal"] .ds-slider-prev,
   .ds-slider-box[data-nav="minimal"] .ds-slider-next {
     background: transparent;
     color: var(--ds-nav-color, #fff);
-    font-size: 2rem;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  }
+  .ds-slider-box[data-nav="minimal"] .ds-slider-prev svg,
+  .ds-slider-box[data-nav="minimal"] .ds-slider-next svg {
+    width: 85%;
+    height: 85%;
+  }
+  .ds-slider-box[data-nav="bar"] .ds-slider-prev,
+  .ds-slider-box[data-nav="bar"] .ds-slider-next {
+    top: 0;
+    bottom: 0;
+    width: var(--ds-nav-size, 3rem);
+    height: auto;
+    transform: none;
+    border-radius: 0;
+    background: var(--ds-nav-color, rgba(0, 0, 0, 0.3));
+    color: var(--ds-nav-fg, #fff);
+  }
+  .ds-slider-box[data-nav="bar"] .ds-slider-prev {
+    left: 0;
+  }
+  .ds-slider-box[data-nav="bar"] .ds-slider-next {
+    right: 0;
+  }
+  .ds-slider-box[data-nav="bar"] .ds-slider-prev svg,
+  .ds-slider-box[data-nav="bar"] .ds-slider-next svg {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+  .ds-slider-box[data-nav="corner"] .ds-slider-prev,
+  .ds-slider-box[data-nav="corner"] .ds-slider-next {
+    top: auto;
+    bottom: var(--ds-nav-offset, 1rem);
+    transform: none;
+    border-radius: 0.375rem;
+  }
+  .ds-slider-box[data-nav="corner"] .ds-slider-prev {
+    left: auto;
+    right: calc(var(--ds-nav-offset, 1rem) + var(--ds-nav-size, 2.25rem) + 0.5rem);
+  }
+  .ds-slider-box[data-nav="corner"] .ds-slider-next {
+    right: var(--ds-nav-offset, 1rem);
+  }
+  @media (max-width: 640px) {
+    .ds-slider[data-nav-mobile="hide"] .ds-slider-prev,
+    .ds-slider[data-nav-mobile="hide"] .ds-slider-next {
+      display: none;
+    }
+  }
+  .ds-slider-dots[data-style="pill"] .ds-slider-dot.is-active {
+    width: calc(var(--ds-dot-size, 0.5rem) * 3);
   }
   .ds-slider-dots[data-style="lines"] .ds-slider-dot {
     width: 1.5rem;
@@ -915,8 +1030,38 @@ if (el.bp && Object.keys(el.bp).length > 0) {
     padding: 0.15rem 0.5rem;
     border-radius: 9999px;
     color: #111827;
+    font-family: inherit;
     font-size: 0.7rem;
     line-height: 1.2;
+  }
+  .ds-slider-frac {
+    padding: 0.2rem 0.65rem;
+    border-radius: 9999px;
+    background: rgba(0, 0, 0, 0.45);
+    color: var(--ds-dot-color, #fff);
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.4;
+  }
+  /* --p (0..1) is the current slide's share, set by the <script>. */
+  .ds-slider-progress {
+    position: relative;
+    display: block;
+    width: calc(var(--ds-dot-size, 0.5rem) * 12);
+    height: max(2px, calc(var(--ds-dot-size, 0.5rem) / 2));
+    overflow: hidden;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.35);
+  }
+  .ds-slider-progress::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--ds-dot-color, #fff);
+    transform: scaleX(var(--p, 0));
+    transform-origin: left;
+    transition: transform 0.3s ease;
   }
   .ds-slider-box[data-transition="fade"] .ds-slider-track {
     display: block;
@@ -971,6 +1116,8 @@ if (el.bp && Object.keys(el.bp).length > 0) {
     flip: EffectFlip,
     cards: EffectCards,
   };
+  // Navigation panel's transition speed; unset = normal (fade's old 0.5s).
+  const SPEED_MS: Record<string, number> = { slow: 900, normal: 500, fast: 300 };
   document.querySelectorAll<HTMLElement>(".ds-slider").forEach((slider) => {
     // Dataset (autoplay/transition/layout knobs) lives on .ds-slider-box,
     // not this outer element — .ds-slider itself only wraps it plus an
@@ -985,24 +1132,54 @@ if (el.bp && Object.keys(el.bp).length > 0) {
     const designerEdit = box.dataset.designerEdit === "true";
     const autoplayMs = designerEdit ? 0 : Number(box.dataset.autoplay || "0");
     const transition = box.dataset.transition || "slide";
+    // Navigation panel behaviour: loop/pause-on-hover default on.
+    const loop = box.dataset.loop !== "false";
+    const pauseOnHover = box.dataset.pauseHover !== "false";
+    const speed = SPEED_MS[box.dataset.speed ?? ""] ?? SPEED_MS.normal;
+    const prev = slider.querySelector<HTMLButtonElement>(".ds-slider-prev");
+    const next = slider.querySelector<HTMLButtonElement>(".ds-slider-next");
+    const fracCur = slider.querySelector<HTMLElement>("[data-frac-cur]");
+    const progress = slider.querySelector<HTMLElement>(".ds-slider-progress");
+    const count = slider.querySelectorAll(".ds-slide").length;
+    // Active dot, fraction number and progress fill; with loop off, the
+    // arrow at either end is disabled.
+    const sync = (i: number, atStart: boolean, atEnd: boolean) => {
+      dots.forEach((d, di) => d.classList.toggle("is-active", di === i));
+      if (fracCur) fracCur.textContent = String(i + 1);
+      progress?.style.setProperty("--p", String((i + 1) / count));
+      if (!loop) {
+        if (prev) prev.disabled = atStart;
+        if (next) next.disabled = atEnd;
+      }
+    };
 
     // transition="fade": a real crossfade needs slides stacked absolutely
     // (CSS above), which Swiper's own EffectFade also does, but this
     // hand-rolled version predates the Swiper switch and still works fine —
-    // no reason to churn it just to route through another module.
+    // no reason to churn it just to route through another module. Autoplay
+    // rewinds to the first slide at the end even with loop off, same as
+    // Swiper's own autoplay.
     if (transition === "fade") {
       const slides = Array.from(slider.querySelectorAll<HTMLElement>(".ds-slide"));
+      slides.forEach((s) => (s.style.transitionDuration = `${speed}ms`));
       let idx = 0;
-      const show = (next: number) => {
-        idx = ((next % slides.length) + slides.length) % slides.length;
+      let paused = false;
+      const show = (n: number) => {
+        idx = ((n % slides.length) + slides.length) % slides.length;
         slides.forEach((s, si) => s.classList.toggle("is-active-fade", si === idx));
-        dots.forEach((d, di) => d.classList.toggle("is-active", di === idx));
+        sync(idx, idx === 0, idx === slides.length - 1);
       };
-      slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => show(idx - 1));
-      slider.querySelector(".ds-slider-next")?.addEventListener("click", () => show(idx + 1));
+      prev?.addEventListener("click", () => show(idx - 1));
+      next?.addEventListener("click", () => show(idx + 1));
       dots.forEach((d, di) => d.addEventListener("click", () => show(di)));
       show(0);
-      if (autoplayMs > 0) setInterval(() => show(idx + 1), autoplayMs);
+      if (autoplayMs > 0) {
+        if (pauseOnHover) {
+          box.addEventListener("pointerenter", () => (paused = true));
+          box.addEventListener("pointerleave", () => (paused = false));
+        }
+        setInterval(() => !paused && show(idx + 1), autoplayMs);
+      }
       return;
     }
 
@@ -1020,7 +1197,8 @@ if (el.bp && Object.keys(el.bp).length > 0) {
       modules: [Autoplay, ...(effectModule ? [effectModule] : []), ...(rows > 1 ? [Grid] : [])],
       wrapperClass: "ds-slider-track",
       slideClass: "ds-slide",
-      loop: true,
+      loop,
+      speed,
       direction: box.dataset.direction === "vertical" ? "vertical" : "horizontal",
       effect: effectModule ? transition : "slide",
       centeredSlides: transition === "coverflow" || box.dataset.centeredSlides === "true",
@@ -1038,13 +1216,13 @@ if (el.bp && Object.keys(el.bp).length > 0) {
       // mid-edit — arrows/dots still navigate. Layout is untouched either
       // way, so Live Edit still renders pixel-identical to Preview.
       allowTouchMove: !designerEdit,
-      autoplay: !designerEdit && autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false } : false,
+      autoplay: !designerEdit && autoplayMs > 0 ? { delay: autoplayMs, disableOnInteraction: false, pauseOnMouseEnter: pauseOnHover } : false,
     });
-    const updateDots = () => dots.forEach((d, di) => d.classList.toggle("is-active", di === swiper.realIndex));
-    slider.querySelector(".ds-slider-prev")?.addEventListener("click", () => swiper.slidePrev());
-    slider.querySelector(".ds-slider-next")?.addEventListener("click", () => swiper.slideNext());
+    const update = () => sync(swiper.realIndex, swiper.isBeginning, swiper.isEnd);
+    prev?.addEventListener("click", () => swiper.slidePrev());
+    next?.addEventListener("click", () => swiper.slideNext());
     dots.forEach((d, di) => d.addEventListener("click", () => swiper.slideToLoop(di)));
-    swiper.on("slideChange", updateDots);
-    updateDots();
+    swiper.on("slideChange", update);
+    update();
   });
 </script>
