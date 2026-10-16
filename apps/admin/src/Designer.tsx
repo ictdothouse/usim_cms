@@ -243,7 +243,6 @@ export default function Designer({
   const [reloading, setReloading] = useState(false);
   const [savedAny, setSavedAny] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dropHint, setDropHint] = useState<string | null>(null);
@@ -280,7 +279,7 @@ export default function Designer({
     rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
-    dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny, setMsg,
+    dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny,
     previewModal, setPreviewModal, t, confirmAction: confirmLeave,
   });
 
@@ -311,15 +310,28 @@ export default function Designer({
   // Draft pages/blueprints/symbols write their own row (nothing public to
   // protect). A published header/footer still only saves on its explicit
   // Publish click — it has no draft column of its own yet.
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Autosave is silent (no busy flip), so busy ending no longer re-arms this:
+  // every state autosave sends is a dep (an edit made mid-save gets its own
+  // save), and a failed save retries itself every 5s — the edit is still
+  // only in memory until one lands.
+  // ponytail: busy no longer cancels this timer while Live Edit's 500ms
+  // reload flush is saving, so a flush slower than ~500ms gets the same
+  // state PATCHed twice (harmless, queued in order). Skip a write whose
+  // state equals the last one sent if that ever shows up in the network tab.
   useEffect(() => {
     const eligible = kind !== "siteChrome" || chromeStatus !== "published";
     if (!dirty || !eligible || uiBusy) return;
-    autosaveTimerRef.current = setTimeout(() => void autosave(), 1000);
+    let cancelled = false;
+    let timer = setTimeout(function run() {
+      void autosave().then((ok) => {
+        if (!ok && !cancelled) timer = setTimeout(run, 5000);
+      });
+    }, 1000);
     return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      cancelled = true;
+      clearTimeout(timer);
     };
-  }, [dirty, uiBusy, kind, page.status, chromeStatus, rawBlocks, pageSettings]);
+  }, [dirty, uiBusy, kind, page.status, chromeStatus, rawBlocks, pageSettings, pageSeo, langOverrides, pageLanguage, pageMultilangEnabled]);
 
   // "menu" element's Inspector needs a live list to populate its menuId
   // picker — dynamic per-tenant data, unlike every other field here which
@@ -473,7 +485,6 @@ export default function Designer({
     // onto the live site without an Update click. autosave() routes a
     // published page to its pages.draft instead (see usePersist).
     save: autosave,
-    saveBlueprint,
     setError,
     setReloading,
     setCtxMenu,
@@ -787,7 +798,6 @@ export default function Designer({
         canRedo={canRedo}
         dirty={dirty}
         hasDraft={hasDraft}
-        msg={msg}
         error={error}
         undo={undo}
         redo={redo}

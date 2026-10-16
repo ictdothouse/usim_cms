@@ -8,6 +8,9 @@
 // Holds no hooks of its own — deliberately NOT wrapped in React.memo (this
 // region wasn't memoized before the split either).
 import {
+  CloudAlert,
+  CloudCheck,
+  CloudUpload,
   ExternalLink,
   History,
   LayoutTemplate,
@@ -47,7 +50,6 @@ export interface DesignerTopBarProps {
   // A published page with an autosaved-but-unpublished edit (pages.draft) —
   // nothing is "unsaved", but it isn't live yet either.
   hasDraft: boolean;
-  msg: string | null;
   error: string | null;
   undo: () => void;
   redo: () => void;
@@ -68,13 +70,41 @@ export interface DesignerTopBarProps {
   close: () => void;
 }
 
+// Canva-style save state: one fixed-size icon, so an autosave never resizes
+// or recolors the bar; the words only show on hover. It replaced a text badge
+// that flipped Unsaved → Saving... → Draft saved on every autosave.
+function SaveStatus({ label, pending, unsaved }: { label: string; pending: boolean; unsaved: boolean }) {
+  const Icon = unsaved ? CloudAlert : pending ? CloudUpload : CloudCheck;
+  return (
+    <span role="img" aria-label={label} className={`group relative grid h-9 w-9 shrink-0 place-items-center rounded-full ${unsaved ? "text-warn" : "text-sub"}`}>
+      <Icon aria-hidden="true" className="h-4 w-4" />
+      <span className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden whitespace-nowrap rounded-md bg-ink px-2 py-1 text-xs font-medium text-white shadow-lg group-hover:block">
+        {label}
+      </span>
+    </span>
+  );
+}
+
 export function DesignerTopBar({
   mobilePanel, setMobilePanel, t, page, tenantHost, kind,
   editingSlug, setEditingSlug, slugDraft, setSlugDraft, slugError, setSlugError, renameSlug,
-  busy, canUndo, canRedo, dirty, hasDraft, msg, error, undo, redo, openTemplates, setSel, loadHistory, setShowSaveBlueprint,
+  busy, canUndo, canRedo, dirty, hasDraft, error, undo, redo, openTemplates, setSel, loadHistory, setShowSaveBlueprint,
   mode, toggleLive, bp, setBp, openDevicePreview,
   saveBlueprint, saveSymbol, saveSiteChrome, save, chromeStatus, close,
 }: DesignerTopBarProps) {
+  // A published header/footer is the one thing autosave skips (no draft
+  // column yet), so its edit stays a visible warning until Save/Publish.
+  const unsaved = dirty && kind === "siteChrome" && chromeStatus === "published";
+  const status = kind === "page" ? page.status : kind === "siteChrome" ? chromeStatus : null;
+  const saveLabel = unsaved
+    ? t("designer-dirty")
+    : busy || dirty
+      ? t("designer-saving")
+      : hasDraft
+        ? t("designer-draft-pending")
+        : status
+          ? `${t("designer-all-saved")} · ${t(status === "published" ? "pages-published" : "pages-draft")}`
+          : t("designer-all-saved");
   return (
     <header className="shrink-0 border-b border-line/30 bg-white [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent">
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 sm:flex sm:flex-wrap sm:px-4">
@@ -126,63 +156,14 @@ export function DesignerTopBar({
               /{page.slug as string}
             </button>
           )}
-          <span
-            role="status"
-            aria-live="polite"
-            className={`min-w-0 rounded-full px-2 py-0.5 text-center text-sm font-bold leading-tight ${
-              busy ? "bg-accent/10 text-accent" : page.status === "published" && !dirty && !hasDraft ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
-            }`}
-          >
-            {busy
-              ? t("designer-saving")
-              : dirty
-                ? t("designer-dirty")
-                : hasDraft
-                  ? t("designer-draft-pending")
-                  : page.status === "published"
-                    ? t("pages-published")
-                    : t("pages-draft")}
-          </span>
         </>
       )}
-      {kind === "blueprint" && (
-        <>
-          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-sm font-bold uppercase text-accent">
-            {t("blueprints-title")}
-          </span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-sm font-bold ${busy ? "bg-accent/10 text-accent" : dirty ? "bg-warn/10 text-warn" : "bg-ok/10 text-ok"}`}
-          >
-            {busy ? t("designer-saving") : dirty ? t("designer-dirty") : t("designer-saved")}
-          </span>
-        </>
+      {kind !== "page" && (
+        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-sm font-bold uppercase text-accent">
+          {t(kind === "blueprint" ? "blueprints-title" : kind === "symbol" ? "designer-symbols-title" : "header-footer-title")}
+        </span>
       )}
-      {kind === "symbol" && (
-        <>
-          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-sm font-bold uppercase text-accent">
-            {t("designer-symbols-title")}
-          </span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-sm font-bold ${busy ? "bg-accent/10 text-accent" : dirty ? "bg-warn/10 text-warn" : "bg-ok/10 text-ok"}`}
-          >
-            {busy ? t("designer-saving") : dirty ? t("designer-dirty") : t("designer-saved")}
-          </span>
-        </>
-      )}
-      {kind === "siteChrome" && (
-        <>
-          <span className="rounded-full bg-accent/10 px-2 py-0.5 text-sm font-bold uppercase text-accent">
-            {t("header-footer-title")}
-          </span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-sm font-bold ${
-              busy ? "bg-accent/10 text-accent" : chromeStatus === "published" && !dirty ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"
-            }`}
-          >
-            {busy ? t("designer-saving") : dirty ? t("designer-dirty") : chromeStatus === "published" ? t("pages-published") : t("pages-draft")}
-          </span>
-        </>
-      )}
+      <SaveStatus label={saveLabel} pending={busy || dirty} unsaved={unsaved} />
       {kind !== "page" && (
         <button onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "symbol" ? saveSymbol() : saveSiteChrome())} disabled={busy} className="min-h-10 shrink-0 rounded-full bg-canvas px-4 text-sm font-semibold text-ink disabled:opacity-50">
           {busy ? t("designer-saving") : t("designer-save")}
@@ -292,7 +273,6 @@ export function DesignerTopBar({
       </div>
       {slugError && <p role="alert" className="px-4 pb-2 text-sm text-red-700">{slugError}</p>}
       {error && <p role="alert" className="border-t border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}
-      {msg && <p role="status" className="px-4 pb-2 text-sm font-medium text-ok">{msg}</p>}
     </header>
   );
 }
