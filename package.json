@@ -2,7 +2,7 @@
   "name": "ucms",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "pnpm@12.11.2",
+  "packageManager": "pnpm@12.14.0",
   "engines": {
     "node": "22.x"
   },
