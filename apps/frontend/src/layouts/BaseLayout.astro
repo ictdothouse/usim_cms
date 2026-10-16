@@ -1481,6 +1481,14 @@ const fontsHref = allFonts.length
           const PADDING_KEYS = { top: "paddingTop", right: "paddingRight", bottom: "paddingBottom", left: "paddingLeft" };
           const MARGIN_KEYS = { top: "marginTop", right: "marginRight", bottom: "marginBottom", left: "marginLeft" };
           const MARGIN_COLOR = "#f59e0b";
+          // Magnet at 0: a drag reaches 0 at the usual spot, then holds there
+          // for 2×DETENT px of extra travel before going negative — so a drag
+          // toward a wall parks at 0 instead of overshooting into a negative
+          // margin. Starting at 0, it takes DETENT px to pull free. 1:1 on
+          // either side, so every value is still reachable.
+          const DETENT = 8;
+          const toDetent = (px) => px + Math.sign(px) * DETENT;
+          const fromDetent = (u) => Math.sign(u) * Math.max(0, Math.abs(u) - DETENT);
           // Set once per designer:selected message (see below) from
           // useLiveEditBridge.ts's own linkedPadding/linkedMargin — the
           // Inspector's chain-icon toggle, not duplicated here.
@@ -1704,6 +1712,7 @@ const fontsHref = allFonts.length
                 handle.dataset.dragging = "1";
                 revealLockBar(true);
                 const startPx = currentPx();
+                const startU = toDetent(startPx);
                 const startPos = axis === "y" ? e.clientY : e.clientX;
                 let lastPx = startPx;
                 track(
@@ -1711,7 +1720,7 @@ const fontsHref = allFonts.length
                   (ev) => {
                     const pos = axis === "y" ? ev.clientY : ev.clientX;
                     // Margin may go negative (boxes overlap); padding can't — invalid CSS.
-                    lastPx = Math.round(startPx + sign * (pos - startPos));
+                    lastPx = Math.round(fromDetent(startU + sign * (pos - startPos)));
                     if (!isMargin) lastPx = Math.max(0, lastPx);
                     for (const k of touched) setImp(target, kebab(k), `${lastPx}px`);
                     show(true, lastPx);
