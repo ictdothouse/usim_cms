@@ -14,15 +14,14 @@
 // object combining schema + canvas-render + site-render + validator is a
 // bigger, separate design question, not attempted here.
 import {
+  ArrowDown,
+  ArrowRight,
   Bell,
   BarChart3,
   Building2,
   CalendarDays,
   ChevronsUpDown,
   Code2,
-  Columns2,
-  Columns3,
-  Columns4,
   Component,
   FileText,
   Frame,
@@ -43,12 +42,8 @@ import {
   MousePointerClick,
   MoveVertical,
   Newspaper,
-  PanelLeft,
-  PanelRight,
   Quote,
   Radio,
-  RectangleHorizontal,
-  Rows2,
   Share2,
   Star,
   Tag,
@@ -845,23 +840,26 @@ export const CONTENT_KEYS: Record<ElType, string[]> = {
 // difference. DesignerPalette.tsx renders these above the plain ELS list
 // (which excludes "container" — folded into this group instead of appearing
 // twice).
+// 2026-10-16 (Elementor's "Select your structure"): V/H Flex show their
+// direction as an arrow, and each column preset has no icon — DesignerPalette
+// draws its columns, sized by span. The separate "Container" tile is gone:
+// container defaults to flexDirection "row", so it was H Flex twice.
 export interface LayoutPreset {
   key: string;
   labelKey: Key;
-  icon: typeof Type;
+  icon?: typeof Type;
   drag: Drag;
 }
 export const LAYOUT_PRESETS: LayoutPreset[] = [
   { key: "section", labelKey: "designer-el-section", icon: LayoutTemplate, drag: { kind: "new-section" } },
-  { key: "container", labelKey: "designer-el-container", icon: Frame, drag: { kind: "new", type: "container" } },
-  { key: "vflex", labelKey: "designer-el-vflex", icon: Rows2, drag: { kind: "new", type: "container", propsOverride: { flexDirection: "column" } } },
-  { key: "hflex", labelKey: "designer-el-hflex", icon: Columns2, drag: { kind: "new", type: "container", propsOverride: { flexDirection: "row" } } },
-  { key: "row-1", labelKey: "designer-layout-1col", icon: RectangleHorizontal, drag: { kind: "new-row", spans: [1] } },
-  { key: "row-2", labelKey: "designer-layout-2col", icon: Columns2, drag: { kind: "new-row", spans: [1, 1] } },
-  { key: "row-3", labelKey: "designer-layout-3col", icon: Columns3, drag: { kind: "new-row", spans: [1, 1, 1] } },
-  { key: "row-4", labelKey: "designer-layout-4col", icon: Columns4, drag: { kind: "new-row", spans: [1, 1, 1, 1] } },
-  { key: "row-1-2", labelKey: "designer-layout-1to2", icon: PanelLeft, drag: { kind: "new-row", spans: [1, 2] } },
-  { key: "row-2-1", labelKey: "designer-layout-2to1", icon: PanelRight, drag: { kind: "new-row", spans: [2, 1] } },
+  { key: "vflex", labelKey: "designer-el-vflex", icon: ArrowDown, drag: { kind: "new", type: "container", propsOverride: { flexDirection: "column" } } },
+  { key: "hflex", labelKey: "designer-el-hflex", icon: ArrowRight, drag: { kind: "new", type: "container", propsOverride: { flexDirection: "row" } } },
+  { key: "row-1", labelKey: "designer-layout-1col", drag: { kind: "new-row", spans: [1] } },
+  { key: "row-2", labelKey: "designer-layout-2col", drag: { kind: "new-row", spans: [1, 1] } },
+  { key: "row-3", labelKey: "designer-layout-3col", drag: { kind: "new-row", spans: [1, 1, 1] } },
+  { key: "row-4", labelKey: "designer-layout-4col", drag: { kind: "new-row", spans: [1, 1, 1, 1] } },
+  { key: "row-1-2", labelKey: "designer-layout-1to2", drag: { kind: "new-row", spans: [1, 2] } },
+  { key: "row-2-1", labelKey: "designer-layout-2to1", drag: { kind: "new-row", spans: [2, 1] } },
 ];
 
 // Elements palette category of every other ElType (container is in

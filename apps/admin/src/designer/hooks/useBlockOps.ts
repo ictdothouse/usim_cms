@@ -317,6 +317,35 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     bumpStructural();
   }
 
+  // Live Edit's column/container hover toolbar (BaseLayout.astro,
+  // designer:boxAction): a section column (path length 3) or a container at
+  // any depth below one, through designerTree's generic path walkers.
+  // "addColumn" inserts an empty sibling column — a section column, or a V
+  // Flex column of a nested "N Columns" (newColumns).
+  function boxAction(path: number[], action: "duplicate" | "delete" | "addColumn") {
+    if (isSectionLocked(path[0])) {
+      toast.error(t("designer-section-locked-toast"));
+      return;
+    }
+    const parentPath = path.slice(0, -1);
+    const i = path[path.length - 1];
+    mutate((bs) => {
+      const node = nodeAt(bs, path);
+      if (!node) return;
+      if (action === "delete") {
+        removeAt(bs, path);
+        // deleteColumn's rule: a row left without columns goes too.
+        if (path.length === 3 && childrenOf(bs, parentPath).length === 0) removeAt(bs, parentPath);
+      } else if (action === "duplicate") {
+        insertAt(bs, parentPath, path.length === 3 ? clone(node) : { ...clone(node as El), id: uid() }, i + 1);
+      } else {
+        insertAt(bs, parentPath, path.length === 3 ? { span: 1, elements: [] } : newEl("container", { flexDirection: "column", grow: "1" }), i + 1);
+      }
+    });
+    if (action === "delete") setSel(null);
+    bumpStructural();
+  }
+
   function dropIntoColumn(colPath: number[], index?: number) {
     const d = drag.current;
     drag.current = null;
@@ -466,7 +495,7 @@ function blockOpsFns(deps: BlockOpsDeps, drag: { current: Drag | null }) {
     duplicateColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, nudgeColumn,
     deleteRow, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, setRowGap,
     duplicateElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, deleteElement, moveElement,
-    dropIntoColumn, dropIntoNewSection,
+    boxAction, dropIntoColumn, dropIntoNewSection,
   };
 }
 

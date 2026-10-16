@@ -290,6 +290,55 @@ test("dropIntoColumn: a colPath that doesn't resolve to a real column (e.g. a ro
   assert.equal(JSON.stringify(state.blocks), before);
 });
 
+test("boxAction (Live Edit's column/container toolbar): add column, duplicate and delete at a section column and inside a nested 'N Columns'", () => {
+  const blocks: Block[] = [
+    {
+      type: "section",
+      props: {
+        rows: [
+          {
+            columns: [
+              {
+                span: 1,
+                elements: [
+                  {
+                    id: "h",
+                    type: "container",
+                    props: { flexDirection: "row" },
+                    children: [{ id: "v", type: "container", props: { flexDirection: "column", grow: "2" }, children: [] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as Block,
+  ];
+  const { deps, state } = makeDeps(blocks);
+  const ops = __testOnly_blockOpsFns(deps as never);
+  const row = () => (state.blocks[0].props as { rows: { columns: { span: number; elements: NestedEl[] }[] }[] }).rows[0];
+  const nested = () => row().columns[0].elements[0].children ?? [];
+
+  ops.boxAction([0, 0, 0, 0, 0], "addColumn");
+  assert.deepEqual(nested().map((c) => [c.props.flexDirection, c.props.grow]), [["column", "2"], ["column", "1"]]);
+  ops.boxAction([0, 0, 0, 0, 0], "duplicate");
+  assert.equal(nested().length, 3);
+  assert.notEqual((nested()[1] as NestedEl & { id: string }).id, "v", "a duplicate gets its own id");
+  ops.boxAction([0, 0, 0], "addColumn");
+  assert.deepEqual(row().columns.map((c) => [c.span, c.elements.length]), [[1, 1], [1, 0]]);
+  ops.boxAction([0, 0, 1], "delete");
+  ops.boxAction([0, 0, 0], "delete");
+  assert.equal((state.blocks[0].props as { rows: unknown[] }).rows.length, 0, "the row goes with its last column (deleteColumn's rule)");
+
+  const locked = sampleBlocks();
+  (locked[0].props as Record<string, unknown>).locked = "true";
+  const l = makeDeps(locked);
+  const before = JSON.stringify(l.state.blocks);
+  __testOnly_blockOpsFns(l.deps as never).boxAction([0, 0, 0], "delete");
+  assert.equal(JSON.stringify(l.state.blocks), before, "refused on a locked section");
+});
+
 test("dropIntoNewSection: a Layout 'new-section' preset inserts a fresh empty Block at afterBlockIndex+1", () => {
   const { deps, state } = makeDeps(twoSectionBlocks());
   const ops = __testOnly_blockOpsFns(deps as never);

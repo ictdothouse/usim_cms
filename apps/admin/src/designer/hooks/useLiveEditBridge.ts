@@ -58,8 +58,13 @@ export interface LiveEditBridgeDeps {
   // own residual UI state (see reloading's own comment there), set here.
   setReloading: (v: boolean) => void;
   setCtxMenu: (v: { path: number[]; x: number; y: number } | null) => void;
-  // The element picker an empty column/container's "+" opens (designer:addInto).
+  // The element picker an empty column/container's "+" opens (designer:addInto),
+  // or with path [] the page-end zone's structure picker (designer:addSection).
   setAddMenu: (v: { path: number[]; x: number; y: number } | null) => void;
+  // The page-end zone's Templates button (designer:openTemplates).
+  openTemplates: () => void | Promise<void>;
+  // The column/container hover toolbar (designer:boxAction) — useBlockOps.
+  boxAction: (path: number[], action: "duplicate" | "delete" | "addColumn") => void;
   sliderSlideIdx: Record<string, number>;
   setSliderSlideIdx: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   // Read too, not just set: designer:selected re-sends the selected slide
@@ -99,7 +104,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
     tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
-    setError, setReloading, setCtxMenu, setAddMenu, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
+    setError, setReloading, setCtxMenu, setAddMenu, openTemplates, boxAction, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     linkedPadding, linkedMargin, setLinkedPadding, setLinkedMargin,
     structuralTick, bumpStructural, bp,
   } = deps;
@@ -289,10 +294,18 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       // Rides along on this per-load message: the iframe's empty-element
       // placeholders (BaseLayout.astro) exist before anything is selected,
       // so designer:selected's labels arrive too late for them.
+      // Also the column/container toolbar's and the page-end zone's labels.
       const phLabels = {
         clickToEdit: t("designer-ph-click-edit"),
         typeText: t("designer-ph-type-text"),
         addElement: t("designer-add-element"),
+        addSection: t("designer-add-section"),
+        addColumn: t("designer-add-column"),
+        dropHere: t("designer-drop-here"),
+        templates: t("designer-templates"),
+        edit: t("designer-edit"),
+        duplicate: t("designer-duplicate"),
+        delete: t("designer-delete"),
         el: Object.fromEntries(Object.entries(ELS).map(([k, d]) => [k, t(d.labelKey)])),
       };
       frame.contentWindow.postMessage({ type: "designer:showSlides", map: sliderSlideIdx, labels: phLabels }, new URL(src, window.location.href).origin);
@@ -354,13 +367,31 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
         setCtxMenu({ path: p, x: rect.left + Number(e.data.x ?? 0) * scale, y: rect.top + Number(e.data.y ?? 0) * scale });
         return;
       }
-      if (e.data?.type === "designer:addInto") {
-        // An empty column (depth 3) or container (4+) "+" (BaseLayout.astro);
-        // x/y = the button's bottom-center in the iframe's own unscaled px.
+      if (e.data?.type === "designer:openTemplates") {
+        void openTemplates();
+        return;
+      }
+      if (e.data?.type === "designer:boxAction") {
+        // The hovered column (depth 3) / container (4+) toolbar (BaseLayout.astro).
         const p = String(e.data.path ?? "")
           .split(".")
           .map(Number);
-        if (p.length < 3 || p.some((n) => !Number.isInteger(n) || n < 0) || !liveFrame.current) return;
+        const action = e.data.action;
+        if (p.length < 3 || p.some((n) => !Number.isInteger(n) || n < 0)) return;
+        if (action === "duplicate" || action === "delete" || action === "addColumn") boxAction(p, action);
+        return;
+      }
+      if (e.data?.type === "designer:addInto" || e.data?.type === "designer:addSection") {
+        // An empty column (depth 3) or container (4+) "+", or the page-end
+        // zone's "+" (path [], a new last section) (BaseLayout.astro);
+        // x/y = the button's bottom-center in the iframe's own unscaled px.
+        const p: number[] =
+          e.data.type === "designer:addSection"
+            ? []
+            : String(e.data.path ?? "")
+                .split(".")
+                .map(Number);
+        if ((e.data.type === "designer:addInto" && p.length < 3) || p.some((n) => !Number.isInteger(n) || n < 0) || !liveFrame.current) return;
         const rect = liveFrame.current.getBoundingClientRect();
         const scale = liveFrame.current.offsetWidth ? rect.width / liveFrame.current.offsetWidth : 1;
         setCtxMenu(null);

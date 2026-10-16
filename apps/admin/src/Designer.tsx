@@ -399,7 +399,7 @@ export default function Designer({
     duplicateColumn, copyColumn, pasteColumn, copyStyleColumn, pasteStyleColumn, deleteColumn, nudgeColumn,
     deleteRow, moveRow, duplicateRow, copyRow, pasteRow, copyStyleRow, pasteStyleRow, setRowGap,
     duplicateElement, copyElement, pasteElement, copyStyleElement, pasteStyleElement, deleteElement, moveElement,
-    dropIntoColumn, dropIntoNewSection,
+    boxAction, dropIntoColumn, dropIntoNewSection,
   } = useBlockOps({
     blocks,
     mutate,
@@ -478,6 +478,8 @@ export default function Designer({
     setReloading,
     setCtxMenu,
     setAddMenu,
+    openTemplates,
+    boxAction,
     setSliderSlideIdx,
     setSliderInnerSel,
   });
@@ -854,6 +856,7 @@ export default function Designer({
             x={addMenu.x}
             y={addMenu.y}
             t={t}
+            structures={!addMenu.path.length}
             onClose={() => setAddMenu(null)}
             onPick={(payload) => {
               // A new element is selected so the Inspector opens on it (an
@@ -865,7 +868,9 @@ export default function Designer({
                 /* stale path — dropIntoColumn no-ops too */
               }
               drag.current = payload;
-              dropIntoColumn(addMenu.path);
+              // path [] = the page-end zone's structure picker: a new last section.
+              if (addMenu.path.length) dropIntoColumn(addMenu.path);
+              else dropIntoNewSection();
               if (at >= 0) setSel([...addMenu.path, at]);
               setAddMenu(null);
             }}
