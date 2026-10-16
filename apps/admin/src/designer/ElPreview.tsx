@@ -182,7 +182,7 @@ function startFreeElDrag(
   // (this file's slider case, near `.ds-slide-box`) is the actual visual
   // warning; the REAL guard against bleeding into the NEXT carousel slide
   // is that box's own `overflow:hidden` (and SliderBlock.astro's mirrored
-  // `.ds-slider-viewport`) — a sibling slide is cropped against, never
+  // per-slide `.ds-slide` clip) — a sibling slide is cropped against, never
   // painted into, regardless of how far past this slide's edge the
   // element sits. Alignment snap (above) pulls the element's own CENTER —
   // not its raw top-left — onto the slide's true center or another free

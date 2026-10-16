@@ -922,9 +922,9 @@ const fontsHref = allFonts.length
                 gx.show(sx !== rawCx ? sx : null);
                 gy.show(sy !== rawCy ? sy : null);
                 // No clamp on purpose — an author may bleed past the edge (same
-                // freedom as ElPreview's startFreeElDrag); .ds-slider-viewport's
-                // overflow:hidden is the real guard against painting into the
-                // next slide.
+                // freedom as ElPreview's startFreeElDrag); .ds-slide's own
+                // overflow:clip (SliderBlock.astro) is the real guard against
+                // painting into the next slide.
                 x = r1(((sx - halfW - ml) / rect.width) * 100);
                 y = r1(((sy - halfH - mt) / rect.height) * 100);
                 setImp(node, "left", x + "%");

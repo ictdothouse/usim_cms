@@ -135,11 +135,10 @@ function navVars(mp: Record<string, string>): string {
     .join(";");
 }
 // Slide-nested element free positioning (props.position === "custom") — opts
-// an element out of the row/column stack and into position:absolute inside
-// `.ds-slide-content` (already `position:relative` for its own z-index — see
-// that rule's own comment), the same containing block apps/admin's ElPreview
-// drags against (`.ds-slide-canvas` there), so an x/y saved in the admin
-// lands in the same spot here. Defined in frontmatter (not inside
+// an element out of the row/column stack and into position:absolute against
+// the full `.ds-slide` (`.ds-slide-content` has no position of its own), the
+// same box apps/admin's ElPreview drags against (`.ds-slide-box` there), so
+// an x/y saved in the admin lands in the same spot here. Defined in frontmatter (not inside
 // renderSlideEl, which lives in the template for JSX) — Astro's template
 // expression parser rejects a function declaration's TS type annotations.
 function posStyle(mp: Record<string, string>): string | null {
@@ -816,8 +815,13 @@ if (el.bp && Object.keys(el.bp).length > 0) {
     display: flex;
     height: 100%;
   }
+  /* overflow:clip — .ds-slider-viewport only clips the whole track, so a
+     free-positioned/rotated child past this slide's edge painted over the
+     neighbouring slide. clip, not hidden: never a scroll container, so
+     focusing a link that sits past the edge can't scroll the slide. */
   .ds-slide {
     position: relative;
+    overflow: clip;
     flex-shrink: 0;
     min-width: 0;
     width: 100%;

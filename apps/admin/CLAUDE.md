@@ -132,7 +132,7 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   numeric-only (Width/Height fields), no corner-drag handle, to avoid resurrecting the old smart-guide
   system's snap/edge-detection complexity for a still-narrow need. **Coordinate basis fixed
   (2026-09-11)**: the drag's percentage math and the site's own CSS both resolve against the FULL
-  slide box (`.ds-slide-box` in `ElPreview.tsx`, `.ds-slide` in `SectionBlock.astro` — both already
+  slide box (`.ds-slide-box` in `ElPreview.tsx`, `.ds-slide` in `SliderBlock.astro` — both already
   `position:relative`), NOT the narrower `.ds-slide-canvas`/`.ds-slide-content` text column (max-width
   36rem, centered) nested inside it. It used to be the other way round — both files' comments said so
   explicitly — which made the "safe area" overlay hug a box far smaller than the actual slide and made
@@ -146,7 +146,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   insets 6% from the full slide's edges instead of hugging the old narrow box exactly — a real margin
   guide, matching how "safe area" usually means top/left/right/bottom clearance, not "the box's own
   edge." No frontend-visible safe-area overlay exists (editor-only aid); the CSS fix alone keeps
-  admin-canvas and published-site positioning in sync. Also fixed same day: a free-positioned
+  admin-canvas and published-site positioning in sync. **Per-slide clip (2026-10-17)**: `.ds-slide` is
+  `overflow:clip` — `.ds-slider-viewport` only clips the whole track, so a free/rotated child past one
+  slide's edge painted over the next slide on the site/Live Edit (admin's one-slide `.ds-slide-box` was
+  already `overflow-hidden`). `clip`, not `hidden`, so the slide never becomes a scroll container. Also fixed same day: a free-positioned
   **button**'s selection/resize box (`posWidth`/`posHeight`) visibly grew on resize but the button pill
   itself stayed its small intrinsic size top-left, dead space around it — `ElPreview.tsx`'s "button"
   case already told the inner `<span>` to fill 100% width/height, but that span's own parent (`<div
