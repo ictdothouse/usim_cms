@@ -7,6 +7,7 @@
 // paths), page revision history, and the two preview-token mint flows.
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { toast } from "sonner";
 import * as api from "@/lib/api";
 import { slugify, clone } from "@/lib/utils";
 import type { Key } from "@/i18n";
@@ -47,7 +48,6 @@ export interface PersistDeps {
   setBusy: (v: boolean) => void;
   setError: (msg: string | null) => void;
   setSavedAny: (v: boolean) => void;
-  setMsg: (v: string | null) => void;
   previewModal: PreviewModalState;
   setPreviewModal: Dispatch<SetStateAction<PreviewModalState>>;
   t: (k: Key) => string;
@@ -60,7 +60,7 @@ export function usePersist(deps: PersistDeps) {
     rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
-    dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny, setMsg,
+    dirty, setDirty, setHasDraft, setBusy, setError, setSavedAny,
     previewModal, setPreviewModal, t, confirmAction,
   } = deps;
 
@@ -152,11 +152,12 @@ export function usePersist(deps: PersistDeps) {
   // after whatever was queued before it, by which point a newer render may
   // exist — it must send the newest state, never the snapshot from whenever
   // it happened to be queued (that's how an older draft could overwrite a
-  // newer one).
+  // newer one). No clone: api.* JSON.stringifies the body at call time, so a
+  // deep copy first was a second full serialize of the page per save.
   function pageContentPayload() {
     const s = latest.current;
     return {
-      layout: clone(s.rawBlocks),
+      layout: s.rawBlocks,
       translations: currentTranslationsPayload(),
       settings: s.pageSettings,
       seo: s.pageSeo,
@@ -165,35 +166,51 @@ export function usePersist(deps: PersistDeps) {
     };
   }
 
-  // Writes the LIVE columns (what real visitors see) and clears any pending
-  // draft — this is Publish/Update, and also the plain autosave for a page
-  // that isn't published yet (nobody outside the admin can see it anyway).
-  function save(status?: "published") {
-    return queued(async () => {
-      const sent = latest.current;
+  // Every write, whichever kind: queued in call order, `dirty` cleared only
+  // if nothing changed while it was in flight. An explicit save (Update/
+  // Publish/Save button) shows busy at once and a toast when done. Autosave
+  // passes `silent` and changes nothing on screen until it lands — the top
+  // bar's cloud icon already reads "saving" off `dirty`. It used to flip
+  // busy (status badge text + color, the Update button's label and disabled
+  // look) and, on a draft page, show a "Draft saved" row that pushed the
+  // canvas down: a blink on every autosave, plus an extra full render.
+  function write(silent: boolean, doneMsg: Key | null, send: (sent: typeof latest.current) => Promise<void>) {
+    if (!silent) {
       setBusy(true);
       setError(null);
+    }
+    return queued(async () => {
+      const sent = latest.current;
       try {
-        await api.updatePage(tenantHost, token, page.id as string, {
-          ...pageContentPayload(),
-          draft: null,
-          ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
-        });
-        if (status) page.status = status;
-        page.draft = null;
-        setHasDraft(false);
+        await send(sent);
         if (unchangedSince(sent)) setDirty(false);
         setSavedAny(true);
+        setError(null);
         markSaved();
-        setMsg(status ? t("designer-published") : t("designer-saved"));
-        setTimeout(() => setMsg(null), 2500);
+        if (doneMsg && !silent) toast.success(t(doneMsg));
         return true;
       } catch (err) {
         setError((err as Error).message);
         return false;
       } finally {
-        setBusy(false);
+        if (!silent) setBusy(false);
       }
+    });
+  }
+
+  // Writes the LIVE columns (what real visitors see) and clears any pending
+  // draft — this is Publish/Update, and also the plain autosave for a page
+  // that isn't published yet (nobody outside the admin can see it anyway).
+  function save(status?: "published", silent = false) {
+    return write(silent, status ? "designer-published" : "designer-saved", async () => {
+      await api.updatePage(tenantHost, token, page.id as string, {
+        ...pageContentPayload(),
+        draft: null,
+        ...(status ? { status, publishedAt: new Date().toISOString() } : {}),
+      });
+      if (status) page.status = status;
+      page.draft = null;
+      setHasDraft(false);
     });
   }
 
@@ -201,28 +218,13 @@ export function usePersist(deps: PersistDeps) {
   // in-progress edit to pages.draft only — the live columns (what visitors
   // see) stay untouched until an explicit Update. Preview renders this same
   // row via a preview token, so it shows exactly what's on the canvas
-  // without anything going live first. No toast: the header badge already
-  // says "Draft saved — not published".
+  // without anything going live first. Always silent: only autosave calls it.
   function saveDraft() {
-    return queued(async () => {
-      const sent = latest.current;
-      setBusy(true);
-      setError(null);
-      try {
-        const draft = pageContentPayload();
-        await api.updatePage(tenantHost, token, page.id as string, { draft });
-        page.draft = draft;
-        setHasDraft(true);
-        if (unchangedSince(sent)) setDirty(false);
-        setSavedAny(true);
-        markSaved();
-        return true;
-      } catch (err) {
-        setError((err as Error).message);
-        return false;
-      } finally {
-        setBusy(false);
-      }
+    return write(true, null, async () => {
+      const draft = pageContentPayload();
+      await api.updatePage(tenantHost, token, page.id as string, { draft });
+      page.draft = draft;
+      setHasDraft(true);
     });
   }
 
@@ -272,8 +274,7 @@ export function usePersist(deps: PersistDeps) {
         setDirty(false);
         markSaved();
         setShowHistory(false);
-        setMsg(t("designer-saved"));
-        setTimeout(() => setMsg(null), 2500);
+        toast.success(t("designer-saved"));
       });
     } catch (err) {
       setError((err as Error).message);
@@ -286,28 +287,12 @@ export function usePersist(deps: PersistDeps) {
   // Blueprint's own save path — no slug/status/publish/translations concept,
   // just the layout + page-wide settings, PATCHed straight to the blueprint
   // row (apps/api's PATCH /api/blueprints/:id already accepts both).
-  function saveBlueprint() {
-    return queued(async () => {
-      const sent = latest.current;
-      setBusy(true);
-      setError(null);
-      try {
-        await api.updateBlueprint(tenantHost, token, page.id as string, {
-          layout: clone(latest.current.rawBlocks),
-          settings: latest.current.pageSettings,
-        });
-        if (unchangedSince(sent)) setDirty(false);
-        setSavedAny(true);
-        markSaved();
-        setMsg(t("designer-saved"));
-        setTimeout(() => setMsg(null), 2500);
-        return true;
-      } catch (err) {
-        setError((err as Error).message);
-        return false;
-      } finally {
-        setBusy(false);
-      }
+  function saveBlueprint(silent = false) {
+    return write(silent, "designer-saved", async (sent) => {
+      await api.updateBlueprint(tenantHost, token, page.id as string, {
+        layout: sent.rawBlocks,
+        settings: sent.pageSettings,
+      });
     });
   }
 
@@ -317,26 +302,11 @@ export function usePersist(deps: PersistDeps) {
   // PATCHing, since that's all `symbols.node` actually stores. Live (no
   // sync/propagate step needed): every page instance resolves this same row
   // at render time, see ElPreview.tsx/SectionBlock.astro's "symbol" case.
-  function saveSymbol() {
-    return queued(async () => {
-    const sent = latest.current;
-    setBusy(true);
-    setError(null);
-    try {
+  function saveSymbol(silent = false) {
+    return write(silent, "designer-saved", async (sent) => {
       const wrapped = sent.rawBlocks[0] as unknown as { props: SectionProps };
       const node = wrapped.props.rows[0].columns[0].elements[0];
       await api.updateSymbol(tenantHost, token, page.id as string, { node: node as unknown as Record<string, unknown> });
-      if (unchangedSince(sent)) setDirty(false);
-      setSavedAny(true);
-      setMsg(t("designer-saved"));
-      setTimeout(() => setMsg(null), 2500);
-      return true;
-    } catch (err) {
-      setError((err as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
     });
   }
 
@@ -345,28 +315,14 @@ export function usePersist(deps: PersistDeps) {
   // edited via the small standalone panel below the canvas (immediate PATCH
   // through api.updateSiteChrome, same pattern the Header & Footer list's
   // own "Set default" star already uses) — not part of this dirty/Save flow.
-  function saveSiteChrome(status?: "draft" | "published") {
-    return queued(async () => {
-    const sent = latest.current;
-    setBusy(true);
-    setError(null);
-    try {
+  function saveSiteChrome(status?: "draft" | "published", silent = false) {
+    const doneMsg = status === "published" ? "designer-published" : status === "draft" ? "header-footer-unpublished" : "designer-saved";
+    return write(silent, doneMsg, async (sent) => {
       await api.updateSiteChrome(tenantHost, token, page.id as string, {
-        layout: clone(sent.rawBlocks),
+        layout: sent.rawBlocks,
         ...(status ? { status } : {}),
       });
       if (status) setChromeStatus(status);
-      if (unchangedSince(sent)) setDirty(false);
-      setSavedAny(true);
-      setMsg(status === "published" ? t("designer-published") : status === "draft" ? t("header-footer-unpublished") : t("designer-saved"));
-      setTimeout(() => setMsg(null), 2500);
-      return true;
-    } catch (err) {
-      setError((err as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
     });
   }
 
@@ -398,12 +354,12 @@ export function usePersist(deps: PersistDeps) {
   // effect, Live Edit's reload, and Preview's pre-mint flush all call this) —
   // a published page autosaves to its pages.draft only (Canva-style: never
   // live until Update), an unpublished page/blueprint/symbol/header-footer
-  // writes its own row as before.
+  // writes its own row as before. Always silent (see write()).
   function autosave() {
-    if (kind === "page") return page.status === "published" ? saveDraft() : save();
-    if (kind === "blueprint") return saveBlueprint();
-    if (kind === "symbol") return saveSymbol();
-    return saveSiteChrome();
+    if (kind === "page") return page.status === "published" ? saveDraft() : save(undefined, true);
+    if (kind === "blueprint") return saveBlueprint(true);
+    if (kind === "symbol") return saveSymbol(true);
+    return saveSiteChrome(undefined, true);
   }
 
   // Mints a fresh, un-framed preview URL — the shared core both

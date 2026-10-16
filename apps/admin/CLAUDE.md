@@ -251,9 +251,20 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   flushes pending edits then mints a body-less token, and `[...slug].astro` overlays `page.draft`
   for a token read — the same Postgres row on every replica. The open modal re-mints off
   `savedTick` (right after each save), not its own timer. Designer overlays `page.draft` onto
-  `page` once at mount so every seed site reopens onto the draft; the header badge shows
-  `designer-draft-pending` and Update stays enabled while `hasDraft`. Revision restore clears the
-  draft. Header/footer (siteChrome) still uses the ephemeral path — no draft column of its own yet.
+  `page` once at mount so every seed site reopens onto the draft; Update stays enabled while
+  `hasDraft`. Revision restore clears the draft. Header/footer (siteChrome) still uses the
+  ephemeral path — no draft column of its own yet.
+  **Silent autosave (2026-10-17)**: autosave changes nothing on screen. `usePersist`'s `write()`
+  is the one save core; `silent` (every `autosave()` path, incl. Live Edit's reload flush and
+  Preview's pre-mint flush) skips `busy` and the toast. The top bar's status is `SaveStatus`
+  (DesignerTopBar.tsx): one fixed-size cloud icon (`CloudUpload` while `dirty`/`busy`,
+  `CloudCheck` when saved, amber `CloudAlert` for a dirty published header/footer, which
+  doesn't autosave), words only in a hover tooltip (`role="img"` + `aria-label`). It replaced a
+  text badge plus an Update-button "Saving..." flip and a "Draft saved" row that pushed the
+  canvas down on every autosave (reported as a blink). Explicit saves toast via sonner (no
+  layout shift). Without busy flipping, Designer's autosave effect lists every saved state as a
+  dep and retries a failed save every 5s itself. Save payloads aren't `clone()`d first —
+  `api.*` stringifies them anyway.
   **Slider canvas Canva-style controls (2026-10-02)**: a selected free-positioned slide child
   (ElPreview.tsx slider case) now gets 8 resize handles (`RESIZE_HANDLES` — corners scale
   proportionally + scale font, sides change one dimension and edge-snap; heading/text get no

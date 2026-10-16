@@ -51,8 +51,8 @@ export interface LiveEditBridgeDeps {
   pageSlug: string;
   kind: "page" | "blueprint" | "siteChrome" | "symbol";
   dirty: boolean;
+  // usePersist's autosave() — silent, and routes page vs blueprint itself.
   save: () => Promise<boolean>;
-  saveBlueprint: () => Promise<boolean>;
   setError: (msg: string | null) => void;
   // Skeleton-overlay flag shown during any iframe (re)load — Designer()'s
   // own residual UI state (see reloading's own comment there), set here.
@@ -103,7 +103,7 @@ export interface LiveEditBridgeApi {
 export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
-    tenantHost, token, pageId, pageSlug, kind, dirty, save, saveBlueprint,
+    tenantHost, token, pageId, pageSlug, kind, dirty, save,
     setError, setReloading, setCtxMenu, setAddMenu, openTemplates, boxAction, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     linkedPadding, linkedMargin, setLinkedPadding, setLinkedMargin,
     structuralTick, bumpStructural, bp,
@@ -148,7 +148,7 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   // data-designer-path attributes never activated, so clicks in Live Edit
   // silently did nothing.
   async function enterLive(cold = false) {
-    if (dirty && !(await (kind === "blueprint" ? saveBlueprint() : save()))) return;
+    if (dirty && !(await save())) return;
     const previewToken =
       kind === "blueprint"
         ? await api.getBlueprintPreviewToken(tenantHost, token, pageId)

@@ -69,7 +69,9 @@ test("Designer: add element, save, reload, layout persists", async ({ page, cont
   const canvasHeading = canvas.getByText("Heading", { exact: true });
   await expect(canvasHeading).toBeVisible();
 
-  await expect(page.getByRole("status").filter({ hasText: /draf disimpan|draft saved/i }).first()).toBeVisible({ timeout: 8000 });
+  // Autosave is silent — the top bar's cloud icon names the state. The heading
+  // and dirty land in one render, so this waits for the save, not the mount.
+  await expect(page.getByRole("img", { name: /all changes saved/i })).toBeVisible({ timeout: 8000 });
 
   await page.reload();
 
