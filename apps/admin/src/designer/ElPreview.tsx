@@ -853,12 +853,6 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
             : "#000000";
       return (
         <div
-          // Identifies this slide's own canvas box for the Inspector's free-
-          // position toggle, which measures the child's live rendered rect
-          // against this box (getBoundingClientRect) to preserve its visual
-          // spot when switching flow -> custom, instead of guessing a fixed
-          // x/y — see Inspector.tsx's childIsFree toggle handler.
-          data-slide-box={`${el.id}:${slideIdx}`}
           ref={(node) => {
             if (node) slideBoxSizeCache.set(`${el.id}:${slideIdx}`, { width: node.clientWidth, height: node.clientHeight });
           }}
@@ -909,8 +903,10 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
             // posWidth/posHeight is still unset — same as the origin-only
             // check already did in either case.
             const cachedBoxSize = slideBoxSizeCache.get(`${el.id}:${slideIdx}`);
-            const selPosWidthPx = selectedChild ? parseFloat(bpGetValue(selectedChild.props.posWidth, selectedChild.bp, "posWidth")) : NaN;
-            const selPosHeightPx = selectedChild ? parseFloat(bpGetValue(selectedChild.props.posHeight, selectedChild.bp, "posHeight")) : NaN;
+            // posWidth/posHeight in px — a layout preset stores % of this box.
+            const freeLenPx = (v: string, basis = 0) => (v.trim().endsWith("%") ? (parseFloat(v) / 100) * basis : parseFloat(v));
+            const selPosWidthPx = selectedChild ? freeLenPx(bpGetValue(selectedChild.props.posWidth, selectedChild.bp, "posWidth"), cachedBoxSize?.width) : NaN;
+            const selPosHeightPx = selectedChild ? freeLenPx(bpGetValue(selectedChild.props.posHeight, selectedChild.bp, "posHeight"), cachedBoxSize?.height) : NaN;
             const selWidthPct = cachedBoxSize && cachedBoxSize.width > 0 && !Number.isNaN(selPosWidthPx) ? (selPosWidthPx / cachedBoxSize.width) * 100 : 0;
             const selHeightPct =
               cachedBoxSize && cachedBoxSize.height > 0 && !Number.isNaN(selPosHeightPx) ? (selPosHeightPx / cachedBoxSize.height) * 100 : 0;
@@ -1001,8 +997,8 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                                 .map((ee) => ({
                                   xPct: Number(bpGetValue(ee.props.x, ee.bp, "x") || "50"),
                                   yPct: Number(bpGetValue(ee.props.y, ee.bp, "y") || "50"),
-                                  widthPx: parseFloat(bpGetValue(ee.props.posWidth, ee.bp, "posWidth") || "") || 100,
-                                  heightPx: parseFloat(bpGetValue(ee.props.posHeight, ee.bp, "posHeight") || "") || 40,
+                                  widthPx: freeLenPx(bpGetValue(ee.props.posWidth, ee.bp, "posWidth"), cachedBoxSize?.width) || 100,
+                                  heightPx: freeLenPx(bpGetValue(ee.props.posHeight, ee.bp, "posHeight"), cachedBoxSize?.height) || 40,
                                 })),
                             ),
                           )
@@ -1210,8 +1206,8 @@ function ElPreviewImpl({ ctx, el, path }: { ctx: DesignerCtx; el: El; path?: num
                             // own overflow:hidden would otherwise crop it.
                             const tx = Number(bpGetValue(childEl.props.x, childEl.bp, "x") || "50");
                             const ty = Number(bpGetValue(childEl.props.y, childEl.bp, "y") || "50");
-                            const wPx = parseFloat(childPosWidth || "") || 0;
-                            const hPx = parseFloat(childPosHeight || "") || 40;
+                            const wPx = freeLenPx(childPosWidth || "", cachedBoxSize?.width) || 0;
+                            const hPx = freeLenPx(childPosHeight || "", cachedBoxSize?.height) || 40;
                             const below = ty < 18;
                             const btn = "flex h-7 w-7 items-center justify-center rounded-full hover:bg-canvas";
                             const menu = "absolute top-full z-10 mt-2 rounded-lg border border-line/30 bg-white p-1.5 text-[11px] text-body shadow-lg";

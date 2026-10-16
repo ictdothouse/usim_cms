@@ -16,7 +16,53 @@ import {
   stringifyCards,
   newSection,
   newRow,
+  SLIDE_PRESETS,
+  buildSlidePreset,
+  lengthPx,
 } from "./parsers";
+
+test("addSlideElement makes a free-positioned element, each add a step lower", () => {
+  let s = addSlideElement(newSlide(), "heading", { text: "Hi", level: "2", align: "left" });
+  s = addSlideElement(s, "button", { label: "Go", href: "#", variant: "primary", align: "left" });
+  const [h, b] = s.rows[0].columns[0].elements;
+  assert.equal(h.props.position, "custom");
+  assert.equal(h.props.posWidth, "80%");
+  assert.equal(b.props.position, "custom");
+  assert.ok(Number(b.props.y) > Number(h.props.y));
+});
+
+test("every slide preset is free, stays inside the slide on desktop and mobile, at any slider height", () => {
+  for (const { id } of SLIDE_PRESETS) {
+    for (const h of [384, 512, 800]) {
+      const els = buildSlidePreset(id, h);
+      assert.ok(els.length >= 4, id);
+      assert.equal(new Set(els.map((el) => el.id)).size, els.length, `${id} ids unique`);
+      for (const el of els) {
+        assert.equal(el.props.position, "custom", `${id} ${el.type}`);
+        for (const tier of ["", "mobile:"]) {
+          const get = (k: string) => el.bp?.[tier + k] ?? el.props[k];
+          const x = Number(get("x"));
+          const y = Number(get("y"));
+          const w = parseFloat(get("posWidth")) || 0;
+          assert.ok(x >= 0 && x + w <= 100, `${id} ${el.type} ${tier}x=${x} w=${w}`);
+          assert.ok(y >= 0 && y <= 92, `${id} ${el.type} ${tier}y=${y} at ${h}px`);
+          // A desktop width needs a mobile one too — "" can't unset it.
+          if (el.props.posWidth) assert.ok(get("posWidth"), `${id} ${el.type} ${tier}posWidth`);
+        }
+      }
+    }
+  }
+});
+
+test("slide preset stacks tighter in % on a taller slider (fixed px gaps)", () => {
+  const ys = (h: number) => buildSlidePreset("center", h).map((el) => Number(el.props.y));
+  const spread = (y: number[]) => Math.max(...y) - Math.min(...y);
+  assert.ok(spread(ys(800)) < spread(ys(384)));
+  assert.equal(lengthPx("32rem"), 512);
+  assert.equal(lengthPx("480px"), 480);
+  assert.equal(lengthPx("100vh"), 800);
+  assert.equal(lengthPx("auto"), 512);
+});
 
 test("parsePairs splits on the first pipe, defaults b to '', filters blank lines", () => {
   assert.deepEqual(parsePairs("Q1|A1\n\nno-pipe-line\n"), [{ a: "Q1", b: "A1" }, { a: "no-pipe-line", b: "" }]);

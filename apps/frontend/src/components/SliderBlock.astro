@@ -548,6 +548,23 @@ if (el.bp && Object.keys(el.bp).length > 0) {
                 .join(";")}
             />
           </div>
+        ) : designerEdit ? (
+          // Live Edit only: an image with no picture yet (a layout preset's
+          // image slot) still needs a box to select, drag and resize — the
+          // published page renders nothing here.
+          <div
+            data-slide-el={el.id}
+            {...editAttrs}
+            style={[
+              posStyle(ep),
+              marginStyle(ep),
+              "min-height:3rem;display:flex;align-items:center;justify-content:center;border:1px dashed currentColor;border-radius:6px;opacity:.6",
+            ]
+              .filter(Boolean)
+              .join(";")}
+          >
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" /></svg>
+          </div>
         ) : null;
       }
       case "button": {
