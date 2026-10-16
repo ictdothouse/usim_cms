@@ -644,7 +644,12 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   depth-3-throws limit: for a path of length 4+, it walks into the addressed El's own `children` (throwing
   only if some ancestor along the path isn't actually a container), so every existing generic primitive
   (`getNode`/`removeAt`/`insertAt`/`moveWithin`) already works at any depth for free — exactly the
-  extension point that refactor's own doc comment called out. **Deliberately scoped v1** (a much larger
+  extension point that refactor's own doc comment called out. **Frozen state (2026-10-16):** committed
+  `blocks` are Immer-frozen (`useUndoRedo`'s `produce()`), and render-time reads (InspectorNestedPanel's
+  `getNode`) go through `childrenOf()` too — so it never writes on a read (a missing `children` is
+  created only on a draft), and a draft node is copied with `clone()` (`@/lib/utils`), never
+  `structuredClone` (DataCloneError on Immer's proxy). `useBlockOps.test.ts`'s `mutate` is the real
+  `produce()` for that reason. **Deliberately scoped v1** (a much larger
   effort was ruled out — see below): canvas (`ElPreview.tsx`'s new `"container"` case) and real site
   render (`SectionBlock.astro`'s new `"container"` case + a `renderContainerChild` helper, mirroring
   `renderSlideEl`'s own curated-subset shape) both recurse for real, and the validator

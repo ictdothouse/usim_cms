@@ -34,12 +34,14 @@ export function childrenOf(blocks: Block[], parentPath: number[]): unknown[] {
   let el = (blocks[b].props as unknown as SectionProps).rows[r].columns[c].elements[parentPath[3]] as unknown as El;
   for (let i = 4; i < parentPath.length; i++) {
     if (el.type !== "container") throw new Error(`designerTree: ${JSON.stringify(parentPath.slice(0, i))} is not a container, has no children`);
-    el.children = el.children ?? [];
-    el = el.children[parentPath[i]];
+    el = (el.children ?? [])[parentPath[i]];
   }
   if (el.type !== "container") throw new Error(`designerTree: ${JSON.stringify(parentPath)} is not a container, has no children`);
-  el.children = el.children ?? [];
-  return el.children;
+  // Committed state is frozen (useUndoRedo's Immer produce()), and render-time
+  // reads (InspectorNestedPanel's getNode) land here too: writing `children`
+  // there — even the same array back — throws. Only a draft gets a new list.
+  if (!el.children && !Object.isFrozen(el)) el.children = [];
+  return el.children ?? [];
 }
 
 /** `path`'s own containing list + index within it — the shared shape

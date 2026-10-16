@@ -16,6 +16,7 @@ import { ELS } from "./elements";
 import { ICONS } from "./icons";
 import type { El, Field } from "./types";
 import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
+import { clone } from "@/lib/utils";
 import { BoxModel, ContainerChildrenPanel, VisibilityToggle } from "./InspectorControls";
 
 export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
@@ -177,7 +178,7 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
         </div>
         <div className="flex gap-3">
           <button
-            onClick={() => mutate((bs) => insertAt(bs, parentPath, structuredClone(getNode(bs, sel)), idx + 1))}
+            onClick={() => mutate((bs) => insertAt(bs, parentPath, clone(getNode(bs, sel)), idx + 1))}
             className="flex items-center gap-1 text-sm font-semibold text-accent"
           >
             <Copy className="h-3.5 w-3.5" /> {t("designer-duplicate")}
