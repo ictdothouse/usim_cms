@@ -340,15 +340,15 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     },
     fields: [
       { key: "slides", labelKey: "designer-f-slider-slides", kind: "slides" },
-      { key: "autoplay", labelKey: "designer-f-slider-autoplay", kind: "select", options: ["0", "3", "5", "8"] },
       // px/%/em/rem/vh/vw via the shared "length" kind — was a closed
       // sm/md/lg/full select, which could never express a custom px or vh
       // value at all. 100vh now covers the old "full" preset directly.
       { key: "height", labelKey: "designer-f-slider-height", kind: "length" },
-      { key: "navStyle", labelKey: "designer-f-slider-nav", kind: "select", options: ["arrows", "minimal", "none"] },
-      { key: "dotsStyle", labelKey: "designer-f-slider-pagination", kind: "select", options: ["dots", "lines", "numbers", "none"] },
+      // Arrows/pagination/autoplay/loop/speed aren't listed here: the Content
+      // tab's Navigation panel (SliderNavPanel.tsx) edits them as switches +
+      // picture grids (SLIDER_ARROW_STYLES etc. after the registry).
       // Real-site only, same admin-canvas-preview-cosmetic-only convention as
-      // navStyle/dotsStyle/transition above. Multi-column carousel (Swiper's
+      // the navigation props. Multi-column carousel (Swiper's
       // own slidesPerView) — ignored when transition is a 3D effect
       // (coverflow/cube/flip/cards), which only ever make sense one slide at
       // a time; SectionBlock.astro's <script> forces 1 in that case.
@@ -372,19 +372,6 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "autoHeight", labelKey: "designer-f-slider-autoheight", kind: "select", options: ["true", "false"] },
       { key: "grabCursor", labelKey: "designer-f-slider-grabcursor", kind: "select", options: ["true", "false"] },
       { key: "slideToClickedSlide", labelKey: "designer-f-slider-slidetoclick", kind: "select", options: ["true", "false"] },
-      // Navigation module (prev/next buttons) full customization.
-      { key: "navColor", labelKey: "designer-f-slider-navcolor", kind: "color" },
-      { key: "navSize", labelKey: "designer-f-slider-navsize", kind: "length" },
-      { key: "navOffset", labelKey: "designer-f-slider-navoffset", kind: "length" },
-      { key: "navPlacement", labelKey: "designer-f-slider-navplacement", kind: "select", options: ["inside", "outside"] },
-      { key: "navIcon", labelKey: "designer-f-slider-navicon", kind: "select", options: ["chevron", "arrow"] },
-      // Pagination module (dots) full customization.
-      { key: "paginationColor", labelKey: "designer-f-slider-paginationcolor", kind: "color" },
-      { key: "paginationPlacement", labelKey: "designer-f-slider-paginationplacement", kind: "select", options: ["inside", "outside"] },
-      { key: "paginationPosition", labelKey: "designer-f-slider-paginationposition", kind: "select", options: ["start", "center", "end"] },
-      { key: "paginationOffset", labelKey: "designer-f-slider-paginationoffset", kind: "length" },
-      { key: "paginationBulletSize", labelKey: "designer-f-slider-paginationbulletsize", kind: "length" },
-      { key: "paginationBulletGap", labelKey: "designer-f-slider-paginationbulletgap", kind: "length" },
     ],
   },
   // Drops a saved Menu (built in the Menus admin panel) into any page — the
@@ -780,6 +767,14 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     ],
   },
 };
+
+// The slider Navigation panel's picture-grid choices (SliderNavPanel.tsx), in
+// grid order — "none" is the panel's on/off switch, not a tile. Rendered by
+// SliderBlock.astro; elements.test.ts checks them against element-schema
+// since they're no longer ELS fields the generic cross-check walks.
+export const SLIDER_ARROW_STYLES = ["arrows", "square", "outline", "dark", "minimal", "bar", "corner"] as const;
+export const SLIDER_DOT_STYLES = ["dots", "pill", "lines", "numbers", "fraction", "progress"] as const;
+export const SLIDER_NAV_ICONS = ["chevron", "arrow", "caret"] as const;
 
 // Which of each ElType's props are actual content (vs. style) — copy-style/
 // paste-style (designer/hooks/useClipboard.ts's styleCopy) strips these

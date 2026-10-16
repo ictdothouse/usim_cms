@@ -152,6 +152,11 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   opacity: "appearance", shadow: "appearance", radius: "appearance",
   border: "border", borderWidth: "border", borderColor: "border", borderStyle: "border",
   anchorId: "advanced", cssClass: "advanced", zIndex: "advanced",
+  // Slider's power-user carousel knobs — out of the Content tab so its
+  // Navigation panel sits right under the slides editor.
+  direction: "advanced", slidesPerGroup: "advanced", slidesRows: "advanced", centeredSlides: "advanced",
+  spaceBetween: "advanced", initialSlide: "advanced", autoHeight: "advanced", grabCursor: "advanced",
+  slideToClickedSlide: "advanced",
 };
 
 export const GROUP_META: { key: FieldGroupKey; labelKey: Key; icon: typeof Type }[] = [
