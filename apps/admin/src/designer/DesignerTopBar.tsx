@@ -8,7 +8,6 @@
 // Holds no hooks of its own — deliberately NOT wrapped in React.memo (this
 // region wasn't memoized before the split either).
 import {
-  CloudAlert,
   CloudCheck,
   CloudUpload,
   ExternalLink,
@@ -48,8 +47,8 @@ export interface DesignerTopBarProps {
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
-  // A published page with an autosaved-but-unpublished edit (pages.draft) —
-  // nothing is "unsaved", but it isn't live yet either.
+  // A published page or header/footer with an autosaved-but-unpublished edit
+  // (its draft column) — nothing is "unsaved", but it isn't live yet either.
   hasDraft: boolean;
   error: string | null;
   undo: () => void;
@@ -76,10 +75,10 @@ export interface DesignerTopBarProps {
 // Canva-style save state: one fixed-size icon, so an autosave never resizes
 // or recolors the bar; the words only show on hover. It replaced a text badge
 // that flipped Unsaved → Saving... → Draft saved on every autosave.
-function SaveStatus({ label, pending, unsaved }: { label: string; pending: boolean; unsaved: boolean }) {
-  const Icon = unsaved ? CloudAlert : pending ? CloudUpload : CloudCheck;
+function SaveStatus({ label, pending }: { label: string; pending: boolean }) {
+  const Icon = pending ? CloudUpload : CloudCheck;
   return (
-    <span role="img" aria-label={label} className={`group relative grid h-9 w-9 shrink-0 place-items-center rounded-full ${unsaved ? "text-warn" : "text-sub"}`}>
+    <span role="img" aria-label={label} className="group relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-sub">
       <Icon aria-hidden="true" className="h-4 w-4" />
       <span className="pointer-events-none absolute right-0 top-full z-50 mt-1 hidden whitespace-nowrap rounded-md bg-ink px-2 py-1 text-xs font-medium text-white shadow-lg group-hover:block">
         {label}
@@ -95,19 +94,16 @@ export function DesignerTopBar({
   mode, toggleLive, bp, setBp, openDevicePreview,
   saveBlueprint, saveSymbol, saveSiteChrome, save, chromeStatus, openPresets, close,
 }: DesignerTopBarProps) {
-  // A published header/footer is the one thing autosave skips (no draft
-  // column yet), so its edit stays a visible warning until Save/Publish.
-  const unsaved = dirty && kind === "siteChrome" && chromeStatus === "published";
   const status = kind === "page" ? page.status : kind === "siteChrome" ? chromeStatus : null;
-  const saveLabel = unsaved
-    ? t("designer-dirty")
-    : busy || dirty
-      ? t("designer-saving")
-      : hasDraft
-        ? t("designer-draft-pending")
-        : status
-          ? `${t("designer-all-saved")} · ${t(status === "published" ? "pages-published" : "pages-draft")}`
-          : t("designer-all-saved");
+  // A published header/footer autosaves to its draft, so its Save pushes that live — "Update", like a page.
+  const chromeLive = kind === "siteChrome" && chromeStatus === "published";
+  const saveLabel = busy || dirty
+    ? t("designer-saving")
+    : hasDraft
+      ? t("designer-draft-pending")
+      : status
+        ? `${t("designer-all-saved")} · ${t(status === "published" ? "pages-published" : "pages-draft")}`
+        : t("designer-all-saved");
   return (
     <header className="shrink-0 border-b border-line/30 bg-white [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent">
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 sm:flex sm:flex-wrap sm:px-4">
@@ -166,10 +162,10 @@ export function DesignerTopBar({
           {t(kind === "blueprint" ? "blueprints-title" : kind === "symbol" ? "designer-symbols-title" : "header-footer-title")}
         </span>
       )}
-      <SaveStatus label={saveLabel} pending={busy || dirty} unsaved={unsaved} />
+      <SaveStatus label={saveLabel} pending={busy || dirty} />
       {kind !== "page" && (
-        <button onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "symbol" ? saveSymbol() : saveSiteChrome())} disabled={busy} className="min-h-10 shrink-0 rounded-full bg-canvas px-4 text-sm font-semibold text-ink disabled:opacity-50">
-          {busy ? t("designer-saving") : t("designer-save")}
+        <button onClick={() => void (kind === "blueprint" ? saveBlueprint() : kind === "symbol" ? saveSymbol() : saveSiteChrome())} disabled={busy || (chromeLive && !dirty && !hasDraft)} className="min-h-10 shrink-0 rounded-full bg-canvas px-4 text-sm font-semibold text-ink disabled:opacity-50">
+          {busy ? t("designer-saving") : chromeLive ? t("designer-update") : t("designer-save")}
         </button>
       )}
       {kind === "page" && (

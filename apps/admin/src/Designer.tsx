@@ -30,6 +30,7 @@ import { DesignerHistoryModal } from "./designer/DesignerHistoryModal";
 import { DesignerDevicePreviewModal } from "./designer/DesignerDevicePreviewModal";
 import { DeviceViewport } from "./designer/DeviceViewport";
 import { ChromePresetsModal } from "./designer/ChromePresetsModal";
+import { LinkSiteContext } from "./designer/LinkInput";
 
 export default function Designer({
   page,
@@ -68,12 +69,15 @@ export default function Designer({
   // picks the draft up with no per-site change (Canva-style: you come back
   // to exactly where you left off, published or not). Mutates the same
   // object the rest of this file already treats as a plain mutable record.
+  // A header/footer's draft (site_chrome.draft, migration 0034) is just
+  // { layout }, picked up the same way.
+  const hasDraftKind = kind === "page" || kind === "siteChrome";
   const draftMerged = useRef(false);
   if (!draftMerged.current) {
     draftMerged.current = true;
-    if (kind === "page" && page.draft && typeof page.draft === "object") Object.assign(page, page.draft);
+    if (hasDraftKind && page.draft && typeof page.draft === "object") Object.assign(page, page.draft);
   }
-  const [hasDraft, setHasDraft] = useState(() => kind === "page" && !!page.draft);
+  const [hasDraft, setHasDraft] = useState(() => hasDraftKind && !!page.draft);
   // Declared ahead of the useUndoRedo() call below, which needs it.
   const [dirty, setDirty] = useState(false);
   // Bumped by every structural (shape/order-changing) mutate() call reachable
@@ -272,7 +276,7 @@ export default function Designer({
     renameSlug, save, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
     openDevicePreview, withDeviceFrame, mintPreviewSrc,
   } = usePersist({
-    tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
+    tenantHost, token, page, kind, bp, chromeKind, chromeStatus, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
@@ -304,9 +308,9 @@ export default function Designer({
   // the live columns visitors read stay untouched until an explicit Update,
   // so autosave still can never push an unreviewed edit onto the live site,
   // while Preview (which renders that draft) always matches the canvas.
-  // Draft pages/blueprints/symbols write their own row (nothing public to
-  // protect). A published header/footer still only saves on its explicit
-  // Publish click — it has no draft column of its own yet.
+  // A published header/footer does the same into site_chrome.draft.
+  // Draft pages/blueprints/symbols/headers/footers write their own row
+  // (nothing public to protect).
   // Autosave is silent (no busy flip), so busy ending no longer re-arms this:
   // every state autosave sends is a dep (an edit made mid-save gets its own
   // save), and a failed save retries itself every 5s — the edit is still
@@ -316,8 +320,7 @@ export default function Designer({
   // state PATCHed twice (harmless, queued in order). Skip a write whose
   // state equals the last one sent if that ever shows up in the network tab.
   useEffect(() => {
-    const eligible = kind !== "siteChrome" || chromeStatus !== "published";
-    if (!dirty || !eligible || uiBusy) return;
+    if (!dirty || uiBusy) return;
     let cancelled = false;
     let timer = setTimeout(function run() {
       void autosave().then((ok) => {
@@ -797,8 +800,12 @@ export default function Designer({
     editingText,
   ]);
 
+  // Lets every link field search this site's pages/posts (designer/LinkInput.tsx).
+  const linkSite = useMemo(() => ({ tenantHost, token }), [tenantHost, token]);
+
   // ---------- render ----------
   return (
+    <LinkSiteContext.Provider value={linkSite}>
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas font-sans text-ink antialiased">
       <DesignerTopBar
         mobilePanel={mobilePanel}
@@ -1028,5 +1035,6 @@ export default function Designer({
         restoreRevision={restoreRevision}
       />
     </div>
+    </LinkSiteContext.Provider>
   );
 }

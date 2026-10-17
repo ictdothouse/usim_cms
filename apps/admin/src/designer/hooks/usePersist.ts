@@ -23,6 +23,7 @@ export interface PersistDeps {
   kind: "page" | "blueprint" | "siteChrome" | "symbol";
   bp: "desktop" | "tablet" | "mobile";
   chromeKind: "header" | "footer" | undefined;
+  chromeStatus: "draft" | "published";
   setChromeStatus: (s: "draft" | "published") => void;
   rawBlocks: Block[];
   setRawBlocksDirectly: (next: Block[]) => void;
@@ -56,7 +57,7 @@ export interface PersistDeps {
 
 export function usePersist(deps: PersistDeps) {
   const {
-    tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
+    tenantHost, token, page, kind, bp, chromeKind, chromeStatus, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
     pageLanguage, pageMultilangEnabled, langOverrides,
     slugDraft, setSlugDraft, setEditingSlug, setSlugError,
@@ -219,11 +220,16 @@ export function usePersist(deps: PersistDeps) {
   // see) stay untouched until an explicit Update. Preview renders this same
   // row via a preview token, so it shows exactly what's on the canvas
   // without anything going live first. Always silent: only autosave calls it.
+  // A published header/footer's draft is just its layout (site_chrome.draft).
   function saveDraft() {
-    return write(true, null, async () => {
-      const draft = pageContentPayload();
-      await api.updatePage(tenantHost, token, page.id as string, { draft });
-      page.draft = draft;
+    return write(true, null, async (sent) => {
+      if (kind === "siteChrome") {
+        await api.updateSiteChrome(tenantHost, token, page.id as string, { draft: { layout: sent.rawBlocks } });
+      } else {
+        const draft = pageContentPayload();
+        await api.updatePage(tenantHost, token, page.id as string, { draft });
+        page.draft = draft;
+      }
       setHasDraft(true);
     });
   }
@@ -315,14 +321,18 @@ export function usePersist(deps: PersistDeps) {
   // edited via the small standalone panel below the canvas (immediate PATCH
   // through api.updateSiteChrome, same pattern the Header & Footer list's
   // own "Set default" star already uses) — not part of this dirty/Save flow.
+  // Writes the live layout, so any autosaved draft is spent (cleared).
   function saveSiteChrome(status?: "draft" | "published", silent = false) {
-    const doneMsg = status === "published" ? "designer-published" : status === "draft" ? "header-footer-unpublished" : "designer-saved";
+    // A published row's plain Save is its Update: it goes live, so it says so.
+    const doneMsg = status === "draft" ? "header-footer-unpublished" : status === "published" || chromeStatus === "published" ? "designer-published" : "designer-saved";
     return write(silent, doneMsg, async (sent) => {
       await api.updateSiteChrome(tenantHost, token, page.id as string, {
         layout: sent.rawBlocks,
+        draft: null,
         ...(status ? { status } : {}),
       });
       if (status) setChromeStatus(status);
+      setHasDraft(false);
     });
   }
 
@@ -352,14 +362,14 @@ export function usePersist(deps: PersistDeps) {
 
   // The one autosave target per kind (Designer.tsx's debounced autosave
   // effect, Live Edit's reload, and Preview's pre-mint flush all call this) —
-  // a published page autosaves to its pages.draft only (Canva-style: never
-  // live until Update), an unpublished page/blueprint/symbol/header-footer
-  // writes its own row as before. Always silent (see write()).
+  // a published page or header/footer autosaves to its draft only (Canva-
+  // style: never live until Update), an unpublished page/blueprint/symbol/
+  // header-footer writes its own row as before. Always silent (see write()).
   function autosave() {
     if (kind === "page") return page.status === "published" ? saveDraft() : save(undefined, true);
     if (kind === "blueprint") return saveBlueprint(true);
     if (kind === "symbol") return saveSymbol(true);
-    return saveSiteChrome(undefined, true);
+    return chromeStatus === "published" ? saveDraft() : saveSiteChrome(undefined, true);
   }
 
   // Mints a fresh, un-framed preview URL — the shared core openDevicePreview
@@ -375,8 +385,8 @@ export function usePersist(deps: PersistDeps) {
   // (apps/api's live-preview-store.ts), which silently fell back to the
   // last REAL save whenever the mint and the render's read-back landed on
   // different api replicas — reported as "Preview only matches after
-  // Update". Header/footer keeps that ephemeral path: a published one has no
-  // draft column of its own yet (follow-up if asked).
+  // Update". Header/footer keeps that ephemeral path: chrome-preview.astro
+  // reads the token's store, not site_chrome.draft (follow-up if asked).
   async function mintPreviewSrc(): Promise<{ src: string; tick: number }> {
     if (kind === "siteChrome") {
       const previewToken = await api.getSiteChromePreviewToken(tenantHost, token, page.id as string, {

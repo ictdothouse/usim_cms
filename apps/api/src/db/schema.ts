@@ -94,6 +94,9 @@ export const siteChrome = pgTable("site_chrome", {
   settings: jsonb("settings").notNull().default({}),
   isDefault: boolean("is_default").notNull().default(false),
   status: text("status").notNull().default("draft"), // "draft" | "published"
+  // Pending { layout } edit of a published header/footer (migration 0034) —
+  // Designer's autosave target, same as pages.draft; never what a visitor reads.
+  draft: jsonb("draft"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

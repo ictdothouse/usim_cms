@@ -99,6 +99,8 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     fields: [
       { key: "src", labelKey: "designer-f-src", kind: "image" },
       { key: "alt", labelKey: "designer-f-alt", kind: "text" },
+      // Optional link (e.g. a header logo to "/"); the alt text names it.
+      { key: "href", labelKey: "designer-f-href", kind: "text" },
       // "imgWidth", not "width" — SectionProps.width (contained/full) shares
       // this same flat props-bag key namespace across every node type, see
       // element-schema's LENGTH_KEYS comment.
@@ -802,7 +804,7 @@ export const SLIDER_NAV_ICONS = ["chevron", "arrow", "caret"] as const;
 export const CONTENT_KEYS: Record<ElType, string[]> = {
   heading: ["text"],
   text: ["text"],
-  image: ["src", "alt"],
+  image: ["src", "alt", "href"],
   video: ["src"],
   button: ["label", "href"],
   badge: ["label"],

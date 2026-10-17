@@ -36,6 +36,11 @@ import {
 import { ELS } from "./elements";
 import { LEGACY_SHADOW, SLIDER_HEIGHT } from "./style";
 import { SocialPicker, SocialStyleTiles } from "./SocialPicker";
+import { LinkInput } from "./LinkInput";
+
+// Flat-prop link keys (button/image, ctabanner's two buttons, announcementbar)
+// that get the site page/post suggestions; embed/googlemap URLs don't.
+const LINK_KEYS = new Set(["href", "button1Href", "button2Href", "linkHref"]);
 
 // The slides editor's layout picture grid (parsers.ts's SLIDE_PRESETS) — each
 // thumbnail is buildSlidePreset's own desktop output drawn small: bars for
@@ -638,11 +643,12 @@ export function FieldInput({
               placeholder={t("designer-f-text")}
               onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, description: v } : x)))}
             />
-            <BufferedInput
+            <LinkInput
               className={base}
               value={c.href}
               placeholder={t("designer-f-href")}
               onCommit={(v) => setCards(cards.map((x, j) => (j === i ? { ...x, href: v } : x)))}
+              t={t}
             />
             <BufferedInput
               className={base}
@@ -759,6 +765,7 @@ export function FieldInput({
               }
               if (f.type === "textarea")
                 return <BufferedTextarea key={f.key} rows={2} className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />;
+              if (f.key === "href") return <LinkInput key={f.key} className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} t={t} />;
               return <BufferedInput key={f.key} className={base} value={v} placeholder={t(f.labelKey)} onCommit={commit} />;
             })}
           </div>
@@ -1128,5 +1135,7 @@ export function FieldInput({
       </div>
     );
   }
+  if (field.kind === "text" && LINK_KEYS.has(field.key))
+    return <LinkInput className={base} value={value} placeholder={t("designer-link-placeholder")} onCommit={onChange} t={t} />;
   return <BufferedInput className={base} value={value} onCommit={onChange} />;
 }
