@@ -104,3 +104,7 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   each do it. The img stays `display:block`, so only the picture is clickable, its alignment
   margins still apply, and a free slide image's 100% width/height still size against the wrapper.
   `alt` names the link. Live Edit's click handler already stops the navigation.
+- **Pinned header/footer fallback (2026-10-17)**: `resolveHeaderFooter` (`lib/api.ts`) renders the
+  default when a page's pinned `headerId`/`footerId` isn't visible to its anonymous read (a draft,
+  or one moved to the admin list's Trash; RLS shows published rows only), as a hard delete's FK
+  SET NULL would. It used to render no header at all.

@@ -132,7 +132,7 @@ export function HeaderFooterDesignerRoute({ tenantHost, token, isSuper, backTo }
       tenantHost={tenantHost}
       token={token}
       t={t}
-      onClose={() => navigate(backTo)}
+      onClose={() => navigate(`${backTo}?tab=${item.kind}`)}
       isSuper={isSuper}
       kind="siteChrome"
     />

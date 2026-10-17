@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolvePageLayout, resolvePostContent, resolveCategoryName, type Page, type Post } from "./api";
+import { resolvePageLayout, resolvePostContent, resolveCategoryName, resolveHeaderFooter, type Page, type Post } from "./api";
 
 const basePage: Page = {
   id: "p1",
@@ -51,6 +51,20 @@ test("resolvePageLayout merges a breakpoint-prefixed override key into that node
   const resolved = resolvePageLayout(page, "ms") as Array<{ props?: { bp?: Record<string, string>; anchorId?: string } }>;
   assert.equal(resolved[0].props?.bp?.["tablet:anchorId"], "tablet-anchor");
   assert.equal(resolved[0].props?.anchorId, undefined);
+});
+
+test("resolveHeaderFooter falls back to the default when the pinned header is hidden (draft or trash)", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    const body = String(url).includes("/api/siteChrome/gone") ? { item: null } : { items: [{ id: "default-header" }] };
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as unknown as typeof fetch;
+  try {
+    const { header } = await resolveHeaderFooter({ ...basePage, headerId: "gone", hideFooter: true }, "fallback.test");
+    assert.equal(header?.id, "default-header");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 const basePost: Post = {
