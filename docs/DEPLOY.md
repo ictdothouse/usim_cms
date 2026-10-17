@@ -129,16 +129,59 @@ dideploy. Ia tidak terikat kepada GitHub atau GitLab; mana-mana CI dan registry 
    - **CI atau mesin build lain** (Jenkins, Bitbucket, Azure DevOps, pelayan build): jalankan
      `docker login <registry>`, kemudian
      `UCMS_IMAGE_REPO=<registry>/<path> bash scripts/build-images.sh --push`.
-2. Di setiap server, sekali sahaja: `docker login <registry>` dengan token baca sahaja (GHCR: PAT
-   classic dengan skop `read:packages`; GitLab: deploy token dengan skop `read_registry`).
-3. Dalam `.env` server: `UCMS_IMAGE_REPO=<registry>/<path>`, sama seperti di CI. `deploy.sh` kini
-   menarik imej untuk commit semasa, dan menunggu sehingga `IMAGE_WAIT_SECONDS` (lalai 900) jika CI
-   belum siap. Kosongkan nilai ini untuk kembali membina di server.
-4. Tetapkan polisi simpanan registry, contohnya simpan 30 versi terakhir dan buang yang lain:
+2. Pemasangan baharu: `sudo ./install.sh --mode=production` bertanya **"Image registry path"**.
+   Kosongkan untuk membina di server. Atau masukkan path registry, username dan token baca
+   sahaja (GHCR: PAT classic dengan skop `read:packages`; GitLab: deploy token dengan skop
+   `read_registry`). Installer akan `docker login`, menyemak imej untuk versi ini wujud, dan
+   menyimpan `UCMS_IMAGE_REPO` dalam `.env`. Deploy pertama terus menarik imej tanpa membina.
+3. Server sedia ada, atau pemasangan tanpa interaksi: jalankan `docker login <registry>` sekali
+   sahaja, kemudian tetapkan `UCMS_IMAGE_REPO=<registry>/<path>` dalam `.env`, sama seperti di CI.
+   `deploy.sh` kini menarik imej untuk commit semasa, dan menunggu sehingga `IMAGE_WAIT_SECONDS`
+   (lalai 900) jika CI belum siap. Kosongkan nilai ini untuk kembali membina di server.
+4. Tetapkan polisi simpanan registry: kekalkan tag `v*` (release) selama-lamanya, dan buang tag
+   lain (imej setiap commit di `main`) selepas tempoh tertentu, contohnya 30 hari:
    - GitLab: Settings > Packages and registries > Cleanup policies.
    - GHCR: tiada polisi terbina; padam versi lama melalui halaman Packages atau action
      `actions/delete-package-versions`.
    - Harbor, Docker Hub atau registry lain: guna retention rule registry tersebut.
+
+## Release: penerbit dan server organisasi
+
+Penerbit (vendor) membina dan menerbitkan; server organisasi hanya menerima versi yang
+diterbitkan, bukan setiap commit di `main`.
+
+**Terbitkan patch (penerbit):**
+
+1. Pastikan `main` lulus CI dan sudah diuji di server sendiri.
+2. `git tag v1.2.3 && git push origin v1.2.3`, atau cipta Release di GitHub/GitLab dengan tag
+   baharu. Guna format `vMAJOR.MINOR.PATCH`; tag pra-keluaran seperti `v1.3.0-rc1` tidak
+   ditawarkan kepada server organisasi.
+3. CI membina dan menolak imej bertag `v1.2.3`. Monitor setiap server organisasi akan memaparkan
+   **"Release v1.2.3 available"**, dan pentadbir mereka klik **Pull latest & deploy**.
+
+Jika release mengubah `scripts/deploy.sh`, supervisor monitor atau konfigurasi base tier
+(compose, Caddyfile, PgBouncer), monitor menyekat kemaskini sekali klik. Organisasi perlu
+memasangnya secara manual: `git fetch --tags && git checkout v1.2.3 && bash scripts/deploy.sh`.
+Elakkan perubahan begitu dalam patch biasa, atau nyatakan langkah ini dalam nota release.
+
+**Server organisasi baharu:**
+
+```bash
+git clone --branch v1.2.3 <url-repo> usim_cms   # klon penuh, jangan --depth 1
+cd usim_cms
+sudo ./install.sh --mode=production
+```
+
+Installer mengesan checkout pada tag release dan menetapkan `UPDATE_CHANNEL=release` dalam
+`/etc/ucms-monitor.env`. Pada soalan "Image registry path", masukkan registry penerbit (contoh
+`ghcr.io/ictdothouse/usim_cms`) dan token baca sahaja yang diberi oleh penerbit.
+
+Server penerbit sendiri kekal pada `UPDATE_CHANNEL=main` (lalai). Untuk menukar saluran, ubah
+nilai itu dalam `/etc/ucms-monitor.env`, kemudian `sudo systemctl restart ucms-monitor`.
+
+Jika repo atau registry peribadi, setiap organisasi perlukan akses baca sahaja: deploy key untuk
+git dan token registry dengan skop baca. Sebaiknya satu token bagi setiap organisasi, supaya akses
+boleh ditarik balik secara berasingan.
 
 ## CDN / WAF pilihan
 

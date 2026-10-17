@@ -347,6 +347,58 @@ configure_optional_integrations() {
 }
 
 # ---------------------------------------------------------------------------
+# Where production mode's app images come from. Blank (default): the first
+# deploy builds them on this server. A registry path: pulled ready-built,
+# e.g. from the vendor's or the organisation's own CI (any registry — see
+# scripts/build-images.sh), so this server never builds. Enter keeps the
+# current answer, "-" switches back to building here. A non-interactive run
+# keeps whatever .env says (preset UCMS_IMAGE_REPO after a `docker login`).
+# ---------------------------------------------------------------------------
+configure_image_source() {
+  [ -t 0 ] || return 0
+  local current repo host user token tag
+  current=$(sed -n 's/^UCMS_IMAGE_REPO=//p' .env | tail -1)
+  echo ""
+  echo "-- App images (now: ${current:-built on this server}) --"
+  echo "  To pull ready-built images instead, enter their registry path,"
+  echo "  e.g. ghcr.io/acme/usim_cms. Enter keeps the above, '-' builds here."
+  read -r -p "Image registry path: " repo
+  case "$repo" in
+    "") return 0 ;;
+    -) set_env_kv .env UCMS_IMAGE_REPO "" && return 0 ;;
+  esac
+  # Lands in .env, which scripts/deploy.sh sources as root: image-path
+  # characters only.
+  if ! [[ "$repo" =~ ^[a-z0-9]([a-z0-9._/:-]*[a-z0-9])?$ ]]; then
+    echo "  Not a registry path (lowercase, e.g. ghcr.io/acme/usim_cms); images will be built here." >&2
+    return 0
+  fi
+  # A first part with a dot, a port or "localhost" names the registry;
+  # anything else (acme/usim_cms) is Docker Hub.
+  host="${repo%%/*}"
+  case "$host" in *.* | *:* | localhost) ;; *) host="" ;; esac
+  read -r -p "  Registry username (blank = public images, no login): " user
+  if [ -n "$user" ]; then
+    read -r -s -p "  Read-only token: " token
+    echo ""
+    if ! printf '%s' "$token" | docker login ${host:+"$host"} -u "$user" --password-stdin >/dev/null; then
+      echo "  Login failed; images will be built here." >&2
+      return 0
+    fi
+  fi
+  # The tag scripts/deploy.sh will pull: this checkout's release version
+  # when it sits on one, else its commit.
+  tag=$(git -c safe.directory='*' describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null ||
+    git -c safe.directory='*' rev-parse HEAD)
+  if ! docker manifest inspect "$repo/api:$tag" >/dev/null 2>&1; then
+    echo "  No $repo/api:$tag there (this version not published yet?); images will be built here." >&2
+    return 0
+  fi
+  set_env_kv .env UCMS_IMAGE_REPO "$repo"
+  echo "  Found this version's images; the first deploy pulls them."
+}
+
+# ---------------------------------------------------------------------------
 # Where uploaded media lives. Docker/production: UPLOADS_PATH or UPLOADS_NFS
 # in .env, turned into the api's /app/uploads volume by
 # scripts/uploads-volume.sh on every deploy — which also moves the existing
@@ -1186,6 +1238,16 @@ EOF
   set_env_kv /etc/ucms-monitor.env MONITOR_HOST "$MONITOR_BIND_HOST"
   set_env_kv /etc/ucms-monitor.env MONITOR_ACCESS_MODE "$monitor_access_mode"
   set_env_kv /etc/ucms-monitor.env MONITOR_PUBLIC_DOMAIN "$monitor_public_domain"
+  # What the monitor's "update available" follows: an install from a release
+  # checkout (git clone --branch v1.2.3) follows releases, anything else main.
+  # A re-run keeps whatever is already set.
+  if ! grep -q '^UPDATE_CHANNEL=' /etc/ucms-monitor.env; then
+    if git -c safe.directory='*' describe --tags --exact-match --match 'v[0-9]*' >/dev/null 2>&1; then
+      set_env_kv /etc/ucms-monitor.env UPDATE_CHANNEL release
+    else
+      set_env_kv /etc/ucms-monitor.env UPDATE_CHANNEL main
+    fi
+  fi
   systemctl daemon-reload
   systemctl enable --now ucms-monitor
   systemctl restart ucms-monitor
@@ -1844,6 +1906,7 @@ install_production_mode() {
   grep -qE '^ADMIN_REPLICAS=.+' .env || set_env_kv .env ADMIN_REPLICAS "1"
   configure_optional_integrations .env
   configure_media_storage docker .env
+  configure_image_source
   install_backup_cron "docker"
 
   echo ""

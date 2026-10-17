@@ -1,5 +1,6 @@
-# Builds the api/frontend/admin images once per commit on the default branch
-# and pushes them to this project's container registry
+# Builds the api/frontend/admin images once per commit on the default branch,
+# and once per release tag (v1.2.3, also tagged with that version), and
+# pushes them to this project's container registry
 # ($CI_REGISTRY_IMAGE/{api,frontend,admin}); a server with UCMS_IMAGE_REPO set
 # in .env then pulls them instead of building. Off until the CI/CD variable
 # UCMS_PUBLISH_IMAGES is "true" (Settings > CI/CD > Variables). Needs a runner
@@ -13,9 +14,9 @@ publish-images:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   rules:
-    - if: $UCMS_PUBLISH_IMAGES == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $UCMS_PUBLISH_IMAGES == "true" && ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_TAG =~ /^v/)
   before_script:
     - apk add --no-cache bash
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
   script:
-    - UCMS_IMAGE_REPO="$CI_REGISTRY_IMAGE" UCMS_IMAGE_TAG="$CI_COMMIT_SHA" bash scripts/build-images.sh --push
+    - UCMS_IMAGE_REPO="$CI_REGISTRY_IMAGE" UCMS_IMAGE_TAG="$CI_COMMIT_SHA" UCMS_IMAGE_VERSION="${CI_COMMIT_TAG:-}" bash scripts/build-images.sh --push

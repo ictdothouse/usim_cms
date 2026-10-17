@@ -85,6 +85,10 @@ const ALERT_DISK_THRESHOLD_PCT = Number(process.env.ALERT_DISK_THRESHOLD_PCT) ||
 // network call to GitHub and update freshness doesn't need 60s granularity. GET /api/update-check
 // (the dashboard's own on-demand refresh) always fetches fresh regardless of this interval.
 const UPDATE_CHECK_INTERVAL_MS = Number(process.env.UPDATE_CHECK_INTERVAL_MS) || 5 * 60_000;
+// What "update available" follows: "main" (default) = every commit merged to main; "release"
+// (an organisation's server) = the newest vX.Y.Z tag the publisher released. install.sh picks
+// "release" when it ran from a release checkout.
+const UPDATE_CHANNEL = process.env.UPDATE_CHANNEL === "release" ? "release" : "main";
 // Same idea as UPDATE_CHECK_INTERVAL_MS but for upstream stack versions
 // (Node/pnpm/Postgres/Redis/Caddy/PgBouncer, see getUpstreamLatest) — those
 // move on their own release cadence, not this repo's commits, so they get
@@ -740,26 +744,45 @@ function selfHealRestart(name) {
   });
 }
 
-// Fetches origin/main and reports how far HEAD is behind it — the only signal needed to answer
-// "is there something to update": anything merged to main (a green-CI'd Dependabot bump included,
-// see .github/dependabot.yml) shows up here the moment it lands, no GitHub token/API call needed.
-// null means the fetch itself failed (offline, GitHub down, etc) — callers treat that as
-// "unknown", never as "0 updates".
+// Fetches the update target (origin/main, or the newest release tag on the release channel)
+// and reports how far HEAD is behind it — the only signal needed to answer "is there something
+// to update": anything merged to main (a green-CI'd Dependabot bump included, see
+// .github/dependabot.yml), or a newly pushed vX.Y.Z tag, shows up here the moment it lands, no
+// GitHub token/API call needed. null means the fetch itself failed (offline, GitHub down, etc)
+// — callers treat that as "unknown", never as "0 updates".
 function getRemoteUpdateInfo(cb) {
-  execFile("git", ["fetch", "origin", "main", "--quiet"], { cwd: REPO_DIR, timeout: 20_000 }, (fetchErr) => {
+  const release = UPDATE_CHANNEL === "release";
+  const fetchArgs = release
+    ? ["fetch", "origin", "--tags", "--force", "--prune", "--prune-tags", "--quiet"]
+    : ["fetch", "origin", "main", "--quiet"];
+  execFile("git", fetchArgs, { cwd: REPO_DIR, timeout: 20_000 }, (fetchErr) => {
     if (fetchErr) return cb(null);
-    execFile(
-      "git",
-      ["log", "--oneline", "HEAD..origin/main", "-20"],
-      { cwd: REPO_DIR, timeout: 10_000 },
-      (logErr, stdout) => {
-        if (logErr) return cb(null);
-        const commits = stdout.trim() ? stdout.trim().split("\n") : [];
-        execFile("git", ["rev-parse", "origin/main"], { cwd: REPO_DIR, timeout: 5_000 }, (shaErr, shaOut) => {
-          cb({ commitsBehind: commits.length, commits, remoteSha: shaErr ? null : shaOut.trim() });
-        });
-      },
-    );
+    resolveUpdateTarget(release, (target) => {
+      if (!target) return cb(null);
+      execFile(
+        "git",
+        ["log", "--oneline", `HEAD..${target.ref}`, "-20"],
+        { cwd: REPO_DIR, timeout: 10_000 },
+        (logErr, stdout) => {
+          if (logErr) return cb(null);
+          const commits = stdout.trim() ? stdout.trim().split("\n") : [];
+          execFile("git", ["rev-parse", `${target.ref}^{commit}`], { cwd: REPO_DIR, timeout: 5_000 }, (shaErr, shaOut) => {
+            cb({ commitsBehind: commits.length, commits, remoteSha: shaErr ? null : shaOut.trim(), target: target.label });
+          });
+        },
+      );
+    });
+  });
+}
+
+// The release channel follows the newest plain vX.Y.Z tag (a pre-release like v1.3.0-rc1 is
+// never offered to an organisation's server); with none released yet, HEAD itself (= up to date).
+function resolveUpdateTarget(release, cb) {
+  if (!release) return cb({ ref: "origin/main", label: "origin/main" });
+  execFile("git", ["tag", "--list", "v*", "--sort=-v:refname"], { cwd: REPO_DIR, timeout: 5_000 }, (err, out) => {
+    if (err) return cb(null);
+    const tag = out.split("\n").find((t) => /^v\d+\.\d+\.\d+$/.test(t));
+    cb(tag ? { ref: `refs/tags/${tag}`, label: tag } : { ref: "HEAD", label: "no release yet" });
   });
 }
 
@@ -1056,10 +1079,10 @@ function getPreflightCheck(cb) {
   reconcileDeployState();
   getRemoteUpdateInfo((updateInfo) => {
     if (!updateInfo) return cb({ error: "git fetch failed — check network/GitHub reachability" });
-    if (!/^[0-9a-f]{40}$/.test(updateInfo.remoteSha || "")) return cb({ error: "Could not verify origin/main revision." });
+    if (!/^[0-9a-f]{40}$/.test(updateInfo.remoteSha || "")) return cb({ error: `Could not verify the ${updateInfo.target} revision.` });
     execFile(
       "git",
-      ["diff", "--name-only", "HEAD", "origin/main"],
+      ["diff", "--name-only", "HEAD", updateInfo.remoteSha],
       { cwd: REPO_DIR, timeout: 10_000 },
       (diffErr, diffOut) => {
         if (diffErr) return cb({ error: "Could not inspect incoming changes." });
@@ -1090,7 +1113,7 @@ function getPreflightCheck(cb) {
                 { cwd: REPO_DIR, timeout: 5000 });
             } catch {
               raise("blocked");
-              reasons.push("Local branch diverged from origin/main; review it before updating.");
+              reasons.push(`Local checkout diverged from ${updateInfo.target}; review it before updating.`);
             }
             try {
               execFileSync("git", ["diff", "--quiet"], { cwd: REPO_DIR, timeout: 5000 });
@@ -1196,6 +1219,7 @@ function getPreflightCheck(cb) {
               commitsBehind: updateInfo.commitsBehind,
               commits: updateInfo.commits,
               remoteSha: updateInfo.remoteSha,
+              target: updateInfo.target,
               verdict,
               reasons,
               trial,
@@ -1224,8 +1248,8 @@ async function handleSecurity(req, res, force) {
 }
 
 // Edge-triggered on remoteSha the same way service up/down and disk-threshold alerts are above —
-// fires once when a new HEAD first appears on origin/main, not on every single poll while it's
-// still there unpulled. Piggybacks the existing ALERT_WEBHOOK_URL wiring (sendAlert no-ops when
+// fires once when a new update target first appears (origin/main's HEAD, or a new release tag),
+// not on every single poll while it's still there unpulled. Piggybacks the existing ALERT_WEBHOOK_URL wiring (sendAlert no-ops when
 // unset), so this needs no new secret/config beyond what alerting already asks for.
 function pollForUpdateAlert() {
   getRemoteUpdateInfo((info) => {
@@ -1233,7 +1257,7 @@ function pollForUpdateAlert() {
     if (info.remoteSha === lastAlertedRemoteSha) return;
     lastAlertedRemoteSha = info.remoteSha;
     sendAlert(
-      `[usim_cms/${PUBLIC_HOST}] ${info.commitsBehind} update(s) available on main:\n` +
+      `[usim_cms/${PUBLIC_HOST}] ${info.commitsBehind} update(s) available on ${info.target}:\n` +
         info.commits.slice(0, 5).join("\n"),
     );
   });
@@ -1443,7 +1467,7 @@ function handlePull(req, res) {
       fi
       old_head="$(git rev-parse HEAD)"
       git merge-base --is-ancestor "$old_head" "${pre.remoteSha}" || {
-        echo "origin/main diverged from this checkout; refusing a destructive reset." >&2
+        echo "The update target diverged from this checkout; refusing a destructive reset." >&2
         exit 1
       }
       trap 'result=$?; if [ "$result" -ne 0 ]; then git reset --hard "$old_head"; fi' EXIT
@@ -3539,7 +3563,9 @@ async function refreshUpdateCheck() {
       count.style.display = "";
       el.style.display = "block";
       el.innerHTML =
-        "<b>" + info.commitsBehind + " update" + (info.commitsBehind > 1 ? "s" : "") + " available.</b> " +
+        "<b>" + (info.target && info.target !== "origin/main"
+          ? "Release " + escapeHtml(info.target)
+          : info.commitsBehind + " update" + (info.commitsBehind > 1 ? "s" : "")) + " available.</b> " +
         "The deployment flow checks the new release before switching traffic. " +
         "<button class=\\"secondary\\" data-action=\\"open-deploy\\">Open deployments</button><br>" +
         "<span style=\\"font-size:0.8rem;opacity:0.85\\">" + info.commits.slice(0, 5).map(escapeHtml).join("<br>") + "</span>";
@@ -3756,7 +3782,7 @@ async function pull(button) {
       } else {
         const label = pre.verdict === "caution" ? "⚠ Needs attention" : "✓ Safe to update";
         const msg =
-          label + " — " + pre.commitsBehind + " commit(s) behind origin/main:\\n\\n" +
+          label + " — " + pre.commitsBehind + " commit(s) behind " + (pre.target || "origin/main") + ":\\n\\n" +
           pre.reasons.join("\\n\\n") + "\\n\\nProceed with \\"Pull latest & deploy\\"?";
         if (!confirm(msg)) return;
       }
@@ -4143,6 +4169,6 @@ if (ALERT_WEBHOOK_URL) {
   pollForAlerts();
 }
 
-console.log(`update checks: polling origin/main every ${UPDATE_CHECK_INTERVAL_MS}ms`);
+console.log(`update checks: polling ${UPDATE_CHANNEL === "release" ? "release tags" : "origin/main"} every ${UPDATE_CHECK_INTERVAL_MS}ms`);
 setInterval(pollForUpdateAlert, UPDATE_CHECK_INTERVAL_MS);
 pollForUpdateAlert();

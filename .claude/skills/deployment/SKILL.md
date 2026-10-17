@@ -745,9 +745,30 @@ the failed new color — safe to re-run.
     `<repo>/<svc>:$(git rev-parse HEAD)` instead, retrying until `IMAGE_WAIT_SECONDS` (900)
     because a server can deploy before CI has finished. `docker-compose.release.yml` names its
     images from the same two variables (`build:` kept for a manual `up --build`). Rollback is
-    unchanged: stopped containers keep their own image.
+    unchanged: stopped containers keep their own image. The tag comes from
+    `git -c safe.directory='*' rev-parse HEAD`, so root (install.sh, the monitor) can read a
+    checkout another user cloned.
+  - `install.sh --mode=production` asks "Image registry path" before the first deploy
+    (`configure_image_source`, interactive only; Enter keeps, `-` = build here). It validates
+    the path (image-path characters only: `.env` is sourced as root), runs `docker login`
+    with the token on stdin, and saves `UCMS_IMAGE_REPO` only once `docker manifest inspect`
+    finds this commit's api image, otherwise the server builds. Trial and bare-metal modes
+    always build.
   - Registry retention is not automated (each registry has its own policy); docs/DEPLOY.md lists
     GitLab cleanup policies, GHCR and others.
+  - **Releases (publisher model).** The publisher pushes a `vX.Y.Z` tag; both CI wrappers build
+    on `v*` tags too and pass `UCMS_IMAGE_VERSION`, so the images also get that version tag
+    (keep `v*` forever, prune per-commit tags). `deploy.sh` pulls `:vX.Y.Z` when HEAD is
+    exactly a `v[0-9]*` tag (`git describe --exact-match`), else `:<commit>`. The monitor's
+    `UPDATE_CHANNEL` (`/etc/ucms-monitor.env`): `main` (default) follows origin/main; `release`
+    fetches tags (`--force --prune --prune-tags`, so a withdrawn release disappears) and
+    targets the newest plain `vX.Y.Z` (`git tag --sort=-v:refname`, pre-releases skipped),
+    reusing the same preflight/ancestry/reset flow against that tag's commit. install.sh's
+    `install_monitor` sets `release` when it ran from a release checkout
+    (`git clone --branch vX.Y.Z`, a full clone: the ancestry check needs history), else
+    `main`, and never overwrites an existing value. A release that changes `deploy.sh`, the
+    supervisor or the base tier is still blocked from one-click (manual
+    `git checkout vX.Y.Z && bash scripts/deploy.sh`).
   - **The admin image is config-free.** `VITE_API_URL`/`VITE_FRONTEND_URL` are runtime env now
     (same names, so `.env` files are unchanged). `apps/admin/runtime-config.sh`, run from nginx's
     `/docker-entrypoint.d`, accepts URL characters only (both values land verbatim in JS and an

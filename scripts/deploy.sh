@@ -248,9 +248,14 @@ node --test monitor/security.test.js monitor/dashboard.test.js
     exit 1
   fi
 
-  # Every image is tagged with the commit it was built from, so a server runs
-  # exactly what was built and tested for its own checkout.
-  UCMS_IMAGE_TAG="${UCMS_IMAGE_TAG:-$(git rev-parse HEAD)}"
+  # Every image is tagged with the commit it was built from (and a release
+  # with its version too), so a server runs exactly what was built and tested
+  # for its own checkout: one sitting on a release tag pulls :v1.2.3, anything
+  # else :<commit>. install.sh's configure_image_source derives it the same
+  # way. safe.directory: root (install.sh, the monitor) reading a checkout
+  # another user cloned.
+  UCMS_IMAGE_TAG="${UCMS_IMAGE_TAG:-$(git -c safe.directory='*' describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null ||
+    git -c safe.directory='*' rev-parse HEAD)}"
   export UCMS_IMAGE_TAG
   # Runs on every exit from here, failed deploys included.
   trap prune_images EXIT
