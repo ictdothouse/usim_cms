@@ -117,9 +117,10 @@ services:
     build:
       context: .
       dockerfile: apps/admin/Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
-        VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:-http://localhost:4321}
+    # Read at container start (apps/admin/runtime-config.sh), not baked in.
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+      VITE_FRONTEND_URL: ${VITE_FRONTEND_URL:-http://localhost:4321}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

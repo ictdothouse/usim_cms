@@ -30,11 +30,16 @@ RUN pnpm --filter @ucms/element-render build
 # on its own to block a bad deploy.
 RUN pnpm --filter @ucms/frontend typecheck
 RUN pnpm --filter @ucms/frontend build
-RUN pnpm --filter @ucms/frontend deploy --prod --legacy /app/deploy/frontend
+# Same dependency/app layer split as apps/api/Dockerfile — see its comments.
+RUN pnpm --filter @ucms/frontend deploy --prod --legacy /app/deploy/frontend \
+  && mv /app/deploy/frontend/node_modules /app/deploy/node_modules \
+  && rm -f /app/deploy/node_modules/.modules.yaml \
+  && chmod -R u=rwX,go=rX /app/deploy/node_modules
 
 FROM base AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+COPY --from=build /app/deploy/node_modules ./node_modules
 COPY --from=build /app/deploy/frontend ./
 RUN addgroup -S app && adduser -S app -G app
 USER app

@@ -1,8 +1,8 @@
-# Build from repo root: docker build -f apps/admin/Dockerfile -t ucms-admin \
-#   --build-arg VITE_API_URL=https://api.example.com .
-# Static SPA — Vite envs are compile-time only, baked into the JS bundle here,
-# not read at container runtime. No pnpm deploy needed: nginx just serves
-# the built dist/, no node_modules at runtime.
+# Build from repo root: docker build -f apps/admin/Dockerfile -t ucms-admin .
+# Static SPA served by nginx, no node_modules at runtime. Nothing
+# organisation-specific is baked in: the API/frontend URLs come from the
+# container's VITE_API_URL/VITE_FRONTEND_URL env at start (runtime-config.sh
+# writes /config.js and the CSP), so one image serves any organisation.
 FROM node:24-alpine AS build
 RUN corepack enable
 WORKDIR /app
@@ -18,11 +18,6 @@ COPY packages/element-schema packages/element-schema
 COPY packages/element-style packages/element-style
 COPY packages/element-render packages/element-render
 COPY apps/admin apps/admin
-ARG VITE_API_URL=http://localhost:3000
-ARG VITE_FRONTEND_URL=http://localhost:4321
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_FRONTEND_URL=$VITE_FRONTEND_URL
-RUN node --input-type=module -e 'import fs from "node:fs"; const file="apps/admin/security-headers.conf"; const api=new URL(process.env.VITE_API_URL); if (!["http:","https:"].includes(api.protocol)) throw new Error("VITE_API_URL must use HTTP or HTTPS"); fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("__UCMS_API_ORIGIN__", api.origin));'
 # @ucms/element-schema/@ucms/element-style (apps/admin's own dependencies, see
 # designer/elements.test.ts and package.json) ship no dist/ in the repo — build
 # both before apps/admin's own test/build, which import their compiled output
@@ -42,5 +37,7 @@ RUN pnpm --filter @ucms/admin build
 FROM nginxinc/nginx-unprivileged:alpine AS runtime
 COPY --from=build --chown=101:0 /app/apps/admin/dist /usr/share/nginx/html
 COPY --chown=101:0 apps/admin/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build --chown=101:0 /app/apps/admin/security-headers.conf /etc/nginx/ucms-security-headers.conf
+# Template: runtime-config.sh fills in the API origin at container start.
+COPY --chown=101:0 apps/admin/security-headers.conf /etc/nginx/ucms-security-headers.conf
+COPY --chmod=755 apps/admin/runtime-config.sh /docker-entrypoint.d/40-ucms-runtime-config.sh
 EXPOSE 8080

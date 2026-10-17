@@ -161,12 +161,21 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `ensure_docker_live_restore` below: (1) every service in `docker-compose.yml` and
   `docker-compose.release.yml` now sets `logging: *default-logging` (`json-file`, `max-size:
   10m`, `max-file: 3` — a 30MB ceiling per container) instead of Docker's own unbounded
-  default, which otherwise keeps every line of stdout forever. (2) `scripts/deploy.sh`'s
-  `do_deploy` runs `docker builder prune -af --filter "until=24h"` + `docker image prune -af`
-  right after every successful promote — safe because both only ever remove cache/images with
-  **zero** container references, so the just-stopped old color (kept for instant rollback,
-  see above) is never touched; the `until=24h` filter keeps the current deploy's own layer
-  cache for next time, only sweeping cache that's accumulated past a day. (3) `install.sh`'s
+  default, which otherwise keeps every line of stdout forever. (2) `scripts/build-images.sh`
+  (every image build, on a server or a CI runner) trims the build cache to `BUILD_CACHE_MAX`
+  (`.env`, default `5GB`) in an EXIT trap, failed builds included, and `scripts/deploy.sh`'s
+  `do_deploy` runs `docker image prune -af` in its own EXIT trap. A size-limited prune runs in
+  BuildKit's GC mode: it deletes the least recently used record first, one at a time, until
+  under the limit, so the base image and `pnpm install` layers every build reuses stay warm.
+  Images a container still uses (the stopped old color kept for instant rollback, see above)
+  are never removed. Docker 28+ takes `--max-used-space`; older engines get `--keep-storage`,
+  which 28+ keeps only as a deprecated alias of `--reserved-space` (that alone still caps).
+  Until 2026-10-17 this was `--filter "until=24h"` after a successful promote only, which kept
+  every layer from a busy deploy day: the demo VPS showed 14.1GB of build cache, 11.7GB
+  reclaimable. Build cache grows with deploys, not tenants: every site runs on the same three
+  images, so 100 sites add database and upload growth (the panels below), not build cache.
+  Pulling CI-built images (see "Image builds" below) leaves no build cache on a server at all.
+  (3) `install.sh`'s
   `ensure_journald_cap` writes `/etc/systemd/journald.conf.d/00-usim-cms-size-cap.conf`
   (`SystemMaxUse=200M`) — same idempotent drop-in-file pattern as `ensure_docker_live_restore`,
   called from the same two install-mode call sites, for the host's own `/var/log/journal`
@@ -707,9 +716,10 @@ the failed new color — safe to re-run.
   (`apps/api/Dockerfile` → `pnpm --filter @ucms/api test`; `apps/admin/Dockerfile` →
   `pnpm --filter @ucms/admin test`; `apps/frontend/Dockerfile` → `pnpm --filter
   @ucms/frontend typecheck`, since `astro build` alone doesn't type-check the way the
-  other two's `tsc`-based builds already do) — a failing test/type error fails `docker
-  compose build`, which aborts `scripts/deploy.sh` (`set -e`) before any live container is
-  touched. No new host tooling, no separate CI step: the existing build IS the gate.
+  other two's `tsc`-based builds already do) — a failing test/type error fails
+  `scripts/build-images.sh` (on the server, or in CI before anything is pushed), which aborts
+  `scripts/deploy.sh` (`set -e`) before any live container is touched. No new host tooling,
+  no separate CI step: the existing build IS the gate.
   `deploy.sh` also stopped deleting the color it just replaced — a successful promote now
   `docker compose ... stop`s the old color (kept, not removed) instead of `... down`, so
   `scripts/deploy.sh rollback` can start it back up in seconds with **no rebuild**,
@@ -722,6 +732,38 @@ the failed new color — safe to re-run.
   polling `handlePull` already has) — refused with a clear message in systemd/bare-metal
   mode (blue-green doesn't exist there) and while still in trial mode (nothing promoted
   yet to roll back to).
+- **Image builds: on the server, or once in CI (2026-10-17).** The CMS is meant for many
+  organisations on different platforms (GitHub, GitLab, or neither), so nothing here is tied
+  to one CI or registry.
+  - `scripts/build-images.sh` is the only build recipe. It runs plain `docker build` (no
+    compose, so CI needs no `.env`), tags `<repo>/{api,frontend,admin}:<commit>` plus `:latest`,
+    and `--push` publishes to any OCI registry. `.github/workflows/images.yml` and
+    `.gitlab-ci.yml` only log in and call it, and stay off until `UCMS_PUBLISH_IMAGES=true`
+    (repository / CI variable); Jenkins and others call the script directly.
+  - `deploy.sh`: `UCMS_IMAGE_REPO` unset (default) builds on the server through the script, as
+    `localhost/ucms/*` (a `localhost/` name can never resolve to Docker Hub). Set, it pulls
+    `<repo>/<svc>:$(git rev-parse HEAD)` instead, retrying until `IMAGE_WAIT_SECONDS` (900)
+    because a server can deploy before CI has finished. `docker-compose.release.yml` names its
+    images from the same two variables (`build:` kept for a manual `up --build`). Rollback is
+    unchanged: stopped containers keep their own image.
+  - Registry retention is not automated (each registry has its own policy); docs/DEPLOY.md lists
+    GitLab cleanup policies, GHCR and others.
+  - **The admin image is config-free.** `VITE_API_URL`/`VITE_FRONTEND_URL` are runtime env now
+    (same names, so `.env` files are unchanged). `apps/admin/runtime-config.sh`, run from nginx's
+    `/docker-entrypoint.d`, accepts URL characters only (both values land verbatim in JS and an
+    nginx directive) and writes `/tmp/ucms/config.js` plus the CSP include from the
+    `security-headers.conf` template; nginx serves `/config.js` from there. `lib/api.ts` reads
+    `globalThis.__UCMS_CONFIG__` first and the build-time `VITE_*` second (dev and bare-metal
+    ship an empty `public/config.js`). An invalid URL stops the container at start, so the
+    deploy fails before promote.
+  - **Dependency layer.** The api/frontend runtime stages copy `node_modules` as its own layer
+    before the app files. `pnpm deploy` output is made deterministic: `.modules.yaml`
+    (timestamp) is removed and modes are normalised (`chmod -R u=rwX,go=rX`; pnpm left
+    `@fastify/cors`'s directory at 755 or 777 between runs). Identical dependencies then make
+    that COPY a cache hit (it is content-checksummed), so consecutive images share the layer:
+    one copy on disk for both colors, and a push or pull moves only the app layer. A CI runner
+    without local cache gets the same hit through `--cache-from <repo>/<svc>:latest` +
+    `BUILDKIT_INLINE_CACHE=1` (final stage only; the build stages rerun).
 - **Going live on a box that already runs other apps' nginx on 80/443**: `docker-compose.yml`'s
   `proxy` service ports are `${PROXY_BIND_HTTP:-80:80}`/`${PROXY_BIND_HTTPS:-443:443}` — unset
   in `.env`, Caddy still owns 80/443 directly (the default, single-purpose-box path above).

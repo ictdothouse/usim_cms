@@ -1,0 +1,32 @@
+name: Images
+
+# Builds the api/frontend/admin images once per commit on main and pushes
+# them to this repository's container registry
+# (ghcr.io/<owner>/<repo>/{api,frontend,admin}); a server with
+# UCMS_IMAGE_REPO set in .env then pulls them instead of building. Off until
+# the repository variable UCMS_PUBLISH_IMAGES is "true" (Settings > Secrets
+# and variables > Actions > Variables). The logic lives in
+# scripts/build-images.sh, which GitLab CI (.gitlab-ci.yml) or any other CI
+# runs the same way.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: vars.UCMS_PUBLISH_IMAGES == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Plain docker login, no third-party action: this token can push the
+      # images production servers run.
+      - run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Registry paths must be lowercase.
+      - run: UCMS_IMAGE_REPO="ghcr.io/${GITHUB_REPOSITORY,,}" bash scripts/build-images.sh --push

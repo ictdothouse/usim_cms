@@ -92,7 +92,8 @@ header `Host` (`proxy_set_header Host $host;` dalam nginx).
 
 ## 3. apps/admin (SPA statik)
 
-Env dibaca **semasa build** sahaja:
+Bare-metal: env dibaca **semasa build**. Docker: dibaca semasa container admin bermula
+(`apps/admin/runtime-config.sh`), jadi satu imej boleh digunakan oleh mana-mana organisasi/domain.
 
 | Env | Wajib | Nilai |
 |---|---|---|
@@ -108,6 +109,36 @@ VITE_API_URL=https://api.usim.edu.my pnpm --filter @ucms/admin build
 - Jalankan API + frontend bawah pm2/systemd (API sengaja `process.exit(1)` pada ralat fatal — mesti auto-restart).
 - Tetapkan `ADMIN_ORIGIN` kepada origin admin sebenar dan `NODE_ENV=production`; API memerlukan kedua-duanya untuk konfigurasi production.
 - `STORAGE_DRIVER=local`: pastikan folder `apps/api/uploads/` wujud & boleh tulis; ia dihidang pada `/uploads/`.
+
+## Imej Docker: bina di server atau tarik dari registry
+
+Lalai: `scripts/deploy.sh` membina imej api/frontend/admin di server itu sendiri
+(`scripts/build-images.sh`). Cache build dihadkan oleh `BUILD_CACHE_MAX` (lalai `5GB`); lapisan
+yang paling lama tidak digunakan dibuang dahulu.
+
+Amalan terbaik untuk production atau banyak server: bina **sekali** dalam CI, server hanya menarik
+imej. Server tiada beban CPU build dan tiada cache build, dan imej yang lulus ujian ialah imej yang
+dideploy. Ia tidak terikat kepada GitHub atau GitLab; mana-mana CI dan registry OCI boleh digunakan.
+
+1. CI membina dan menolak imej, ditag dengan commit:
+   - **GitHub**: tetapkan repository variable `UCMS_PUBLISH_IMAGES=true` (Settings > Secrets and
+     variables > Actions > Variables). `.github/workflows/images.yml` menolak ke
+     `ghcr.io/<owner>/<repo>`.
+   - **GitLab**: tetapkan CI/CD variable `UCMS_PUBLISH_IMAGES=true`. `.gitlab-ci.yml` menolak ke
+     registry projek (`$CI_REGISTRY_IMAGE`); perlukan runner Docker-in-Docker.
+   - **CI atau mesin build lain** (Jenkins, Bitbucket, Azure DevOps, pelayan build): jalankan
+     `docker login <registry>`, kemudian
+     `UCMS_IMAGE_REPO=<registry>/<path> bash scripts/build-images.sh --push`.
+2. Di setiap server, sekali sahaja: `docker login <registry>` dengan token baca sahaja (GHCR: PAT
+   classic dengan skop `read:packages`; GitLab: deploy token dengan skop `read_registry`).
+3. Dalam `.env` server: `UCMS_IMAGE_REPO=<registry>/<path>`, sama seperti di CI. `deploy.sh` kini
+   menarik imej untuk commit semasa, dan menunggu sehingga `IMAGE_WAIT_SECONDS` (lalai 900) jika CI
+   belum siap. Kosongkan nilai ini untuk kembali membina di server.
+4. Tetapkan polisi simpanan registry, contohnya simpan 30 versi terakhir dan buang yang lain:
+   - GitLab: Settings > Packages and registries > Cleanup policies.
+   - GHCR: tiada polisi terbina; padam versi lama melalui halaman Packages atau action
+     `actions/delete-package-versions`.
+   - Harbor, Docker Hub atau registry lain: guna retention rule registry tersebut.
 
 ## CDN / WAF pilihan
 

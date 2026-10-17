@@ -33,14 +33,26 @@ RUN pnpm --filter @ucms/element-style build
 RUN pnpm --filter @ucms/element-schema build
 RUN pnpm --filter @ucms/api build
 # Test gate: a failing test here fails this whole image build, which fails
-# `docker compose build` in scripts/deploy.sh (set -e) before any live
-# container is ever touched — see CLAUDE.md's Deployment section.
+# scripts/build-images.sh (on the server via scripts/deploy.sh, or in CI
+# before anything is pushed) before any live container is ever touched — see
+# CLAUDE.md's Deployment section.
 RUN pnpm --filter @ucms/api test
-RUN pnpm --filter @ucms/api deploy --prod --legacy /app/deploy/api
+# node_modules moves out so the runtime stage copies it as its own layer.
+# .modules.yaml carries a timestamp, and pnpm leaves some directory modes
+# varying between runs (seen: @fastify/cors 755 vs 777); dropping the one and
+# normalising the other keeps that layer byte-identical whenever the
+# dependencies are (and leaves nothing world-writable).
+RUN pnpm --filter @ucms/api deploy --prod --legacy /app/deploy/api \
+  && mv /app/deploy/api/node_modules /app/deploy/node_modules \
+  && rm -f /app/deploy/node_modules/.modules.yaml \
+  && chmod -R u=rwX,go=rX /app/deploy/node_modules
 
 FROM base AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+# Dependencies first: when they didn't change (most deploys) this layer is
+# reused as-is, so a new image adds, pushes and pulls only the app layer.
+COPY --from=build /app/deploy/node_modules ./node_modules
 COPY --from=build /app/deploy/api ./
 # Created here (not left for storage.ts's own mkdir) so the ownership below
 # actually applies to it: docker-compose mounts a named volume at this exact
