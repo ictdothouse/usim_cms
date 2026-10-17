@@ -10,6 +10,8 @@
 // serialization-agnostic; toCssText() below is the one place that turns that into a CSS string
 // for Astro's SSR output.
 
+export { SOCIAL_ICONS, type SocialIcon } from "./social-icons.js";
+
 export const PAD: Record<string, string> = { none: "0", sm: "1.5rem", md: "3rem", lg: "5rem", xl: "7rem" };
 export const RADIUS: Record<string, string> = { none: "0", md: "0.75rem", xl: "1.5rem", full: "9999px" };
 export const BORDER: Record<string, string> = { none: "none", thin: "1px solid currentColor", thick: "3px solid currentColor" };

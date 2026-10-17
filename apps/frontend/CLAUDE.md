@@ -91,3 +91,11 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   - On mobile, the hamburger follows the menu's `align`. A vertical menu (a footer's link column)
     stays a plain list instead of collapsing behind a hamburger.
   - Items with a dropdown/mega menu get a small caret.
+- **Social Media logos (`RepeaterBlock.astro`, 2026-10-17)**: a `socials[].platform` found in
+  `@ucms/element-render`'s `SOCIAL_ICONS` renders that brand's real logo (filled path, `aria-label` =
+  brand title). Anything else (globe/mail/phone, older generic icon names) keeps the `ICON_PATHS`
+  stroke icon. `socialStyle` → `ds-socialicons-outline|plain|brand`; brand sets `--ds-brand`/
+  `--ds-brand-fg` per link (hex + `bestTextColor`). Plain keeps a 24px tap target.
+- **Repeaters inside a Symbol (`SymbolBlock.astro`, 2026-10-17)**: the 8 repeater types now render
+  through `RepeaterBlock` there too (they returned `null` before), wrapped in a `data-vis` div so their
+  bp rules still match — one saved Social Media symbol can sit in a header, a page and a footer.

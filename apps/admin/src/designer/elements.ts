@@ -614,8 +614,10 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
     icon: Share2,
     defaults: {
       socials: JSON.stringify([
-        { platform: "globe", url: "#" },
-        { platform: "mail", url: "#" },
+        { platform: "facebook", url: "#" },
+        { platform: "instagram", url: "#" },
+        { platform: "x", url: "#" },
+        { platform: "youtube", url: "#" },
       ]),
       align: "left",
     },
@@ -625,11 +627,13 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
         labelKey: "designer-f-socialicons-items",
         kind: "repeater",
         itemFields: [
-          { key: "platform", labelKey: "designer-f-socialicons-platform", type: "icon" },
+          // Brand logos from @ucms/element-render's SOCIAL_ICONS, searched by name.
+          { key: "platform", labelKey: "designer-f-socialicons-platform", type: "social" },
           { key: "url", labelKey: "designer-f-href", type: "text" },
         ],
       },
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      { key: "socialStyle", labelKey: "designer-f-socialicons-style", kind: "select", options: ["outline", "plain", "brand"] },
     ],
   },
   logocloud: {

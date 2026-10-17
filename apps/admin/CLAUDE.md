@@ -1532,10 +1532,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   strict-shape convention `isSafeCard` already uses) — covered by real test cases in
   `validate-layout.test.ts` (accepts a valid testimonial, rejects a `javascript:` URL smuggled into a
   repeater's image field, rejects an item with an unrecognized key), not just the existing menu-only
-  coverage. `socialicons`' `platform` field reuses the existing generic icon picker (`Object.keys(ICONS)`)
-  rather than a dedicated brand-logo set — lucide-react ships no Facebook/Instagram/etc marks, and adding a
-  new icon dependency or hand-drawn brand SVGs for this alone wasn't worth it; an author picks any lucide
-  icon + sets the item's own link. `googlemap`'s `requireConsent` (audit report 5.3: map embeds need
+  coverage. `socialicons`' `platform` field originally reused the generic icon picker; since 2026-10-17
+  it's a brand-logo search (see "Social Media brand logos" below). `googlemap`'s `requireConsent` (audit report 5.3: map embeds need
   "consent/cookie policy dan fallback address text") gates the real `<iframe>` behind a click-to-load
   placeholder — the real embed URL sits in a `data-map-src` attribute until a delegated click handler
   (`SectionBlock.astro`'s bottom `<script>`, same event-delegation convention as every other zero-framework
@@ -1686,7 +1684,26 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
     - Applying is one `mutate()` (Undo reverts it); replacing a non-empty layout asks first.
     - Logo = the theme's `logoUrl`; menu = the tenant's first menu.
     - `chromePresets.test.ts` runs every preset through element-schema's `validateLayout`.
-    - The icon set has no brand icons (Facebook/Instagram/YouTube), so presets use globe/mail/phone.
+    - Socials are Facebook/Instagram/X/YouTube brand logos with `url: "#"` (plain in header bars,
+      brand/outline in footers).
+
+  **Social Media brand logos (2026-10-17)** — user ask: wire the presets' social icons to the social
+  media element, give it real logos from a proper SVG library, "search je logo media sosial, then
+  letak link", usable in header/body/footer.
+  - Data: `@ucms/element-render`'s `SOCIAL_ICONS` (`src/social-icons.ts`), 43 brands keyed by the slug
+    `socials[].platform` stores. Paths are verbatim Simple Icons 16.35.0 (CC0). LinkedIn is Bootstrap
+    Icons' (MIT), since Simple Icons removed it at LinkedIn's request (Twitter, now X, plus Slack, Skype
+    and Weibo aren't there either). No runtime dependency: rows were copied once; add one by pasting a
+    `<path d>` + hex from simpleicons.org.
+  - Admin: item field type `"social"` (UI-only, element-schema still checks an icon slug) renders
+    `designer/SocialPicker.tsx` — a name search (title, slug, `alias` e.g. "Twitter") over the brands
+    plus generic website/email/phone/link. An empty, just-added row opens straight onto the search.
+  - `socialStyle` (outline/plain/brand, `ENUM_VALUES`) renders as picture tiles; "brand" fills each
+    disc with the brand hex and `bestTextColor` for the logo.
+  - The element is labelled "Media Sosial"/"Social Media" and sits in every Designer kind's palette.
+    For one set of links reused everywhere, save it as a Symbol — `SymbolBlock.astro` now renders the
+    repeater elements (it used to drop them).
+  - ElPreview's full `socialicons` render is unreachable (Blocks = skeleton, Live = iframe), left as is.
   - **Menu element Style tab**: `align`, a subset of `TYPOGRAPHY_FIELDS`, `hoverColor`, `menuEffect`,
     `accentColor`, `gap`, `bg`, `dropdownBg`/`dropdownColor`. `menuEffect` (none/underline/overline/
     pill/box) renders as picture tiles (FieldInput.tsx), not a raw `<select>`. element-schema gained

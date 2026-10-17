@@ -36,14 +36,12 @@ const logo = (c: ChromePresetCtx, align = "left") =>
 const menu = (c: ChromePresetCtx, style: Record<string, string>) =>
   el("menu", { menuId: c.menuId, layout: "horizontal", dropdownTrigger: "hover", megaMenuWidth: "contained", fontSize: "15", fontWeight: "500", ...style });
 const button = (label: string, props: Record<string, string> = {}) => el("button", { label, href: "#", variant: "primary", align: "right", ...props });
-const socials = (align = "right") =>
+// Brand logos; the Inspector's platform search swaps them, each "#" waits for the real link.
+const socials = (align = "right", socialStyle = "plain") =>
   el("socialicons", {
-    socials: JSON.stringify([
-      { platform: "globe", url: "#" },
-      { platform: "mail", url: "#" },
-      { platform: "phone", url: "#" },
-    ]),
+    socials: JSON.stringify(["facebook", "instagram", "x", "youtube"].map((platform) => ({ platform, url: "#" }))),
     align,
+    socialStyle,
   });
 const text = (value: string, props: Record<string, string> = {}) => el("text", { text: value, size: "0.875rem", align: "left", ...props });
 const iconText = (icon: string, value: string) => hbox([el("icon", { name: icon, size: "1rem" }), text(value)], { justifyContent: "flex-start", gap: "0.5rem" });
@@ -164,7 +162,7 @@ export const CHROME_PRESETS: ChromePreset[] = [
           col(1, [
             logo(c, "center"),
             menu(c, { align: "center", fontSize: "14", hoverColor: "#111827" }),
-            socials("center"),
+            socials("center", "brand"),
             copyright(c, { align: "center" }),
           ]),
         ),
@@ -179,7 +177,7 @@ export const CHROME_PRESETS: ChromePreset[] = [
       section(
         { bg: DARK, textColor: "#d1d5db", paddingY: "3rem" },
         row(
-          col(1, [logo(c), text(c.t("chrome-sample-about")), socials("left")], { valign: "top" }),
+          col(1, [logo(c), text(c.t("chrome-sample-about")), socials("left", "outline")], { valign: "top" }),
           col(1, [el("heading", { text: c.t("chrome-sample-links"), level: "4", color: "#ffffff" }), menu(c, { layout: "vertical", fontSize: "14", hoverColor: "#ffffff" })], { valign: "top" }),
           col(
             1,
@@ -224,7 +222,7 @@ export const CHROME_PRESETS: ChromePreset[] = [
             ],
             { valign: "top" },
           ),
-          col(1, [el("heading", { text: c.t("chrome-sample-follow"), level: "4" }), socials("left")], { valign: "top" }),
+          col(1, [el("heading", { text: c.t("chrome-sample-follow"), level: "4" }), socials("left", "brand")], { valign: "top" }),
         ),
         row(col(1, [copyright(c, { align: "center", size: "0.8rem" })])),
       ),
