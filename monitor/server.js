@@ -752,8 +752,11 @@ function selfHealRestart(name) {
 // — callers treat that as "unknown", never as "0 updates".
 function getRemoteUpdateInfo(cb) {
   const release = UPDATE_CHANNEL === "release";
+  // No --force: a published release tag never moves, so one moved on the remote fails this
+  // fetch ("Update check unavailable") instead of being followed. --prune-tags drops a release
+  // the publisher withdrew.
   const fetchArgs = release
-    ? ["fetch", "origin", "--tags", "--force", "--prune", "--prune-tags", "--quiet"]
+    ? ["fetch", "origin", "--tags", "--prune", "--prune-tags", "--quiet"]
     : ["fetch", "origin", "main", "--quiet"];
   execFile("git", fetchArgs, { cwd: REPO_DIR, timeout: 20_000 }, (fetchErr) => {
     if (fetchErr) return cb(null);
