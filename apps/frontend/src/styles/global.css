@@ -120,6 +120,20 @@ body {
 .ds-menu-dropdown.is-open { display: block; }
 .ds-menu-toggle { display: none; flex-direction: column; gap: 4px; background: none; border: none; cursor: pointer; padding: 0.5rem; }
 .ds-menu-toggle span { display: block; width: 22px; height: 2px; background: currentColor; }
+/* Header settings (the siteChrome row's settings.sticky/transparent, set on
+   BaseLayout.astro's <header>). Sticky stays at the top of the screen.
+   Transparent floats over the top of the page — out of flow, so the first
+   section (a hero) starts under it — with its sections' background and shadow
+   dropped. Both: fixed, and that background comes back once the page scrolls
+   (BaseLayout's script toggles data-at-top), or its text would sit on the
+   scrolled content. !important beats a section's per-breakpoint rules; z-50
+   is above any element's own z-index (0-10). */
+.ds-site-header[data-sticky] { position: sticky; top: 0; z-index: 50; }
+.ds-site-header[data-transparent] { position: absolute; left: 0; right: 0; z-index: 50; }
+.ds-site-header[data-transparent][data-sticky] { position: fixed; top: 0; }
+.ds-site-header[data-transparent] > .ds-section { transition: background-color 0.2s, box-shadow 0.2s; }
+.ds-site-header[data-transparent]:not([data-sticky]) > .ds-section,
+.ds-site-header[data-transparent][data-at-top] > .ds-section { background: none !important; box-shadow: none !important; }
 @media (max-width: 768px) {
   .ds-menu-toggle { display: flex; }
   .ds-menu-list { display: none; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: var(--ds-menu-dd-bg, #fff); color: var(--ds-menu-dd-color, #1f2937); box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 1rem; z-index: 30; }

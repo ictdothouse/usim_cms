@@ -224,7 +224,7 @@ export interface SiteChrome {
   kind: "header" | "footer";
   layout: PageLayout;
   translations: Record<string, { layout: PageLayout }>;
-  settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string; style?: string } };
+  settings: { sticky?: boolean; transparent?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string; style?: string } };
   isDefault: boolean;
 }
 

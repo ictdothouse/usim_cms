@@ -85,13 +85,19 @@ function Glyph({ el }: { el: El }) {
   }
 }
 
-function ChromePresetThumb({ blocks }: { blocks: Block[] }) {
+// A transparent preset is drawn over a stand-in hero, its own background
+// dropped, the way it first shows on a page.
+function ChromePresetThumb({ blocks, transparent }: { blocks: Block[]; transparent?: boolean }) {
   return (
-    <div aria-hidden className="overflow-hidden rounded-lg border border-line/30 bg-zinc-100 p-2">
+    <div
+      aria-hidden
+      className={`overflow-hidden rounded-lg border border-line/30 p-2 ${transparent ? "pb-8" : "bg-zinc-100"}`}
+      style={transparent ? { background: "linear-gradient(160deg,#1e293b,#64748b)" } : undefined}
+    >
       {blocks.map((b, i) => {
         const sp = b.props as unknown as SectionProps;
         return (
-          <div key={i} className="space-y-1.5 px-3 py-2" style={{ background: sp.bg, color: sp.textColor || "#1f2937" }}>
+          <div key={i} className="space-y-1.5 px-3 py-2" style={{ background: transparent ? undefined : sp.bg, color: sp.textColor || "#1f2937" }}>
             {sp.rows.map((r, ri) => (
               <div key={ri} className="flex items-center gap-3">
                 {r.columns.map((c, ci) => (
@@ -122,7 +128,7 @@ export function ChromePresetsModal({ kind, presetCtx, t, onPick, onClose }: {
   kind: "header" | "footer";
   presetCtx: ChromePresetCtx;
   t: (k: Key) => string;
-  onPick: (blocks: Block[]) => void;
+  onPick: (blocks: Block[], transparent: boolean) => void;
   onClose: () => void;
 }) {
   const title = t(kind === "header" ? "chrome-presets-header" : "chrome-presets-footer");
@@ -143,10 +149,10 @@ export function ChromePresetsModal({ kind, presetCtx, t, onPick, onClose }: {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => onPick(blocks)}
+                onClick={() => onPick(blocks, Boolean(p.transparent))}
                 className="rounded-xl border border-line/40 p-2 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
               >
-                <ChromePresetThumb blocks={blocks} />
+                <ChromePresetThumb blocks={blocks} transparent={p.transparent} />
                 <span className="mt-2 block px-1 text-sm font-semibold text-ink">{t(p.labelKey)}</span>
               </button>
             );

@@ -676,7 +676,7 @@ export interface SiteChrome {
   name: string;
   layout: unknown[];
   translations: Record<string, { layout: unknown[] }>;
-  settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string; style?: string } };
+  settings: { sticky?: boolean; transparent?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string; style?: string } };
   isDefault: boolean;
   // "trash" = HeaderFooterPanel's soft delete (restored as "draft").
   status: "draft" | "published" | "trash";

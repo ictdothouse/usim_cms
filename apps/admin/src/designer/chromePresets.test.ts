@@ -14,3 +14,12 @@ for (const preset of CHROME_PRESETS) {
     }
   });
 }
+
+// The floating pill sat in its own white band above the page until it set
+// settings.transparent; only headers have that setting.
+test("Floating and Transparent are the header presets that float over the page", () => {
+  assert.deepEqual(
+    CHROME_PRESETS.filter((p) => p.transparent).map((p) => `${p.kind}:${p.id}`),
+    ["header:floating", "header:transparent"],
+  );
+});
