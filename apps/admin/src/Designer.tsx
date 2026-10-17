@@ -266,7 +266,7 @@ export default function Designer({
   const [slugDraft, setSlugDraft] = useState(page.slug as string);
   const [slugError, setSlugError] = useState<string | null>(null);
   const {
-    chromeKind, chromeStatus, setChromeStatus, chromeIsDefault, chromeMobileNav, patchChromeMeta,
+    chromeKind, chromeStatus, setChromeStatus, chromeIsDefault, chromeSettings, patchChromeMeta,
     availableHeaders, availableFooters,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, patchPageChrome,
   } = useSiteChrome({ tenantHost, token, page, kind, setError, bumpStructural });
@@ -458,15 +458,18 @@ export default function Designer({
 
   // Header/Footer Presets (ChromePresetsModal): opens by itself on an empty
   // header/footer, so a new one starts from a picture instead of a blank bar.
-  // Applying is one mutate(), so Undo brings the previous layout back.
+  // Applying is one mutate(), so Undo brings the previous layout back. A
+  // header preset also sets settings.transparent (Floating/Transparent float
+  // over the page); Undo leaves that setting as it is.
   const [showPresets, setShowPresets] = useState(() => kind === "siteChrome" && !(page.layout as unknown[] | undefined)?.length);
-  async function applyPreset(next: Block[]) {
+  async function applyPreset(next: Block[], transparent: boolean) {
     if (blocks.length && !(await confirmLeave(t("chrome-presets-replace-confirm")))) return;
     mutate((bs) => {
       bs.splice(0, bs.length, ...next);
     });
     setSel(null);
     setShowPresets(false);
+    if (chromeKind === "header" && transparent !== Boolean(chromeSettings.transparent)) void patchChromeMeta({ transparent });
   }
 
   const {
@@ -875,7 +878,7 @@ export default function Designer({
           kind={kind}
           chromeKind={chromeKind}
           chromeIsDefault={chromeIsDefault}
-          chromeMobileNav={chromeMobileNav}
+          chromeSettings={chromeSettings}
           patchChromeMeta={patchChromeMeta}
         />
 
@@ -1018,7 +1021,7 @@ export default function Designer({
           kind={chromeKind}
           presetCtx={{ t, logoUrl: siteTheme?.logoUrl ?? "", menuId: availableMenus[0]?.id ?? "" }}
           t={t}
-          onPick={(next) => void applyPreset(next)}
+          onPick={(next, transparent) => void applyPreset(next, transparent)}
           onClose={() => setShowPresets(false)}
         />
       )}

@@ -113,7 +113,8 @@ function chromeAttrs(chrome: SiteChrome, kind: "header" | "footer") {
   if (!designerEdit) return {};
   return chromeEdit ? { "data-ds-root": "" } : { "data-ds-chrome": kind, "data-ds-chrome-id": chrome.id };
 }
-const mobileNav = headerChrome?.settings?.mobileNav;
+const headerSettings = headerChrome?.settings;
+const mobileNav = headerSettings?.mobileNav;
 
 // Same WCAG relative-luminance math as apps/admin's lib/utils.ts
 // (contrastRatio/bestTextColor) — duplicated, not imported, since this is a
@@ -383,6 +384,8 @@ const fontsHref = allFonts.length
     {headerChrome ? (
       <header
         class="ds-site-header"
+        data-sticky={headerSettings?.sticky === true ? "" : undefined}
+        data-transparent={headerSettings?.transparent === true ? "" : undefined}
         data-mobile-nav-position={mobileNav?.position}
         data-mobile-nav-size={mobileNav?.size}
         data-mobile-nav-color={mobileNav?.color}
@@ -422,6 +425,18 @@ const fontsHref = allFonts.length
           </div>
         )}
       </>
+    )}
+    {/* A sticky transparent header is only transparent at the page's top
+        (global.css). Without this script it keeps its background. */}
+    {headerSettings?.sticky === true && headerSettings.transparent === true && (
+      <script is:inline nonce={cspNonce}>
+        (() => {
+          const h = document.querySelector(".ds-site-header");
+          const on = () => h.toggleAttribute("data-at-top", scrollY < 10);
+          on();
+          addEventListener("scroll", on, { passive: true });
+        })();
+      </script>
     )}
     <main id="main-content" data-ds-root={editRoot}>
       <slot />

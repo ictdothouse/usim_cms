@@ -16,6 +16,9 @@ export interface ChromePreset {
   id: string;
   kind: "header" | "footer";
   labelKey: Key;
+  // Header only: applying it sets settings.transparent to this (floats over
+  // the page's top, sections' background shown only once a sticky one scrolls).
+  transparent?: boolean;
   build: (c: ChromePresetCtx) => Block[];
 }
 
@@ -70,6 +73,7 @@ export const CHROME_PRESETS: ChromePreset[] = [
     id: "floating",
     kind: "header",
     labelKey: "chrome-preset-floating",
+    transparent: true,
     build: (c) => [
       section(
         { textColor: "#1f2937" },
@@ -84,6 +88,23 @@ export const CHROME_PRESETS: ChromePreset[] = [
               { bg: "#ffffff", radius: "full", shadow: "0|8|24|0|#000000|0.08", paddingTop: "0.6rem", paddingBottom: "0.6rem", paddingLeft: "1.5rem", paddingRight: "0.75rem" },
             ),
           ]),
+        ),
+      ),
+    ],
+  },
+  {
+    // White over the page's hero; the dark bar only shows once a sticky one scrolls.
+    id: "transparent",
+    kind: "header",
+    labelKey: "chrome-preset-transparent",
+    transparent: true,
+    build: (c) => [
+      section(
+        { bg: DARK, textColor: "#ffffff", paddingY: "1.25rem" },
+        row(
+          col(1, [logo(c)]),
+          col(3, [menu(c, { align: "right", menuEffect: "underline", accentColor: "#ffffff", ...DARK_MENU })]),
+          col(1, [button(c.t("chrome-sample-contact"), { variant: "outline", color: "#ffffff" })], { hideMobile: "true" }),
         ),
       ),
     ],

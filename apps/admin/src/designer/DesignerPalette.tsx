@@ -271,15 +271,16 @@ export interface DesignerPaletteProps {
   kind: "page" | "blueprint" | "siteChrome" | "symbol";
   chromeKind: ReturnType<typeof useSiteChrome>["chromeKind"];
   chromeIsDefault: ReturnType<typeof useSiteChrome>["chromeIsDefault"];
-  chromeMobileNav: ReturnType<typeof useSiteChrome>["chromeMobileNav"];
+  chromeSettings: ReturnType<typeof useSiteChrome>["chromeSettings"];
   patchChromeMeta: ReturnType<typeof useSiteChrome>["patchChromeMeta"];
 }
 
 export function DesignerPalette({
   ctx, mobilePanel, setMobilePanel, isDesktop, activeLeftTab, setActiveLeftTab, drag, mode, startPaletteDrag, dropIntoColumn, dropIntoNewSection,
   blocks, treeDropHint, rowDragProps, expanded, selEq, pick, toggleExpand, t,
-  kind, chromeKind, chromeIsDefault, chromeMobileNav, patchChromeMeta,
+  kind, chromeKind, chromeIsDefault, chromeSettings, patchChromeMeta,
 }: DesignerPaletteProps) {
+  const chromeMobileNav = chromeSettings.mobileNav ?? {};
   const panelRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (isDesktop || mobilePanel !== "palette") return;
@@ -410,6 +411,34 @@ export function DesignerPalette({
                 />
                 {t("header-footer-set-default")}
               </label>
+              {chromeKind === "header" && (
+                <div className="space-y-2 border-t border-line/20 pt-2">
+                  <label className="flex items-start gap-2 text-sm font-medium text-body">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={Boolean(chromeSettings.sticky)}
+                      onChange={(e) => void patchChromeMeta({ sticky: e.target.checked })}
+                    />
+                    <span>
+                      {t("header-footer-sticky")}
+                      <span className="block text-xs font-normal text-sub">{t("header-footer-sticky-hint")}</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm font-medium text-body">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={Boolean(chromeSettings.transparent)}
+                      onChange={(e) => void patchChromeMeta({ transparent: e.target.checked })}
+                    />
+                    <span>
+                      {t("header-footer-transparent")}
+                      <span className="block text-xs font-normal text-sub">{t("header-footer-transparent-hint")}</span>
+                    </span>
+                  </label>
+                </div>
+              )}
               {chromeKind === "header" && (
                 <div className="space-y-2 border-t border-line/20 pt-2">
                   <p className="text-sm font-semibold text-body">{t("header-footer-mobile-nav")}</p>

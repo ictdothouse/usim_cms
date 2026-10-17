@@ -108,3 +108,17 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   default when a page's pinned `headerId`/`footerId` isn't visible to its anonymous read (a draft,
   or one moved to the admin list's Trash; RLS shows published rows only), as a hard delete's FK
   SET NULL would. It used to render no header at all.
+- **Sticky/transparent header (2026-10-17)**: a header's `settings.sticky`/`settings.transparent`
+  (`=== true` only) become `data-sticky`/`data-transparent` on `.ds-site-header`; `global.css` does
+  the rest.
+  - Sticky is `position:sticky;top:0`.
+  - Transparent is `position:absolute` over the top of the page: out of flow, so the first section
+    (a hero) starts under it. Its sections lose background and shadow via `!important`, which beats
+    their per-breakpoint rules. The Floating preset's pill keeps its own background, since that is
+    a container, not a section.
+  - Both is `position:fixed`. A nonce'd inline script after `</header>` toggles `data-at-top`
+    (`scrollY < 10`), and only at the top are the sections transparent. Without JS the header keeps
+    its background, rather than leaving text over scrolled content.
+  - z-index 50 sits above any element's own (0-10).
+  - `chrome-preview.astro` puts a transparent header over a stand-in dark hero, and adds 150vh
+    of scroll room under a sticky one.

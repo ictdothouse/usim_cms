@@ -33,26 +33,23 @@ export interface SiteChromeDeps {
 export function useSiteChrome(deps: SiteChromeDeps) {
   const { tenantHost, token, page, kind, setError, bumpStructural } = deps;
 
-  // Header/Footer designer (kind === "siteChrome") — isDefault + mobileNav
-  // style, edited via the standalone panel below the canvas, saved with an
+  // Header/Footer designer (kind === "siteChrome") — isDefault + settings
+  // (sticky/transparent/mobileNav), edited in the Settings tab, saved with an
   // immediate api.updateSiteChrome PATCH rather than folded into the
   // dirty/Save flow (see saveSiteChrome's own comment in usePersist).
   const chromeKind = page.kind as "header" | "footer" | undefined;
   const [chromeStatus, setChromeStatus] = useState<"draft" | "published">((page.status as "draft" | "published") ?? "draft");
   const [chromeIsDefault, setChromeIsDefault] = useState<boolean>(Boolean(page.isDefault));
-  const [chromeMobileNav, setChromeMobileNav] = useState<{ position?: string; size?: string; color?: string; animation?: string; style?: string }>(
-    () => (page.settings as { mobileNav?: Record<string, string> } | undefined)?.mobileNav ?? {},
-  );
-  async function patchChromeMeta(patch: { isDefault?: boolean; mobileNav?: Record<string, string | undefined> }) {
-    const nextDefault = patch.isDefault ?? chromeIsDefault;
-    const nextMobileNav = patch.mobileNav ? { ...chromeMobileNav, ...patch.mobileNav } : chromeMobileNav;
-    setChromeIsDefault(nextDefault);
-    setChromeMobileNav(nextMobileNav);
+  const [chromeSettings, setChromeSettings] = useState<api.SiteChrome["settings"]>(() => (page.settings as api.SiteChrome["settings"] | undefined) ?? {});
+  async function patchChromeMeta(patch: { isDefault?: boolean; sticky?: boolean; transparent?: boolean; mobileNav?: api.SiteChrome["settings"]["mobileNav"] }) {
+    const { isDefault = chromeIsDefault, mobileNav, ...flags } = patch;
+    const nextSettings = { ...chromeSettings, ...flags, mobileNav: { ...chromeSettings.mobileNav, ...mobileNav } };
+    setChromeIsDefault(isDefault);
+    setChromeSettings(nextSettings);
     try {
-      await api.updateSiteChrome(tenantHost, token, page.id as string, {
-        isDefault: nextDefault,
-        settings: { ...(page.settings as Record<string, unknown>), mobileNav: nextMobileNav },
-      });
+      await api.updateSiteChrome(tenantHost, token, page.id as string, { isDefault, settings: nextSettings });
+      // Live Edit renders the saved row's settings, so it reloads to show them.
+      if (patch.isDefault === undefined) bumpStructural();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -110,7 +107,7 @@ export function useSiteChrome(deps: SiteChromeDeps) {
   // openChrome). The Blocks canvas used to embed them read-only too
   // (chrome-preview.astro?embed=1), removed once Blocks became a wireframe.
   return {
-    chromeKind, chromeStatus, setChromeStatus, chromeIsDefault, chromeMobileNav, patchChromeMeta,
+    chromeKind, chromeStatus, setChromeStatus, chromeIsDefault, chromeSettings, patchChromeMeta,
     availableHeaders, availableFooters,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, patchPageChrome,
   };

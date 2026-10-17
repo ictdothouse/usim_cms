@@ -88,9 +88,11 @@ export const siteChrome = pgTable("site_chrome", {
   layout: jsonb("layout").notNull().default([]),
   // Per-locale { layout } entries, same i18n Phase 5 shape as pages.translations.
   translations: jsonb("translations").notNull().default({}),
-  // { sticky?: boolean, mobileNav?: { position, size, color, animation } } —
-  // mobileNav only meaningful for kind="header", applied to the Menu
-  // element's existing hamburger toggle, not a separate mobile layout.
+  // { sticky?: boolean, transparent?: boolean, mobileNav?: { position, size,
+  // color, animation, style } } — all only meaningful for kind="header".
+  // sticky/transparent position the whole header (apps/frontend global.css);
+  // mobileNav styles the Menu element's existing hamburger toggle, not a
+  // separate mobile layout.
   settings: jsonb("settings").notNull().default({}),
   isDefault: boolean("is_default").notNull().default(false),
   status: text("status").notNull().default("draft"), // "draft" | "published"

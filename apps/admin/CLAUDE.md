@@ -1687,7 +1687,7 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   - **Blocks = wireframe for siteChrome too.** Removed with it: DesignerCanvas's `wire` flag and every
     non-wire style branch, the read-only header/footer iframes (useSiteChrome's `resolved*Id`/frame
     heights, chrome-preview's `embed` mode), and ElPreview's image/menu skeleton exemption.
-  - **Presets**: `designer/chromePresets.ts` holds 6 headers + 4 footers built from real elements
+  - **Presets**: `designer/chromePresets.ts` holds 7 headers + 4 footers built from real elements
     (logo image or "Logo" heading, menu, button, socialicons, icon+text containers).
     - `ChromePresetsModal.tsx` draws each thumbnail from the preset's own blocks.
     - Opened from a "Preset" toolbar button (siteChrome only), and by itself on an empty layout.
@@ -1749,6 +1749,23 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
     Restore (back as a draft), Delete permanently and Empty Trash, and those two confirm.
   - Trashed rows are left out of a page's header/footer picker (`useSiteChrome`). A page still
     pinned to one renders the default instead (apps/frontend `resolveHeaderFooter`).
+
+  **Sticky/transparent header (2026-10-17)** — user: the Floating preset rendered as its own band
+  above the body ("sepatutnya ... layer kat atas body"), plus a transparent option ("takde
+  background") and a sticky tick box.
+  - Two header-only checkboxes in the Designer's Settings tab write `settings.sticky`/
+    `settings.transparent` (rendering: apps/frontend CLAUDE.md).
+  - `useSiteChrome` now holds the whole `chromeSettings` bag. It replaces `chromeMobileNav`, and
+    every PATCH sends all keys; it used to spread the page's initial settings.
+  - A settings change (not a default flag change) calls `bumpStructural()`, since Live Edit renders
+    the saved row's settings.
+  - `ChromePreset.transparent`: applying a header preset sets the setting to it (Floating and the
+    new "Transparent over hero" are true, every other header preset false). Undo reverts the
+    layout only.
+  - The transparent preset carries a dark section background, which is what a sticky one shows
+    once scrolled. Its thumbnail, like Floating's, is drawn over a stand-in hero with section
+    backgrounds dropped.
+  - `chromePresets.test.ts` pins which presets are transparent.
 
   **Content Manager nav grouping**: the superadmin's Content Manager sub-nav (9 items:
   Pages/Posts/Media/Theme/Languages/Menus/Header&Footer/Blueprints/Events) and the webmaster
