@@ -393,8 +393,11 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
       ...TYPOGRAPHY_FIELDS.filter((f) => ["fontFamily", "color", "fontSize", "letterSpacing", "fontWeight", "textTransform"].includes(f.key)),
       { key: "hoverColor", labelKey: "designer-f-menu-hover-color", kind: "color" },
+      // Current page's item; empty follows the hover color above.
+      { key: "currentTextColor", labelKey: "designer-f-menu-current-color", kind: "color" },
       { key: "menuEffect", labelKey: "designer-f-menu-effect", kind: "select", options: ["none", "underline", "overline", "pill", "box"] },
       { key: "accentColor", labelKey: "designer-f-menu-accent", kind: "color" },
+      { key: "currentAccentColor", labelKey: "designer-f-menu-current-accent", kind: "color" },
       { key: "gap", labelKey: "designer-f-menu-gap", kind: "length" },
       { key: "bg", labelKey: "designer-s-bg", kind: "color" },
       { key: "dropdownBg", labelKey: "designer-f-menu-dropdown-bg", kind: "color" },

@@ -1700,6 +1700,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
     `accentColor`, `gap`, `bg`, `dropdownBg`/`dropdownColor`. `menuEffect` (none/underline/overline/
     pill/box) renders as picture tiles (FieldInput.tsx), not a raw `<select>`. element-schema gained
     the 4 colors in `COLOR_KEYS` and `ENUM_VALUES.menuEffect` — rebuild its `dist` before admin tests.
+    The current page's item has its own `currentTextColor`/`currentAccentColor` (also `COLOR_KEYS`).
+    Empty follows `hoverColor`/`accentColor`, so menus saved before them look the same.
 
   **Social Media brand logos (2026-10-17)** — user ask: wire the presets' social icons to the social
   media element, give it real logos from a proper SVG library, "search je logo media sosial, then

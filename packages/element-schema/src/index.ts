@@ -234,8 +234,9 @@ export const LENGTH_KEYS = new Set([
 ]);
 export const COLOR_KEYS = new Set([
   "bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor",
-  // menu element: hover/current text, effect line or fill, dropdown + mobile panel.
-  "hoverColor", "accentColor", "dropdownBg", "dropdownColor",
+  // menu element: hover text + effect line or fill, the current page's own pair
+  // (empty follows hover's), dropdown + mobile panel.
+  "hoverColor", "accentColor", "currentTextColor", "currentAccentColor", "dropdownBg", "dropdownColor",
 ]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
 // only the URI-scheme check applies — bgImage is handled separately above
