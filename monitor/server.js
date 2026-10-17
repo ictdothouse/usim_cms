@@ -1971,17 +1971,21 @@ function startSourceBumpDeploy(label, oldContents, commitMsg, res, preCommitScri
     ${preCommitScript || ""}
     echo "--- committing ${quotedFiles} ---"
     git add ${quotedFiles}
-    git commit -m "$(cat <<'COMMITMSG'
+    if git diff --cached --quiet -- ${quotedFiles}; then
+      echo "--- nothing to commit (no file changed) — skipping commit and deploy ---"
+    else
+      git commit -m "$(cat <<'COMMITMSG'
 ${commitMsg}
 COMMITMSG
 )"
-    echo "--- deploying (blue-green, zero-downtime — builds+tests the new image before switching) ---"
-    bash scripts/deploy.sh
-    echo "--- syncing to git remote (best effort, never blocks the deploy above) ---"
-    if git remote get-url origin >/dev/null 2>&1; then
-      git push origin main || echo "WARNING: push to origin failed — the bump is already deployed and committed locally, just not synced to the remote. Fix git credentials then run: git push origin main"
-    else
-      echo "no git remote configured — skipping push, commit stays local-only"
+      echo "--- deploying (blue-green, zero-downtime — builds+tests the new image before switching) ---"
+      bash scripts/deploy.sh
+      echo "--- syncing to git remote (best effort, never blocks the deploy above) ---"
+      if git remote get-url origin >/dev/null 2>&1; then
+        git push origin main || echo "WARNING: push to origin failed — the bump is already deployed and committed locally, just not synced to the remote. Fix git credentials then run: git push origin main"
+      else
+        echo "no git remote configured — skipping push, commit stays local-only"
+      fi
     fi
     echo "--- done ---"
   `;
@@ -2137,6 +2141,55 @@ function handlePnpmUpdate(req, res) {
   });
 }
 
+// `pnpm outdated --compatible` filters down to only the packages that have a
+// newer version satisfying their ALREADY-DECLARED package.json range (pnpm's
+// own semver-range matching, not hand-rolled here) — exactly the subset
+// `pnpm -r update` (no --latest, see handleDepsUpdate below) will actually
+// touch. Diffing that count against the full outdated count is what lets
+// Test/Update report a real "N updatable, M need a manual major-version
+// bump" breakdown instead of a generic "outdated packages found". This
+// needs two registry reads, not one — --compatible changes which packages
+// are LISTED, not just a column, and `pnpm outdated --format json`'s own
+// "wanted" field was checked against this repo's real outdated packages and
+// found to just mirror "current" rather than the highest in-range version,
+// so it can't be used as a shortcut.
+function getOutdatedBreakdown(cb) {
+  const prefix = `NODE_DIR="$(dirname "${NODE_BIN}")"; export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH";`;
+  const countNames = (extraArgs, done) => {
+    execFile(
+      "sh",
+      ["-c", `${prefix} pnpm -r outdated --format json ${extraArgs}`],
+      { cwd: REPO_DIR, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        // Same "exit 1 just means outdated packages exist" convention as the
+        // plain-text check below — only a JSON parse failure is a real error.
+        try {
+          done(null, Object.keys(JSON.parse(stdout || "{}")).length);
+        } catch (e) {
+          done(e);
+        }
+      },
+    );
+  };
+  countNames("", (totalErr, totalCount) => {
+    if (totalErr) return cb(totalErr);
+    if (!totalCount) return cb(null, { totalCount: 0, compatibleCount: 0 });
+    countNames("--compatible", (compatErr, compatibleCount) => {
+      cb(null, { totalCount, compatibleCount: compatErr ? null : compatibleCount });
+    });
+  });
+}
+
+// "" (no claim either way) when the breakdown couldn't be computed, so a
+// registry hiccup degrades to the old generic message instead of a wrong count.
+function outdatedBreakdownNote(b) {
+  if (!b || !b.totalCount || typeof b.compatibleCount !== "number") return "";
+  const blocked = b.totalCount - b.compatibleCount;
+  if (b.compatibleCount === 0) return ` — all ${b.totalCount} need a manual major-version bump`;
+  if (blocked === 0) return ` — all ${b.compatibleCount} can update within their declared range`;
+  return ` — ${b.compatibleCount} can update within range, ${blocked} need a manual major-version bump`;
+}
+
 // Read-only — `pnpm outdated` only reads the registry and compares against
 // what's already declared/locked, never writes anything. Works regardless
 // of DEPLOY_MODE, unlike everything else in this file. The full table goes
@@ -2155,9 +2208,14 @@ function handleDepsCheck(req, res) {
       DEPLOY_LOG,
       `\n\n=== dependency check ${new Date().toISOString()} ===\n${output || "(nothing outdated within declared ranges)"}\n`,
     );
-    sendJson(res, 200, {
-      ok: true,
-      message: output ? "outdated packages found — see Deployments log for the full list" : "all dependencies already match their declared ranges",
+    if (!output) {
+      return sendJson(res, 200, { ok: true, message: "all dependencies already match their declared ranges" });
+    }
+    getOutdatedBreakdown((breakdownErr, breakdown) => {
+      sendJson(res, 200, {
+        ok: true,
+        message: `outdated packages found${outdatedBreakdownNote(breakdown)} — see Deployments log for the full list`,
+      });
     });
   });
 }
@@ -2175,44 +2233,67 @@ function handleDepsUpdate(req, res) {
     return sendJson(res, 501, { error: "dependency updates need docker mode — this box runs systemd mode" });
   }
   if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
-  // `pnpm -r update` can rewrite the specifier in ANY workspace's
-  // package.json (not just the lockfile) when it resolves to a newer
-  // version within the declared range — every tracked package.json must be
-  // captured (for revert-on-failure) and committed alongside the lockfile,
-  // or a later `git reset --hard` discards the uncommitted package.json
-  // change while the lockfile (committed) keeps referencing it, leaving the
-  // two permanently out of sync.
-  let pkgPaths;
-  try {
-    pkgPaths = execFileSync("git", ["ls-files", "--", "*package.json"], { cwd: REPO_DIR, encoding: "utf8" })
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-  } catch (e) {
-    return sendJson(res, 500, { error: `couldn't list workspace package.json files: ${e.message}` });
-  }
-  const oldContents = {};
-  try {
-    for (const rel of pkgPaths) oldContents[rel] = fs.readFileSync(path.join(REPO_DIR, rel), "utf8");
-    oldContents["pnpm-lock.yaml"] = fs.readFileSync(path.join(REPO_DIR, "pnpm-lock.yaml"), "utf8");
-  } catch (e) {
-    return sendJson(res, 500, { error: `couldn't read workspace files: ${e.message}` });
-  }
-  const preCommit = `
-  NODE_DIR="$(dirname "${NODE_BIN}")"
-  export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
-  echo "--- updating dependencies within their declared package.json ranges (pnpm -r update) ---"
-  pnpm -r update
-  echo "--- auditing updated dependency graph before commit or deployment ---"
-  pnpm audit
-  `;
-  startSourceBumpDeploy(
-    "dependency update",
-    oldContents,
-    `chore(deps): update dependencies within declared ranges\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
-    res,
-    preCommit,
-  );
+  // Checked upfront, same "already on latest — nothing to bump" shape as
+  // handleNodeUpdate/handlePnpmUpdate above: without this, a workspace where
+  // every outdated package is a major/out-of-range bump (the common case —
+  // see outdatedBreakdownNote) falls through to `pnpm -r update` changing
+  // zero files, leaving `git commit` with nothing staged. A breakdown
+  // failure (registry hiccup) never blocks the attempt — it just falls back
+  // to the old unconditional behavior, same "don't strand a bump over a
+  // diagnostic-only step" reasoning as the git-push-is-best-effort comment
+  // in startSourceBumpDeploy above.
+  getOutdatedBreakdown((breakdownErr, breakdown) => {
+    const haveBreakdown = !breakdownErr && breakdown && typeof breakdown.compatibleCount === "number";
+    if (haveBreakdown && breakdown.compatibleCount === 0) {
+      return sendJson(res, 400, {
+        error: breakdown.totalCount
+          ? `already up to date within declared ranges — ${breakdown.totalCount} package(s) need a manual major-version bump (see Test)`
+          : "already on the latest versions within declared ranges — nothing to bump",
+      });
+    }
+    // `pnpm -r update` can rewrite the specifier in ANY workspace's
+    // package.json (not just the lockfile) when it resolves to a newer
+    // version within the declared range — every tracked package.json must be
+    // captured (for revert-on-failure) and committed alongside the lockfile,
+    // or a later `git reset --hard` discards the uncommitted package.json
+    // change while the lockfile (committed) keeps referencing it, leaving the
+    // two permanently out of sync.
+    let pkgPaths;
+    try {
+      pkgPaths = execFileSync("git", ["ls-files", "--", "*package.json"], { cwd: REPO_DIR, encoding: "utf8" })
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+    } catch (e) {
+      return sendJson(res, 500, { error: `couldn't list workspace package.json files: ${e.message}` });
+    }
+    const oldContents = {};
+    try {
+      for (const rel of pkgPaths) oldContents[rel] = fs.readFileSync(path.join(REPO_DIR, rel), "utf8");
+      oldContents["pnpm-lock.yaml"] = fs.readFileSync(path.join(REPO_DIR, "pnpm-lock.yaml"), "utf8");
+    } catch (e) {
+      return sendJson(res, 500, { error: `couldn't read workspace files: ${e.message}` });
+    }
+    const note = haveBreakdown
+      ? `echo "${breakdown.compatibleCount} package(s) have an in-range update; ${breakdown.totalCount - breakdown.compatibleCount} need a manual major-version bump (see the dependency check above for the list)"`
+      : "";
+    const preCommit = `
+    NODE_DIR="$(dirname "${NODE_BIN}")"
+    export PATH="$NODE_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+    echo "--- updating dependencies within their declared package.json ranges (pnpm -r update) ---"
+    ${note}
+    pnpm -r update
+    echo "--- auditing updated dependency graph before commit or deployment ---"
+    pnpm audit
+    `;
+    startSourceBumpDeploy(
+      "dependency update",
+      oldContents,
+      `chore(deps): update ${haveBreakdown ? breakdown.compatibleCount + " " : ""}dependencies within declared ranges\n\nCo-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`,
+      res,
+      preCommit,
+    );
+  });
 }
 
 // Auto-SSL for the nginx-fronted enterprise pattern (see CLAUDE.md's
