@@ -327,7 +327,8 @@ function Shell({
   // superadmin picks which site to manage in the content tab; webmaster is locked to theirs
   const [tenants, setTenants] = useState<Array<Record<string, unknown>>>([]);
   const [tenantsError, setTenantsError] = useState<string | null>(null);
-  const [siteHost, setSiteHost] = useState<string>(session.tenantHost ?? "");
+  // ?site= — a Designer tab opened from another one (Designer.tsx's openChrome).
+  const [siteHost, setSiteHost] = useState<string>(() => new URLSearchParams(window.location.search).get("site") ?? session.tenantHost ?? "");
 
   function loadTenants() {
     setTenantsError(null);

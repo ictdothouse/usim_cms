@@ -1,14 +1,12 @@
-// Designer's main canvas — the Section/Row/Column/Element render tree,
-// spacing-drag handles, add-row/add-section buttons, and header/footer
-// chrome iframes. Split out of Designer.tsx as part of the same God
+// Designer's main canvas — the Section/Row/Column/Element wireframe tree and
+// its add-row/add-section buttons. Split out of Designer.tsx as part of the same God
 // Component file-size refactor Inspector.tsx already went through (see
 // Designer.tsx's own header comment) — pure code motion, same JSX, same
 // conditions, same event handlers, same values, just reached through the
 // same `ctx: DesignerCtx` bundle Inspector/ElPreview already use (Canvas
 // renders ElPreview too) plus one extra canvas-only props bundle for
-// everything DesignerCtx doesn't carry (section-level block ops, spacing-
-// drag plumbing, site-chrome iframe heights, selection/context-menu
-// plumbing that stays local to Designer.tsx).
+// everything DesignerCtx doesn't carry (section-level block ops, selection/
+// context-menu plumbing that stays local to Designer.tsx).
 //
 // Holds no hooks of its own (every piece of state it reads comes from
 // `ctx`/props, same as Inspector/ElPreview) — deliberately NOT wrapped in
@@ -28,24 +26,20 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MutableRefObject } from "react";
-import * as api from "@/lib/api";
 import { bestTextColor } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { section } from "./blockPath";
 import { newRow, newSection } from "./parsers";
-import {
-  PAD, PADDING_SIDE_KEYS, PADDING_SIDE_FALLBACK, MARGIN_SIDE_KEYS, MARGIN_SIDE_FALLBACK,
-  SPACE, lengthValue, colStyle, overlayColors, shadowToCss, RADIUS, BORDER, RADIUS_CORNER_KEYS,
-} from "./style";
-import { flexWrapFor, zIndexValue } from "@ucms/element-render";
-import { COLUMN_FIELDS, COLUMN_SPACING_KEYS } from "./fields";
+import { overlayColors } from "./style";
+import { flexWrapFor } from "@ucms/element-render";
 import { ElPreview } from "./ElPreview";
 import { DEVICE_DIMS } from "./DeviceViewport";
-import type { Bp, Block, Col, Row, El, SectionProps, Drag } from "./types";
+import type { Bp, Row, SectionProps, Drag } from "./types";
 import type { DesignerCtx } from "./context";
-import type { UndoRedoApi } from "./hooks/useUndoRedo";
 import type { useBlockOps } from "./hooks/useBlockOps";
-import type { useSiteChrome } from "./hooks/useSiteChrome";
+
+// Blocks draws every box on white (no author bg), so one overlay pair serves all.
+const OVERLAY = overlayColors("#ffffff");
 
 // Row presets offered by "add row": each entry is the column span list.
 const ROW_PRESETS: number[][] = [[1], [1, 1], [1, 1, 1], [1, 1, 1, 1], [1, 2], [2, 1]];
@@ -71,14 +65,7 @@ export interface DesignerCanvasProps {
   pick: (e: React.SyntheticEvent, p: number[]) => void;
   setCtxMenu: (v: { path: number[]; x: number; y: number } | null) => void;
   effectiveTheme: Record<string, string> | null;
-  desktopBoxed: boolean;
   isCanvasMode: boolean;
-  tenantHost: string;
-  resolvedHeaderId: ReturnType<typeof useSiteChrome>["resolvedHeaderId"];
-  resolvedFooterId: ReturnType<typeof useSiteChrome>["resolvedFooterId"];
-  headerFrameHeight: ReturnType<typeof useSiteChrome>["headerFrameHeight"];
-  footerFrameHeight: ReturnType<typeof useSiteChrome>["footerFrameHeight"];
-  startSpacingDrag: UndoRedoApi["startSpacingDrag"];
   duplicateSection: ReturnType<typeof useBlockOps>["duplicateSection"];
   copySection: ReturnType<typeof useBlockOps>["copySection"];
   pasteSection: ReturnType<typeof useBlockOps>["pasteSection"];
@@ -95,26 +82,22 @@ export interface DesignerCanvasProps {
 export function DesignerCanvas({
   ctx,
   selEq, selCls, pick, setCtxMenu,
-  effectiveTheme, desktopBoxed, isCanvasMode, tenantHost,
-  resolvedHeaderId, resolvedFooterId, headerFrameHeight, footerFrameHeight,
-  startSpacingDrag,
+  effectiveTheme, isCanvasMode,
   duplicateSection, copySection, pasteSection, copyStyleSection, pasteStyleSection, deleteSection,
   dropHint, setDropHint, dropIntoColumn, dropIntoNewSection, drag,
 }: DesignerCanvasProps) {
   const {
-    t, bp, bpKey, bpGetValue, bpKeysOverridden, sideValue, fourSideValue, mode, kind, blocks, setSel,
+    t, bp, bpGetValue, bpKeysOverridden, mode, blocks, setSel,
     isSectionLocked, mutate, pageSettings, saveAsTemplate, clipHas, styleHas,
     deleteRow, deleteColumn, deleteElement,
   } = ctx;
-  // Blocks on a page/post is a structure-only wireframe (Divi's Wireframe
+  // Blocks is a structure-only wireframe for every kind (Divi's Wireframe
   // View / Elementor's Navigator idea): no section/row/column/element
   // spacing, bg, border, shadow or contained max-width applies here, every
   // level gets the same uniform gaps instead, and the canvas fills a framed
-  // box like Live. Live Edit is where a page is seen and spaced for real.
-  // Header/Footer Designer (kind "siteChrome") has no Live toggle, so this
-  // canvas is its only visual and keeps the real styling.
-  const wire = kind !== "siteChrome";
-  const framed = isCanvasMode || wire;
+  // box like Live. Live Edit is where a page or header/footer is seen and
+  // spaced for real (the Header/Footer Designer kept the real styling here
+  // until it got Live Edit too, 2026-10-17).
 
   // Whether a node's own Visibility toggle hides it on the CURRENT bp preview
   // — this is real (SectionBlock.astro renders the matching @media rule on
@@ -129,94 +112,6 @@ export function DesignerCanvas({
     if (!props) return false;
     const key = bp === "desktop" ? "hideDesktop" : bp === "tablet" ? "hideTablet" : "hideMobile";
     return props[key] === "true";
-  }
-  function sectionBpStyle(sp: SectionProps): React.CSSProperties {
-    // Top band leaves room for the hover Section pill above row 0's Row badge.
-    if (wire) return { padding: "1.5rem 0.75rem 0.75rem" };
-    const v =(key: string) => bpGetValue((sp as unknown as Record<string, string>)[key], sp.bp, key);
-    const bgImage = v("bgImage");
-    const border = v("border");
-    const borderWidth = v("borderWidth");
-    const borderColor = v("borderColor");
-    const borderStyle = v("borderStyle");
-    const shadow = v("shadow");
-    const opacity = v("opacity");
-    const side = (side: keyof typeof PADDING_SIDE_KEYS) =>
-      lengthValue(fourSideValue(sp, PADDING_SIDE_KEYS[side], PADDING_SIDE_FALLBACK[side]), PAD, side === "top" || side === "bottom" ? PAD.md : "1.5rem");
-    const corner = (side: keyof typeof RADIUS_CORNER_KEYS) => {
-      const raw = fourSideValue(sp, RADIUS_CORNER_KEYS[side], "radius");
-      return lengthValue(raw, RADIUS, RADIUS.none);
-    };
-    const marginSide = (side: keyof typeof MARGIN_SIDE_KEYS) =>
-      lengthValue(fourSideValue(sp, MARGIN_SIDE_KEYS[side], MARGIN_SIDE_FALLBACK[side]), PAD, "0");
-    return {
-      background: bgImage ? `url(${bgImage}) center/cover` : v("bg") || "var(--color-bg, #ffffff)",
-      color: v("textColor") || "inherit",
-      padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}`,
-      margin: `${marginSide("top")} ${marginSide("right")} ${marginSide("bottom")} ${marginSide("left")}`,
-      // borderWidth set = the new real stroke fields win; otherwise fall
-      // back to the legacy none/thin/thick preset so old pages don't move.
-      ...(borderWidth
-        ? { border: `${borderWidth}px ${borderStyle || "solid"} ${borderColor || "currentColor"}` }
-        : border
-          ? { border: BORDER[border] }
-          : {}),
-      boxShadow: shadowToCss(shadow),
-      borderRadius: `${corner("top")} ${corner("right")} ${corner("bottom")} ${corner("left")}`,
-      opacity: opacity ? Math.max(0, Math.min(100, Number(opacity))) / 100 : undefined,
-      zIndex: zIndexValue(v("zIndex")),
-    };
-  }
-  function bpColStyle(col: Col): React.CSSProperties {
-    if (wire) return {};
-    if (bp === "desktop" || !col.bp) return colStyle(col.props);
-    const merged: Record<string, string> = { ...(col.props ?? {}) };
-    for (const key of [...COLUMN_FIELDS.map((f) => f.key), ...COLUMN_SPACING_KEYS]) {
-      const ov = col.bp[bpKey(key)];
-      if (ov !== undefined) merged[key] = ov;
-    }
-    return colStyle(merged);
-  }
-  function bpMarginStyle(el: El): React.CSSProperties | undefined {
-    if (wire) return undefined;
-    const side = (s: keyof typeof MARGIN_SIDE_KEYS) => sideValue(el.props, el.bp, MARGIN_SIDE_KEYS[s], MARGIN_SIDE_FALLBACK[s]);
-    const top = side("top");
-    const right = side("right");
-    const bottom = side("bottom");
-    const left = side("left");
-    if (!top && !right && !bottom && !left) return undefined;
-    return {
-      margin: `${lengthValue(top, SPACE, "0")} ${lengthValue(right, SPACE, "0")} ${lengthValue(bottom, SPACE, "0")} ${lengthValue(left, SPACE, "0")}`,
-    };
-  }
-  // Universal per-element padding — every element type gets it (unlike
-  // radius, which only makes visual sense on image/embed/gallery), same
-  // per-side/fallback convention as Column's padding.
-  function bpPaddingStyle(el: El): React.CSSProperties | undefined {
-    const has = (k: string) => bpGetValue(el.props[k], el.bp, k);
-    if (wire || !has("padding") && !has("paddingTop") && !has("paddingRight") && !has("paddingBottom") && !has("paddingLeft")) {
-      return undefined;
-    }
-    const side = (s: keyof typeof PADDING_SIDE_KEYS) => lengthValue(sideValue(el.props, el.bp, PADDING_SIDE_KEYS[s], "padding"), PAD, "0");
-    return { padding: `${side("top")} ${side("right")} ${side("bottom")} ${side("left")}` };
-  }
-  // Row's own margin/padding — no `bp` breakpoint bag on Row (desktop-only
-  // for now, unlike Section/Column/Element), so this skips bpGetValue's
-  // fallback chain and reads row.marginTop/paddingTop etc directly.
-  // marginTop's default replaces the old fixed space-y-* gap between rows
-  // (see the rows container below) — row 0 never got a leading gap under
-  // that either, so it defaults to "0" instead.
-  function rowMarginStyle(row: Row, isFirst: boolean): React.CSSProperties {
-    if (wire) return { marginTop: isFirst ? 0 : "0.75rem" };
-    return {
-      marginTop: lengthValue(row.marginTop, SPACE, isFirst ? "0" : mode === "live" ? "2.5rem" : "1.25rem"),
-      marginBottom: lengthValue(row.marginBottom, SPACE, "0"),
-    };
-  }
-  function rowPaddingStyle(row: Row): React.CSSProperties | undefined {
-    if (wire || (!row.paddingTop && !row.paddingRight && !row.paddingBottom && !row.paddingLeft)) return undefined;
-    const v = (x?: string) => lengthValue(x, PAD, "0");
-    return { padding: `${v(row.paddingTop)} ${v(row.paddingRight)} ${v(row.paddingBottom)} ${v(row.paddingLeft)}` };
   }
   // Column span per screen size — desktop's own span is always the base;
   // switching the canvas to tablet/mobile and setting a column's span there
@@ -322,7 +217,7 @@ export function DesignerCanvas({
       // reading as an accidental leftover margin ("macam island") rather
       // than a deliberate frame. Only the boxed/backdropped case gets
       // that breathing room now.
-      className={`min-w-0 flex-1 overflow-y-auto [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent ${framed ? "bg-zinc-200 p-4" : ""}`}
+      className="min-w-0 flex-1 overflow-y-auto bg-zinc-200 p-4 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-accent"
       onClick={() => setSel(null)}
       style={
         {
@@ -340,59 +235,38 @@ export function DesignerCanvas({
           // (bg-zinc-200 above, or pageSettings.canvasColor when the
           // author picked one in Page Settings) rather than looking
           // like unfilled/leftover theme-bg space.
-          background: framed ? pageSettings.canvasColor || undefined : "var(--color-bg, #ffffff)",
+          background: pageSettings.canvasColor || undefined,
           color: "var(--color-text, inherit)",
           fontFamily: "var(--font-family, inherit)",
         } as React.CSSProperties
       }
     >
       <div
-        className={`relative mx-auto ${wire ? "min-h-full" : ""}`}
+        className="relative mx-auto min-h-full"
         style={{
           // Same DEVICE_DIMS Preview and Live Edit frame the real page at
           // (DeviceViewport) — this bp simulation, those two, and a real
           // phone/tablet all agree on the width a free-position element's
           // fixed-px size gets judged against.
-          maxWidth: bp !== "desktop" ? `${DEVICE_DIMS[bp].w}px` : wire || !desktopBoxed ? undefined : "56rem",
+          maxWidth: bp !== "desktop" ? `${DEVICE_DIMS[bp].w}px` : undefined,
         }}
       >
-        {framed && (
-          // Decorative-only layer (bg/rounded corners/border/shadow), kept
-          // OUT of the real content below — same split this file's own
-          // per-section render already uses (see its "Split so
-          // overflow-hidden ... only ever wraps a decorative backdrop
-          // layer" comment a bit further down): an overflow-hidden box
-          // around the real content would clip every padding/margin
-          // drag-handle badge that deliberately overhangs its own edge by
-          // design, and here that overhang lands right on this box's own
-          // left/right edge (sections span its full width, no gap to
-          // absorb it) — that was clipping the "0px" badges at
-          // tablet/mobile. The sibling content div right below is
-          // `relative` (not static) so it still stacks above this
-          // `absolute` one despite coming later in paint order only by
-          // position, not z-index.
-          <div
-            className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem] border border-line/60 shadow-lg"
-            style={{ background: wire ? "#ffffff" : "var(--color-bg, #ffffff)" }}
-          />
-        )}
-        <div className={`relative ${wire ? "p-4" : ""}`} style={{ color: isCanvasMode ? "var(--color-text, inherit)" : undefined }}>
-        {resolvedHeaderId && !wire && (
-          // Inside the same bp-width-constrained box as the page content below
-          // (was a full-width sibling of it) — the iframe's own real CSS media
-          // queries only ever see this box's rendered width, so a tablet/mobile
-          // simulation needs the header iframe narrowed too, or its bp-only
-          // styles never activate and it always renders at the desktop tier.
-          <div className="overflow-hidden border-b border-dashed border-line/40">
-            <iframe
-              key={resolvedHeaderId}
-              src={api.chromePreviewUrl(tenantHost, resolvedHeaderId, "header", { embed: true })}
-              className="w-full border-0"
-              style={{ height: headerFrameHeight || 64, pointerEvents: "none" }}
-              title="Header preview"
-            />
-          </div>
-        )}
+        {/* Decorative-only layer (bg/rounded corners/border/shadow), kept
+            OUT of the real content below — same split this file's own
+            per-section render already uses (see its "Split so
+            overflow-hidden ... only ever wraps a decorative backdrop
+            layer" comment a bit further down): an overflow-hidden box
+            around the real content would clip every padding/margin
+            drag-handle badge that deliberately overhangs its own edge by
+            design, and here that overhang lands right on this box's own
+            left/right edge (sections span its full width, no gap to
+            absorb it) — that was clipping the "0px" badges at
+            tablet/mobile. The sibling content div right below is
+            `relative` (not static) so it still stacks above this
+            `absolute` one despite coming later in paint order only by
+            position, not z-index. */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem] border border-line/60 bg-white shadow-lg" />
+        <div className="relative p-4" style={{ color: isCanvasMode ? "var(--color-text, inherit)" : undefined }}>
         <div className={mode === "live" ? "" : "space-y-4"}>
         {blocks.length === 0 && <p className="py-10 text-center text-xs text-sub">{t("designer-empty")}</p>}
         {blocks.map((block, b) => {
@@ -403,30 +277,19 @@ export function DesignerCanvas({
           // resurrect an editor for a shape that can no longer arrive.
           if (block.type !== "section") return null;
           const sp = block.props as unknown as SectionProps;
-          const contained = (sp.width ?? "contained") === "contained";
-          // Split so overflow-hidden (needed to clip the background/rounded
-          // corners, and this section's own padding bands, cleanly) only
-          // ever wraps a decorative backdrop layer — never the real rows/
-          // columns/elements content. A column or element with little/no
-          // padding of its own sits flush against this box's edge, and its
-          // grip/delete/drag-handle badges stick out a few px past that
-          // edge by design (see the -left-2/-top-2 offsets below); the old
-          // single overflow-hidden div clipped those badges away entirely
-          // whenever there wasn't enough padding to absorb the overhang.
-          const { padding: sectionPadding, margin: sectionMargin, color: sectionColor, opacity: sectionOpacity, zIndex: sectionZ, ...sectionBgStyle } = sectionBpStyle(sp);
-          const sectionEffectiveBg = (!wire && sp.bg) || (!wire && effectiveTheme?.backgroundColor) || "#ffffff";
-          const sectionOverlay = overlayColors(sectionEffectiveBg);
-          // Real stroke set (new fields or the legacy preset) already
-          // draws its own border via sectionBgStyle.border — the overlay
-          // tint below is only a structural guide for an unset border,
-          // so it must never paint over a color the author actually chose.
-          const hasRealBorder = !wire && Boolean(sp.borderWidth || sp.border);
+          // Split so overflow-hidden (needed to clip the rounded corners
+          // cleanly) only ever wraps a decorative backdrop layer — never the
+          // real rows/columns/elements content. A column or element sits
+          // flush against this box's edge, and its grip/delete/drag-handle
+          // badges stick out a few px past that edge by design (see the
+          // -left-2/-top-2 offsets below); the old single overflow-hidden div
+          // clipped those badges away.
           const sectionHiddenAtBp = hiddenAtBp(sp as unknown as Record<string, string>);
           return (
             <div
               key={b}
               className={`group relative ${mode === "live" ? "" : "rounded-xl"} ${selCls([b])}`}
-              style={{ opacity: sectionHiddenAtBp ? 0.35 : sectionOpacity, zIndex: sectionZ }}
+              style={{ opacity: sectionHiddenAtBp ? 0.35 : undefined }}
               onClick={(ev) => pick(ev, [b])}
               onContextMenu={(ev) => {
                 ev.preventDefault();
@@ -439,20 +302,21 @@ export function DesignerCanvas({
               <div className={`absolute -top-3 left-3 z-10 items-center gap-1 rounded-full border border-line/30 bg-white px-2 py-0.5 text-xs font-bold text-sub shadow-sm ${selEq([b]) ? "flex" : "hidden group-hover:flex group-focus-within:flex"}`}>
                 {t("designer-section")} {BlockControls({ b })}
               </div>
-              <div className="relative" style={{ margin: sectionMargin, color: sectionColor }}>
+              <div className="relative">
                 <div
                   className={`pointer-events-none absolute inset-0 overflow-hidden ${mode === "live" ? "" : "rounded-xl border"}`}
-                  style={{ ...sectionBgStyle, borderColor: mode === "live" || hasRealBorder ? undefined : sectionOverlay.line }}
+                  style={{ borderColor: mode === "live" ? undefined : OVERLAY.line }}
                 />
-                <div className="relative" style={{ padding: sectionPadding }}>
-                <div className={contained && !wire ? "mx-auto max-w-3xl" : ""}>
+                {/* Top band leaves room for the hover Section pill above row 0's Row badge. */}
+                <div className="relative" style={{ padding: "1.5rem 0.75rem 0.75rem" }}>
+                <div>
                   {(sp.rows ?? []).map((row, r) => {
                     const rowHiddenAtBp = hiddenAtBp(row as unknown as Record<string, string>);
                     return (
                     <div
                       key={r}
                       className="group/row relative"
-                      style={{ ...rowMarginStyle(row, r === 0), opacity: rowHiddenAtBp ? 0.35 : undefined }}
+                      style={{ marginTop: r === 0 ? 0 : "0.75rem", opacity: rowHiddenAtBp ? 0.35 : undefined }}
                     >
                       <HiddenAtBpBadge hidden={rowHiddenAtBp} bp={bp} t={t} />
                       {mode !== "live" && (
@@ -500,13 +364,10 @@ export function DesignerCanvas({
                                 flexWrap: flexWrapFor(rowFlexDirectionAtBp(row, bp), row.flexWrap),
                               }
                             : { gridTemplateColumns: rowGridTemplate(row, bp) }),
-                          gap: wire ? "0.75rem" : row.gap ?? pageSettings.gap ?? "1rem",
-                          ...rowPaddingStyle(row),
+                          gap: "0.75rem",
                         }}
                       >
                         {row.columns.map((col, c) => {
-                        const colBg = (!wire && col.props?.bg) || sectionEffectiveBg;
-                        const colOverlay = overlayColors(colBg);
                         const colHiddenAtBp = hiddenAtBp(col.props);
                         return (
                         <div
@@ -515,7 +376,6 @@ export function DesignerCanvas({
                             mode === "live" ? "" : "rounded-lg border border-dashed p-1.5"
                           } ${selCls([b, r, c])} ${dropHint === `${b}.${r}.${c}` ? "bg-accent/10" : ""}`}
                           style={{
-                            ...bpColStyle(col),
                             // Row's own `span` field is reused as this
                             // column's flex-grow factor in flex mode
                             // (same field, same author intent — "this
@@ -537,7 +397,7 @@ export function DesignerCanvas({
                                   { flex: "1 1 100%", ...(col.elements.some((el) => el.type === "slider") ? { alignSelf: "stretch" } : {}) }
                                 : { flex: `${bpGetValue(String(col.span ?? 1), col.bp, "span")} 1 0%` }
                               : {}),
-                            borderColor: mode === "live" ? undefined : colOverlay.line,
+                            borderColor: mode === "live" ? undefined : OVERLAY.line,
                             opacity: colHiddenAtBp ? 0.35 : undefined,
                           }}
                           onClick={(ev) => pick(ev, [b, r, c])}
@@ -581,7 +441,7 @@ export function DesignerCanvas({
                           {col.elements.length === 0 && (
                             <div
                               className="flex h-12 items-center justify-center rounded-lg border border-dashed text-[10px] font-medium"
-                              style={{ borderColor: colOverlay.line, color: colOverlay.text }}
+                              style={{ borderColor: OVERLAY.line, color: OVERLAY.text }}
                             >
                               {t("designer-empty-col")}
                             </div>
@@ -610,12 +470,7 @@ export function DesignerCanvas({
                                 setCtxMenu({ path: [b, r, c, e], x: ev.clientX, y: ev.clientY });
                               }}
                               className={`relative cursor-grab rounded-lg p-1 ${selCls([b, r, c, e])}`}
-                              style={{
-                                ...bpMarginStyle(el),
-                                ...bpPaddingStyle(el),
-                                opacity: hiddenAtBp(el.props) ? 0.35 : undefined,
-                                zIndex: wire ? undefined : zIndexValue(bpGetValue(el.props.zIndex, el.bp, "zIndex")),
-                              }}
+                              style={{ opacity: hiddenAtBp(el.props) ? 0.35 : undefined }}
                             >
                               <HiddenAtBpBadge hidden={hiddenAtBp(el.props)} bp={bp} t={t} />
                               {selEq([b, r, c, e]) && (
@@ -635,23 +490,6 @@ export function DesignerCanvas({
                                 >
                                   <Trash2 className="h-3 w-3" />
                                 </button>
-                              )}
-                              {selEq([b, r, c, e]) && !wire && el.type === "image" && (
-                                <span
-                                  onMouseDown={(ev) => {
-                                    const wrapper = (ev.currentTarget as HTMLElement).parentElement;
-                                    const img = wrapper?.querySelector("img");
-                                    const startPx = img ? Math.round(img.getBoundingClientRect().width) : 200;
-                                    startSpacingDrag(ev, startPx, "x", 1, (next, px) => {
-                                      const target = section(next, b).rows[r].columns[c].elements[e];
-                                      const value = `${Math.max(20, px)}px`;
-                                      if (bp === "desktop") target.props = { ...(target.props ?? {}), imgWidth: value };
-                                      else target.bp = { ...(target.bp ?? {}), [bpKey("imgWidth")]: value };
-                                    });
-                                  }}
-                                  title={t("designer-f-width")}
-                                  className="absolute -bottom-2 -right-2 z-20 h-3 w-3 cursor-nwse-resize rounded-full border-2 border-white bg-accent shadow-sm"
-                                />
                               )}
                               <ElPreview ctx={ctx} el={el} path={[b, r, c, e]} />
                             </div>
@@ -709,17 +547,6 @@ export function DesignerCanvas({
           <Plus className="h-4 w-4" /> {t("designer-add-section")}
         </button>
         </div>
-        {resolvedFooterId && !wire && (
-          <div className="overflow-hidden border-t border-dashed border-line/40">
-            <iframe
-              key={resolvedFooterId}
-              src={api.chromePreviewUrl(tenantHost, resolvedFooterId, "footer", { embed: true })}
-              className="w-full border-0"
-              style={{ height: footerFrameHeight || 96, pointerEvents: "none" }}
-              title="Footer preview"
-            />
-          </div>
-        )}
         </div>
       </div>
     </div>

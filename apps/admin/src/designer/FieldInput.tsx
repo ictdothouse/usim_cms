@@ -270,6 +270,35 @@ export function FieldInput({
       </div>
     );
   }
+  if (field.kind === "select" && field.key === "menuEffect") {
+    // Picture tiles — the effect drawn on a sample word (MenuBlock.astro's ds-menu-fx-*).
+    const FX: Record<string, string> = {
+      none: "",
+      underline: "border-b-2 border-current",
+      overline: "border-t-2 border-current",
+      pill: "rounded-full bg-accent/20 px-1.5",
+      box: "bg-accent/20 px-1.5",
+    };
+    return (
+      <div className="flex gap-1">
+        {(field.options ?? []).map((o) => (
+          <button
+            key={o}
+            type="button"
+            onClick={() => onChange(o)}
+            title={t(`designer-menu-effect-${o}` as Key)}
+            aria-label={t(`designer-menu-effect-${o}` as Key)}
+            aria-pressed={(value || "none") === o}
+            className={`flex-1 rounded-lg border py-2 text-xs font-semibold ${
+              (value || "none") === o ? "border-accent bg-accent/10 text-accent" : "border-line/30 text-sub hover:border-accent/40"
+            }`}
+          >
+            <span className={`inline-block leading-5 ${FX[o] ?? ""}`}>Aa</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
   if (field.kind === "select")
     return (
       <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>

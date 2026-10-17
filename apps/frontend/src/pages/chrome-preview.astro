@@ -2,11 +2,8 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroBlock from "../components/HeroBlock.astro";
 import { getTheme, getSiteChromeById, getLivePreviewOverride } from "../lib/api";
-import { collectFonts } from "../lib/collectFonts";
 
-const cspNonce = Astro.request.headers.get("x-ucms-csp-nonce") ?? undefined;
-
-// Designer's Header/Footer device-preview modal — renders one siteChrome row
+// Designer's Header/Footer device-preview modal and Live Edit — renders one siteChrome row
 // standalone inside BaseLayout, with placeholder body content so the
 // header/footer alone can be judged in context without needing a real page.
 // Unlike blueprint-preview.astro, no preview token is needed: siteChrome's
@@ -21,13 +18,11 @@ const tenantHost =
 
 const id = Astro.url.searchParams.get("id") ?? "";
 const kind = Astro.url.searchParams.get("kind") === "footer" ? "footer" : "header";
-// embed=1: Designer's canvas embeds this as a real-rendered band above/below
-// its own in-app canvas — skips the placeholder body text (would look like
-// stray content sandwiched against the canvas) and posts its own real
-// height back so the host can size the iframe to exactly the chrome, no
-// leftover gap.
-const embed = Astro.url.searchParams.get("embed") === "1";
 const previewToken = Astro.url.searchParams.get("token") ?? "";
+// Designer's Live Edit of this header/footer (useLiveEditBridge): the same
+// designerEdit bridge a page gets, with the chrome as the edited document.
+// Token-gated like [...slug].astro's.
+const designerEdit = Astro.url.searchParams.get("designerEdit") === "1" && Boolean(previewToken);
 let chrome = id ? await getSiteChromeById(tenantHost, id) : null;
 if (!chrome) {
   Astro.response.status = 404;
@@ -38,51 +33,22 @@ if (!chrome) {
   if (draft?.layout) chrome = { ...chrome, layout: draft.layout };
 }
 const siteTheme = await getTheme(tenantHost);
-const fonts = collectFonts(chrome?.layout ?? []);
 ---
 <BaseLayout
   title="Header/Footer preview"
   theme={siteTheme}
-  fonts={fonts}
   langSwitcher={null}
   headerChrome={kind === "header" ? chrome : null}
   footerChrome={kind === "footer" ? chrome : null}
   tenantHost={tenantHost}
+  designerEdit={designerEdit}
+  chromeEdit={designerEdit}
 >
   {!chrome ? (
-    embed ? null : <HeroBlock title="Preview not available" subtitle="This header/footer preview link is invalid." />
+    <HeroBlock title="Preview not available" subtitle="This header/footer preview link is invalid." />
   ) : (
-    !embed && (
-      <div style="max-width:44rem;margin:4rem auto;padding:2rem 1rem;text-align:center;color:#86868b;">
-        <p>{kind === "header" ? "Page content appears here." : "Page content appears above."}</p>
-      </div>
-    )
+    <div style="max-width:44rem;margin:4rem auto;padding:2rem 1rem;text-align:center;color:#86868b;">
+      <p>{kind === "header" ? "Page content appears here." : "Page content appears above."}</p>
+    </div>
   )}
 </BaseLayout>
-{embed && (
-  // The host (Designer.tsx) sizes this iframe's box exactly to the chrome's
-  // own reported height via postMessage below — this page's <html>/<body>
-  // should never need (or show) its own scrollbar for that to work. Without
-  // this, a real BaseLayout page is taller than just the header/footer band
-  // (global.css/daisyUI full-page defaults), so the iframe showed its own
-  // internal scrollbar the moment the narrowed tablet/mobile bp box made
-  // that extra height more likely to exceed the assigned iframe box.
-  <style is:global>
-    html, body {
-      overflow: hidden !important;
-    }
-  </style>
-)}
-{embed && (
-  <script is:inline nonce={cspNonce} define:vars={{ kind }}>
-    function reportHeight() {
-      const el = document.querySelector(kind);
-      const height = el ? el.getBoundingClientRect().height : 0;
-      window.parent.postMessage({ type: "chromePreview:height", kind, height }, "*");
-    }
-    reportHeight();
-    window.addEventListener("load", reportHeight);
-    const el = document.querySelector(kind);
-    if (el && "ResizeObserver" in window) new ResizeObserver(reportHeight).observe(el);
-  </script>
-)}

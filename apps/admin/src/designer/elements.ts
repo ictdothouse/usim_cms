@@ -386,6 +386,17 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
       { key: "layout", labelKey: "designer-f-menu-layout", kind: "select", options: ["horizontal", "vertical"] },
       { key: "dropdownTrigger", labelKey: "designer-f-menu-trigger", kind: "select", options: ["hover", "click"] },
       { key: "megaMenuWidth", labelKey: "designer-f-menu-width", kind: "select", options: ["contained", "full-width"] },
+      // Style tab (MenuBlock.astro): item placement + typography, the hover/
+      // current-page effect, spacing, and the bar/dropdown backgrounds.
+      { key: "align", labelKey: "designer-f-align", kind: "select", options: ["left", "center", "right"] },
+      ...TYPOGRAPHY_FIELDS.filter((f) => ["fontFamily", "color", "fontSize", "letterSpacing", "fontWeight", "textTransform"].includes(f.key)),
+      { key: "hoverColor", labelKey: "designer-f-menu-hover-color", kind: "color" },
+      { key: "menuEffect", labelKey: "designer-f-menu-effect", kind: "select", options: ["none", "underline", "overline", "pill", "box"] },
+      { key: "accentColor", labelKey: "designer-f-menu-accent", kind: "color" },
+      { key: "gap", labelKey: "designer-f-menu-gap", kind: "length" },
+      { key: "bg", labelKey: "designer-s-bg", kind: "color" },
+      { key: "dropdownBg", labelKey: "designer-f-menu-dropdown-bg", kind: "color" },
+      { key: "dropdownColor", labelKey: "designer-f-menu-dropdown-color", kind: "color" },
     ],
   },
   // Live-linked reusable component — a thin reference (props.symbolId only,

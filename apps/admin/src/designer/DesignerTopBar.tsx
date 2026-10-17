@@ -17,6 +17,7 @@ import {
   Menu,
   Monitor,
   MousePointerClick,
+  PanelTop,
   Redo2,
   Settings,
   Smartphone,
@@ -67,6 +68,8 @@ export interface DesignerTopBarProps {
   saveSiteChrome: ReturnType<typeof usePersist>["saveSiteChrome"];
   save: ReturnType<typeof usePersist>["save"];
   chromeStatus: "draft" | "published";
+  // Header/Footer Designer only — its Presets gallery (ChromePresetsModal).
+  openPresets?: () => void;
   close: () => void;
 }
 
@@ -90,7 +93,7 @@ export function DesignerTopBar({
   editingSlug, setEditingSlug, slugDraft, setSlugDraft, slugError, setSlugError, renameSlug,
   busy, canUndo, canRedo, dirty, hasDraft, error, undo, redo, openTemplates, setSel, loadHistory, setShowSaveBlueprint,
   mode, toggleLive, bp, setBp, openDevicePreview,
-  saveBlueprint, saveSymbol, saveSiteChrome, save, chromeStatus, close,
+  saveBlueprint, saveSymbol, saveSiteChrome, save, chromeStatus, openPresets, close,
 }: DesignerTopBarProps) {
   // A published header/footer is the one thing autosave skips (no draft
   // column yet), so its edit stays a visible warning until Save/Publish.
@@ -204,6 +207,14 @@ export function DesignerTopBar({
       >
         <LayoutTemplate className="h-3.5 w-3.5" /> {t("designer-templates")}
       </button>
+      {openPresets && (
+        <button
+          onClick={openPresets}
+          className="flex items-center gap-1 rounded-full bg-canvas px-3 py-1.5 text-sm font-semibold text-ink hover:bg-[#e8e8ed]"
+        >
+          <PanelTop className="h-3.5 w-3.5" /> {t("chrome-presets")}
+        </button>
+      )}
       {kind === "page" && (
         <button
           onClick={() => setSel(null)}
@@ -230,7 +241,7 @@ export function DesignerTopBar({
           <LayoutTemplate className="h-3.5 w-3.5" /> {t("blueprints-save-as")}
         </button>
       )}
-      {(kind === "page" || kind === "blueprint") && (
+      {kind !== "symbol" && (
         <button
           onClick={() => void toggleLive()}
           aria-pressed={mode === "live"}

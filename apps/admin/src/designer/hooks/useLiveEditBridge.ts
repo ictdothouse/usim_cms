@@ -13,7 +13,6 @@
 // two same-typed args getting silently swapped.
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
-import * as api from "@/lib/api";
 import { toast } from "sonner";
 import type { Key } from "@/i18n";
 import { getNode, moveSection, moveColumn } from "../../designerTree";
@@ -45,14 +44,10 @@ export interface LiveEditBridgeDeps {
   bumpStructural: () => void;
   isSectionLocked: (b: number) => boolean;
   t: (k: Key) => string;
-  tenantHost: string;
-  token: string;
-  pageId: string;
-  pageSlug: string;
-  kind: "page" | "blueprint" | "siteChrome" | "symbol";
-  dirty: boolean;
-  // usePersist's autosave() — silent, and routes page vs blueprint itself.
-  save: () => Promise<boolean>;
+  // usePersist's mintPreviewSrc() — the exact URL Preview frames, per kind.
+  mintPreviewSrc: () => Promise<{ src: string }>;
+  // A click on a page's header/footer in the iframe (designer:editChrome).
+  openChrome: (which: "header" | "footer", id: string) => void;
   setError: (msg: string | null) => void;
   // Skeleton-overlay flag shown during any iframe (re)load — Designer()'s
   // own residual UI state (see reloading's own comment there), set here.
@@ -103,7 +98,7 @@ export interface LiveEditBridgeApi {
 export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   const {
     blocks, mutate, sel, setSel, undo, redo, isSectionLocked, t,
-    tenantHost, token, pageId, pageSlug, kind, dirty, save,
+    mintPreviewSrc, openChrome,
     setError, setReloading, setCtxMenu, setAddMenu, openTemplates, boxAction, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     linkedPadding, linkedMargin, setLinkedPadding, setLinkedMargin,
     structuralTick, bumpStructural, bp,
@@ -146,18 +141,11 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
   // [...slug].astro only turns designerEdit on when a token is present —
   // skipping the mint for "published" used to leave the bridge script/
   // data-designer-path attributes never activated, so clicks in Live Edit
-  // silently did nothing.
+  // silently did nothing. Same URL Preview frames (mintPreviewSrc flushes a
+  // pending page/blueprint edit first; a header/footer carries its unsaved
+  // layout in the token, so a published one's edit never goes live here).
   async function enterLive(cold = false) {
-    if (dirty && !(await save())) return;
-    const previewToken =
-      kind === "blueprint"
-        ? await api.getBlueprintPreviewToken(tenantHost, token, pageId)
-        : await api.getPagePreviewToken(tenantHost, token, pageId);
-    const base =
-      kind === "blueprint"
-        ? api.blueprintPreviewUrl(tenantHost, pageId, previewToken)
-        : api.previewUrl(tenantHost, pageSlug, previewToken);
-    const url = new URL(base, window.location.href);
+    const url = new URL((await mintPreviewSrc()).src, window.location.href);
     url.searchParams.set("designerEdit", "1");
     // Same deviceFrame param Preview's withDeviceFrame() sets (usePersist),
     // so BaseLayout hides the scrollbar identically for tablet/mobile — a
@@ -369,6 +357,12 @@ export function useLiveEditBridge(deps: LiveEditBridgeDeps): LiveEditBridgeApi {
       }
       if (e.data?.type === "designer:openTemplates") {
         void openTemplates();
+        return;
+      }
+      if (e.data?.type === "designer:editChrome") {
+        // The page's header/footer (BaseLayout.astro) — edited in its own tab.
+        const which = e.data.kind;
+        if ((which === "header" || which === "footer") && typeof e.data.id === "string" && e.data.id) openChrome(which, e.data.id);
         return;
       }
       if (e.data?.type === "designer:boxAction") {

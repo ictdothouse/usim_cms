@@ -29,6 +29,7 @@ import { DesignerTemplatesModal } from "./designer/DesignerTemplatesModal";
 import { DesignerHistoryModal } from "./designer/DesignerHistoryModal";
 import { DesignerDevicePreviewModal } from "./designer/DesignerDevicePreviewModal";
 import { DeviceViewport } from "./designer/DeviceViewport";
+import { ChromePresetsModal } from "./designer/ChromePresetsModal";
 
 export default function Designer({
   page,
@@ -50,10 +51,8 @@ export default function Designer({
   // blueprint has no route of its own to preview/live-edit against. Blocks
   // canvas editing, Undo/Redo, Templates, and Page Settings all work
   // unchanged either way. "siteChrome" (header/footer designer) gets the
-  // same treatment as "blueprint" for slug/publish/Live-Edit, minus the
-  // device-preview button too — a header/footer has no preview-token route
-  // of its own yet (a real, scoped-out-for-now follow-up), Blocks-mode
-  // canvas editing is enough for v1.
+  // same no-slug treatment as "blueprint", with its own Publish toggle;
+  // Preview and Live Edit frame apps/frontend's chrome-preview.astro.
   // "symbol" (a live-linked component's own master, see SymbolDesignerRoute
   // in App.tsx) gets the same no-slug/no-publish treatment as "blueprint" —
   // Save just PATCHes the symbol's node, no Preview/Live-Edit (a bare
@@ -120,7 +119,6 @@ export default function Designer({
     rawBlocks, canUndo, canRedo,
     mutate,
     setRawBlocksDirectly,
-    startSpacingDrag,
     undo,
     redo,
     draggingBand,
@@ -267,13 +265,12 @@ export default function Designer({
     chromeKind, chromeStatus, setChromeStatus, chromeIsDefault, chromeMobileNav, patchChromeMeta,
     availableHeaders, availableFooters,
     pageHeaderId, pageFooterId, pageHideHeader, pageHideFooter, patchPageChrome,
-    resolvedHeaderId, resolvedFooterId, headerFrameHeight, footerFrameHeight,
   } = useSiteChrome({ tenantHost, token, page, kind, setError, bumpStructural });
 
   const {
     showHistory, setShowHistory, revisions, revisionsLoaded, historyError, restoring,
     renameSlug, save, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    openDevicePreview, withDeviceFrame,
+    openDevicePreview, withDeviceFrame, mintPreviewSrc,
   } = usePersist({
     tenantHost, token, page, kind, bp, chromeKind, setChromeStatus,
     rawBlocks, setRawBlocksDirectly, pageSettings, loadRestoredPage, pageSeo,
@@ -446,6 +443,29 @@ export default function Designer({
   // too would just be unused locals.
   const { openTemplates, templateKind, saveAsTemplate, makeComponent, detachSymbolInstance, setShowSaveBlueprint } = templateLibrary;
 
+  // A click on a page's header/footer in Live Edit: confirm, then open its
+  // own Designer in a new tab, straight into Live Edit (?live=1). A
+  // superadmin's site is in-memory state a fresh tab can't see — ?site= is
+  // what App.tsx seeds it from.
+  async function openChrome(which: "header" | "footer", id: string) {
+    if (!(await confirmLeave(t(which === "header" ? "designer-edit-header-confirm" : "designer-edit-footer-confirm")))) return;
+    const site = isSuper ? `&site=${encodeURIComponent(tenantHost)}` : "";
+    window.open(`${isSuper ? "/content/header-footer" : "/header-footer"}/${encodeURIComponent(id)}?live=1${site}`, "_blank");
+  }
+
+  // Header/Footer Presets (ChromePresetsModal): opens by itself on an empty
+  // header/footer, so a new one starts from a picture instead of a blank bar.
+  // Applying is one mutate(), so Undo brings the previous layout back.
+  const [showPresets, setShowPresets] = useState(() => kind === "siteChrome" && !(page.layout as unknown[] | undefined)?.length);
+  async function applyPreset(next: Block[]) {
+    if (blocks.length && !(await confirmLeave(t("chrome-presets-replace-confirm")))) return;
+    mutate((bs) => {
+      bs.splice(0, bs.length, ...next);
+    });
+    setSel(null);
+    setShowPresets(false);
+  }
+
   const {
     mode,
     toggleLive,
@@ -474,17 +494,12 @@ export default function Designer({
     bumpStructural,
     isSectionLocked,
     t,
-    tenantHost,
-    token,
-    pageId: page.id as string,
-    pageSlug: page.slug as string,
-    kind,
-    dirty,
-    // autosave, not save(): Live Edit's reload flush used to call the real
-    // save(), which on a PUBLISHED page wrote the in-progress edit straight
-    // onto the live site without an Update click. autosave() routes a
-    // published page to its pages.draft instead (see usePersist).
-    save: autosave,
+    // Flushes through autosave(), not save(): Live Edit's reload flush used
+    // to call the real save(), which on a PUBLISHED page wrote the
+    // in-progress edit straight onto the live site without an Update click.
+    // autosave() routes a published page to its pages.draft instead.
+    mintPreviewSrc,
+    openChrome,
     setError,
     setReloading,
     setCtxMenu,
@@ -505,6 +520,12 @@ export default function Designer({
   useEffect(() => {
     activeSlotRef.current = activeSlot;
   }, [activeSlot]);
+
+  // Opened by openChrome (above) from a page's Live Edit: start in Live Edit.
+  useEffect(() => {
+    if (kind !== "symbol" && new URLSearchParams(window.location.search).get("live") === "1") void toggleLive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { ghostLabel, ghostElRef, startPaletteDrag } = useLiveEditPaletteDrag({
     drag,
@@ -815,6 +836,7 @@ export default function Designer({
         saveSiteChrome={saveSiteChrome}
         save={save}
         chromeStatus={chromeStatus}
+        openPresets={kind === "siteChrome" ? () => setShowPresets(true) : undefined}
         close={close}
       />
 
@@ -929,14 +951,7 @@ export default function Designer({
           pick={pick}
           setCtxMenu={setCtxMenu}
           effectiveTheme={effectiveTheme}
-          desktopBoxed={desktopBoxed}
           isCanvasMode={isCanvasMode}
-          tenantHost={tenantHost}
-          resolvedHeaderId={resolvedHeaderId}
-          resolvedFooterId={resolvedFooterId}
-          headerFrameHeight={headerFrameHeight}
-          footerFrameHeight={footerFrameHeight}
-          startSpacingDrag={startSpacingDrag}
           duplicateSection={duplicateSection}
           copySection={copySection}
           pasteSection={pasteSection}
@@ -990,6 +1005,16 @@ export default function Designer({
         isSuper={isSuper}
         availableSymbols={availableSymbols}
       />
+
+      {showPresets && chromeKind && (
+        <ChromePresetsModal
+          kind={chromeKind}
+          presetCtx={{ t, logoUrl: siteTheme?.logoUrl ?? "", menuId: availableMenus[0]?.id ?? "" }}
+          t={t}
+          onPick={(next) => void applyPreset(next)}
+          onClose={() => setShowPresets(false)}
+        />
+      )}
 
       <DesignerHistoryModal
         t={t}

@@ -714,13 +714,12 @@ export const chromePreviewUrl = (
   tenantHost: string,
   id: string,
   kind: "header" | "footer",
-  opts?: { embed?: boolean; previewToken?: string },
+  opts?: { previewToken?: string },
 ) => {
   const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(FRONTEND_DEV_URL);
   const query = new URLSearchParams({
     id,
     kind,
-    ...(opts?.embed ? { embed: "1" } : {}),
     ...(opts?.previewToken ? { token: opts.previewToken } : {}),
     ...(isLocal ? { __tenant: tenantHost } : {}),
   }).toString();
