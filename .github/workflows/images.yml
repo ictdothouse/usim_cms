@@ -9,11 +9,12 @@ name: Images
 # and variables > Actions > Variables). The logic lives in
 # scripts/build-images.sh, which GitLab CI (.gitlab-ci.yml) or any other CI
 # runs the same way.
+# Only main and v* tags publish; deliberately no workflow_dispatch, which
+# would let any branch push images under this repository's name.
 on:
   push:
     branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read

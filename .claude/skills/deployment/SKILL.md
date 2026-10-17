@@ -761,7 +761,9 @@ the failed new color — safe to re-run.
     (keep `v*` forever, prune per-commit tags). `deploy.sh` pulls `:vX.Y.Z` when HEAD is
     exactly a `v[0-9]*` tag (`git describe --exact-match`), else `:<commit>`. The monitor's
     `UPDATE_CHANNEL` (`/etc/ucms-monitor.env`): `main` (default) follows origin/main; `release`
-    fetches tags (`--force --prune --prune-tags`, so a withdrawn release disappears) and
+    fetches tags (`--prune --prune-tags`, so a withdrawn release disappears; deliberately no
+    `--force`, so a release tag moved on the remote fails the fetch, shown as "Update check
+    unavailable", instead of being followed) and
     targets the newest plain `vX.Y.Z` (`git tag --sort=-v:refname`, pre-releases skipped),
     reusing the same preflight/ancestry/reset flow against that tag's commit. install.sh's
     `install_monitor` sets `release` when it ran from a release checkout
@@ -769,6 +771,11 @@ the failed new color — safe to re-run.
     `main`, and never overwrites an existing value. A release that changes `deploy.sh`, the
     supervisor or the base tier is still blocked from one-click (manual
     `git checkout vX.Y.Z && bash scripts/deploy.sh`).
+  - **Trust limits (security review, 2026-10-17).** Only pushes to main and `v*` tags publish
+    (no `workflow_dispatch`); protect `v*` tags in the repository settings so only the
+    publisher can create them. Servers trust a pulled image by its tag and a release by its git
+    tag: nothing verifies a signature. Signing images (cosign) and tags, verified on each
+    server, is the upgrade path once that matters; it needs a new tool on every server.
   - **The admin image is config-free.** `VITE_API_URL`/`VITE_FRONTEND_URL` are runtime env now
     (same names, so `.env` files are unchanged). `apps/admin/runtime-config.sh`, run from nginx's
     `/docker-entrypoint.d`, accepts URL characters only (both values land verbatim in JS and an
