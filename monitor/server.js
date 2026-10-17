@@ -1585,6 +1585,14 @@ function handleGitSync(req, res) {
             error: `${ahead} local commit(s) aren't on GitHub, but origin/main also has ${behind} commit(s) this VPS hasn't deployed — pushing blindly would desync "Pull latest & deploy"'s commit tracking. Ask Claude to reconcile this (same as the 2026-10-17 incident) or fix it over SSH.`,
           });
         }
+        // Re-checked here (not just at entry) for the same reason
+        // startSourceBumpDeploy does: fetch+rev-list above is async, leaving
+        // a window where a real deploy could start and begin its own commit
+        // concurrently. git itself can't corrupt a ref from a concurrent
+        // push (ref updates are atomic), but refusing keeps this action's
+        // own "N commit(s) pushed" count honest instead of racing a number
+        // computed before the deploy's commit landed.
+        if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
         execFile("git", ["push", "origin", "main"], { cwd: REPO_DIR, timeout: 30_000 }, (pushErr, pushOut, pushErrText) => {
           if (pushErr) return sendJson(res, 502, { error: `push failed: ${(pushErrText || pushErr.message || "").trim()}` });
           fs.appendFileSync(DEPLOY_LOG, `\n\n=== git sync ${new Date().toISOString()} ===\npushed ${ahead} local commit(s) to GitHub\n`);
