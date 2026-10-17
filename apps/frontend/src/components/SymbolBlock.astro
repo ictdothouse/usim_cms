@@ -166,19 +166,21 @@ const renderNode = (el: El, nested = false): unknown => {
           ),
         );
       }
-      // Same two-node box as ElementBlock.astro's image (margin on the wrapper).
+      const href = safeUrl(p.href);
+      const img = (
+        <img
+          class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          src={src}
+          alt={p.alt ?? ""}
+          loading="lazy"
+          style={[`border-radius:${elRadius(p)}`, p.imgWidth ? `width:${p.imgWidth}` : null, imgAlignStyle(p.align), paddingStyle(p), elBorderShadowStyle(p)]
+            .filter(Boolean)
+            .join(";")}
+        />
+      );
+      // Same two-node box as ElementBlock.astro's image (margin on the wrapper, optional link).
       return (
-        <div class="ds-img-wrap" data-vis={visId} style={marginStyle(p)}>
-          <img
-            class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
-            src={src}
-            alt={p.alt ?? ""}
-            loading="lazy"
-            style={[`border-radius:${elRadius(p)}`, p.imgWidth ? `width:${p.imgWidth}` : null, imgAlignStyle(p.align), paddingStyle(p), elBorderShadowStyle(p)]
-              .filter(Boolean)
-              .join(";")}
-          />
-        </div>
+        <div class="ds-img-wrap" data-vis={visId} style={marginStyle(p)}>{href ? <a href={href}>{img}</a> : img}</div>
       );
     }
     case "button": {

@@ -773,23 +773,27 @@ const siteChromeBeforeChange = async (data: unknown, args: AccessArgs, req: Fast
   if (record.kind !== undefined && record.kind !== "header" && record.kind !== "footer") {
     throw Object.assign(new Error('kind must be "header" or "footer"'), { statusCode: 400 });
   }
-  if (record.layout !== undefined) {
-    const err = validateLayout(record.layout);
+  const checkLayout = (layout: unknown) => {
+    const err = validateLayout(layout);
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });
-    if (layoutHasUnsafeHtml(record.layout) && !hasPermission(args, "layout.unsafeHtml")) {
+    if (layoutHasUnsafeHtml(layout) && !hasPermission(args, "layout.unsafeHtml")) {
       throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
     }
+  };
+  if (record.layout !== undefined) checkLayout(record.layout);
+  // A published header/footer's autosave target (migration 0034): only a
+  // `layout`, checked like the live one since Save copies it there.
+  if (record.draft !== undefined && record.draft !== null) {
+    const draft = record.draft as Record<string, unknown>;
+    if (typeof draft !== "object" || Array.isArray(draft) || Object.keys(draft).some((k) => k !== "layout")) {
+      throw Object.assign(new Error("draft must be null or { layout }"), { statusCode: 400 });
+    }
+    if (draft.layout !== undefined) checkLayout(draft.layout);
   }
   if (record.translations && typeof record.translations === "object") {
     for (const entry of Object.values(record.translations as Record<string, unknown>)) {
       const e = entry as Record<string, unknown> | null;
-      if (e?.layout !== undefined) {
-        const err = validateLayout(e.layout);
-        if (err) throw Object.assign(new Error(err), { statusCode: 400 });
-        if (layoutHasUnsafeHtml(e.layout) && !hasPermission(args, "layout.unsafeHtml")) {
-          throw Object.assign(new Error("setting a \"html\" element's content requires the layout.unsafeHtml permission"), { statusCode: 403 });
-        }
-      }
+      if (e?.layout !== undefined) checkLayout(e.layout);
       if (e?.overrides !== undefined) {
         const err = validateOverrides(e.overrides);
         if (err) throw Object.assign(new Error(err), { statusCode: 400 });
@@ -817,6 +821,12 @@ const siteChromeBeforeChange = async (data: unknown, args: AccessArgs, req: Fast
   return record;
 };
 
+// Same as pagesAfterRead's draft rule: every row is readable, so the pending
+// draft (migration 0034) is dropped here for anyone but an admin session or
+// a Designer-minted preview token.
+const siteChromeAfterRead = (items: unknown[], req: FastifyRequest) =>
+  isElevatedRequest(req) ? items : (items as Record<string, unknown>[]).map(({ draft: _draft, ...rest }) => rest);
+
 export const siteChromeCollection: CollectionConfig = {
   slug: "siteChrome",
   table: schema.siteChrome,
@@ -840,12 +850,14 @@ export const siteChromeCollection: CollectionConfig = {
     update: (a) => hasPermission(a, "headerFooter.write"),
     delete: (a) => hasPermission(a, "headerFooter.write"),
   },
-  hooks: { beforeChange: siteChromeBeforeChange },
+  hooks: { beforeChange: siteChromeBeforeChange, afterRead: siteChromeAfterRead },
   // siteChrome's own GET is already publicly readable regardless of draft/
   // published status, so unlike pages/posts this exists purely to carry
   // not-yet-saved canvas content for Designer's Header/Footer device preview
   // — no draft-visibility elevation needed, but the mechanism is identical.
   previewToken: { supportsLiveDraft: true },
+  // A draft-only autosave changes nothing a visitor sees (see pagesCollection).
+  isPublicCacheAffecting: (body) => !(Object.keys(body).length === 1 && "draft" in body),
 };
 
 // Reusable Designer section blocks. Protected-scope only (see registration

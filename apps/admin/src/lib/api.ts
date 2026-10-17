@@ -679,11 +679,13 @@ export interface SiteChrome {
   settings: { sticky?: boolean; mobileNav?: { position?: string; size?: string; color?: string; animation?: string; style?: string } };
   isDefault: boolean;
   status: "draft" | "published";
+  // Autosaved edit of a published row, not live yet (apps/api migration 0034).
+  draft?: { layout?: unknown[] } | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export const listSiteChrome = (tenantHost: string, token: string, kind?: "header" | "footer") =>
+export const listSiteChrome =(tenantHost: string, token: string, kind?: "header" | "footer") =>
   request(`/api/siteChrome${kind ? `?kind=${kind}` : ""}`, tenantHost, token).then((b) => b.items as SiteChrome[]);
 
 export const createSiteChrome = (tenantHost: string, token: string, data: { kind: "header" | "footer"; name: string; layout?: unknown; settings?: unknown }) =>

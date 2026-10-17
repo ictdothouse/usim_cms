@@ -255,14 +255,24 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   for a token read — the same Postgres row on every replica. The open modal re-mints off
   `savedTick` (right after each save), not its own timer. Designer overlays `page.draft` onto
   `page` once at mount so every seed site reopens onto the draft; Update stays enabled while
-  `hasDraft`. Revision restore clears the draft. Header/footer (siteChrome) still uses the
-  ephemeral path — no draft column of its own yet.
+  `hasDraft`. Revision restore clears the draft. Header/footer (siteChrome) Preview/Live Edit
+  still uses the ephemeral path, but it autosaves like a page since 2026-10-17 (next paragraph).
+  **Header/footer draft autosave (2026-10-17)** — user: "header/footer takde autosave". A
+  published header/footer used to skip autosave (amber "Unsaved changes" until Save), since
+  writing its live `layout` would push a half-done edit onto every page. Now `site_chrome.draft`
+  jsonb (apps/api migration 0034) holds `{ layout }`: `autosave()` → `saveDraft()` (PATCH
+  `{draft: {layout}}`) when `chromeStatus === "published"`, else its own row as before.
+  `saveSiteChrome()` (Update/Publish/Unpublish) writes `layout` + `draft: null`. The API
+  validates the draft's layout like the live one (`siteChromeBeforeChange`), strips it from
+  anonymous reads (`siteChromeAfterRead`), and a draft-only PATCH doesn't evict the HTML cache.
+  `HeaderFooterDesignerRoute` passes `draft`, Designer overlays it at mount (`hasDraftKind`), and
+  the top bar's Save reads "Update" for a published one (disabled with nothing pending).
   **Silent autosave (2026-10-17)**: autosave changes nothing on screen. `usePersist`'s `write()`
   is the one save core; `silent` (every `autosave()` path, incl. Live Edit's reload flush and
   Preview's pre-mint flush) skips `busy` and the toast. The top bar's status is `SaveStatus`
   (DesignerTopBar.tsx): one fixed-size cloud icon (`CloudUpload` while `dirty`/`busy`,
-  `CloudCheck` when saved, amber `CloudAlert` for a dirty published header/footer, which
-  doesn't autosave), words only in a hover tooltip (`role="img"` + `aria-label`). It replaced a
+  `CloudCheck` when saved; every kind autosaves now, so the old amber `CloudAlert` is gone),
+  words only in a hover tooltip (`role="img"` + `aria-label`). It replaced a
   text badge plus an Update-button "Saving..." flip and a "Draft saved" row that pushed the
   canvas down on every autosave (reported as a blink). Explicit saves toast via sonner (no
   layout shift). Without busy flipping, Designer's autosave effect lists every saved state as a
@@ -1667,8 +1677,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   **Header/Footer upgrade (2026-10-17)** — user ask: "sama dgn designer", Live Edit, Menu styling, presets.
   - **Live Edit**: the Live toggle shows for every kind but `symbol`. `useLiveEditBridge`'s
     `enterLive` frames usePersist's `mintPreviewSrc()` + `designerEdit=1`, the same URL Preview uses
-    per kind. A header/footer carries its unsaved layout in the ephemeral live-preview token (no draft
-    column), so a published one's edit never goes live from Live Edit. `chrome-preview.astro` turns
+    per kind. A header/footer carries its unsaved layout in the ephemeral live-preview token (its
+    autosave goes to `site_chrome.draft`), so a published one's edit never goes live from Live Edit. `chrome-preview.astro` turns
     `designerEdit` on with a token and passes BaseLayout `chromeEdit` (see apps/frontend/CLAUDE.md).
   - **From a page**: a page's header/footer is inert in its Live Edit (no box guides). A click posts
     `designer:editChrome {kind, id}`. Designer's `openChrome` confirms, then `window.open`s
@@ -1704,6 +1714,22 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
     For one set of links reused everywhere, save it as a Symbol — `SymbolBlock.astro` now renders the
     repeater elements (it used to drop them).
   - ElPreview's full `socialicons` render is unreachable (Blocks = skeleton, Live = iframe), left as is.
+
+  **Image link + link suggestions (2026-10-17)** — user: "tambah fgsi hyperlink utk imej utk
+  header/footer" (a logo is an image) and "link kt hyperlink/button ... auto detect page/post dlm
+  site yg sama ... tak perlu taip manually".
+  - The image element has an `href` field (already a schema `ATTR_URL_KEYS` key); preset logos link
+    to "/". The site logo itself is still a one-click copy into `src` ("Use site logo" under the
+    image field, from the merged theme's `logoUrl`), not a live binding.
+  - `designer/LinkInput.tsx` is a combobox for link fields: as you type it searches the site's
+    pages and posts by title (`listPagesPage`/`listPostsPage`, `?search=&limit=5` each, 200ms
+    debounce) and fills in the site's own URL (`/slug`, "home" → `/`, `/posts/slug`). Empty or "#"
+    lists the first few; a path, `#anchor`, `mailto:`/`tel:` or `scheme://` URL isn't searched.
+    It commits on blur/Enter like BufferedInput.
+  - Used by FieldInput for `LINK_KEYS` (`href`, `button1Href`, `button2Href`, `linkHref`), repeater
+    items keyed `href` (peoplegrid/logocloud/ticker) and cardgrid cards; not embed/googlemap/social
+    URLs. tenantHost/token come from `LinkSiteContext`, which Designer.tsx provides around its tree
+    (React context, so FieldInputProps didn't grow another threaded value).
   - **Menu element Style tab**: `align`, a subset of `TYPOGRAPHY_FIELDS`, `hoverColor`, `menuEffect`,
     `accentColor`, `gap`, `bg`, `dropdownBg`/`dropdownColor`. `menuEffect` (none/underline/overline/
     pill/box) renders as picture tiles (FieldInput.tsx), not a raw `<select>`. element-schema gained

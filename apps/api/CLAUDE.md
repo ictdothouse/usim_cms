@@ -837,7 +837,11 @@ callouts before assuming any of this is speculative hardening.
     validates `layout`/`translations[code].layout` through the same `validateLayout()` pages use, and
     enforces "exactly one `isDefault` per `kind`" by flipping every other row of that kind to `false`
     whenever a write sets one `true` (flip-based, not reject-based — unlike `tenant_languages`'
-    `guardLastEnabled`, a tenant may have zero defaults, e.g. before its first header exists). `pages`
+    `guardLastEnabled`, a tenant may have zero defaults, e.g. before its first header exists).
+    `draft` (migration 0034, 2026-10-17) is a published header/footer's autosave target, the
+    `pages.draft` idea: only `{ layout }`, checked by the same layout validation, dropped from
+    anonymous reads by `siteChromeAfterRead`, and a `{draft}`-only PATCH skips the HTML-cache evict
+    (`isPublicCacheAffecting`); `routes/site-chrome-draft.test.ts` covers both hooks. `pages`
     gained 4 nullable columns for the per-page override/exception: `headerId`/`footerId` (FK →
     `site_chrome`, `onDelete: "set null"`) and `hideHeader`/`hideFooter` (booleans) — resolution per
     page/kind is `hideX` → nothing renders; `Xid` set → that row; else → the tenant's `isDefault`

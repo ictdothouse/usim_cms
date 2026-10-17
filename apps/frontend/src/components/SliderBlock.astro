@@ -549,31 +549,35 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         const freePos = ep.position === "custom";
         const epSrc = safeUrl(ep.src);
         const epSrcset = epSrc ? buildSrcset(epSrc) : null;
+        const epHref = safeUrl(ep.href);
+        const epImg = (
+          <img
+            class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+            src={epSrc}
+            srcset={epSrcset?.srcset}
+            sizes={epSrcset ? epSrcset.sizes : undefined}
+            alt={ep.alt ?? ""}
+            loading="lazy"
+            style={[
+              `border-radius:${elRadius(ep)}`,
+              freePos && ep.posWidth ? "width:100%" : ep.imgWidth ? `width:${ep.imgWidth}` : null,
+              freePos && ep.posHeight ? "height:100%;object-fit:cover" : null,
+              imgAlignStyle(ep.align),
+              paddingStyle(ep),
+              elBorderShadowStyle(ep),
+            ]
+              .filter(Boolean)
+              .join(";")}
+          />
+        );
         // Margin on the wrapper, like ElementBlock.astro's image — in flow so
         // it fits the column, free so the Live Edit chrome framing the
         // wrapper frames the picture (BaseLayout.astro's slide gestures back
-        // a free box's margin out of x/y).
+        // a free box's margin out of x/y). An optional link is an inline <a>
+        // around the block img, so the img's 100% sizes still resolve
+        // against this wrapper.
         return epSrc ? (
-          <div data-slide-el={el.id} {...editAttrs} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep), marginStyle(ep)].filter(Boolean).join(";")}>
-            <img
-              class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
-              src={epSrc}
-              srcset={epSrcset?.srcset}
-              sizes={epSrcset ? epSrcset.sizes : undefined}
-              alt={ep.alt ?? ""}
-              loading="lazy"
-              style={[
-                `border-radius:${elRadius(ep)}`,
-                freePos && ep.posWidth ? "width:100%" : ep.imgWidth ? `width:${ep.imgWidth}` : null,
-                freePos && ep.posHeight ? "height:100%;object-fit:cover" : null,
-                imgAlignStyle(ep.align),
-                paddingStyle(ep),
-                elBorderShadowStyle(ep),
-              ]
-                .filter(Boolean)
-                .join(";")}
-            />
-          </div>
+          <div data-slide-el={el.id} {...editAttrs} style={[ep.align ? `text-align:${ep.align}` : null, posStyle(ep), marginStyle(ep)].filter(Boolean).join(";")}>{epHref ? <a href={epHref}>{epImg}</a> : epImg}</div>
         ) : designerEdit ? (
           // Live Edit only: an image with no picture yet (a layout preset's
           // image slot) still needs a box to select, drag and resize — the

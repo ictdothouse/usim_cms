@@ -128,7 +128,7 @@ export function HeaderFooterDesignerRoute({ tenantHost, token, isSuper, backTo }
   if (item === null) return <RouteFeedback missing retry={retry} back={() => navigate(backTo)} />;
   return (
     <Designer
-      page={{ id: item.id, title: item.name, layout: item.layout, settings: item.settings, kind: item.kind, isDefault: item.isDefault, status: item.status }}
+      page={{ id: item.id, title: item.name, layout: item.layout, settings: item.settings, kind: item.kind, isDefault: item.isDefault, status: item.status, draft: item.draft }}
       tenantHost={tenantHost}
       token={token}
       t={t}

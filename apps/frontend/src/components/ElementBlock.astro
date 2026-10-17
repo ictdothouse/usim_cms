@@ -244,29 +244,33 @@ switch (el.type) {
     const isFirst = blockIndex === 0 && r === 0 && c === 0 && e === 0;
     const imgSrc = safeUrl(p.src);
     const imgSrcset = imgSrc ? buildSrcset(imgSrc) : null;
+    const imgHref = safeUrl(p.href);
+    const img = (
+      <img
+        class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+        src={imgSrc}
+        srcset={imgSrcset?.srcset}
+        sizes={imgSrcset ? imgSrcset.sizes : undefined}
+        alt={p.alt ?? ""}
+        loading={isFirst ? undefined : "lazy"}
+        fetchpriority={isFirst ? "high" : undefined}
+        style={[
+          `border-radius:${elRadius(p)}`,
+          p.imgWidth ? `width:${p.imgWidth}` : null,
+          imgAlignStyle(p.align),
+          paddingStyle(p),
+          elBorderShadowStyle(p),
+        ]
+          .filter(Boolean)
+          .join(";")}
+      />
+    );
     // Margin on the wrapper, alignment as the img's own margin — see
-    // @ucms/element-render's imgAlignStyle.
+    // @ucms/element-render's imgAlignStyle. A link (e.g. a logo to "/") is an
+    // inline <a> around the block img: only the picture is clickable and the
+    // alignment margins still apply.
     return imgSrc ? (
-      <div class="ds-img-wrap" style={marginStyle(p)}>
-        <img
-          class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
-          src={imgSrc}
-          srcset={imgSrcset?.srcset}
-          sizes={imgSrcset ? imgSrcset.sizes : undefined}
-          alt={p.alt ?? ""}
-          loading={isFirst ? undefined : "lazy"}
-          fetchpriority={isFirst ? "high" : undefined}
-          style={[
-            `border-radius:${elRadius(p)}`,
-            p.imgWidth ? `width:${p.imgWidth}` : null,
-            imgAlignStyle(p.align),
-            paddingStyle(p),
-            elBorderShadowStyle(p),
-          ]
-            .filter(Boolean)
-            .join(";")}
-        />
-      </div>
+      <div class="ds-img-wrap" style={marginStyle(p)}>{imgHref ? <a href={imgHref}>{img}</a> : img}</div>
     ) : null;
   }
   case "video":

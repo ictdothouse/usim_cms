@@ -99,3 +99,8 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
 - **Repeaters inside a Symbol (`SymbolBlock.astro`, 2026-10-17)**: the 8 repeater types now render
   through `RepeaterBlock` there too (they returned `null` before), wrapped in a `data-vis` div so their
   bp rules still match — one saved Social Media symbol can sit in a header, a page and a footer.
+- **Image links (2026-10-17)**: an image element's `href` (e.g. a header logo to "/") wraps the
+  `<img>` in a plain inline `<a>` inside `.ds-img-wrap` — ElementBlock, SymbolBlock and SliderBlock
+  each do it. The img stays `display:block`, so only the picture is clickable, its alignment
+  margins still apply, and a free slide image's 100% width/height still size against the wrapper.
+  `alt` names the link. Live Edit's click handler already stops the navigation.

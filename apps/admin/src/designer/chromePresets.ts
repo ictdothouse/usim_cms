@@ -31,8 +31,9 @@ const section = (props: Record<string, string>, ...rows: Row[]): Block => ({
   props: { width: "contained", paddingY: "1rem", ...props, rows },
 });
 
+// The logo links home, like on any site.
 const logo = (c: ChromePresetCtx, align = "left") =>
-  c.logoUrl ? el("image", { src: c.logoUrl, alt: "Logo", imgWidth: "150px", align }) : el("heading", { text: "Logo", level: "4", align });
+  c.logoUrl ? el("image", { src: c.logoUrl, alt: "Logo", imgWidth: "150px", align, href: "/" }) : el("heading", { text: "Logo", level: "4", align });
 const menu = (c: ChromePresetCtx, style: Record<string, string>) =>
   el("menu", { menuId: c.menuId, layout: "horizontal", dropdownTrigger: "hover", megaMenuWidth: "contained", fontSize: "15", fontWeight: "500", ...style });
 const button = (label: string, props: Record<string, string> = {}) => el("button", { label, href: "#", variant: "primary", align: "right", ...props });
