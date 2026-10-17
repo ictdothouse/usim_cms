@@ -2778,7 +2778,7 @@ const DASHBOARD_HTML = `<!doctype html>
   <p class="section-intro">Docker usage, per-database size and the nightly backup destination.</p>
 
   <h3>Docker disk usage</h3>
-  <p class="muted">What's actually using disk under Docker — images, stopped containers, volumes, and build cache. Build cache + dangling images now auto-prune on every deploy (see the deployment skill's disk-hygiene note); this is for checking in between, or diagnosing a spike.</p>
+  <p class="muted">What's actually using disk under Docker — images, stopped containers, volumes, and build cache. Every deploy trims build cache to BUILD_CACHE_MAX (default 5GB, least recently used first) and removes unused images (see the deployment skill's disk-hygiene note); this is for checking in between, or diagnosing a spike.</p>
   <table id="diskUsageTable" style="width:100%; border-collapse: collapse;">
     <thead>
       <tr class="muted" style="text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid #8884;">

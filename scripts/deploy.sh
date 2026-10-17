@@ -17,8 +17,13 @@
 #
 # Test gate: each app's own Dockerfile runs its typecheck/test step as part
 # of the image build (see apps/api/Dockerfile's comment) — a failing test
-# fails `docker compose build` below, which aborts this script (set -e)
-# before any live container is ever touched.
+# fails scripts/build-images.sh (here, or in CI before an image is ever
+# pushed), which aborts this script (set -e) before any live container is
+# ever touched.
+#
+# Images: built here by default; with UCMS_IMAGE_REPO set in .env they are
+# pulled instead, as CI built them for this exact commit (any registry —
+# see scripts/build-images.sh).
 #
 # On any deploy failure before promote succeeds, the previously-live color
 # is left completely untouched (zero impact) and the failed new color is
@@ -49,6 +54,8 @@ FRONTEND_REPLICAS="${FRONTEND_REPLICAS:-1}"
 ADMIN_REPLICAS="${ADMIN_REPLICAS:-1}"
 SMOKE_TEST_HOST="${SMOKE_TEST_HOST:-}"
 SMOKE_TEST_PATH="${SMOKE_TEST_PATH:-/}"
+UCMS_IMAGE_REPO="${UCMS_IMAGE_REPO:-}"
+IMAGE_WAIT_SECONDS="${IMAGE_WAIT_SECONDS:-900}"
 STATE_FILE="$REPO_DIR/.deploy-color"
 RELEASE_FILE="docker-compose.release.yml"
 HEALTH_TRIES=45 # 45 * 2s = 90s budget
@@ -177,18 +184,29 @@ promote() {
   return 1
 }
 
-# Compose names a built-but-untagged service image <project>-<service>
-# (older compose v2 releases used an underscore).
-api_image_of() {
-  local name
-  for name in "$1-api" "$1_api"; do
-    if docker image inspect "$name" >/dev/null 2>&1; then
-      echo "$name"
-      return 0
-    fi
+# A server can deploy right after a push, while CI is still building that
+# commit, so a missing image is retried until IMAGE_WAIT_SECONDS.
+pull_images() {
+  local svc out deadline=$((SECONDS + IMAGE_WAIT_SECONDS))
+  for svc in api frontend admin; do
+    until out=$(docker pull -q "$UCMS_IMAGE_REPO/$svc:$UCMS_IMAGE_TAG" 2>&1); do
+      if [ "$SECONDS" -ge "$deadline" ]; then
+        echo "$out" >&2
+        echo "No $UCMS_IMAGE_REPO/$svc:$UCMS_IMAGE_TAG after ${IMAGE_WAIT_SECONDS}s: check that CI built this commit and that this server ran docker login for the registry." >&2
+        exit 1
+      fi
+      echo "   $svc:$UCMS_IMAGE_TAG not in the registry yet, waiting for CI..."
+      sleep 15
+    done
   done
-  echo "no built api image found for $1" >&2
-  return 1
+}
+
+# Images are tagged per commit, so each deploy leaves the previous ones
+# unused. Ones a container still uses (the stopped rollback color) are never
+# removed. Build cache is trimmed by scripts/build-images.sh itself.
+prune_images() {
+  echo "-- pruning unused images --"
+  docker image prune -af >/dev/null || true
 }
 
 do_deploy() {
@@ -230,15 +248,27 @@ node --test monitor/security.test.js monitor/dashboard.test.js
     exit 1
   fi
 
-  echo "-- building & starting $next --"
-  docker compose -p "$project" -f "$RELEASE_FILE" build
+  # Every image is tagged with the commit it was built from, so a server runs
+  # exactly what was built and tested for its own checkout.
+  UCMS_IMAGE_TAG="${UCMS_IMAGE_TAG:-$(git rev-parse HEAD)}"
+  export UCMS_IMAGE_TAG
+  # Runs on every exit from here, failed deploys included.
+  trap prune_images EXIT
+  if [ -z "$UCMS_IMAGE_REPO" ]; then
+    echo "-- building images for $UCMS_IMAGE_TAG --"
+    export UCMS_IMAGE_REPO=localhost/ucms
+    bash scripts/build-images.sh
+  else
+    echo "-- pulling $UCMS_IMAGE_REPO images for $UCMS_IMAGE_TAG --"
+    export UCMS_IMAGE_REPO
+    pull_images
+  fi
 
   # The uploads volume docker-compose.release.yml mounts (`external: true`,
   # so it must exist first): the default ucms-uploads, or the folder/NFS
   # share .env's UPLOADS_PATH/UPLOADS_NFS name. A changed location is copied
   # over here while $CURRENT keeps serving, and finished after promote below.
-  local api_image
-  api_image="$(api_image_of "$project")"
+  local api_image="$UCMS_IMAGE_REPO/api:$UCMS_IMAGE_TAG"
   UPLOADS_VOLUME="$(bash scripts/uploads-volume.sh prepare "$api_image")"
   export UPLOADS_VOLUME
 
@@ -308,17 +338,6 @@ node --test monitor/security.test.js monitor/dashboard.test.js
   # stays pending and the next deploy redoes it from the start.
   bash scripts/uploads-volume.sh finish "$api_image" ||
     echo "WARNING: uploads move didn't finish — files uploaded during this deploy may be missing; run another deploy to redo it." >&2
-
-  # Every rebuild retags api/frontend/admin's images, leaving the previous
-  # build dangling (still-referenced images — the stopped old color above —
-  # are never touched by either command, so rollback is unaffected). Left
-  # unpruned this silently fills the disk over weeks of deploys (observed:
-  # 13GB of stale build cache on one live VPS). `until=24h` on the builder
-  # cache keeps today's layers around for THIS deploy's own cache hits, only
-  # sweeping cache older than that.
-  echo "-- pruning stale build cache & dangling images --"
-  docker builder prune -af --filter "until=24h" >/dev/null || true
-  docker image prune -af >/dev/null || true
 
   echo "== deploy complete: $next is live =="
 }

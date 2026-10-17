@@ -1,4 +1,9 @@
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+// The admin container writes /config.js from its env at start
+// (runtime-config.sh), so one image serves any organisation's domain; dev and
+// bare-metal builds ship an empty one and fall back to the build-time value.
+const runtimeConfig = (globalThis as { __UCMS_CONFIG__?: { apiUrl?: string; frontendUrl?: string } }).__UCMS_CONFIG__;
+
+export const API_URL = runtimeConfig?.apiUrl ?? import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
 // Base URL to bake into a media reference that gets PERSISTED into page/post/
 // theme content — deliberately NOT the same as API_URL, which every on-screen
@@ -24,7 +29,7 @@ export function publicMediaBase(tenantHost: string): string {
 // Locally there's one shared `astro dev` server, so this points at it with
 // a `?__tenant=` override (see apps/frontend's [...slug].astro) letting the
 // admin preview any local tenant, not just whichever one DEV_TENANT_HOST names.
-const FRONTEND_DEV_URL = import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:4321";
+const FRONTEND_DEV_URL = runtimeConfig?.frontendUrl ?? import.meta.env.VITE_FRONTEND_URL ?? "http://localhost:4321";
 // previewToken is optional — a short-lived, read-only token minted by
 // getPagePreviewToken() (never the admin's real session bearer, which
 // doesn't expire — see apps/api's auth.ts) to preview a draft page before
