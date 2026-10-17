@@ -138,6 +138,7 @@ export const FIELD_GROUP_BY_KEY: Record<string, FieldGroupKey> = {
   // default in FieldGroups), so it lands in the same group either way.
   menuId: "content", dropdownTrigger: "content", megaMenuWidth: "content",
   hoverColor: "typography", menuEffect: "appearance", accentColor: "appearance", dropdownBg: "background", dropdownColor: "background",
+  socialStyle: "appearance",
   fontFamily: "typography", color: "typography", fontSize: "typography", lineHeight: "typography",
   letterSpacing: "typography", wordSpacing: "typography", fontWeight: "typography", level: "typography", align: "typography",
   textTransform: "typography", fontStyle: "typography", textDecoration: "typography",

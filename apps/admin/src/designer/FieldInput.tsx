@@ -35,6 +35,7 @@ import {
 } from "./parsers";
 import { ELS } from "./elements";
 import { LEGACY_SHADOW, SLIDER_HEIGHT } from "./style";
+import { SocialPicker, SocialStyleTiles } from "./SocialPicker";
 
 // The slides editor's layout picture grid (parsers.ts's SLIDE_PRESETS) — each
 // thumbnail is buildSlidePreset's own desktop output drawn small: bars for
@@ -299,6 +300,8 @@ export function FieldInput({
       </div>
     );
   }
+  if (field.kind === "select" && field.key === "socialStyle")
+    return <SocialStyleTiles options={field.options ?? []} value={value} onChange={onChange} t={t} />;
   if (field.kind === "select")
     return (
       <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>
@@ -740,6 +743,7 @@ export function FieldInput({
                   </div>
                 );
               }
+              if (f.type === "social") return <SocialPicker key={f.key} value={v} onChange={commit} t={t} />;
               if (f.type === "icon") {
                 return (
                   <div key={f.key} className="space-y-0.5">

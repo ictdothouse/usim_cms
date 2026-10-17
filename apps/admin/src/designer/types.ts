@@ -69,11 +69,12 @@ export type FieldKind =
 // (see REPEATER_SCHEMAS there) — keep both in sync when adding a field.
 // "file" is UI-only (upload affordance + auto-filled sibling fileType/
 // fileSize, see FieldInput.tsx) — the schema side still validates fileUrl as
-// a plain "url", same as before.
+// a plain "url", same as before. "social" is UI-only too: socialicons'
+// searchable brand-logo picker (SocialPicker.tsx), still an "icon" slug there.
 export interface RepeaterItemField {
   key: string;
   labelKey: Key;
-  type: "text" | "textarea" | "image" | "icon" | "file";
+  type: "text" | "textarea" | "image" | "icon" | "file" | "social";
 }
 
 export interface Field {

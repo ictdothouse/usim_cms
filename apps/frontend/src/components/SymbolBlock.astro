@@ -15,6 +15,7 @@
 // selectable on the canvas either (see ElPreview.tsx's "symbol" case,
 // path: undefined), editing only happens via "Edit Master".
 import { getSymbol } from "../lib/api";
+import RepeaterBlock from "./RepeaterBlock.astro";
 import {
   cls,
   safeUrl,
@@ -287,6 +288,23 @@ const renderNode = (el: El, nested = false): unknown => {
             .join(";")}
         >
           {children.map((child) => renderNode(child, true))}
+        </div>
+      );
+    }
+    // ContainerBlock.astro's repeater set, so e.g. one saved Social Media
+    // symbol can sit in the header, a page and the footer at once.
+    case "testimonial":
+    case "statscounter":
+    case "peoplegrid":
+    case "socialicons":
+    case "logocloud":
+    case "timeline":
+    case "documentdownload":
+    case "announcementticker": {
+      const visId = `${elId}-sym${visIdCounter++}`;
+      return (
+        <div data-vis={visId}>
+          <RepeaterBlock el={el} elId={visId} />
         </div>
       );
     }

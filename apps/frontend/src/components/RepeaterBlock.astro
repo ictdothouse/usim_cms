@@ -6,6 +6,7 @@
 // None of these element types read blockIndex/r/c/e/designerEdit — unlike
 // ContainerBlock/SliderBlock, this one only needs `el` and its `elId`.
 import { ICON_PATHS, safeUrl, cls, marginStyle, paddingStyle, elBorderShadowStyle } from "../lib/element-render";
+import { SOCIAL_ICONS, bestTextColor } from "@ucms/element-render";
 
 // Local, not imported from SectionBlock.astro's frontmatter — see that
 // file's top comment on the outage caused by sharing frontmatter bindings
@@ -185,19 +186,28 @@ switch (el.type) {
   case "socialicons": {
     const items = parseRepeaterItems(p.socials);
     if (items.length === 0) return null;
+    const look = p.socialStyle || "outline";
     return (
       <div
-        class={cls("ds-socialicons", p.cssClass)}
+        class={cls("ds-socialicons", `ds-socialicons-${look}`, p.cssClass)}
         style={[p.align ? `justify-content:${p.align === "center" ? "center" : p.align === "right" ? "flex-end" : "flex-start"}` : null, boxStyle(p)].filter(Boolean).join(";")}
       >
         {items.map((it) => {
           const href = safeUrl(it.url) ?? "#";
-          const path = ICON_PATHS[it.platform ?? ""] ?? ICON_PATHS.globe;
+          // A brand's real logo (SOCIAL_ICONS); globe/mail/phone and older generic names keep the stroke icon.
+          const brand = SOCIAL_ICONS[it.platform ?? ""];
+          const tint = brand && look === "brand" ? `--ds-brand:#${brand.hex};--ds-brand-fg:${bestTextColor(`#${brand.hex}`)}` : undefined;
           return (
-            <a class="ds-socialicon" href={href} aria-label={it.platform ?? "social"}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d={path} />
-              </svg>
+            <a class="ds-socialicon" href={href} aria-label={brand?.title ?? it.platform ?? "social"} style={tint}>
+              {brand ? (
+                <svg width="18" height="18" viewBox={brand.viewBox ?? "0 0 24 24"} fill="currentColor" aria-hidden="true">
+                  <path d={brand.path} />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d={ICON_PATHS[it.platform ?? ""] ?? ICON_PATHS.globe} />
+                </svg>
+              )}
             </a>
           );
         })}
@@ -387,6 +397,7 @@ switch (el.type) {
   }
   .ds-socialicons {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.75rem;
   }
   .ds-socialicon {
@@ -398,6 +409,26 @@ switch (el.type) {
     border-radius: 50%;
     border: 1px solid currentColor;
     color: inherit;
+    transition: opacity 0.15s;
+  }
+  .ds-socialicon:hover {
+    opacity: 0.75;
+  }
+  /* 24px keeps the bare icon a usable tap target (WCAG 2.5.8). */
+  .ds-socialicons-plain .ds-socialicon {
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 0;
+  }
+  .ds-socialicons-brand .ds-socialicon {
+    border: 0;
+    background: var(--ds-brand, #4b5563);
+    color: var(--ds-brand-fg, #ffffff);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ds-socialicon {
+      transition: none;
+    }
   }
   .ds-logocloud {
     display: grid;

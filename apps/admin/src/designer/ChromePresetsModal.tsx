@@ -6,6 +6,8 @@ import { X } from "lucide-react";
 import type { Key } from "@/i18n";
 import { DesignerDialog } from "./DesignerDialog";
 import { CHROME_PRESETS, type ChromePresetCtx } from "./chromePresets";
+import { parseRepeaterItems } from "./parsers";
+import { SocialGlyph } from "./SocialPicker";
 import type { Block, El, SectionProps } from "./types";
 
 const JUSTIFY: Record<string, string> = { center: "center", right: "flex-end" };
@@ -69,8 +71,8 @@ function Glyph({ el }: { el: El }) {
     case "socialicons":
       return (
         <span className="flex shrink-0 gap-1">
-          {[0, 1, 2].map((i) => (
-            <span key={i} className="h-2 w-2 rounded-full border border-current opacity-80" />
+          {parseRepeaterItems(p.socials).map((it, i) => (
+            <SocialGlyph key={i} platform={it.platform ?? ""} brand={p.socialStyle === "brand"} className="h-2.5 w-2.5" />
           ))}
         </span>
       );

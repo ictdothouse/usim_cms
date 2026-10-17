@@ -145,6 +145,8 @@ export const ENUM_VALUES: Record<string, string[]> = {
   megaMenuWidth: ["contained", "full-width"],
   // Hover + current-page marker on menu items (MenuBlock.astro's ds-menu-fx-*).
   menuEffect: ["none", "underline", "overline", "pill", "box"],
+  // socialicons' look (RepeaterBlock.astro's ds-socialicons-*): ringed, bare icon, brand-colored disc.
+  socialStyle: ["outline", "plain", "brand"],
   // Per-breakpoint visibility toggles — Section/Row/Column/Element all use
   // the same 3 keys (see Designer.tsx's VisibilityToggle); "" (not hidden)
   // is skipped by validateValue's own value === "" check above, so only

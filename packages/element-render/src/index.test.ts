@@ -8,7 +8,17 @@ import {
   bestTextColor,
   zIndexValue,
   imgAlignStyle,
+  SOCIAL_ICONS,
 } from "./index.js";
+
+// A row hand-added later must still pass element-schema's icon-slug check and render as one path.
+test("SOCIAL_ICONS rows have an icon slug, a brand hex and plain path data", () => {
+  for (const [slug, icon] of Object.entries(SOCIAL_ICONS)) {
+    assert.match(slug, /^[a-z0-9-]+$/);
+    assert.match(icon.hex, /^[0-9A-F]{6}$/);
+    assert.match(icon.path, /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s-]+$/, slug);
+  }
+});
 
 test("imgAlignStyle always sets the full margin shorthand, so a breakpoint can undo another's", () => {
   assert.deepEqual(imgAlignStyle("center"), { margin: "0 auto" });
