@@ -3,7 +3,7 @@
 # organisation-specific is baked in: the API/frontend URLs come from the
 # container's VITE_API_URL/VITE_FRONTEND_URL env at start (runtime-config.sh
 # writes /config.js and the CSP), so one image serves any organisation.
-FROM node:24-alpine AS build
+FROM node:25-alpine AS build
 RUN corepack enable
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
