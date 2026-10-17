@@ -1559,6 +1559,42 @@ function handlePullLog(req, res) {
   });
 }
 
+// The safe half of the 2026-10-17 divergence incident, done from the
+// dashboard instead of over SSH: pushes commit(s) this VPS already built and
+// deployed (e.g. startSourceBumpDeploy's own post-deploy "git push" failing)
+// up to GitHub. Deliberately refuses when origin/main has ALSO moved ahead —
+// pulling those commits in here, without running them through the real
+// preflight/build/test/deploy gate handlePull uses, would silently fast-
+// forward this box's git ref past code it never actually ran, which then
+// makes handlePull's own "commits behind" count lie. That two-way case stays
+// a manual (or Claude-assisted) fetch+rebase+push, same as the incident.
+function handleGitSync(req, res) {
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
+  execFile("git", ["fetch", "origin", "main"], { cwd: REPO_DIR, timeout: 30_000 }, (fetchErr, fetchOut, fetchErrText) => {
+    if (fetchErr) return sendJson(res, 502, { error: `git fetch failed: ${(fetchErrText || fetchErr.message || "").trim()}` });
+    execFile(
+      "git",
+      ["rev-list", "--left-right", "--count", "origin/main...HEAD"],
+      { cwd: REPO_DIR, timeout: 10_000, encoding: "utf8" },
+      (countErr, countOut) => {
+        if (countErr) return sendJson(res, 500, { error: "couldn't compare local HEAD against origin/main" });
+        const [behind, ahead] = countOut.trim().split(/\s+/).map(Number);
+        if (!ahead) return sendJson(res, 200, { ok: true, message: "already in sync with GitHub — nothing local to push" });
+        if (behind) {
+          return sendJson(res, 409, {
+            error: `${ahead} local commit(s) aren't on GitHub, but origin/main also has ${behind} commit(s) this VPS hasn't deployed — pushing blindly would desync "Pull latest & deploy"'s commit tracking. Ask Claude to reconcile this (same as the 2026-10-17 incident) or fix it over SSH.`,
+          });
+        }
+        execFile("git", ["push", "origin", "main"], { cwd: REPO_DIR, timeout: 30_000 }, (pushErr, pushOut, pushErrText) => {
+          if (pushErr) return sendJson(res, 502, { error: `push failed: ${(pushErrText || pushErr.message || "").trim()}` });
+          fs.appendFileSync(DEPLOY_LOG, `\n\n=== git sync ${new Date().toISOString()} ===\npushed ${ahead} local commit(s) to GitHub\n`);
+          sendJson(res, 200, { ok: true, message: `pushed ${ahead} local commit(s) to GitHub` });
+        });
+      },
+    );
+  });
+}
+
 // --- Stack version updates: a "test" (download/verify only, never touches the
 // running container) then an "update" (apply, health-check, auto-rollback on
 // failure) for the Stack tab items that have a safe, scriptable path.
@@ -2830,8 +2866,10 @@ const DASHBOARD_HTML = `<!doctype html>
     <div class="row">
       <button data-action="pull">Pull latest &amp; deploy</button>
       <button class="secondary" data-action="rollback">Rollback</button>
+      <button class="secondary" data-action="git-sync">Sync local commits to GitHub</button>
     </div>
     <p class="muted">To refresh the app services, use Pull latest &amp; deploy; it checks the release before switching traffic. Restarting every service would interrupt the shared database and proxy on this single VPS, so that action is unavailable. Shared database, proxy, pooler and cache updates also require redundant infrastructure.</p>
+    <p class="muted">Sync local commits to GitHub pushes anything this VPS committed itself (e.g. a dependency update whose automatic push failed) up to GitHub. It refuses if GitHub also has new commits this VPS hasn't deployed yet — that case needs Pull latest &amp; deploy, or Claude's help, instead.</p>
   </div>
   <div class="section-head"><h3>Deployment activity</h3></div>
   <p class="muted" id="deployState">No deploy run yet.</p>
@@ -3904,6 +3942,21 @@ async function rollback() {
   }
 }
 
+async function gitSync(button) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Syncing…";
+  try {
+    const result = await api("/api/git/sync", { method: "POST" });
+    alert(result.message);
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 let polling = false;
 async function pollDeployLog() {
   if (polling) return;
@@ -4054,6 +4107,7 @@ const dashboardActions = new Map([
   ["open-deploy", () => switchTab("deploy")],
   ["pull", pull],
   ["rollback", rollback],
+  ["git-sync", gitSync],
   ["refresh", () => { refresh(); refreshUpdateCheck(); }],
   ["refresh-update-check", refreshUpdateCheck],
   ["refresh-security", () => refreshSecurity(true)],
@@ -4208,6 +4262,8 @@ const server = http.createServer(async (req, res) => {
       handlePull(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/rollback") {
       handleRollback(req, res);
+    } else if (req.method === "POST" && url.pathname === "/api/git/sync") {
+      handleGitSync(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/base/apply") {
       handleApplyBaseTier(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "test") {
