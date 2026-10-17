@@ -282,11 +282,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   with ds-entrance/ds-hover animations), registered in element-schema's LENGTH_KEYS, editable in the
   Inspector's free-position grid. No "Comment" button — there's no comment system to back it.
   **Same controls in Live Edit (2026-10-02)** — Live Edit is the primary editing surface; Blocks mode
-  is only a layout guide (2026-10-11: a real structure-only wireframe now — `DesignerCanvas.tsx`'s
-  `wire` flag, on for every kind but `siteChrome`, ignores all section/row/column/element spacing,
-  bg, border, shadow and contained max-width, uses uniform gaps, hides the header/footer iframes and
-  fills a framed box like Live; the Header/Footer Designer has no Live toggle so it keeps real
-  styling). `BaseLayout.astro`'s designerEdit bridge shows a selection outline and
+  is only a layout guide (2026-10-11: a real structure-only wireframe now — `DesignerCanvas.tsx`
+  ignores all section/row/column/element spacing, bg, border, shadow and contained max-width, uses
+  uniform gaps and fills a framed box like Live; every kind since 2026-10-17, when the Header/Footer
+  Designer got Live Edit too). `BaseLayout.astro`'s designerEdit bridge shows a selection outline and
   common toolbar for every nested slide child; the full set (8 handles, Rotate/Move, magenta guides,
   align) is active on free-positioned children. The overlays are `position:fixed` on the iframe's `<body>` (never
   inside the element — overflow:hidden would crop it, rotation would rotate the toolbar), re-placed
@@ -1665,8 +1664,33 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   fetches the row straight off the existing public `GET /api/siteChrome/:id` (via
   `getSiteChromeById`, now exported) and renders it through `BaseLayout`'s existing
   `headerChrome`/`footerChrome` props, with simple placeholder body text standing in for real page
-  content — full click-to-edit Live Edit (the designerEdit bridge) was deliberately not extended to
-  chrome, this is view-only, same scope line the original spec drew.
+  content. (View-only at first; Live Edit came 2026-10-17, below.)
+
+  **Header/Footer upgrade (2026-10-17)** — user ask: "sama dgn designer", Live Edit, Menu styling, presets.
+  - **Live Edit**: the Live toggle shows for every kind but `symbol`. `useLiveEditBridge`'s
+    `enterLive` frames usePersist's `mintPreviewSrc()` + `designerEdit=1`, the same URL Preview uses
+    per kind. A header/footer carries its unsaved layout in the ephemeral live-preview token (no draft
+    column), so a published one's edit never goes live from Live Edit. `chrome-preview.astro` turns
+    `designerEdit` on with a token and passes BaseLayout `chromeEdit` (see apps/frontend/CLAUDE.md).
+  - **From a page**: a page's header/footer is inert in its Live Edit (no box guides). A click posts
+    `designer:editChrome {kind, id}`. Designer's `openChrome` confirms, then `window.open`s
+    `/header-footer/:id?live=1` (superadmin: `/content/header-footer/:id?live=1&site=<host>`, since
+    App.tsx seeds `siteHost` from `?site=`). `?live=1` mounts that Designer straight into Live Edit.
+  - **Blocks = wireframe for siteChrome too.** Removed with it: DesignerCanvas's `wire` flag and every
+    non-wire style branch, the read-only header/footer iframes (useSiteChrome's `resolved*Id`/frame
+    heights, chrome-preview's `embed` mode), and ElPreview's image/menu skeleton exemption.
+  - **Presets**: `designer/chromePresets.ts` holds 6 headers + 4 footers built from real elements
+    (logo image or "Logo" heading, menu, button, socialicons, icon+text containers).
+    - `ChromePresetsModal.tsx` draws each thumbnail from the preset's own blocks.
+    - Opened from a "Preset" toolbar button (siteChrome only), and by itself on an empty layout.
+    - Applying is one `mutate()` (Undo reverts it); replacing a non-empty layout asks first.
+    - Logo = the theme's `logoUrl`; menu = the tenant's first menu.
+    - `chromePresets.test.ts` runs every preset through element-schema's `validateLayout`.
+    - The icon set has no brand icons (Facebook/Instagram/YouTube), so presets use globe/mail/phone.
+  - **Menu element Style tab**: `align`, a subset of `TYPOGRAPHY_FIELDS`, `hoverColor`, `menuEffect`,
+    `accentColor`, `gap`, `bg`, `dropdownBg`/`dropdownColor`. `menuEffect` (none/underline/overline/
+    pill/box) renders as picture tiles (FieldInput.tsx), not a raw `<select>`. element-schema gained
+    the 4 colors in `COLOR_KEYS` and `ENUM_VALUES.menuEffect` — rebuild its `dist` before admin tests.
 
   **Content Manager nav grouping**: the superadmin's Content Manager sub-nav (9 items:
   Pages/Posts/Media/Theme/Languages/Menus/Header&Footer/Blueprints/Events) and the webmaster

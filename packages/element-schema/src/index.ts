@@ -143,6 +143,8 @@ export const ENUM_VALUES: Record<string, string[]> = {
   layout: ["horizontal", "vertical"],
   dropdownTrigger: ["hover", "click"],
   megaMenuWidth: ["contained", "full-width"],
+  // Hover + current-page marker on menu items (MenuBlock.astro's ds-menu-fx-*).
+  menuEffect: ["none", "underline", "overline", "pill", "box"],
   // Per-breakpoint visibility toggles — Section/Row/Column/Element all use
   // the same 3 keys (see Designer.tsx's VisibilityToggle); "" (not hidden)
   // is skipped by validateValue's own value === "" check above, so only
@@ -228,7 +230,11 @@ export const LENGTH_KEYS = new Set([
   // rotate handle) — bare number, same unit-less branch as x/y.
   "rotate",
 ]);
-export const COLOR_KEYS = new Set(["bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor"]);
+export const COLOR_KEYS = new Set([
+  "bg", "borderColor", "textColor", "color", "bgColor", "navColor", "paginationColor",
+  // menu element: hover/current text, effect line or fill, dropdown + mobile panel.
+  "hoverColor", "accentColor", "dropdownBg", "dropdownColor",
+]);
 // href/src/url are bound through a safe Astro attribute (href={}/src={}), so
 // only the URI-scheme check applies — bgImage is handled separately above
 // since it's concatenated into raw CSS instead. button1Href/button2Href/

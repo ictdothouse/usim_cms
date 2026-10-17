@@ -3,6 +3,7 @@ import "../styles/global.css";
 import GenericBlock from "../components/GenericBlock.astro";
 import SectionBlock from "../components/SectionBlock.astro";
 import type { SiteChrome } from "../lib/api";
+import { collectFonts } from "../lib/collectFonts";
 
 const cspNonce = Astro.request.headers.get("x-ucms-csp-nonce") ?? undefined;
 
@@ -28,6 +29,11 @@ interface Props {
   // ever true alongside a valid preview token (gated in [...slug].astro),
   // so this script never ships to a real visitor.
   designerEdit?: boolean;
+  // With designerEdit: the header/footer IS the document being Live-Edited
+  // (chrome-preview.astro), so its sections get the bridge's paths. Without
+  // it, a page's header/footer stays inert and a click on it asks admin to
+  // open that header/footer's own Designer (designer:editChrome).
+  chromeEdit?: boolean;
   // i18n Phase 3 — set only by posts/[slug].astro, only when the tenant has
   // turned the switcher on AND the current post actually has published
   // translation siblings to switch to (a page with nothing to switch to
@@ -72,6 +78,7 @@ const {
   theme,
   fonts = [],
   designerEdit = false,
+  chromeEdit = false,
   langSwitcher = null,
   headerChrome = null,
   footerChrome = null,
@@ -98,6 +105,13 @@ const deviceFrame = Astro.url.searchParams.get("deviceFrame");
 function chromeLayout(chrome: SiteChrome) {
   if (!requestedLang) return chrome.layout;
   return chrome.translations[requestedLang]?.layout ?? chrome.layout;
+}
+// data-ds-root marks what Live Edit edits (editor box guides, the page-end
+// zone); data-ds-chrome marks a page's header/footer as click-to-open.
+const editRoot = designerEdit && !chromeEdit ? "" : undefined;
+function chromeAttrs(chrome: SiteChrome, kind: "header" | "footer") {
+  if (!designerEdit) return {};
+  return chromeEdit ? { "data-ds-root": "" } : { "data-ds-chrome": kind, "data-ds-chrome-id": chrome.id };
 }
 const mobileNav = headerChrome?.settings?.mobileNav;
 
@@ -178,7 +192,9 @@ const postTitleFont = typeof theme.postTitleFont === "string" ? theme.postTitleF
 const captionFont = typeof theme.captionFont === "string" ? theme.captionFont : "";
 const logoUrl = typeof theme.logoUrl === "string" ? theme.logoUrl : "";
 const faviconUrl = typeof theme.faviconUrl === "string" ? theme.faviconUrl : "";
-const allFonts = [...new Set([fontFamily, headingFont, subHeadingFont, postTitleFont, captionFont, ...fonts].filter(Boolean))];
+// The header/footer's own element fonts too — each page only collects its own layout's.
+const chromeFonts = [headerChrome, footerChrome].flatMap((c) => (c ? collectFonts(chromeLayout(c)) : []));
+const allFonts = [...new Set([fontFamily, headingFont, subHeadingFont, postTitleFont, captionFont, ...fonts, ...chromeFonts].filter(Boolean))];
 const fontsHref = allFonts.length
   ? `https://fonts.googleapis.com/css2?${allFonts.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`
   : null;
@@ -248,17 +264,22 @@ const fontsHref = allFonts.length
            so a real page never shows empty space) and would collapse to 0px
            — `:has()` instead of `:empty` so stray whitespace text nodes
            don't count as content, and neither does the script's own "+"
-           ([data-ds-add], centered by its auto margin). */
-        .ds-section,
-        .ds-col,
-        .ds-container {
+           ([data-ds-add], centered by its auto margin). Only inside what's
+           being edited ([data-ds-root]): a page's header/footer can't be
+           edited here, so guides on it promised edits that never happened. */
+        [data-ds-root] .ds-section,
+        [data-ds-root] .ds-col,
+        [data-ds-root] .ds-container {
           outline: 1px dashed rgba(15, 98, 254, 0.3);
           outline-offset: -1px;
         }
-        .ds-col:not(:has(> :not([data-ds-add]))),
-        .ds-container:not(:has(> :not([data-ds-add]))) {
+        [data-ds-root] .ds-col:not(:has(> :not([data-ds-add]))),
+        [data-ds-root] .ds-container:not(:has(> :not([data-ds-add]))) {
           min-height: 3rem;
           outline-color: rgba(15, 98, 254, 0.5);
+        }
+        [data-ds-chrome] {
+          cursor: pointer;
         }
         /* Quiet at rest, full strength on hover/focus: the placeholder's own
            square "+" icon, in the section's text color (a fixed gray would
@@ -368,10 +389,11 @@ const fontsHref = allFonts.length
         data-mobile-nav-animation={mobileNav?.animation}
         data-mobile-nav-style={mobileNav?.style}
         style={mobileNav?.color ? `--mobile-nav-color:${mobileNav.color}` : undefined}
+        {...chromeAttrs(headerChrome, "header")}
       >
         {chromeLayout(headerChrome).map((block, b) =>
           block.type === "section" ? (
-            <SectionBlock {...(block.props ?? {})} blockIndex={b} idPrefix="h" tenantHost={tenantHost} requestedLang={requestedLang} />
+            <SectionBlock {...(block.props ?? {})} designerEdit={designerEdit && chromeEdit} blockIndex={b} idPrefix="h" tenantHost={tenantHost} requestedLang={requestedLang} />
           ) : (
             <GenericBlock type={block.type} props={block.props} />
           ),
@@ -401,7 +423,7 @@ const fontsHref = allFonts.length
         )}
       </>
     )}
-    <main id="main-content">
+    <main id="main-content" data-ds-root={editRoot}>
       <slot />
     </main>
     {langSwitcher && langSwitcher.position === "footer" && langSwitcher.options.length > 1 && (
@@ -421,10 +443,10 @@ const fontsHref = allFonts.length
       </div>
     )}
     {footerChrome && (
-      <footer>
+      <footer {...chromeAttrs(footerChrome, "footer")}>
         {chromeLayout(footerChrome).map((block, b) =>
           block.type === "section" ? (
-            <SectionBlock {...(block.props ?? {})} blockIndex={b} idPrefix="f" tenantHost={tenantHost} requestedLang={requestedLang} />
+            <SectionBlock {...(block.props ?? {})} designerEdit={designerEdit && chromeEdit} blockIndex={b} idPrefix="f" tenantHost={tenantHost} requestedLang={requestedLang} />
           ) : (
             <GenericBlock type={block.type} props={block.props} />
           ),
@@ -519,6 +541,14 @@ const fontsHref = allFonts.length
             parent.postMessage({ type: "designer:iframeClick" }, targetOrigin);
             if (justDragged) {
               e.preventDefault();
+              return;
+            }
+            // A page's header/footer isn't this document: admin asks, then
+            // opens it in its own Designer tab (also stops its links).
+            const chrome = e.target.closest("[data-ds-chrome]");
+            if (chrome) {
+              e.preventDefault();
+              parent.postMessage({ type: "designer:editChrome", kind: chrome.dataset.dsChrome, id: chrome.dataset.dsChromeId }, targetOrigin);
               return;
             }
             // A click inside a slider's own nested content (heading/text/
@@ -1443,8 +1473,9 @@ const fontsHref = allFonts.length
             parent.postMessage({ type: "designer:addSection", x: r.left + r.width / 2, y: r.bottom }, targetOrigin);
           });
           endTemplates.addEventListener("click", () => parent.postMessage({ type: "designer:openTemplates" }, targetOrigin));
-          const mainEl = document.getElementById("main-content");
-          if (mainEl) mainEl.appendChild(pageEnd);
+          // The edited document's end: <main>, or the header/footer itself.
+          const editRoot = document.querySelector("[data-ds-root]");
+          if (editRoot) editRoot.appendChild(pageEnd);
           refreshPlaceholders();
           function refreshPlaceholders() {
             document.querySelectorAll("[data-ds-ph]").forEach((ph) => {

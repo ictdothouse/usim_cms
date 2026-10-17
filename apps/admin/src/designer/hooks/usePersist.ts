@@ -362,10 +362,10 @@ export function usePersist(deps: PersistDeps) {
     return saveSiteChrome(undefined, true);
   }
 
-  // Mints a fresh, un-framed preview URL — the shared core both
-  // openDevicePreview (first open, resets device/orientation to match the
-  // canvas's own bp) and the refresh effect below (already-open modal,
-  // device/orientation left alone) build on.
+  // Mints a fresh, un-framed preview URL — the shared core openDevicePreview
+  // (first open, resets device/orientation to match the canvas's own bp),
+  // the refresh effect below (already-open modal, device/orientation left
+  // alone) and Live Edit's enterLive (useLiveEditBridge) build on.
   //
   // Page/blueprint: flush any pending edit to the DB FIRST, then mint a
   // plain token — the preview renders the exact same row (pages.draft for a
@@ -448,6 +448,6 @@ export function usePersist(deps: PersistDeps) {
   return {
     showHistory, setShowHistory, revisions, revisionsLoaded, historyError, restoring,
     renameSlug, save, saveDraft, autosave, loadHistory, restoreRevision, saveBlueprint, saveSymbol, saveSiteChrome,
-    currentTranslationsPayload, openDevicePreview, withDeviceFrame,
+    currentTranslationsPayload, openDevicePreview, withDeviceFrame, mintPreviewSrc,
   };
 }

@@ -5,6 +5,15 @@
 interface El {
   type: string;
   props?: Record<string, string>;
+  children?: El[];
+}
+// The element types with a font picker (apps/admin's TYPOGRAPHY_FIELDS users).
+const FONT_TYPES = new Set(["heading", "text", "list", "menu"]);
+function addFonts(els: El[] | undefined, fonts: Set<string>): void {
+  for (const el of els ?? []) {
+    if (FONT_TYPES.has(el.type) && el.props?.fontFamily) fonts.add(el.props.fontFamily);
+    addFonts(el.children, fonts); // a container's own elements
+  }
 }
 interface Col {
   elements?: El[];
@@ -26,13 +35,7 @@ export function collectFonts(layout: Block[]): string[] {
     if (block.type !== "section") continue;
     const sp = block.props as SectionProps | undefined;
     for (const row of sp?.rows ?? []) {
-      for (const col of row.columns ?? []) {
-        for (const el of col.elements ?? []) {
-          if ((el.type === "heading" || el.type === "text" || el.type === "list") && el.props?.fontFamily) {
-            fonts.add(el.props.fontFamily);
-          }
-        }
-      }
+      for (const col of row.columns ?? []) addFonts(col.elements, fonts);
     }
   }
   return [...fonts];

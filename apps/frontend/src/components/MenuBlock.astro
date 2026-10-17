@@ -1,6 +1,6 @@
 ---
 import { getMenu, resolveMenuTree, type ResolvedMenuItem } from "../lib/api";
-import { marginStyle, paddingStyle, elBorderShadowStyle } from "../lib/element-render";
+import { marginStyle, paddingStyle, elBorderShadowStyle, typoStyle, lengthValue, SPACE, cls } from "../lib/element-render";
 
 interface Props {
   menuId: string;
@@ -24,7 +24,48 @@ const { menuId, layout = "horizontal", dropdownTrigger = "hover", megaMenuWidth 
 const menu = await getMenu(tenantHost, menuId);
 const items: ResolvedMenuItem[] = menu ? await resolveMenuTree(menu.items, lang, tenantHost) : [];
 
-const boxStyle = [marginStyle(p), paddingStyle(p), elBorderShadowStyle(p)].filter(Boolean).join(";");
+// Style tab (apps/admin's ELS.menu): typography straight on the nav, the rest
+// as custom properties global.css's .ds-menu rules read, so the dropdowns and
+// the mobile panel keep their own colors. Values are validated at write time
+// (@ucms/element-schema: hex colors, lengths, enums).
+const JUSTIFY: Record<string, string> = { center: "center", right: "flex-end" };
+function menuStyle(mp: Record<string, string>): string {
+  return [
+    marginStyle(mp),
+    paddingStyle(mp),
+    elBorderShadowStyle(mp),
+    typoStyle(mp),
+    mp.bg ? `background:${mp.bg}` : null,
+    mp.hoverColor ? `--ds-menu-hover:${mp.hoverColor}` : null,
+    mp.accentColor ? `--ds-menu-accent:${mp.accentColor}` : null,
+    mp.dropdownBg ? `--ds-menu-dd-bg:${mp.dropdownBg}` : null,
+    mp.dropdownColor ? `--ds-menu-dd-color:${mp.dropdownColor}` : null,
+    mp.gap ? `--ds-menu-gap:${lengthValue(mp.gap, SPACE, "1.5rem")}` : null,
+    JUSTIFY[mp.align ?? ""] ? `--ds-menu-justify:${JUSTIFY[mp.align ?? ""]}` : null,
+  ]
+    .filter(Boolean)
+    .join(";");
+}
+const boxStyle = menuStyle(p);
+const fx = p.menuEffect && p.menuEffect !== "none" ? `ds-menu-fx-${p.menuEffect}` : undefined;
+
+// The current page's item gets aria-current (and the effect, global.css).
+// chrome-preview.astro has no page of its own, so its first item stands in
+// there — otherwise a header's Live Edit could only show the effect on hover.
+const here = Astro.url.pathname.replace(/\/+$/, "") || "/";
+const previewFirst = here === "/chrome-preview";
+function isCurrent(href: string | undefined, i: number): boolean {
+  if (previewFirst) return i === 0;
+  // "#" (a dropdown parent that only opens its submenu) would match every page.
+  if (!href || href.startsWith("#")) return false;
+  try {
+    const u = new URL(href, Astro.url);
+    return u.origin === Astro.url.origin && (u.pathname.replace(/\/+$/, "") || "/") === here;
+  } catch {
+    return false;
+  }
+}
+
 const responsiveRules: string[] = [];
 if (bp && Object.keys(bp).length > 0 && elId) {
   const prefix = (tier: "tablet" | "mobile") => `${tier}:`;
@@ -34,7 +75,7 @@ if (bp && Object.keys(bp).length > 0 && elId) {
     for (const [k, v] of Object.entries(bp)) {
       if (k.startsWith(prefix(tier))) merged[k.slice(prefix(tier).length)] = v;
     }
-    const css = [marginStyle(merged), paddingStyle(merged), elBorderShadowStyle(merged)].filter(Boolean).join(";");
+    const css = menuStyle(merged);
     if (!css) continue;
     const important = css.split(";").filter(Boolean).map((decl) => `${decl} !important`).join(";");
     const media = tier === "tablet" ? "(min-width:641px) and (max-width:1024px)" : "(max-width:640px)";
@@ -44,14 +85,21 @@ if (bp && Object.keys(bp).length > 0 && elId) {
 ---
 
 {items.length > 0 && (
-  <nav class={`ds-menu ds-menu-${layout}`} data-trigger={dropdownTrigger} style={boxStyle || undefined}>
+  <nav class={cls("ds-menu", `ds-menu-${layout}`, fx)} data-trigger={dropdownTrigger} style={boxStyle || undefined}>
     <button class="ds-menu-toggle" type="button" aria-label="Menu" aria-expanded="false">
       <span></span><span></span><span></span>
     </button>
     <ul class="ds-menu-list">
-      {items.map((item) => (
+      {items.map((item, i) => (
         <li class={`ds-menu-item ${item.children ? "has-dropdown" : ""} ${item.megaMenu ? "has-mega" : ""}`}>
-          <a href={item.href} target={item.target}>{item.label}</a>
+          <a href={item.href} target={item.target} aria-current={isCurrent(item.href, i) ? "page" : undefined}>
+            {item.label}
+            {(item.children || item.megaMenu) && (
+              <svg class="ds-menu-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            )}
+          </a>
           {item.children && (
             <ul class="ds-menu-dropdown">
               {item.children.map((child) => (

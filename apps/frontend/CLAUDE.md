@@ -64,10 +64,30 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   paragraph on it) — checked right after the maintenance gate (so a maintenance response is never cached)
   and written right before returning, skipped for anything carrying a preview/theme-preview/Live-Edit
   token or a maintenance-bypass cookie.
-- **`chrome-preview.astro`** — apps/admin Designer's Header/Footer device-preview modal (`kind ===
-  "siteChrome"`). Reads `?id=&kind=header|footer`, fetches that row via `getSiteChromeById` (now
-  exported — no preview token needed, since `GET /api/siteChrome/:id` is already publicly readable
-  regardless of draft/published status), and renders it through `BaseLayout`'s existing
-  `headerChrome`/`footerChrome` props with placeholder body text. View-only (no `designerEdit`
-  bridge) — mirrors `blueprint-preview.astro`'s "reserved route, id is the whole access check" shape,
-  just without that route's preview-token minting since siteChrome's read access is already open.
+- **`chrome-preview.astro`** — apps/admin's Header/Footer Designer (`kind === "siteChrome"`): its
+  device-preview modal and, since 2026-10-17, its Live Edit. Reads `?id=&kind=header|footer`, fetches
+  that row via `getSiteChromeById` (publicly readable regardless of draft/published status, so the id
+  is the whole access check) and renders it through `BaseLayout`'s `headerChrome`/`footerChrome`
+  props with placeholder body text. `?token=` overlays the unsaved layout (live-preview store);
+  `designerEdit=1` with a token turns the Live Edit bridge on and passes BaseLayout `chromeEdit`.
+- **What Live Edit edits (`BaseLayout.astro`, 2026-10-17)**: `data-ds-root` marks it — `<main>` for a
+  page, the header/footer itself under `chromeEdit` (its SectionBlocks then get `designerEdit` paths).
+  The editor's dashed box guides and the page-end zone are scoped to it; a page's header/footer used to
+  get guides that promised edits that never happened. On a page's Live Edit, the header/footer carry
+  `data-ds-chrome`/`data-ds-chrome-id` instead: a click posts `designer:editChrome` (admin opens that
+  header/footer's Designer in a new tab) and doesn't follow its links. BaseLayout also loads the
+  header/footer's own element fonts (`collectFonts`, which now covers `menu` and container children) —
+  pages only ever collected their own layout's.
+- **Menu styling (`MenuBlock.astro` + `global.css`, 2026-10-17)**: typography goes straight on the
+  `<nav>` (`typoStyle`). The rest are `--ds-menu-*` custom properties: hover, accent, dropdown bg/text,
+  gap, justify. Notes:
+  - `menuEffect` → `ds-menu-fx-*`: underline/overline is an animated 2px line, pill/box a filled
+    item. It shows on hover and on the current page's item, desktop only (≥769px).
+  - The accent falls back to the theme's `--color-primary`.
+  - The current page's item gets `aria-current="page"` (same-origin pathname match). On
+    `/chrome-preview` the first item stands in, so a header's Live Edit shows the effect.
+  - Dropdowns and the mobile panel default to dark-on-white (`#1f2937`) instead of inheriting the
+    bar's color, which made white items on a dark header white-on-white there.
+  - On mobile, the hamburger follows the menu's `align`. A vertical menu (a footer's link column)
+    stays a plain list instead of collapsing behind a hamburger.
+  - Items with a dropdown/mega menu get a small caret.

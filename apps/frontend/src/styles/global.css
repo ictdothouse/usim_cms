@@ -69,15 +69,20 @@ body {
   line-height: var(--font-caption-line-height, inherit);
 }
 
-.ds-menu-list { display: flex; gap: 1.5rem; list-style: none; margin: 0; padding: 0; }
-.ds-menu-vertical .ds-menu-list { flex-direction: column; gap: 0.25rem; }
+/* --ds-menu-* come from the menu element's Style tab (MenuBlock.astro). The
+   dropdowns and the mobile panel default to dark-on-white rather than
+   inheriting the bar's text color: white items on a dark header used to come
+   out white-on-white there. */
+.ds-menu-list { display: flex; gap: var(--ds-menu-gap, 1.5rem); justify-content: var(--ds-menu-justify, flex-start); list-style: none; margin: 0; padding: 0; }
+.ds-menu-vertical .ds-menu-list { flex-direction: column; gap: var(--ds-menu-gap, 0.25rem); justify-content: flex-start; align-items: var(--ds-menu-justify, flex-start); }
+.ds-menu-caret { display: inline-block; margin-left: 0.3em; vertical-align: middle; }
 /* position:relative here (not just on .ds-menu-item) is needed so the
    mobile slide-down panel (.ds-menu-list, below) positions against the nav
    bar itself rather than the page's initial containing block. */
 .ds-menu { position: relative; }
 .ds-menu-item { position: relative; }
 .ds-menu-item > a { text-decoration: none; color: inherit; }
-.ds-menu-dropdown, .ds-mega-menu { display: none; position: absolute; top: 100%; left: 0; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; }
+.ds-menu-dropdown, .ds-mega-menu { display: none; position: absolute; top: 100%; left: 0; background: var(--ds-menu-dd-bg, #fff); color: var(--ds-menu-dd-color, #1f2937); box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 20; }
 .ds-menu-dropdown { list-style: none; margin: 0; padding: 0.5rem 0; min-width: 12rem; }
 .ds-menu-dropdown li { padding: 0; }
 .ds-menu-dropdown a { display: block; padding: 0.5rem 1rem; text-decoration: none; color: inherit; }
@@ -117,9 +122,9 @@ body {
 .ds-menu-toggle span { display: block; width: 22px; height: 2px; background: currentColor; }
 @media (max-width: 768px) {
   .ds-menu-toggle { display: flex; }
-  .ds-menu-list { display: none; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 1rem; z-index: 30; }
+  .ds-menu-list { display: none; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: var(--ds-menu-dd-bg, #fff); color: var(--ds-menu-dd-color, #1f2937); box-shadow: 0 4px 16px rgba(0,0,0,0.12); padding: 1rem; z-index: 30; }
   .ds-menu.is-open .ds-menu-list { display: flex; }
-  .ds-menu-dropdown, .ds-mega-menu { position: static; box-shadow: none; padding-left: 1rem; }
+  .ds-menu-dropdown, .ds-mega-menu { position: static; box-shadow: none; padding-left: 1rem; background: none; }
   .ds-mega-menu { display: none; flex-direction: column; }
   /* position:static on mobile (above) makes .ds-mega-full's left/width
      breakout moot, but transform still applies to a statically-positioned
@@ -135,7 +140,11 @@ body {
      display:none until opened), so .ds-menu needs to be a flex container
      for its margin-inline-start/end:auto below to actually push it to
      either edge — auto margins are a no-op on a plain block parent. */
-  .ds-menu { display: flex; align-items: center; position: static; }
+  .ds-menu { display: flex; align-items: center; justify-content: var(--ds-menu-justify, flex-start); position: static; }
+  /* A vertical menu (a footer's link column) is already compact — it stays
+     a plain list instead of collapsing behind a hamburger. */
+  .ds-menu-vertical .ds-menu-toggle { display: none; }
+  .ds-menu-vertical .ds-menu-list { display: flex; position: static; padding: 0; background: none; color: inherit; box-shadow: none; }
   /* .ds-site-header (BaseLayout.astro's <header>, wraps the whole header
      row/column grid, not just the nav's own narrow grid cell) is the
      positioned ancestor .ds-menu-list's absolute left:0/right:0 resolves
@@ -229,6 +238,43 @@ body {
 @keyframes ds-menu-fade {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+/* Menu hover + current-page effect (ds-menu-fx-*, the menu element's
+   menuEffect). Desktop bar only — the mobile panel keeps its plain list. */
+@media (min-width: 769px) {
+  .ds-menu-item > a { transition: color 0.15s ease, background-color 0.15s ease; }
+  .ds-menu-item > a:hover,
+  .ds-menu-item > a[aria-current="page"] { color: var(--ds-menu-hover, currentColor); }
+  .ds-menu-fx-underline .ds-menu-item > a,
+  .ds-menu-fx-overline .ds-menu-item > a { position: relative; display: inline-block; padding-block: 0.4em; }
+  .ds-menu-fx-underline .ds-menu-item > a::after,
+  .ds-menu-fx-overline .ds-menu-item > a::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--ds-menu-accent, var(--color-primary, currentColor));
+    transform: scaleX(0);
+    transition: transform 0.2s ease;
+  }
+  .ds-menu-fx-underline .ds-menu-item > a::after { bottom: 0; }
+  .ds-menu-fx-overline .ds-menu-item > a::after { top: 0; }
+  .ds-menu-fx-underline .ds-menu-item > a:hover::after,
+  .ds-menu-fx-underline .ds-menu-item > a[aria-current="page"]::after,
+  .ds-menu-fx-overline .ds-menu-item > a:hover::after,
+  .ds-menu-fx-overline .ds-menu-item > a[aria-current="page"]::after { transform: scaleX(1); }
+  .ds-menu-fx-pill .ds-menu-item > a,
+  .ds-menu-fx-box .ds-menu-item > a { display: inline-block; padding: 0.45em 1em; }
+  .ds-menu-fx-pill .ds-menu-item > a { border-radius: 9999px; }
+  .ds-menu-fx-pill .ds-menu-item > a:hover,
+  .ds-menu-fx-pill .ds-menu-item > a[aria-current="page"],
+  .ds-menu-fx-box .ds-menu-item > a:hover,
+  .ds-menu-fx-box .ds-menu-item > a[aria-current="page"] { background: var(--ds-menu-accent, color-mix(in srgb, var(--color-primary, currentColor) 14%, transparent)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-menu-item > a,
+  .ds-menu-item > a::after { transition: none; }
 }
 
 /* Element hoverEffect/entrance fields (heading/text/image/button — see

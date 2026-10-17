@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { collectFonts } from "./collectFonts";
 
-test("collectFonts returns distinct fontFamily values used by heading/text/list elements", () => {
+test("collectFonts returns distinct fontFamily values used by heading/text/list/menu elements, container children included", () => {
   const layout = [
     {
       type: "section",
@@ -17,6 +17,8 @@ test("collectFonts returns distinct fontFamily values used by heading/text/list 
                   { type: "list", props: { fontFamily: "Roboto" } },
                   { type: "button", props: { fontFamily: "Ignored" } },
                   { type: "text", props: {} },
+                  { type: "menu", props: { fontFamily: "Poppins" } },
+                  { type: "container", props: {}, children: [{ type: "heading", props: { fontFamily: "Lora" } }] },
                 ],
               },
             ],
@@ -25,7 +27,7 @@ test("collectFonts returns distinct fontFamily values used by heading/text/list 
       },
     },
   ];
-  assert.deepEqual(collectFonts(layout), ["Inter", "Roboto"]);
+  assert.deepEqual(collectFonts(layout), ["Inter", "Roboto", "Poppins", "Lora"]);
 });
 
 test("collectFonts skips non-section blocks and tolerates missing rows/columns/elements", () => {
