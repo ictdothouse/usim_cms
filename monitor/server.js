@@ -1960,6 +1960,14 @@ function handleStackUpdate(req, res, key) {
 // reads "current" straight off disk, not off git HEAD — without this, a
 // failed bump would look "already latest" forever and silently block retries.
 function startSourceBumpDeploy(label, oldContents, commitMsg, res, preCommitScript) {
+  // Every caller (handleNodeUpdate/handlePnpmUpdate/handleDepsUpdate) does
+  // async work — a registry lookup, getOutdatedBreakdown's two pnpm calls —
+  // between its OWN initial deployState.running check and this call, leaving
+  // a window for a second request to slip past that first check. Re-checking
+  // here, with nothing async between this line and the set below, is what
+  // actually makes the check-and-claim atomic (same second-check-right-
+  // before-the-set pattern handlePull uses around its own preflight check).
+  if (deployState.running) return sendJson(res, 409, { error: "a deploy/update is already running" });
   const files = Object.keys(oldContents);
   deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
   saveDeployState();
