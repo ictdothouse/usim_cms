@@ -1,7 +1,8 @@
 name: Images
 
-# Builds the api/frontend/admin images once per commit on main and pushes
-# them to this repository's container registry
+# Builds the api/frontend/admin images once per commit on main, and once per
+# release tag (v1.2.3, also tagged with that version), and pushes them to
+# this repository's container registry
 # (ghcr.io/<owner>/<repo>/{api,frontend,admin}); a server with
 # UCMS_IMAGE_REPO set in .env then pulls them instead of building. Off until
 # the repository variable UCMS_PUBLISH_IMAGES is "true" (Settings > Secrets
@@ -11,6 +12,7 @@ name: Images
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -30,3 +32,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Registry paths must be lowercase.
       - run: UCMS_IMAGE_REPO="ghcr.io/${GITHUB_REPOSITORY,,}" bash scripts/build-images.sh --push
+        env:
+          # A release tag push (v1.2.3) also tags the images with that version.
+          UCMS_IMAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}

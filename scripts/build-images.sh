@@ -12,12 +12,20 @@
 # Tags: <repo>/{api,frontend,admin}:<commit>, plus :latest, which the next
 # build reads its cache from (inline cache), so even a CI runner with no
 # local cache reuses an unchanged dependency layer instead of re-uploading it.
+# A release build (UCMS_IMAGE_VERSION=v1.2.3, set by the CI wrappers on a tag
+# push) is also tagged with its version: organisations' servers pull that,
+# and registry retention can keep v* tags while pruning per-commit ones.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO="${UCMS_IMAGE_REPO:?set UCMS_IMAGE_REPO, e.g. ghcr.io/acme/ucms}"
 TAG="${UCMS_IMAGE_TAG:-$(git rev-parse HEAD)}"
+VERSION="${UCMS_IMAGE_VERSION:-}"
 BUILD_CACHE_MAX="${BUILD_CACHE_MAX:-5GB}"
+if [ -n "$VERSION" ] && ! [[ "$VERSION" =~ ^v[0-9][0-9A-Za-z._-]{0,126}$ ]]; then
+  echo "UCMS_IMAGE_VERSION '$VERSION' is not a release tag like v1.2.3" >&2
+  exit 1
+fi
 
 # Build cache is capped by size, on whatever machine builds (a server, a
 # self-hosted runner): a size-limited prune drops the least recently used
@@ -37,16 +45,17 @@ trap prune_build_cache EXIT
 
 # ponytail: native architecture only; add `docker buildx build --platform`
 # if an organisation's servers differ from its build machine (e.g. arm64).
+tags=("$TAG" latest ${VERSION:+"$VERSION"})
 for svc in api frontend admin; do
-  echo "-- building $REPO/$svc:$TAG --"
+  args=()
+  for t in "${tags[@]}"; do args+=(-t "$REPO/$svc:$t"); done
+  echo "-- building $REPO/$svc (tags: ${tags[*]}) --"
   docker build -f "apps/$svc/Dockerfile" \
-    --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$REPO/$svc:latest" \
-    -t "$REPO/$svc:$TAG" -t "$REPO/$svc:latest" .
+    --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$REPO/$svc:latest" "${args[@]}" .
 done
 
 if [ "${1:-}" = "--push" ]; then
   for svc in api frontend admin; do
-    docker push "$REPO/$svc:$TAG"
-    docker push "$REPO/$svc:latest"
+    for t in "${tags[@]}"; do docker push "$REPO/$svc:$t"; done
   done
 fi
