@@ -16,6 +16,13 @@ test("a header/footer draft is null or a { layout } validated like the live one"
   assert.equal(cleared.draft, null);
 });
 
+test("trash is a status that drops the default flag; unknown statuses and blank names are rejected", async () => {
+  const trashed = (await beforeChange!({ status: "trash", isDefault: true }, webmaster, anon)) as Record<string, unknown>;
+  assert.equal(trashed.isDefault, false);
+  await assert.rejects(Promise.resolve().then(() => beforeChange!({ status: "deleted" }, webmaster, anon)), /status must be/);
+  await assert.rejects(Promise.resolve().then(() => beforeChange!({ name: "  " }, webmaster, anon)), /name must be/);
+});
+
 test("an anonymous read never carries the draft", async () => {
   const [row] = await afterRead!([{ id: "1", layout: [], draft: { layout: [] } }], anon);
   assert.equal("draft" in (row as object), false);

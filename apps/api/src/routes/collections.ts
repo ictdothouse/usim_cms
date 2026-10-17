@@ -773,6 +773,15 @@ const siteChromeBeforeChange = async (data: unknown, args: AccessArgs, req: Fast
   if (record.kind !== undefined && record.kind !== "header" && record.kind !== "footer") {
     throw Object.assign(new Error('kind must be "header" or "footer"'), { statusCode: 400 });
   }
+  if (record.status !== undefined && !["draft", "published", "trash"].includes(record.status as string)) {
+    throw Object.assign(new Error('status must be "draft", "published" or "trash"'), { statusCode: 400 });
+  }
+  if (record.name !== undefined && (typeof record.name !== "string" || !record.name.trim())) {
+    throw Object.assign(new Error("name must be a non-empty string"), { statusCode: 400 });
+  }
+  // "trash" is the admin list's soft delete. RLS (0022) already hides every
+  // non-published row from visitors; a trashed row can't stay the default either.
+  if (record.status === "trash") record.isDefault = false;
   const checkLayout = (layout: unknown) => {
     const err = validateLayout(layout);
     if (err) throw Object.assign(new Error(err), { statusCode: 400 });

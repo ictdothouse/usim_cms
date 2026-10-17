@@ -841,11 +841,15 @@ callouts before assuming any of this is speculative hardening.
     `draft` (migration 0034, 2026-10-17) is a published header/footer's autosave target, the
     `pages.draft` idea: only `{ layout }`, checked by the same layout validation, dropped from
     anonymous reads by `siteChromeAfterRead`, and a `{draft}`-only PATCH skips the HTML-cache evict
-    (`isPublicCacheAffecting`); `routes/site-chrome-draft.test.ts` covers both hooks. `pages`
+    (`isPublicCacheAffecting`). `status: "trash"` (2026-10-17, no migration: plain text column) is
+    the admin list's soft delete. RLS already hides it from visitors like a draft; the hook forces
+    `isDefault=false` on it, rejects any other unknown status and a blank `name`. Restore is a
+    PATCH back to `"draft"`, and the real DELETE is "Delete permanently". `routes/site-chrome.test.ts`
+    covers these hooks. `pages`
     gained 4 nullable columns for the per-page override/exception: `headerId`/`footerId` (FK →
     `site_chrome`, `onDelete: "set null"`) and `hideHeader`/`hideFooter` (booleans) — resolution per
-    page/kind is `hideX` → nothing renders; `Xid` set → that row; else → the tenant's `isDefault`
-    row; a fresh tenant with none configured gets no header/footer, not an error (`apps/frontend`'s
+    page/kind is `hideX` → nothing renders; `Xid` set and visible (published) → that row; else → the
+    tenant's `isDefault` row; a fresh tenant with none configured gets no header/footer, not an error (`apps/frontend`'s
     `resolveHeaderFooter`/`resolveDefaultHeaderFooter`, `lib/api.ts` — posts have no per-post
     override, they always get the tenant default). Own `headerFooter.write` permission, same
     single-permission convention as `menus.write`/`blueprints.write`, added to both `PERMISSIONS`

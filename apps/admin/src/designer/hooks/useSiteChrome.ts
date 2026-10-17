@@ -66,8 +66,9 @@ export function useSiteChrome(deps: SiteChromeDeps) {
   const [availableFooters, setAvailableFooters] = useState<api.SiteChrome[]>([]);
   useEffect(() => {
     if (kind !== "page") return;
-    void api.listSiteChrome(tenantHost, token, "header").then(setAvailableHeaders);
-    void api.listSiteChrome(tenantHost, token, "footer").then(setAvailableFooters);
+    const notTrashed = (items: api.SiteChrome[]) => items.filter((i) => i.status !== "trash");
+    void api.listSiteChrome(tenantHost, token, "header").then((items) => setAvailableHeaders(notTrashed(items)));
+    void api.listSiteChrome(tenantHost, token, "footer").then((items) => setAvailableFooters(notTrashed(items)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantHost, kind]);
   const [pageHeaderId, setPageHeaderId] = useState<string>((page.headerId as string | null) ?? "");

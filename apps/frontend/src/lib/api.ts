@@ -260,18 +260,17 @@ async function getDefaultSiteChrome(tenantHost: string, kind: "header" | "footer
 // `designerEdit`, itself gated on a real previewToken) lets an author see
 // their still-draft default header/footer while editing, same as a draft
 // page itself already previews via previewToken; a real visitor never passes
-// this. An explicit headerId/footerId (getSiteChromeById) already ignores
-// status regardless, since siteChrome's own read access is unconditionally
-// public — only the isDefault fallback needed this flag.
+// this. An explicit headerId/footerId this anonymous read can't see (RLS
+// shows published rows only, so a draft or trashed one) falls back to the
+// default too, same as a hard delete's ON DELETE SET NULL would.
 export async function resolveHeaderFooter(
   page: Page,
   tenantHost: string,
   includeDraft = false,
 ): Promise<{ header: SiteChrome | null; footer: SiteChrome | null }> {
-  const [header, footer] = await Promise.all([
-    page.hideHeader ? null : page.headerId ? getSiteChromeById(tenantHost, page.headerId) : getDefaultSiteChrome(tenantHost, "header", includeDraft),
-    page.hideFooter ? null : page.footerId ? getSiteChromeById(tenantHost, page.footerId) : getDefaultSiteChrome(tenantHost, "footer", includeDraft),
-  ]);
+  const pick = async (id: string | null, kind: "header" | "footer") =>
+    (id ? await getSiteChromeById(tenantHost, id) : null) ?? getDefaultSiteChrome(tenantHost, kind, includeDraft);
+  const [header, footer] = await Promise.all([page.hideHeader ? null : pick(page.headerId, "header"), page.hideFooter ? null : pick(page.footerId, "footer")]);
   return { header, footer };
 }
 

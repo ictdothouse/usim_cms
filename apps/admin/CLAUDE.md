@@ -1696,6 +1696,10 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
     - `chromePresets.test.ts` runs every preset through element-schema's `validateLayout`.
     - Socials are Facebook/Instagram/X/YouTube brand logos with `url: "#"` (plain in header bars,
       brand/outline in footers).
+  - **Menu element Style tab**: `align`, a subset of `TYPOGRAPHY_FIELDS`, `hoverColor`, `menuEffect`,
+    `accentColor`, `gap`, `bg`, `dropdownBg`/`dropdownColor`. `menuEffect` (none/underline/overline/
+    pill/box) renders as picture tiles (FieldInput.tsx), not a raw `<select>`. element-schema gained
+    the 4 colors in `COLOR_KEYS` and `ENUM_VALUES.menuEffect` — rebuild its `dist` before admin tests.
 
   **Social Media brand logos (2026-10-17)** — user ask: wire the presets' social icons to the social
   media element, give it real logos from a proper SVG library, "search je logo media sosial, then
@@ -1730,10 +1734,21 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
     items keyed `href` (peoplegrid/logocloud/ticker) and cardgrid cards; not embed/googlemap/social
     URLs. tenantHost/token come from `LinkSiteContext`, which Designer.tsx provides around its tree
     (React context, so FieldInputProps didn't grow another threaded value).
-  - **Menu element Style tab**: `align`, a subset of `TYPOGRAPHY_FIELDS`, `hoverColor`, `menuEffect`,
-    `accentColor`, `gap`, `bg`, `dropdownBg`/`dropdownColor`. `menuEffect` (none/underline/overline/
-    pill/box) renders as picture tiles (FieldInput.tsx), not a raw `<select>`. element-schema gained
-    the 4 colors in `COLOR_KEYS` and `ENUM_VALUES.menuEffect` — rebuild its `dist` before admin tests.
+
+  **Header & Footer list (2026-10-17)** — user: "mgkn tab, bukan atas bawah ... link utk klik edit,
+  duplicate, dan lain2 ... search dan manage trash". `HeaderFooterPanel.tsx`:
+  - Header/Footer are shadcn `Tabs` (first use of `components/ui/tabs`) with live counts. The tab
+    sits in `?tab=` so `HeaderFooterDesignerRoute`'s close lands back on it.
+  - Each tab: quick-create card, an All/Trash switch, a client-side name search (the whole list is
+    already loaded; the generic `?search=` only knows a `title` column), then WordPress-style row
+    links: Edit, Duplicate (copies `draft?.layout ?? layout` + settings + translations into a new
+    draft named "… (copy)"), Rename (inline input: Enter/blur saves, Escape cancels), Set as
+    default, Trash.
+  - Trash = PATCH `status: "trash"` (apps/api: RLS keeps it off the site, `isDefault` is cleared).
+    No confirm; the toast's Undo puts the old status and default flag back. The Trash view has
+    Restore (back as a draft), Delete permanently and Empty Trash, and those two confirm.
+  - Trashed rows are left out of a page's header/footer picker (`useSiteChrome`). A page still
+    pinned to one renders the default instead (apps/frontend `resolveHeaderFooter`).
 
   **Content Manager nav grouping**: the superadmin's Content Manager sub-nav (9 items:
   Pages/Posts/Media/Theme/Languages/Menus/Header&Footer/Blueprints/Events) and the webmaster
