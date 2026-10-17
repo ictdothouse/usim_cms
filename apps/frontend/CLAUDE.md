@@ -84,6 +84,10 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   - `menuEffect` → `ds-menu-fx-*`: underline/overline is an animated 2px line, pill/box a filled
     item. It shows on hover and on the current page's item, desktop only (≥769px).
   - The accent falls back to the theme's `--color-primary`.
+  - The current page's item has its own text and effect colors (`--ds-menu-current`,
+    `--ds-menu-current-accent`), each falling back to hover's. The effect reads
+    `--ds-menu-item-accent`, which only the current item sets, because the nav-level variable is
+    inherited by every item.
   - The current page's item gets `aria-current="page"` (same-origin pathname match). On
     `/chrome-preview` the first item stands in, so a header's Live Edit shows the effect.
   - Dropdowns and the mobile panel default to dark-on-white (`#1f2937`) instead of inheriting the

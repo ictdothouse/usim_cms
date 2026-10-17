@@ -254,11 +254,17 @@ body {
   to { opacity: 1; }
 }
 /* Menu hover + current-page effect (ds-menu-fx-*, the menu element's
-   menuEffect). Desktop bar only — the mobile panel keeps its plain list. */
+   menuEffect). Desktop bar only — the mobile panel keeps its plain list.
+   The current page's item has its own text and effect colors, each falling
+   back to hover's: --ds-menu-item-accent is set on that item only, since
+   --ds-menu-current-accent itself is inherited by every item. */
 @media (min-width: 769px) {
   .ds-menu-item > a { transition: color 0.15s ease, background-color 0.15s ease; }
-  .ds-menu-item > a:hover,
-  .ds-menu-item > a[aria-current="page"] { color: var(--ds-menu-hover, currentColor); }
+  .ds-menu-item > a:hover { color: var(--ds-menu-hover, currentColor); }
+  .ds-menu-item > a[aria-current="page"] {
+    color: var(--ds-menu-current, var(--ds-menu-hover, currentColor));
+    --ds-menu-item-accent: var(--ds-menu-current-accent);
+  }
   .ds-menu-fx-underline .ds-menu-item > a,
   .ds-menu-fx-overline .ds-menu-item > a { position: relative; display: inline-block; padding-block: 0.4em; }
   .ds-menu-fx-underline .ds-menu-item > a::after,
@@ -268,7 +274,7 @@ body {
     left: 0;
     right: 0;
     height: 2px;
-    background: var(--ds-menu-accent, var(--color-primary, currentColor));
+    background: var(--ds-menu-item-accent, var(--ds-menu-accent, var(--color-primary, currentColor)));
     transform: scaleX(0);
     transition: transform 0.2s ease;
   }
@@ -284,7 +290,7 @@ body {
   .ds-menu-fx-pill .ds-menu-item > a:hover,
   .ds-menu-fx-pill .ds-menu-item > a[aria-current="page"],
   .ds-menu-fx-box .ds-menu-item > a:hover,
-  .ds-menu-fx-box .ds-menu-item > a[aria-current="page"] { background: var(--ds-menu-accent, color-mix(in srgb, var(--color-primary, currentColor) 14%, transparent)); }
+  .ds-menu-fx-box .ds-menu-item > a[aria-current="page"] { background: var(--ds-menu-item-accent, var(--ds-menu-accent, color-mix(in srgb, var(--color-primary, currentColor) 14%, transparent))); }
 }
 @media (prefers-reduced-motion: reduce) {
   .ds-menu-item > a,

@@ -38,6 +38,8 @@ function menuStyle(mp: Record<string, string>): string {
     mp.bg ? `background:${mp.bg}` : null,
     mp.hoverColor ? `--ds-menu-hover:${mp.hoverColor}` : null,
     mp.accentColor ? `--ds-menu-accent:${mp.accentColor}` : null,
+    mp.currentTextColor ? `--ds-menu-current:${mp.currentTextColor}` : null,
+    mp.currentAccentColor ? `--ds-menu-current-accent:${mp.currentAccentColor}` : null,
     mp.dropdownBg ? `--ds-menu-dd-bg:${mp.dropdownBg}` : null,
     mp.dropdownColor ? `--ds-menu-dd-color:${mp.dropdownColor}` : null,
     mp.gap ? `--ds-menu-gap:${lengthValue(mp.gap, SPACE, "1.5rem")}` : null,
