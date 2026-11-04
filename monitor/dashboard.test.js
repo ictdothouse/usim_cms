@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
-
-const source = fs.readFileSync(path.join(import.meta.dirname, "server.js"), "utf8");
-const literal = source.match(/const DASHBOARD_HTML = (`[\s\S]*?`);\s*const server =/);
-assert.ok(literal, "dashboard template exists");
-const html = vm.runInNewContext(literal[1]);
+import { DASHBOARD_HTML as html } from "./dashboard-html.js";
 
 test("dashboard script parses under the nonce-based CSP", () => {
   const script = html.match(/<script>([\s\S]*?)<\/script>/);
