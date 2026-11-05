@@ -26,3 +26,6 @@ test-results/
 .claude/worktrees/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Audit reports stay local, never pushed
+docs/laporan-*.md
