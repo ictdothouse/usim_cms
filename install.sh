@@ -89,6 +89,7 @@ MODE="${INSTALL_MODE:-}"
 ADMIN_ONLY="false"
 DIAGNOSE_ONLY="false"
 REAPPLY_BACKUP_CRON="false"
+UPGRADE_NODE="false"
 SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-}"
 SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-}"
 for arg in "$@"; do
@@ -105,11 +106,14 @@ for arg in "$@"; do
     # cron code path, same as install_backup_cron's own call sites), since
     # there's no TTY here to ask interactively.
     --reapply-backup-cron) REAPPLY_BACKUP_CRON="true" ;;
+    # Moves the monitor onto the current Node LTS (see the UPGRADE_NODE
+    # branch at the bottom). Reads the install type from the monitor's env.
+    --upgrade-node) UPGRADE_NODE="true" ;;
     --admin-email=*) SUPERADMIN_EMAIL="${arg#--admin-email=}" ;;
     --admin-password=*) SUPERADMIN_PASSWORD="${arg#--admin-password=}" ;;
   esac
 done
-if [ -z "$MODE" ]; then
+if [ -z "$MODE" ] && [ "$UPGRADE_NODE" != "true" ]; then
   if [ "$REAPPLY_BACKUP_CRON" = "true" ]; then
     echo "--reapply-backup-cron needs an explicit --mode=docker|bare-metal — no TTY here to ask interactively." >&2
     exit 1
@@ -152,7 +156,7 @@ echo ""
 # same as an unset SESSION_SECRET would be further down. --diagnose creates
 # no account at all, so it never asks — same for --reapply-backup-cron,
 # which touches none of the app/superadmin setup at all.
-if [ "$DIAGNOSE_ONLY" != "true" ] && [ "$REAPPLY_BACKUP_CRON" != "true" ]; then
+if [ "$DIAGNOSE_ONLY" != "true" ] && [ "$REAPPLY_BACKUP_CRON" != "true" ] && [ "$UPGRADE_NODE" != "true" ]; then
   if [ -z "$SUPERADMIN_EMAIL" ] && [ -t 0 ]; then
     read -r -p "Superadmin email: " SUPERADMIN_EMAIL
   fi
@@ -1081,7 +1085,7 @@ ensure_private_node() {
   # install, not just "a binary happens to exist here" — otherwise a box
   # could end up running whatever bytes sit at that path with no record of
   # what they are.
-  if [ -x "$node_bin" ] && [ -f "$NODE_VERSION_FILE" ]; then
+  if [ "$UPGRADE_NODE" != "true" ] && [ -x "$node_bin" ] && [ -f "$NODE_VERSION_FILE" ]; then
     pinned_version="$(cat "$NODE_VERSION_FILE")"
     if "$node_bin" --version 2>/dev/null | grep -qF "v${pinned_version}"; then
       echo "$node_bin"
@@ -1105,7 +1109,7 @@ ensure_private_node() {
   command -v gpgv >/dev/null 2>&1 || { echo "gpgv not available and couldn't be installed — refusing to install Node without signature verification." >&2; exit 1; }
   {
     echo "Downloading a private Node.js v${node_version} (${arch}) to ${NODE_ROOT}..." >&2
-    mkdir -p "$NODE_ROOT"
+    mkdir -p "$(dirname "$NODE_ROOT")"
     local tarball="node-v${node_version}-linux-${arch}.tar.gz"
     local tmp_dir expected_sha actual_sha
     tmp_dir="$(mktemp -d)"
@@ -1135,9 +1139,17 @@ ensure_private_node() {
       rm -rf "$tmp_dir"
       exit 1
     fi
-    tar -xzf "${tmp_dir}/${tarball}" -C "$NODE_ROOT" --strip-components=1
+    # Unpack beside the live runtime, then swap whole trees: extracting over
+    # it would rewrite a node binary the monitor may be running and leave the
+    # previous release's npm files behind.
+    rm -rf "${NODE_ROOT}.new" "${NODE_ROOT}.old"
+    mkdir "${NODE_ROOT}.new"
+    tar -xzf "${tmp_dir}/${tarball}" -C "${NODE_ROOT}.new" --strip-components=1
     rm -rf "$tmp_dir"
-    echo "$node_version" > "$NODE_VERSION_FILE"
+    echo "$node_version" > "${NODE_ROOT}.new/.node-version"
+    if [ -d "$NODE_ROOT" ]; then mv "$NODE_ROOT" "${NODE_ROOT}.old"; fi
+    mv "${NODE_ROOT}.new" "$NODE_ROOT"
+    rm -rf "${NODE_ROOT}.old"
   } >&2
   echo "$node_bin"
 }
@@ -2308,6 +2320,27 @@ fi
 if [ "$REAPPLY_BACKUP_CRON" = "true" ]; then
   detect_os_family
   reapply_backup_cron "$MODE"
+  exit 0
+fi
+
+# ensure_private_node pins the runtime at first install and nothing else ever
+# bumps it, so a box stays on that LTS past its end of life without this.
+# Docker/production only: there host Node runs just the monitor. Bare-metal
+# services run on it too, with native modules built for its ABI.
+if [ "$UPGRADE_NODE" = "true" ]; then
+  if ! grep -q '^DEPLOY_MODE=docker' /etc/ucms-monitor.env 2>/dev/null; then
+    echo "--upgrade-node supports docker/production installs only (DEPLOY_MODE=docker in /etc/ucms-monitor.env)." >&2
+    exit 1
+  fi
+  detect_os_family
+  node_bin="$(ensure_private_node)"
+  "$node_bin" --check "$REPO_DIR/monitor/supervisor.js"
+  "$node_bin" --check "$REPO_DIR/monitor/server.js"
+  set_env_kv /etc/ucms-monitor.env NODE_BIN "$node_bin"
+  sed -i "s|^ExecStart=[^ ]* |ExecStart=${node_bin} |" /etc/systemd/system/ucms-monitor.service
+  systemctl daemon-reload
+  systemctl restart ucms-monitor
+  echo "Monitor restarted on Node $("$node_bin" --version)."
   exit 0
 fi
 

@@ -16,6 +16,11 @@ if [ ! -f "$unit" ] || [ ! -f "$env_file" ]; then
   exit 1
 fi
 node_bin="$(sed -n 's/^NODE_BIN=//p' "$env_file" | head -1)"
+# Docker installs don't write NODE_BIN; prefer install.sh's private runtime
+# over system Node, which may be an unpatched release nothing here updates.
+if [ -z "$node_bin" ] && [ -x /opt/ucms/node/bin/node ]; then
+  node_bin=/opt/ucms/node/bin/node
+fi
 [ -n "$node_bin" ] || node_bin="$(command -v node)"
 if [ ! -x "$node_bin" ]; then
   echo "Node executable is missing: $node_bin" >&2
