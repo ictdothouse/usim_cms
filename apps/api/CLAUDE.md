@@ -310,6 +310,10 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   tenant-local migration ledger coordinate this), and hands back a pooled client
   (`tenantPools` cached per connection string, not per host, so two hosts sharing a `db_url` share a
   pool). `plugins/tenant.ts` calls this on every request and attaches the result as `req.db`.
+  It releases the client in `onSend` (once-only, `onResponse` is a backup): `onResponse` alone
+  never fires when the client disconnects first, so dropped requests leaked their client and 5 of
+  them hung every later request for that tenant (pool `max: 5`, no connect timeout) — found by the
+  2026-11-05 live test.
 - This makes tenant DB isolation real (a compromised or buggy query against one tenant's `req.db`
   cannot see another tenant's rows — separate database, not just a `WHERE tenant_host = ...` filter),
   on top of the RLS `app.authenticated` session-variable gate already enforced per connection.
