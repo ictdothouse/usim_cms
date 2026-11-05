@@ -3,8 +3,9 @@
 # organisation-specific is baked in: the API/frontend URLs come from the
 # container's VITE_API_URL/VITE_FRONTEND_URL env at start (runtime-config.sh
 # writes /config.js and the CSP), so one image serves any organisation.
-FROM node:24-alpine AS build
-RUN corepack enable
+FROM node:26-alpine AS build
+# Node 25+ ships without corepack; same pin as install.sh's COREPACK_PIN_VERSION.
+RUN npm install -g corepack@0.36.0 && corepack enable
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json

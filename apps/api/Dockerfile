@@ -1,8 +1,9 @@
 # Build from repo root: docker build -f apps/api/Dockerfile -t ucms-api .
 # Runtime config via env vars only (DATABASE_URL, PORT, SESSION_SECRET, ...)
 # — see apps/api/.env.example. No .env file is baked into or read from the image.
-FROM node:24-alpine AS base
-RUN corepack enable
+FROM node:26-alpine AS base
+# Node 25+ ships without corepack; same pin as install.sh's COREPACK_PIN_VERSION.
+RUN npm install -g corepack@0.36.0 && corepack enable
 WORKDIR /app
 
 FROM base AS build

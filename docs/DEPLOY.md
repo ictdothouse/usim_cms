@@ -2,7 +2,7 @@
 
 Panduan ini untuk pemasangan manual. Untuk deployment disyorkan, gunakan `install.sh` (VPS) atau
 `install-dev.mjs` (dev Docker) kerana kedua-duanya mengurus role DB, rahsia, dan Compose.
-Prasyarat semasa: **Node.js 22**, **pnpm 12** (`corepack enable`), **PostgreSQL 16+**.
+Prasyarat semasa: **Node.js 26**, **pnpm 12** (`npm install -g corepack@0.36.0 && corepack enable`; Node 25+ tidak lagi membawa corepack), **PostgreSQL 16+**.
 
 ## Docker: ralat `server login failed: wrong password type`
 
