@@ -1,8 +1,9 @@
 # Build from repo root: docker build -f apps/frontend/Dockerfile -t ucms-frontend .
 # Runtime config via env vars only (API_URL, PORT, ...). No tenant identity is
 # baked in here — it always comes from the request's Host header (CLAUDE.md).
-FROM node:24-alpine AS base
-RUN corepack enable
+FROM node:26-alpine AS base
+# Node 25+ ships without corepack; same pin as install.sh's COREPACK_PIN_VERSION.
+RUN npm install -g corepack@0.36.0 && corepack enable
 WORKDIR /app
 
 FROM base AS build

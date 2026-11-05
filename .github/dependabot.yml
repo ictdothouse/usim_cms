@@ -19,7 +19,7 @@ updates:
         update-types: ["patch", "minor"]
     open-pull-requests-limit: 10
 
-  # Docker base images (node:22-alpine in each apps/*/Dockerfile)
+  # Docker base images (node:26-alpine in each apps/*/Dockerfile)
   - package-ecosystem: "docker"
     directory: "/apps/api"
     schedule:
