@@ -172,7 +172,6 @@ END $$;
 -- FK columns with no supporting index (control-plane tables only — see
 -- migrations/0027_fk_indexes.sql for the tenant-DB equivalents).
 CREATE INDEX IF NOT EXISTS "users_role_id_idx" ON "public"."users" ("role_id");
-CREATE INDEX IF NOT EXISTS "theme_presets_owner_user_id_idx" ON "public"."theme_presets" ("owner_user_id");
 
 -- Upgrade path for control-plane DBs bootstrapped before tenant_hosts/
 -- extra_permissions existed (multi-site users + per-user extra grants).
@@ -194,6 +193,9 @@ CREATE TABLE IF NOT EXISTS "public"."theme_presets" (
 	"settings" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
+-- Must follow the CREATE TABLE: on a fresh database an index on a table that
+-- doesn't exist yet aborts this whole script, and with it every control-plane table.
+CREATE INDEX IF NOT EXISTS "theme_presets_owner_user_id_idx" ON "public"."theme_presets" ("owner_user_id");
 
 -- Superadmin-curated master language list (i18n Phase 1). Seeded ms/en.
 CREATE TABLE IF NOT EXISTS "public"."languages" (
