@@ -69,7 +69,7 @@ COREPACK_PIN_VERSION="0.36.0"
 # this file, no separate place to keep in sync) to decide whether the ops
 # monitor dashboard's "Backup destination" card should show an "Apply
 # update" recommendation. Not a semver, just an increasing integer.
-BACKUP_CRON_VERSION="1"
+BACKUP_CRON_VERSION="2"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run this with sudo: sudo ./install.sh" >&2
@@ -733,6 +733,9 @@ _apply_backup_cron_files() {
 # re-running install.sh, not hand-edited here.
 set -euo pipefail
 cd "$(dirname "$0")"
+# A failed dump still lets media and the off-site push run; the run then
+# exits with that failure at the end instead of reporting success.
+status=0
 docker run --rm \
   --network ucms-net \
   --env-file backup.env \
@@ -740,10 +743,10 @@ docker run --rm \
   -e "RETENTION_DAYS=${RETENTION_DAYS:-14}" \
   -v "${BACKUP_DIR:-/var/backups/usim_cms}:/backup" \
   -v "$(pwd)/backup.sh:/backup.sh:ro" \
-  postgres:16-alpine bash /backup.sh "$@"
+  postgres:16-alpine bash /backup.sh "$@" || status=$?
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
 RETENTION_DAYS="${RETENTION_DAYS:-14}" \
-  bash backup-media.sh "$@"
+  bash backup-media.sh "$@" || status=$?
 
 # --- off-site push (platform_settings.backup_destination) ---
 # Queried fresh on every run, never baked into this generated file, so a
@@ -821,6 +824,7 @@ case "$dest_type" in
       rclone/rclone:latest sync /data "${remote_path}" --config /config/rclone.conf
     ;;
 esac
+exit "$status"
 EOF
   else
     cat > "$run_script" <<'EOF'
@@ -844,10 +848,12 @@ while IFS= read -r line; do
     *=*) export "${line%%=*}=${line#*=}" ;;
   esac
 done < backup.env
-bash backup.sh "$@"
+# Same as docker mode: report a failed dump at the end, after media and push.
+status=0
+bash backup.sh "$@" || status=$?
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/usim_cms}" \
 RETENTION_DAYS="${RETENTION_DAYS:-14}" \
-  bash backup-media.sh "$@"
+  bash backup-media.sh "$@" || status=$?
 
 # --- off-site push (platform_settings.backup_destination) --- same
 # reasoning as the docker-mode run.sh's own comment on this block: queried
@@ -917,6 +923,7 @@ case "$dest_type" in
     rclone sync "${BACKUP_DIR:-/var/backups/usim_cms}" "${remote_path}" --config "${conf_dir}/rclone.conf"
     ;;
 esac
+exit "$status"
 EOF
   fi
   chown root:root "$run_script"

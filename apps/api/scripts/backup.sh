@@ -39,10 +39,14 @@ dump_tenant() {
   if pg_dump -Fc "$url" -f "$out"; then
     echo "Backed up $host -> $out"
   else
-    echo "FAILED to back up $host (database not yet provisioned, or unreachable) — skipped" >&2
+    echo "FAILED to back up $host (database not yet provisioned, or unreachable)" >&2
     rm -f "$out"
+    FAILED=1
   fi
 }
+
+# Any failure still backs up everything else, then exits 1 and skips pruning.
+FAILED=0
 
 # host<TAB>db_url rows for the requested tenants (or every active one) — db_url is empty
 # string, not null, when unset (coalesce), so dump_tenant's [ -z ] check works directly.
@@ -60,8 +64,21 @@ fetch_tenant_rows() {
 
 if [ "$#" -eq 0 ]; then
   OUT="$BACKUP_DIR/usim_cms_control_$TIMESTAMP.dump"
-  pg_dump -Fc "$DATABASE_URL" -f "$OUT"
-  echo "Backed up control plane -> $OUT"
+  if pg_dump -Fc "$DATABASE_URL" -f "$OUT"; then
+    echo "Backed up control plane -> $OUT"
+  else
+    echo "FAILED to back up the control plane" >&2
+    rm -f "$OUT"
+    FAILED=1
+  fi
+fi
+
+# Read into a variable first: a psql failure inside `< <(...)` was invisible,
+# so an unreachable control plane meant zero tenant dumps and exit 0.
+if ! ROWS="$(fetch_tenant_rows "$@")"; then
+  echo "FAILED to list tenants from the control plane — no tenant was backed up" >&2
+  ROWS=""
+  FAILED=1
 fi
 
 FOUND_HOSTS=()
@@ -69,12 +86,20 @@ while IFS=$'\t' read -r host db_url; do
   [ -n "$host" ] || continue
   FOUND_HOSTS+=("$host")
   dump_tenant "$host" "$db_url"
-done < <(fetch_tenant_rows "$@")
+done <<< "$ROWS"
 
 if [ "$#" -gt 0 ]; then
   for requested in "$@"; do
-    printf '%s\n' "${FOUND_HOSTS[@]}" | grep -qxF "$requested" || echo "Unknown or inactive tenant host: $requested" >&2
+    if ! printf '%s\n' "${FOUND_HOSTS[@]}" | grep -qxF "$requested"; then
+      echo "Unknown or inactive tenant host: $requested" >&2
+      FAILED=1
+    fi
   done
 fi
 
+# Pruning after a failed run could delete the last good copies.
+if [ "$FAILED" -ne 0 ]; then
+  echo "Backup incomplete — kept dumps older than ${RETENTION_DAYS} days" >&2
+  exit 1
+fi
 find "$BACKUP_DIR" -name "usim_cms_*.dump" -mtime +"$RETENTION_DAYS" -delete
