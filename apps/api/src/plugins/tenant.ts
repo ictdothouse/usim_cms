@@ -25,8 +25,13 @@ export async function tenantPlugin(app: FastifyInstance) {
     }
     try {
       const { db, release } = await getTenantConnection(tenantHost);
+      let released = false;
       req.db = db;
-      req.releaseTenantConnection = release;
+      req.releaseTenantConnection = () => {
+        if (released) return;
+        released = true;
+        release();
+      };
       // Pooled connection: always reset this before use, since a prior
       // request may have left it "true" (requireTenantAuth sets it, this
       // scope's own hook runs first — see index.ts's public/protected
@@ -47,7 +52,13 @@ export async function tenantPlugin(app: FastifyInstance) {
     }
   });
 
-  // Always release the pool client back, even on error responses.
+  // Release in onSend: it runs once the handler is done, even when the client
+  // already disconnected. onResponse alone only fires on a finished response,
+  // so dropped requests leaked their client and 5 of them hung the tenant.
+  app.addHook("onSend", async (req: FastifyRequest, _reply: FastifyReply, payload: unknown) => {
+    req.releaseTenantConnection?.();
+    return payload;
+  });
   app.addHook("onResponse", async (req: FastifyRequest) => {
     req.releaseTenantConnection?.();
   });
