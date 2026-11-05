@@ -29,8 +29,16 @@ as in the browser:
   worker must listen before the old worker drains, so the monitor socket
   remains available.
 - Shared DB/proxy/pooler configuration changes, a nearly full disk, and a
-  divergent or dirty checkout block the update. Shared infrastructure updates
-  require an HA peer before this console can offer zero downtime.
+  divergent or dirty checkout block the update.
+- Postgres, Redis and Caddy get a patch refresh (Stack & versions > Update). It
+  re-pulls the same major tag, and it is not zero downtime: the operator
+  confirms a brief outage first. Postgres first takes a full dump through
+  `/opt/ucms/backup/backup.sh`, and the refresh stops if the dump is
+  incomplete or the backup cron is out of date. The new container must pass its
+  compose healthcheck within 90 seconds. Otherwise the previous image is
+  re-tagged and recreated. PgBouncer pins an exact tag, so it is bumped with
+  a repo commit instead. Major versions (for example Postgres 16 to 18) are
+  never offered.
 - The new revision's dependency audit must pass at every severity. Docker
   builds run the app test/build gates, `/ready` checks the API and PgBouncer,
   and the idle frontend and admin must serve real HTML before Caddy flips.

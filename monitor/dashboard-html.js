@@ -879,8 +879,8 @@ function stackActions(key, label, testable) {
     html += "<button class=\\"secondary\\" data-action=\\"stack-test\\" data-stack-key=\\"" + key + "\\">Test</button>";
   }
   const safeLabel = label.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  if (["postgres", "redis", "pgbouncer", "caddy"].includes(key)) {
-    html += "<span class=\\"muted\\">Update requires a redundant peer for zero downtime</span>";
+  if (key === "pgbouncer") {
+    html += "<span class=\\"muted\\">Pinned tag: bump it in docker-compose.yml with a repo commit</span>";
   } else {
     html += "<button class=\\"secondary\\" data-action=\\"stack-update\\" data-stack-key=\\"" + key + "\\" data-stack-label=\\"" + safeLabel + "\\">Update</button>";
   }
@@ -998,10 +998,19 @@ async function pollStackMsg(key, label) {
   tick();
 }
 
+// Shared services with no standby: restarting one interrupts every site.
+const STACK_DOWNTIME = {
+  postgres: "Every site loses its database for about 10-30 seconds. A full backup runs first; if it is incomplete, nothing is changed.",
+  redis: "Cache and rate-limit counters reset. Sites keep working, a little slower for a moment.",
+  caddy: "Every site is unreachable for a few seconds while the proxy restarts.",
+};
+
 async function stackUpdate(key, label, btn) {
+  const downtime = STACK_DOWNTIME[key];
   if (!confirm(
     "Update " + label + " now?\\n\\nThis pulls the new version, recreates the service, health-checks it, " +
-    "and automatically rolls back to what's running now if it doesn't come up healthy.",
+    "and automatically rolls back to what's running now if it doesn't come up healthy." +
+    (downtime ? "\\n\\nDOWNTIME: " + downtime + "\\nBest run outside office hours." : ""),
   )) return;
   btn.disabled = true;
   const origText = btn.textContent;
@@ -1012,7 +1021,11 @@ async function stackUpdate(key, label, btn) {
     msg.textContent = "starting…";
   }
   try {
-    await api("/api/stack/" + key + "/update", { method: "POST" });
+    await api("/api/stack/" + key + "/update", {
+      method: "POST",
+      body: JSON.stringify({ acceptDowntime: !!downtime }),
+      headers: { "Content-Type": "application/json" },
+    });
     pollDeployLog();
     refresh();
     pollStackMsg(key, label);

@@ -1640,8 +1640,10 @@ function pollHealthThenMaybeRollback(service, imageRef, oldImageId, logLine, don
   const tick = () => {
     getComposeStatus((err, services) => {
       const entry = !err && services ? services.find((s) => s.Service === service) : null;
-      logLine(`health check (${service}): ${entry ? entry.State : "(not found)"}`);
-      if (entry && isServiceUp(entry.State)) {
+      logLine(`health check (${service}): ${entry ? entry.State + (entry.Health ? ` (${entry.Health})` : "") : "(not found)"}`);
+      // "running" comes before the compose healthcheck passes (Postgres is
+      // running long before it accepts connections), so wait for "healthy".
+      if (entry && isServiceUp(entry.State) && (!entry.Health || entry.Health === "healthy")) {
         if (service !== "pgbouncer") return done(true);
         // PgBouncer's own image has no psql. Its TCP listener can be healthy
         // while every server login fails, so probe through it from the db
@@ -1857,13 +1859,62 @@ function handleStackTest(req, res, key) {
 // single-flight gate as "Pull latest & deploy" (handlePull), so it can never
 // race with that or with another stack update.
 function handleStackUpdate(req, res, key) {
-  if (["postgres", "redis", "pgbouncer", "caddy"].includes(key)) {
-    return sendJson(res, 409, { error: "Shared infrastructure cannot be updated without an HA peer while zero downtime is required." });
+  if (key === "pgbouncer") {
+    return sendJson(res, 409, {
+      error: "PgBouncer pins an exact tag in docker-compose.yml. Bump it with a repo commit; editing it on this box would block the next Pull latest & deploy.",
+    });
   }
   if (key === "node") return handleNodeUpdate(req, res);
   if (key === "pnpm") return handlePnpmUpdate(req, res);
   if (key === "deps") return handleDepsUpdate(req, res);
 
+  // Postgres, Redis and Caddy are shared by every site and this box has no
+  // standby, so a refresh means a brief outage. The dashboard asks the
+  // operator to accept that and sends acceptDowntime.
+  readJsonBody(req, res, 1024, (body) => {
+    if (body.acceptDowntime !== true) {
+      return sendJson(res, 400, { error: "This restarts a service every site shares. Confirm the brief downtime first." });
+    }
+    applyStackUpdate(res, key);
+  });
+}
+
+// Postgres gets a full dump first (control plane and every tenant, through the
+// root-owned backup.sh copy the nightly cron runs), and the refresh stops if
+// that dump is incomplete. Redis holds only cache and Caddy only config the
+// repo already has, so they skip it.
+function backupBeforeRefresh(key, imageRef, logLine, cb) {
+  if (key !== "postgres") return cb(true);
+  const cronStatus = getBackupCronStatus();
+  if (!cronStatus.cronExists || cronStatus.needsUpdate) {
+    logLine("pre-update backup: the backup cron isn't installed or is out of date. Apply the backup-cron update first. Nothing was changed.");
+    return cb(false);
+  }
+  execFile("crontab", ["-l"], { timeout: 5_000 }, (_err, cron) => {
+    const setting = (name) => (String(cron || "").match(new RegExp(`^${name}=(.+)$`, "m")) || [])[1]?.trim() || "";
+    const dir = setting("BACKUP_DIR");
+    const backupDir = dir.startsWith("/") ? dir : "/var/backups/usim_cms";
+    const retention = /^\d+$/.test(setting("RETENTION_DAYS")) ? setting("RETENTION_DAYS") : "14";
+    logLine(`--- pre-update backup into ${backupDir} ---`);
+    execFile(
+      "docker",
+      [
+        "run", "--rm", "--network", "ucms-net", "--env-file", "/opt/ucms/backup/backup.env",
+        "-e", "BACKUP_DIR=/backup", "-e", `RETENTION_DAYS=${retention}`,
+        "-v", `${backupDir}:/backup`, "-v", "/opt/ucms/backup/backup.sh:/backup.sh:ro",
+        imageRef, "bash", "/backup.sh",
+      ],
+      { timeout: 30 * 60_000, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        logLine(`${stdout || ""}${stderr || ""}`.trim());
+        if (err) logLine("pre-update backup incomplete. Nothing was changed.");
+        cb(!err);
+      },
+    );
+  });
+}
+
+function applyStackUpdate(res, key) {
   if (DEPLOY_MODE !== "docker") {
     return sendJson(res, 501, { error: "stack version updates need docker mode — this box runs systemd mode" });
   }
@@ -1880,29 +1931,45 @@ function handleStackUpdate(req, res, key) {
       const logLine = (s) => fs.appendFileSync(DEPLOY_LOG, s + "\n");
       logLine(`\n\n=== ${key} patch refresh started ${deployState.startedAt} ===`);
       sendJson(res, 202, { ok: true, started: true });
+      const done = (code) => finishStackDeploy(`${key} patch refresh`, logFd, code);
 
       runCompose(["ps", "-q", service], (psErr, psOut) => {
         const cid = (psOut || "").trim().split("\n")[0];
         execFile("docker", ["inspect", "--format", "{{.Image}}", cid], { timeout: 10_000 }, (inspectErr, oldImageId) => {
           const oldImage = inspectErr ? null : oldImageId.trim();
-          logLine(`previous image id: ${oldImage || "(unknown)"}`);
+          if (!oldImage) {
+            logLine(`couldn't read ${service}'s current image, so there'd be nothing to roll back to. Nothing was changed.`);
+            return done(1);
+          }
+          logLine(`previous image id: ${oldImage}`);
           logLine(`--- pulling ${imageRef} ---`);
           runCompose(["pull", service], (pullErr, pullOut, pullErrText) => {
             logLine(pullOut || pullErrText || "");
             if (pullErr) {
               logLine(`pull failed: ${pullErr.message}`);
-              return finishStackDeploy(`${key} patch refresh`, logFd, 1);
+              return done(1);
             }
-            logLine(`--- recreating ${service} ---`);
-            runCompose(["up", "-d", service], (upErr, upOut, upErrText) => {
-              logLine(upOut || upErrText || "");
-              if (upErr) {
-                logLine(`recreate failed: ${upErr.message}`);
-                return finishStackDeploy(`${key} patch refresh`, logFd, 1);
+            execFile("docker", ["image", "inspect", "--format", "{{.Id}}", imageRef], { timeout: 10_000 }, (_e, newImageId) => {
+              if (String(newImageId || "").trim() === oldImage) {
+                logLine(`${imageRef} is already the newest patch. Nothing restarted.`);
+                return done(0);
               }
-              pollHealthThenMaybeRollback(service, imageRef, oldImage, logLine, (ok) =>
-                finishStackDeploy(`${key} patch refresh`, logFd, ok ? 0 : 1),
-              );
+              backupBeforeRefresh(key, imageRef, logLine, (backedUp) => {
+                // The pull moved the tag; point it back so no later restart picks up the new image unchecked.
+                if (!backedUp) return execFile("docker", ["tag", oldImage, imageRef], { timeout: 10_000 }, () => done(1));
+                logLine(`--- recreating ${service} ---`);
+                // 60s instead of compose's 10s, so Postgres can finish a clean shutdown.
+                runCompose(["up", "-d", "-t", "60", service], (upErr, upOut, upErrText) => {
+                  logLine(upOut || upErrText || "");
+                  if (!upErr) {
+                    return pollHealthThenMaybeRollback(service, imageRef, oldImage, logLine, (ok) => done(ok ? 0 : 1));
+                  }
+                  logLine(`recreate failed: ${upErr.message}. Rolling back to ${oldImage}`);
+                  execFile("docker", ["tag", oldImage, imageRef], { timeout: 10_000 }, () =>
+                    runCompose(["up", "-d", "--force-recreate", service], () => done(1)),
+                  );
+                });
+              });
             });
           });
         });
