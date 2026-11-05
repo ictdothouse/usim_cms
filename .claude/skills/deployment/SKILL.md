@@ -437,6 +437,21 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   `NODE_BIN`, points `ExecStart` at the private Node, and restarts `ucms-monitor`. The app
   containers' Node is separate: `FROM node:NN-alpine` in the 3 Dockerfiles, which the monitor's
   Node card "Update" bumps.
+- **backup.sh failures are no longer silent** (2026-11-05, BACKUP_CRON_VERSION 2):
+  - A failed control-plane dump, tenant dump or tenant listing, or an unknown requested host,
+    now makes it exit 1 after backing up everything else.
+  - A failed run never prunes old dumps.
+  - Both generated `run.sh` variants still run the media backup and the off-site push, then
+    exit with that status.
+- **Infra patch refresh from the monitor** (2026-11-05): Postgres, Redis and Caddy have an
+  Update button again, with the outage confirmed in the dialog (`acceptDowntime` in the POST).
+  - **Order:** read the old image id (abort if unknown), `compose pull`, stop with no restart if
+    the image id didn't change, run the Postgres pre-dump, `up -d -t 60`, then wait for the compose
+    healthcheck to report `healthy` (a "running" state alone no longer counts).
+  - **Rollback:** re-tag the previous image and recreate.
+  - **Postgres pre-dump:** it runs the root-owned backup.sh copy and needs an up-to-date
+    backup cron.
+  - **PgBouncer** stays commit-only because its tag is pinned in docker-compose.yml.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
