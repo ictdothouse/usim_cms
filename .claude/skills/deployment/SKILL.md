@@ -425,6 +425,18 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   values the reapply just wrote without a restart. The re-run itself only ever happens on that
   explicit click — there's no polling/auto-apply, only a (free, file-read-only) drift check on
   dashboard load.
+- **Host Node for the monitor** (2026-11-05): `ensure_private_node` pins `/opt/ucms/node` at
+  first install and nothing bumps it later, so a box keeps that LTS past end of life. Also,
+  `scripts/monitor-enable-rolling.sh` used `command -v node` when `/etc/ucms-monitor.env` had no
+  `NODE_BIN`, and docker installs never write it. So migrated boxes such as the demo VPS ran the
+  monitor on system `/usr/bin/node` (v20, EOL). That script now prefers `/opt/ucms/node`. To
+  upgrade a box, run `sudo bash install.sh --upgrade-node` from the repo directory. It works on
+  docker/production installs only and refuses bare-metal, where the app services run on that
+  Node with native modules. It downloads the current LTS with GPG verification, unpacks it
+  beside the old tree and swaps the two, checks the monitor files with `node --check`, writes
+  `NODE_BIN`, points `ExecStart` at the private Node, and restarts `ucms-monitor`. The app
+  containers' Node is separate: `FROM node:NN-alpine` in the 3 Dockerfiles, which the monitor's
+  Node card "Update" bumps.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
