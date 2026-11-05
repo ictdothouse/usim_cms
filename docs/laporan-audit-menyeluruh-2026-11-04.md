@@ -21,6 +21,8 @@
 | 4 | Pengerasan upload media (allowlist sambungan fail) | restore backup memintas kawalan ini sepenuhnya |
 | 5 | Toggle per-breakpoint untuk hoverEffect/entrance/warna butang | berfungsi dalam canvas admin, tiada kesan pada laman sebenar |
 
+> **Kemas kini 5 Nov — ujian live:** stack sebenar (Postgres + API + admin + frontend + Playwright) menemui **2 bug KRITIKAL** yang terlepas oleh analisis statik: pemasangan baharu rosak sepenuhnya sejak 17 Sep, dan kebocoran sambungan DB yang menggantung laman tenant. Kedua-duanya sudah dibaiki dan disahkan secara lokal — lihat **§8**.
+
 ### Skor (penilaian, bukan metrik automatik)
 
 | Bidang | Skor | Sebab ringkas |
@@ -46,8 +48,8 @@
 | Ujian monitor + scripts | ✅ **6/6 lulus** | dashboard, security, monitor-access-caddy |
 | `pnpm lint` | ❌ Gagal | **41 error dalam fail ter-commit** (lihat §3.1). 620 error lagi datang dari folder worktree lokal (`.worktrees/`, `.claude/worktrees/`) yang di-gitignore — tak dilihat CI tetapi merosakkan `pnpm lint` di mesin ini |
 | `pnpm format:check` | ❌ 498 fail tak ikut Prettier | Tidak dikuatkuasa dalam CI — kosmetik |
-| E2E Playwright | ⚠️ Tidak dijalankan | Docker Desktop tidak berjalan; tak boleh dihidupkan tanpa interaksi. CI ada job e2e. |
-| `pnpm audit` | ⚠️ Tidak dijalankan | Perlu rangkaian |
+| E2E Playwright | ✅ **5/5 lulus** (5 Nov) | Hanya selepas pembaikan §8.1–8.3. Sebelum itu: 0 test Designer boleh lulus pada DB baharu |
+| `pnpm audit` | ❌ 2 moderate (5 Nov) | Lihat §8.7 — langkah pertama CI turut gagal kerana ini |
 | Status run GitHub Actions | ⚠️ Tidak disemak | Perlu rangkaian. Kegagalan lint di §3.1 adalah deterministik (lockfile sama), tetapi sahkan di GitHub. |
 
 ---
@@ -212,8 +214,8 @@ Setiap item di bawah dikesan dari titik tulis hingga titik baca/penguatkuasaan d
 
 ## 5. Apa yang TIDAK dapat disahkan malam ini
 
-- **Stack hidup + e2e:** Docker Desktop tidak berjalan dan tak boleh dihidupkan tanpa interaksi. Tiada boot API/frontend sebenar. CI ada job e2e (2 smoke spec) — semak status di GitHub.
-- **`pnpm audit`** dan **sejarah run GitHub Actions** — perlu rangkaian.
+- ~~Stack hidup + e2e~~ — **siap 5 Nov**, lihat §8.
+- **Sejarah run GitHub Actions** — tidak disemak (gh hanya dalam WSL). Berdasarkan §3.1, §8.3 dan §8.7, kedua-dua job CI dijangka merah; sahkan di GitHub.
 - **VPS demo / production** — tidak disentuh.
 - Round-trip setiap medan untuk ~40 body PATCH (hanya kewujudan route + method disemak; login/session disemak mendalam).
 - Override per-bahasa × per-breakpoint, preset header/footer sticky/transparent (tidak dibuka).
@@ -240,10 +242,73 @@ Setiap item di bawah dikesan dari titik tulis hingga titik baca/penguatkuasaan d
 
 | Urutan | Kerja | Anggaran |
 |---|---|---|
-| 1 | §3.1 — baiki lint, CI hijau semula | ~30 min |
+| 0 | §8.1 + §8.2 + §8.3 — commit & deploy pembaikan yang sudah siap lokal | ~10 min |
+| 1 | §3.1 + §8.7 — baiki lint dan `pnpm audit`, CI hijau semula | ~30 min |
 | 2 | §3.2 — exit code `backup.sh` + alert kesegaran backup dalam monitor | ~1-2 jam |
 | 3 | §3.3 + §3.4 — lengkapkan jadual backup, allowlist sambungan semasa restore, ujian round-trip | ~2-3 jam |
 | 4 | §3.5 — sembunyikan BpToggle untuk 3 field placebo | ~20 min |
 | 5 | §3.6 — gate `images.yml` pada CI, ujian frontend dalam Dockerfile, job ujian GitLab | ~1 jam |
 | 6 | §3.7 + §3.8 — kemas kini dokumen, teks bantuan Custom HTML | ~30 min |
 | 7 | P3 mengikut kelapangan | — |
+
+---
+
+## 8. Ujian live (5 November 2026)
+
+**Persekitaran:** Postgres 16 pakai-buang (Docker), API (`tsx src/index.ts`, env sama seperti job e2e CI), admin (Vite dev), frontend (build production `server.mjs`), Playwright 1.64 + Chromium, Node 25.8 (lihat §8.6). Stack lain yang sedang berjalan pada mesin ini tidak disentuh.
+
+**Keputusan akhir (selepas pembaikan):**
+- e2e **5/5 lulus**, 3 larian, termasuk satu pada DB yang benar-benar baharu (persis CI).
+- API unit 72/72, typecheck dan build lulus.
+
+### 8.1 KRITIKAL — pemasangan baharu rosak sepenuhnya sejak 17 Sep (diperbaiki, belum commit)
+- `apps/api/src/db/bootstrap-public.sql:175` mencipta index pada `theme_presets` **sebelum** `CREATE TABLE theme_presets` (baris 190).
+- Seluruh skrip dijalankan sebagai satu transaksi tersirat. Pada DB baharu ralat itu membatalkan semuanya: **0 jadual control-plane**, dan `/api/setup` serta login pulang 500 (`relation "public.theme_presets" does not exist`).
+- `ensurePublicSchema` (`tenant-pool/internal.ts:51`) menyimpan promise yang gagal (`??=`), jadi proses API tidak akan cuba lagi sehingga di-restart.
+- Masuk melalui `3732de6` (17 Sep). DB sedia ada tidak terjejas kerana jadualnya sudah wujud.
+- **Kesan:** setiap pemasangan baharu sejak 17 Sep (organisasi pelanggan baharu, VPS baharu) tidak boleh digunakan langsung, dan job e2e CI merah sejak itu.
+- **Pembaikan:** index dipindah ke selepas jadual. Disahkan: DB kosong → 13 jadual; dijalankan dua kali → idempotent.
+
+### 8.2 KRITIKAL — sambungan DB bocor bila klien putus; laman tenant tergantung (diperbaiki, belum commit)
+- `plugins/tenant.ts` hanya melepaskan sambungan dalam hook `onResponse`. Fastify 5 menjalankannya hanya pada event `finish` respons (`fastify/lib/reply.js:1014`). Jika klien putus sebelum respons dihantar, sambungan tidak pernah dilepaskan.
+- Pool tenant `max: 5` (`tenant-pool/connection.ts:102`), tanpa `connectionTimeoutMillis`. Selepas 5 request terputus, **setiap request seterusnya untuk tenant itu tergantung selama-lamanya**. Idle eviction juga tidak membantu kerana sambungan dikira masih "dipinjam".
+- **Repro:**
+  - Sebelum pembaikan: baseline 117ms. Selepas 6 request diputus, tiada respons dalam 5s. Postgres menunjukkan 5 sesi idle dipegang.
+  - Selepas pembaikan: selepas 30 request diputus, 200 dalam 22ms.
+- **Dunia sebenar:** pelawat menutup tab, rangkaian mudah alih terputus, bot dengan timeout pendek, timeout proksi, reload iframe Live Edit. Ia berlaku per replika, dan restart menyembunyikannya — juga satu DoS yang sangat mudah.
+- **Pembaikan:** lepaskan sekali sahaja dalam `onSend` (berjalan selepas handler siap walaupun soket sudah putus), dengan `onResponse` sebagai sandaran. Tiada ralat double-release dalam log.
+- **Cadangan tambahan:** set `connectionTimeoutMillis` pada pool tenant supaya pool penuh gagal cepat (503) dan tidak tergantung.
+
+### 8.3 HIGH — job e2e CI memang tidak boleh lulus (diperbaiki)
+1. §8.1 (bootstrap).
+2. Kata laluan fixture `e2e/seed.ts` 13 aksara; polisi kini minimum 15 (`db/auth.ts:171`).
+3. Fallback login dalam fixture tidak tahu tentang MFA. Login kata laluan superadmin **sentiasa** memerlukan TOTP (`routes/auth.ts:183`), jadi panggilan seed kedua gagal. Fixture kini menjawab cabaran TOTP dan berkongsi satu sesi bagi setiap worker.
+4. Race dalam ujian Live Edit: ujian membaca `data-live-active` sekali sahaja serta-merta selepas drop, sedangkan iframe bertukar slot ~1s kemudian. Diagnostik membuktikan produk betul — iframe buffer aktif dan memaparkan heading dari t+1s.
+
+Bersama §3.1, **kedua-dua job CI tidak memberi isyarat bermakna** — gate placebo.
+
+### 8.4 MEDIUM — kod TOTP boleh diguna semula (tiada perlindungan replay)
+- Tiada rekod langkah masa terakhir yang diterima (grep: tiada).
+- Kod yang dicuri (phishing proxy, intai bahu) bersama kata laluan sah berulang kali dalam tetingkap ±1 langkah (~90s). ASVS 2.8.4 mahu OTP sekali guna.
+- **Baiki:** simpan counter terakhir yang diterima bagi setiap pengguna, dan tolak kod yang ≤ counter itu.
+
+### 8.5 MEDIUM — dokumen kata superadmin dikecualikan daripada MFA wajib; code sentiasa memaksanya
+- `apps/api/CLAUDE.md` (perenggan Mandatory MFA) bercanggah dengan `routes/auth.ts:183` dan `db/auth.ts:60-61`.
+- Code adalah tingkah laku yang lebih ketat dan selamat. Dokumen yang lapuk inilah yang mengelirukan fixture e2e. Kemas kini dokumen.
+
+### 8.6 MEDIUM — versi Node tidak sepadan selepas bump dependency dari VPS
+- `c03faf7` (dari monitor VPS, 27 Okt) menaikkan Astro 7.4.0 → 7.4.2, yang memerlukan **Node ≥22.23.4**.
+- Kedudukan semasa:
+  - `engines` root masih `"22.x"`.
+  - Image Docker guna `node:24-alpine` (OK).
+  - CI guna Node 22 terkini (OK).
+  - Dev lokal Node 22.22.3: `astro build`/`astro check` gagal ("Node.js v22.22.3 is not supported by Astro").
+- **Baiki:** tetapkan `engines` kepada minimum sebenar (atau naik ke 24 supaya sama dengan Docker), dan biar kemas kini dependency dalam monitor menyemak `engines` sebelum bump.
+
+### 8.7 LOW — `pnpm audit`: 2 advisory moderate
+- Salah satunya `glob` ≤14.0.1 melalui `@fastify/static` (GHSA-3g3m-2fjr-6pw4). Tidak boleh dieksploit dalam penggunaan kita (root statik tetap).
+- Tetapi langkah pertama CI ialah `pnpm audit`, yang gagal pada sebarang advisory — satu lagi sebab CI merah.
+- **Baiki:** naikkan `@fastify/static` apabila ada versi yang patched, atau `pnpm.overrides` `glob` ≥14.0.2.
+
+### Kesan pada skor
+Dengan §8.1 dan §8.2, keadaan **sebelum** pembaikan ialah ~6.5/10: ketersediaan dan pemasangan baharu kedua-duanya kritikal. Selepas pembaikan dideploy, kembali ~7.5/10.
