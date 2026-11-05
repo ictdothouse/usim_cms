@@ -139,13 +139,11 @@ test("Designer: Live Edit drag-to-add creates a new section with the dropped ele
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
   await page.mouse.up();
 
-  // The drop triggers mutate() -> autosave -> Live Edit reload, which swaps
-  // the double-buffered iframe pair — the content that was visible before
-  // the drop (slot A, "live-view") is NOT necessarily the one showing it
-  // afterward. data-live-active marks whichever slot is actually visible
-  // right now, so the assertion follows the swap instead of assuming slot A.
-  const activeFrame = page.locator('iframe[data-live-active="true"]');
-  await expect(activeFrame).toHaveCount(1, { timeout: 10000 });
-  const activeTitle = await activeFrame.getAttribute("title");
-  await expect(page.frameLocator(`iframe[title="${activeTitle}"]`).getByText("Heading", { exact: true })).toBeVisible({ timeout: 10000 });
+  // The drop triggers mutate() -> autosave -> a reload into the hidden buffer
+  // iframe, and data-live-active moves to it about a second later. This
+  // locator re-resolves the active iframe on every retry, so it follows that
+  // swap; reading the attribute once right after the drop pinned the old slot.
+  await expect(
+    page.locator('iframe[data-live-active="true"]').contentFrame().getByText("Heading", { exact: true }),
+  ).toBeVisible({ timeout: 10000 });
 });

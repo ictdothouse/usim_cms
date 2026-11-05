@@ -1,4 +1,8 @@
-import { request as pwRequest } from "@playwright/test";
+import { createHmac } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { request as pwRequest, type APIRequestContext } from "@playwright/test";
 
 // Points at a real running apps/api instance — see playwright.config.ts's
 // own E2E_ADMIN_URL sibling. Not the same port apps/api's real dev
@@ -17,7 +21,7 @@ const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
 // (the x-tenant-host header), never as a real network destination.
 const TENANT_HOST = "e2e-127-0-0-1.sslip.io";
 const ADMIN_EMAIL = "e2e-admin@example.com";
-const ADMIN_PASSWORD = "E2ePassw0rd!1";
+const ADMIN_PASSWORD = "E2ePassw0rd!1-smoke";
 
 
 export interface SeedResult {
@@ -54,43 +58,99 @@ function extractCookieValue(setCookieHeader: string | string[] | undefined): str
  * back to logging in with the same fixed credentials, creating the tenant
  * only if it isn't already there.
  */
+type SessionCreds = { cookieValue: string; csrfToken: string };
+
+// A superadmin password login always demands TOTP (apps/api routes/auth.ts),
+// so the secret handed out at enrollment is kept here for later runs that
+// reuse the same database.
+const TOTP_SECRET_FILE = path.join(os.tmpdir(), `ucms-e2e-totp-${new URL(API_URL).port || "80"}.txt`);
+
+// RFC 6238, 6 digits / 30 s / SHA-1 — the parameters apps/api enrolls with.
+function totpCode(secretBase32: string, now = Date.now()): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const bits = [...secretBase32.replace(/=+$/, "").toUpperCase()]
+    .map((ch) => alphabet.indexOf(ch).toString(2).padStart(5, "0"))
+    .join("");
+  const key = Buffer.from((bits.match(/.{8}/g) ?? []).map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)));
+  const hmac = createHmac("sha1", key).update(counter).digest();
+  const offset = hmac[hmac.length - 1] & 0xf;
+  return String((hmac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+async function exchangeTotp(ctx: APIRequestContext, route: string, pendingToken: string, secret: string): Promise<SessionCreds> {
+  const res = await ctx.post(route, { data: { pendingToken, code: totpCode(secret) } });
+  if (!res.ok()) throw new Error(`seedDesignerPage: ${route} failed (${res.status()}): ${await res.text()}`);
+  return {
+    cookieValue: extractCookieValue(res.headers()["set-cookie"]),
+    csrfToken: ((await res.json()) as { csrfToken: string }).csrfToken,
+  };
+}
+
+async function login(ctx: APIRequestContext): Promise<SessionCreds> {
+  const res = await ctx.post("/api/auth/login", { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+  if (!res.ok()) throw new Error(`seedDesignerPage: login failed (${res.status()}): ${await res.text()}`);
+  const body = (await res.json()) as {
+    csrfToken?: string;
+    mfaSetupRequired?: boolean;
+    mfaRequired?: boolean;
+    pendingToken?: string;
+    secret?: string;
+  };
+  if (body.mfaSetupRequired && body.pendingToken && body.secret) {
+    writeFileSync(TOTP_SECRET_FILE, body.secret);
+    return exchangeTotp(ctx, "/api/auth/totp-setup-verify", body.pendingToken, body.secret);
+  }
+  if (body.mfaRequired && body.pendingToken) {
+    const secret = existsSync(TOTP_SECRET_FILE) ? readFileSync(TOTP_SECRET_FILE, "utf8").trim() : "";
+    if (!secret) {
+      throw new Error(`seedDesignerPage: the e2e superadmin has TOTP enrolled but ${TOTP_SECRET_FILE} is missing — reset the e2e database`);
+    }
+    return exchangeTotp(ctx, "/api/auth/totp-verify", body.pendingToken, secret);
+  }
+  return { cookieValue: extractCookieValue(res.headers()["set-cookie"]), csrfToken: body.csrfToken ?? "" };
+}
+
+async function establishSession(ctx: APIRequestContext): Promise<SessionCreds> {
+  const setupRes = await ctx.post("/api/setup", {
+    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, host: TENANT_HOST, departmentName: "E2E Test" },
+  });
+  if (setupRes.ok()) {
+    return {
+      cookieValue: extractCookieValue(setupRes.headers()["set-cookie"]),
+      csrfToken: ((await setupRes.json()) as { csrfToken: string }).csrfToken,
+    };
+  }
+
+  const session = await login(ctx);
+  const tenantsRes = await ctx.get("/api/portal/tenants", {
+    headers: { cookie: `ucms_session=${session.cookieValue}` },
+  });
+  const { tenants } = (await tenantsRes.json()) as { tenants: Array<{ host: string }> };
+  if (!tenants.some((t) => t.host === TENANT_HOST)) {
+    const createRes = await ctx.post("/api/portal/tenants", {
+      headers: { cookie: `ucms_session=${session.cookieValue}`, "x-csrf-token": session.csrfToken },
+      data: { host: TENANT_HOST, departmentName: "E2E Test" },
+    });
+    if (!createRes.ok()) {
+      throw new Error(`seedDesignerPage: tenant create failed (${createRes.status()}): ${await createRes.text()}`);
+    }
+  }
+  return session;
+}
+
+// One session per worker, so a run logs in (and answers TOTP) at most once.
+let sessionPromise: Promise<SessionCreds> | undefined;
+
 export async function seedDesignerPage(): Promise<SeedResult> {
   const ctx = await pwRequest.newContext({ baseURL: API_URL });
   try {
-    let cookieValue: string;
-    let csrfToken: string;
-
-    const setupRes = await ctx.post("/api/setup", {
-      data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, host: TENANT_HOST, departmentName: "E2E Test" },
+    sessionPromise ??= establishSession(ctx).catch((error: unknown) => {
+      sessionPromise = undefined;
+      throw error;
     });
-
-    if (setupRes.ok()) {
-      cookieValue = extractCookieValue(setupRes.headers()["set-cookie"]);
-      csrfToken = ((await setupRes.json()) as { csrfToken: string }).csrfToken;
-    } else {
-      const loginRes = await ctx.post("/api/auth/login", {
-        data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-      });
-      if (!loginRes.ok()) {
-        throw new Error(`seedDesignerPage: login failed (${loginRes.status()}): ${await loginRes.text()}`);
-      }
-      cookieValue = extractCookieValue(loginRes.headers()["set-cookie"]);
-      csrfToken = ((await loginRes.json()) as { csrfToken: string }).csrfToken;
-
-      const tenantsRes = await ctx.get("/api/portal/tenants", {
-        headers: { cookie: `ucms_session=${cookieValue}` },
-      });
-      const { tenants } = (await tenantsRes.json()) as { tenants: Array<{ host: string }> };
-      if (!tenants.some((t) => t.host === TENANT_HOST)) {
-        const createRes = await ctx.post("/api/portal/tenants", {
-          headers: { cookie: `ucms_session=${cookieValue}`, "x-csrf-token": csrfToken },
-          data: { host: TENANT_HOST, departmentName: "E2E Test" },
-        });
-        if (!createRes.ok()) {
-          throw new Error(`seedDesignerPage: tenant create failed (${createRes.status()}): ${await createRes.text()}`);
-        }
-      }
-    }
+    const { cookieValue, csrfToken } = await sessionPromise;
 
     const pageRes = await ctx.post("/api/pages", {
       headers: {
