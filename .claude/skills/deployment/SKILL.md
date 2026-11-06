@@ -446,7 +446,7 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
 - **Infra patch refresh from the monitor** (2026-11-05): Postgres, Redis and Caddy have an
   Update button again, with the outage confirmed in the dialog (`acceptDowntime` in the POST).
   - **Order:** read the old image id (abort if unknown), `compose pull`, stop with no restart if
-    the image id didn't change, run the Postgres pre-dump, `up -d -t 60`, then wait for the compose
+    the image id didn't change, run the Postgres pre-dump, `up -d -t 30`, then wait for the compose
     healthcheck to report `healthy` (a "running" state alone no longer counts).
   - **Rollback:** re-tag the previous image and recreate.
   - **Postgres pre-dump:** it runs the root-owned backup.sh copy and needs an up-to-date

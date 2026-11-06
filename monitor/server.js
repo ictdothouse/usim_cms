@@ -1958,8 +1958,9 @@ function applyStackUpdate(res, key) {
                 // The pull moved the tag; point it back so no later restart picks up the new image unchecked.
                 if (!backedUp) return execFile("docker", ["tag", oldImage, imageRef], { timeout: 10_000 }, () => done(1));
                 logLine(`--- recreating ${service} ---`);
-                // 60s instead of compose's 10s, so Postgres can finish a clean shutdown.
-                runCompose(["up", "-d", "-t", "60", service], (upErr, upOut, upErrText) => {
+                // 30s instead of compose's 10s, so Postgres can finish a clean shutdown;
+                // it must leave room inside runCompose's own 60s kill timeout.
+                runCompose(["up", "-d", "-t", "30", service], (upErr, upOut, upErrText) => {
                   logLine(upOut || upErrText || "");
                   if (!upErr) {
                     return pollHealthThenMaybeRollback(service, imageRef, oldImage, logLine, (ok) => done(ok ? 0 : 1));
