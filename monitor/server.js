@@ -1683,6 +1683,7 @@ function pollHealthThenMaybeRollback(service, imageRef, oldImageId, logLine, don
 
 function finishStackDeploy(label, logFd, code) {
   deployState = { ...deployState, running: false, exitCode: code, finishedAt: new Date().toISOString() };
+  saveDeployState();
   fs.appendFileSync(DEPLOY_LOG, `=== ${label} finished, exit ${code} ===\n`);
   fs.closeSync(logFd);
 }
@@ -1926,7 +1927,10 @@ function applyStackUpdate(res, key) {
       const imageRef = stackImageRef(v, key);
       if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
 
-      deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
+      // pid: this worker runs the refresh itself, so reconcileDeployState must
+      // see a live pid or every status poll marks the run "uncertain".
+      deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null, pid: process.pid };
+      saveDeployState();
       const logFd = fs.openSync(DEPLOY_LOG, "a");
       const logLine = (s) => fs.appendFileSync(DEPLOY_LOG, s + "\n");
       logLine(`\n\n=== ${key} patch refresh started ${deployState.startedAt} ===`);
