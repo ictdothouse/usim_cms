@@ -318,8 +318,8 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   like `max`). A request that can't get a client in time (pool exhausted, DB/PgBouncer not
   answering) fails with `TenantDbUnavailableError`, which `plugins/tenant.ts` turns into a 503 with
   `Retry-After: 5` and a warn log. The error carries `statusCode: 503`, so other callers of
-  `getTenantConnection` also get a 503 from Fastify. The control-plane pool still has no connect
-  timeout.
+  `getTenantConnection` also get a 503 from Fastify. The control-plane pool (`internal.ts`) and the
+  provisioner pool use the same 10s connect timeout; their timeout error is a plain 500.
 - This makes tenant DB isolation real (a compromised or buggy query against one tenant's `req.db`
   cannot see another tenant's rows — separate database, not just a `WHERE tenant_host = ...` filter),
   on top of the RLS `app.authenticated` session-variable gate already enforced per connection.
@@ -462,11 +462,14 @@ callouts before assuming any of this is speculative hardening.
   caller never gets a fresh timing oracle either) — 5 failed attempts per email OR per ip within 15
   minutes trips a 429. Old rows are pruned lazily on every write (24h retention), no separate cleanup
   cron. **Only correct because `req.ip` actually resolves the real visitor** — `index.ts`'s `Fastify()`
-  sets `trustProxy` only when `TRUST_PROXY === "true"`. `docker-compose.release.yml` sets it, and
+  sets `trustProxy` from `TRUST_PROXY`: `"true"` trusts every hop, `"loopback"` only 127.0.0.1/::1,
+  anything else nothing. `docker-compose.release.yml` sets `"true"`, and
   that is safe there specifically because the api container publishes no host port (only
   reachable via Caddy/another container on `ucms-net`), so the connecting peer can never be an external
-  attacker forging `X-Forwarded-For`. A bare-metal install behind its own reverse proxy must set it
-  too, or every visitor is `127.0.0.1` and shares one per-IP login budget. The other half is Caddy itself correctly resolving the real client
+  attacker forging `X-Forwarded-For`. `install.sh` sets `"loopback"` for bare-metal (API on
+  127.0.0.1 behind the operator's own proxy): `"true"` would take the left-most entry, which a client
+  controls whenever that proxy appends (nginx's `$proxy_add_x_forwarded_for`), while unset makes every
+  visitor `127.0.0.1` sharing one per-IP login budget. The other half is Caddy itself correctly resolving the real client
   IP in the first place — see `proxy-sync.ts`'s `TRUSTED_PROXY_MODE` (`unset` = safe default for a
   direct-connection deployment with no CDN in front, e.g. a government agency's own policy; `"cloudflare"`
   once Cloudflare is genuinely proxying the domain's DNS, so Caddy trusts `X-Forwarded-For` only from

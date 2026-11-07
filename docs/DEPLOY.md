@@ -117,15 +117,17 @@ VITE_API_URL=https://api.usim.edu.my pnpm --filter @ucms/admin build
   sahaja, menerima token Entra tanpa bukti MFA (`amr`), dan menghantar cookie sesi tanpa `Secure`. Imej
   Docker api, kedua-dua fail compose dan `install.sh` bare-metal sudah menetapkannya; pemasangan manual
   mesti menetapkannya sendiri.
-- **`TRUST_PROXY`.** `TRUST_PROXY=true` membuat Fastify mempercayai `X-Forwarded-For`, jadi `req.ip` (had
-  cubaan log masuk per-IP, log audit) ialah IP pelawat sebenar. Hanya nilai `true` dikenali.
-  - Docker: `docker-compose.release.yml` sudah menetapkannya, kerana API hanya dicapai melalui Caddy dalam
-    rangkaian Docker peribadi.
-  - Bare-metal di belakang nginx/Caddy sendiri: tanpanya setiap request kelihatan dari `127.0.0.1`. 30
-    kegagalan log masuk oleh sesiapa dalam 15 minit akan menyekat log masuk **semua** pengguna.
-  - Tetapkan hanya jika port API terikat pada loopback/rangkaian peribadi (`HOST=127.0.0.1`) **dan** proxy
-    menulis ganti header itu, bukan menambahnya. API mengambil alamat paling kiri, jadi untuk nginx guna
-    `proxy_set_header X-Forwarded-For $remote_addr;`, bukan `$proxy_add_x_forwarded_for`.
+- **`TRUST_PROXY`.** Menentukan siapa boleh menetapkan IP pelawat melalui `X-Forwarded-For`, jadi `req.ip`
+  (had cubaan log masuk per-IP, log audit) ialah IP sebenar. Nilai yang dikenali: `true` dan `loopback`.
+  - Docker: `docker-compose.release.yml` menetapkan `true`, kerana API hanya dicapai melalui Caddy dalam
+    rangkaian Docker peribadi dan Caddy menulis ganti header itu.
+  - Bare-metal: `install.sh` menetapkan `loopback` (kecuali nilai sedia ada). API hanya mempercayai proxy
+    pada `127.0.0.1`/`::1`, jadi IP yang diambil ialah alamat yang dilihat proxy itu, walaupun nginx guna
+    `$proxy_add_x_forwarded_for`. Tanpanya setiap request kelihatan dari `127.0.0.1`, dan 30 kegagalan log
+    masuk oleh sesiapa dalam 15 minit akan menyekat log masuk **semua** pengguna. Pemasangan bare-metal
+    lama perlu tambah `TRUST_PROXY=loopback` dalam `apps/api/.env` dan restart API.
+  - `true` mengambil alamat paling kiri, jadi hanya selamat jika proxy menulis ganti header itu (nginx:
+    `proxy_set_header X-Forwarded-For $remote_addr;`).
   - Jangan tetapkan jika port API boleh dicapai terus (mod trial/local): pelawat boleh memalsukan IP dan
     mengelak had cubaan log masuk.
 - `STORAGE_DRIVER=local`: pastikan folder `apps/api/uploads/` wujud & boleh tulis; ia dihidang pada `/uploads/`.

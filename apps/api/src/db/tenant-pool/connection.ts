@@ -53,7 +53,12 @@ const tenantPools = new Map<string, Pool>();
 // credential. The request-serving role (DATABASE_URL) remains NOCREATEDB.
 // This pool is used only for same-server tenant database provisioning.
 const provisionerPool = process.env.DATABASE_PROVISIONER_URL
-  ? new Pool({ connectionString: process.env.DATABASE_PROVISIONER_URL, max: 2, idleTimeoutMillis: 30_000 })
+  ? new Pool({
+      connectionString: process.env.DATABASE_PROVISIONER_URL,
+      max: 2,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: TENANT_POOL_CONNECT_TIMEOUT_MS,
+    })
   : undefined;
 provisionerPool?.on("error", (err) => {
   console.error("tenant provisioner pool: idle client error", err);

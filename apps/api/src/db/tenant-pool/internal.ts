@@ -21,6 +21,9 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30_000,
+  // Without it a request waited forever for a client when PgBouncer or
+  // Postgres stopped answering. Same 10s as the tenant pools.
+  connectionTimeoutMillis: 10_000,
 });
 export async function checkControlDatabaseConnection(): Promise<void> {
   await pool.query("SELECT 1");

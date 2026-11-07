@@ -2115,6 +2115,11 @@ install_baremetal_mode() {
   # docker-mode .env above.
   set_env_kv apps/api/.env ADMIN_ORIGIN "http://localhost:${admin_port}"
   set_env_kv apps/api/.env HOST "127.0.0.1"
+  # Only the operator's own proxy on this box can reach the API, so trust it
+  # (and nothing else) for the client IP. Without this every login looks like
+  # 127.0.0.1 and 30 failures by anyone lock out every user. An operator's own
+  # value is kept.
+  grep -q '^TRUST_PROXY=' apps/api/.env || set_env_kv apps/api/.env TRUST_PROXY "loopback"
   grep -q '^SESSION_SECRET=' apps/api/.env || echo "SESSION_SECRET=" >> apps/api/.env
   fill_env_if_blank apps/api/.env SESSION_SECRET
   fill_env_if_blank apps/api/.env SETUP_SECRET

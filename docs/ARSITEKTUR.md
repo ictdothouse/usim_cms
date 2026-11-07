@@ -217,7 +217,8 @@ senyap, itu sebab role khas ini wajib.
   berbilang tak kongsi memori): dalam 15 minit, 10 kegagalan bagi pasangan e-mel+IP, 50 bagi satu e-mel
   atau 30 bagi satu IP → **429**, disemak **sebelum** kata laluan dicari (elak *timing oracle* pada akaun
   terkunci). IP datang daripada `req.ip`, jadi API di belakang reverse proxy memerlukan
-  `TRUST_PROXY=true` (lihat `docs/DEPLOY.md`); tanpanya semua pengguna berkongsi IP proxy dan had per-IP.
+  `TRUST_PROXY` (`true` untuk Docker, `loopback` untuk bare-metal; lihat `docs/DEPLOY.md`); tanpanya semua
+  pengguna berkongsi IP proxy dan had per-IP.
 - **Log audit** — `audit_log` merekod pemadaman tenant/pengguna, toggle MFA — jawapan "siapa buat apa"
   peringkat superadmin, bukan change-data-capture penuh.
 - **MFA (TOTP)** — `node:crypto` sahaja, RFC 6238. Login kata laluan **superadmin sentiasa memerlukan

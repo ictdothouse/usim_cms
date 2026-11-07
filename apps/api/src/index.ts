@@ -61,10 +61,17 @@ import {
 const SWITCHER_POSITIONS = ["header", "topbar", "float", "footer"] as const;
 const SWITCHER_STYLES = ["text", "flag", "shortform"] as const;
 
-// Trust forwarded client IP headers only in the private blue-green network
-// behind Caddy. Trial/local mode publishes the API directly, so proxy headers
-// there are attacker-controlled and must not influence rate limits or logs.
-const app = Fastify({ logger: true, trustProxy: process.env.TRUST_PROXY === "true" });
+// Who may set req.ip via X-Forwarded-For (login rate limit, audit log).
+// "true": every hop, for the private blue-green network behind Caddy, which
+// overwrites the header. "loopback": only 127.0.0.1/::1, for bare-metal behind
+// the operator's own proxy on the same box; req.ip is then the address that
+// proxy saw even when it appends to a client-sent header. Unset: nobody, since
+// trial/local mode publishes the API directly and the header is attacker-controlled.
+const trustProxyEnv = process.env.TRUST_PROXY;
+const app = Fastify({
+  logger: true,
+  trustProxy: trustProxyEnv === "true" ? true : trustProxyEnv === "loopback" ? "loopback" : false,
+});
 
 // Without this, one uncaught error anywhere takes down all 50 tenants at
 // once. Log and exit fast instead of continuing in a possibly-corrupt
