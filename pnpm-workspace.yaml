@@ -16,3 +16,9 @@ overrides:
   # (typescript-eslint still pins minimatch ^10). Drop once upstream catches up.
   "glob@>=9 <14.0.2": "^14.0.2"
   "minimatch@>=7 <11.0.1": "^11.0.1"
+  # @rolldown/binding-wasm32-wasi (vite 8.3.6+) pins the emnapi 2.0 betas, and
+  # pnpm then hands that runtime to @astrojs/check next to a 1.x core, so
+  # `astro check` crashes and every in-range dependency update fails its
+  # build gate. Drop once @astrojs/check works on emnapi 2.
+  "@emnapi/core": "^1.11.3"
+  "@emnapi/runtime": "^1.11.3"
