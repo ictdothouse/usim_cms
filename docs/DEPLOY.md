@@ -29,7 +29,12 @@ Fail env: `apps/api/.env` (salin dari `.env.example`).
 |---|---|---|
 | `DATABASE_URL` | ✅ | `postgres://usim_cms_app:<katalaluan>@<host>:5432/usim_cms` — **mesti role `usim_cms_app`**, bukan superuser (RLS jadi no-op bawah superuser) |
 | `DATABASE_PROVISIONER_URL` | ✅ untuk auto-create tenant | URL terus ke PostgreSQL sebagai `usim_cms_provisioner`; jangan halakan melalui PgBouncer. Role ini sahaja yang mempunyai `CREATEDB`. |
-| `SESSION_SECRET` | ✅ | Rentetan rawak panjang, cth. `openssl rand -hex 32`. Tanpa ini token login guna default dev yang tidak selamat |
+| `SESSION_SECRET` | ✅ | Rentetan rawak sekurang-kurangnya 32 bait, cth. `openssl rand -hex 32`. Dengan `NODE_ENV=production` API enggan boot tanpanya; di luar production ia guna default dev yang tidak selamat |
+| `SETUP_SECRET` | ✅ production | Sekurang-kurangnya 32 bait; API enggan boot tanpanya dalam production. Kredensial sekali guna untuk mencipta superadmin pertama; jangan dedahkan kepada pelayar |
+| `ADMIN_ORIGIN` | ✅ production | Origin admin untuk CORS, dipisah koma, cth. `https://admin.usim.edu.my`. API enggan boot tanpanya dalam production |
+| `NODE_ENV` | ✅ production | `production` pada setiap server sebenar. Lihat **Nota production** untuk kesannya pada MFA |
+| `TRUST_PROXY` | ❌ | `true` hanya jika API berada di belakang reverse proxy dan portnya tidak boleh dicapai terus. Lihat **Nota production** |
+| `HOST` | ❌ | Default `0.0.0.0`. Bare-metal guna `127.0.0.1` (seperti `.env.example`) supaya API hanya dicapai melalui proxy |
 | `PORT` | ❌ | Default `3000` |
 | `STORAGE_DRIVER` | ❌ | `local` (default, tulis ke `apps/api/uploads/`) atau `s3` |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_PUBLIC_URL_BASE` | jika `s3` | Mana-mana storan serasi S3 (AWS/MinIO/Sangfor) |
@@ -67,23 +72,21 @@ fail baru. `db:migrate` Drizzle bukan runner migrasi tenant.
 
 ## 2. apps/frontend (Astro SSR, port 4321)
 
-Env dibaca **semasa build** (`import.meta.env` di-inline oleh Vite) — set sebelum `astro build`:
+Env dibaca **semasa runtime** oleh `apps/frontend/server.mjs` (adapter `@astrojs/node` mod
+`middleware`; `server.mjs` memiliki `http.Server` dan menghidang `dist/client`):
 
 | Env | Wajib | Nilai |
 |---|---|---|
 | `API_URL` | ✅ | URL dalaman API, cth. `http://127.0.0.1:3000` (server-side sahaja) |
+| `HOST` | ❌ | Default `0.0.0.0` |
+| `PORT` | ❌ | Default `4321` |
+| `ADMIN_ORIGIN` | ❌ | Origin admin yang dibenarkan membingkai halaman untuk Live Edit; kosong = same-origin sahaja |
+| `REDIS_URL` | ❌ | Cache HTML pilihan, Redis yang sama dengan API |
 | `DEV_TENANT_HOST` | ❌ | Dev sahaja; tiada kesan pada build/production |
 
-Runtime (adapter `@astrojs/node` standalone):
-
-| Env | Nilai |
-|---|---|
-| `HOST` | `0.0.0.0` supaya boleh diakses luar |
-| `PORT` | Default `4321` |
-
 ```bash
-API_URL=http://127.0.0.1:3000 pnpm --filter @ucms/frontend build
-HOST=0.0.0.0 PORT=4321 node apps/frontend/dist/server/entry.mjs
+pnpm --filter @ucms/frontend build
+API_URL=http://127.0.0.1:3000 PORT=4321 pnpm --filter @ucms/frontend start   # node server.mjs
 ```
 
 **Penting:** identiti tenant datang dari header `Host` permintaan. Reverse proxy (nginx/Caddy) mesti
@@ -108,6 +111,23 @@ VITE_API_URL=https://api.usim.edu.my pnpm --filter @ucms/admin build
 
 - Jalankan API + frontend bawah pm2/systemd (API sengaja `process.exit(1)` pada ralat fatal — mesti auto-restart).
 - Tetapkan `ADMIN_ORIGIN` kepada origin admin sebenar dan `NODE_ENV=production`; API memerlukan kedua-duanya untuk konfigurasi production.
+- **MFA bergantung pada `NODE_ENV`.** Login kata laluan superadmin sentiasa memerlukan TOTP. Pengguna lain
+  wajib MFA hanya apabila `NODE_ENV=production` atau suis MFA wajib dalam Settings dihidupkan. Server
+  production yang tidak menetapkan `NODE_ENV=production` membenarkan webmaster log masuk dengan kata laluan
+  sahaja, menerima token Entra tanpa bukti MFA (`amr`), dan menghantar cookie sesi tanpa `Secure`. Imej
+  Docker api, kedua-dua fail compose dan `install.sh` bare-metal sudah menetapkannya; pemasangan manual
+  mesti menetapkannya sendiri.
+- **`TRUST_PROXY`.** `TRUST_PROXY=true` membuat Fastify mempercayai `X-Forwarded-For`, jadi `req.ip` (had
+  cubaan log masuk per-IP, log audit) ialah IP pelawat sebenar. Hanya nilai `true` dikenali.
+  - Docker: `docker-compose.release.yml` sudah menetapkannya, kerana API hanya dicapai melalui Caddy dalam
+    rangkaian Docker peribadi.
+  - Bare-metal di belakang nginx/Caddy sendiri: tanpanya setiap request kelihatan dari `127.0.0.1`. 30
+    kegagalan log masuk oleh sesiapa dalam 15 minit akan menyekat log masuk **semua** pengguna.
+  - Tetapkan hanya jika port API terikat pada loopback/rangkaian peribadi (`HOST=127.0.0.1`) **dan** proxy
+    menulis ganti header itu, bukan menambahnya. API mengambil alamat paling kiri, jadi untuk nginx guna
+    `proxy_set_header X-Forwarded-For $remote_addr;`, bukan `$proxy_add_x_forwarded_for`.
+  - Jangan tetapkan jika port API boleh dicapai terus (mod trial/local): pelawat boleh memalsukan IP dan
+    mengelak had cubaan log masuk.
 - `STORAGE_DRIVER=local`: pastikan folder `apps/api/uploads/` wujud & boleh tulis; ia dihidang pada `/uploads/`.
 
 ## Imej Docker: bina di server atau tarik dari registry
@@ -120,12 +140,14 @@ Amalan terbaik untuk production atau banyak server: bina **sekali** dalam CI, se
 imej. Server tiada beban CPU build dan tiada cache build, dan imej yang lulus ujian ialah imej yang
 dideploy. Ia tidak terikat kepada GitHub atau GitLab; mana-mana CI dan registry OCI boleh digunakan.
 
-1. CI membina dan menolak imej, ditag dengan commit:
+1. CI membina dan menolak imej, ditag dengan commit, hanya selepas semakan CI lulus:
    - **GitHub**: tetapkan repository variable `UCMS_PUBLISH_IMAGES=true` (Settings > Secrets and
-     variables > Actions > Variables). `.github/workflows/images.yml` menolak ke
-     `ghcr.io/<owner>/<repo>`.
-   - **GitLab**: tetapkan CI/CD variable `UCMS_PUBLISH_IMAGES=true`. `.gitlab-ci.yml` menolak ke
-     registry projek (`$CI_REGISTRY_IMAGE`); perlukan runner Docker-in-Docker.
+     variables > Actions > Variables). Job `publish` dalam `.github/workflows/ci.yml` menolak ke
+     `ghcr.io/<owner>/<repo>` selepas job `build` dan `e2e` lulus.
+   - **GitLab**: tetapkan CI/CD variable `UCMS_PUBLISH_IMAGES=true`. Job `publish-images` dalam
+     `.gitlab-ci.yml` menolak ke registry projek (`$CI_REGISTRY_IMAGE`) selepas job `test` lulus
+     (audit, lint, typecheck, build, ujian unit; tiada E2E); perlukan runner Docker-in-Docker. Job
+     `test` berjalan pada setiap push, jadi projek perlukan runner walaupun penerbitan imej dimatikan.
    - **CI atau mesin build lain** (Jenkins, Bitbucket, Azure DevOps, pelayan build): jalankan
      `docker login <registry>`, kemudian
      `UCMS_IMAGE_REPO=<registry>/<path> bash scripts/build-images.sh --push`.
@@ -156,7 +178,8 @@ diterbitkan, bukan setiap commit di `main`.
 2. `git tag v1.2.3 && git push origin v1.2.3`, atau cipta Release di GitHub/GitLab dengan tag
    baharu. Guna format `vMAJOR.MINOR.PATCH`; tag pra-keluaran seperti `v1.3.0-rc1` tidak
    ditawarkan kepada server organisasi.
-3. CI membina dan menolak imej bertag `v1.2.3`. Monitor setiap server organisasi akan memaparkan
+3. CI menjalankan semula semakan penuh pada tag itu, kemudian membina dan menolak imej bertag
+   `v1.2.3`. Jika semakan gagal, tiada imej diterbitkan untuk tag itu. Monitor setiap server organisasi akan memaparkan
    **"Release v1.2.3 available"**, dan pentadbir mereka klik **Pull latest & deploy**.
 
 Jika release mengubah `scripts/deploy.sh`, supervisor monitor atau konfigurasi base tier
