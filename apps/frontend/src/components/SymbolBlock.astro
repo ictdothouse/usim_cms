@@ -33,6 +33,8 @@ import {
   SPACE,
   elHoverClass,
   elEntranceClass,
+  elEffectBpStyle,
+  elVariantBpStyle,
   renderInline,
 } from "../lib/element-render";
 import { flexWrapFor } from "@ucms/element-render";
@@ -58,9 +60,12 @@ const { symbolId, tenantHost, box, elId } = Astro.props;
 const symbol = symbolId ? await getSymbol(tenantHost, symbolId) : null;
 const node = symbol?.node as El | undefined;
 
-// Heading/text's own real per-breakpoint typography override — same
-// bpStyleRules mechanism SectionBlock.astro/ContainerBlock.astro use for
-// theirs (duplicated here rather than shared, this codebase's established
+// Real per-breakpoint overrides for a symbol's nodes — same bpStyleRules
+// mechanism SectionBlock.astro/ContainerBlock.astro use for theirs, and the
+// same fields ElementBlock.astro covers: each rule's build restates the
+// node's own inline style list (heading/text: align/margin/padding/
+// typography/border/shadow, text size), plus hover/entrance, button/badge
+// variant + color, badge scale, icon size/color, container flex box (duplicated here rather than shared, this codebase's established
 // convention). Nodes here have no dotted path of their own (a symbol's
 // resolved tree isn't individually selectable — see this file's own top
 // comment), so each node needing one gets a small counter-based id instead,
@@ -105,10 +110,17 @@ const renderNode = (el: El, nested = false): unknown => {
       const Tag = headingTag(p.level) as "h1";
       const hasTypoBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasTypoBp ? `${elId}-sym${visIdCounter++}` : undefined;
-      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-h`, el.bp!, p, typoStyle));
+      if (visId)
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-h`, el.bp!, p, (mp) =>
+            [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp), typoStyle(mp), elBorderShadowStyle(mp), elEffectBpStyle(mp, p, el.bp)]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
       const headingNode = (
         <Tag
-          class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
           style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
             .filter(Boolean)
             .join(";")}
@@ -126,10 +138,25 @@ const renderNode = (el: El, nested = false): unknown => {
     case "text": {
       const hasTypoBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasTypoBp ? `${elId}-sym${visIdCounter++}` : undefined;
-      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"] .ds-text`, el.bp!, p, typoStyle));
+      if (visId)
+        responsiveRules.push(
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-text`, el.bp!, p, (mp) =>
+            [
+              `font-size:${fluidTextSize(lengthValue(mp.size, TEXT_SIZE, TEXT_SIZE.md))}`,
+              mp.align ? `text-align:${mp.align}` : null,
+              marginStyle(mp),
+              paddingStyle(mp),
+              typoStyle(mp),
+              elBorderShadowStyle(mp),
+              elEffectBpStyle(mp, p, el.bp),
+            ]
+              .filter(Boolean)
+              .join(";"),
+          ),
+        );
       const textNode = (
         <p
-          class={cls("ds-text", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          class={cls("ds-text", p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
           style={[
             `font-size:${fluidTextSize(lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md))}`,
             p.align ? `text-align:${p.align}` : null,
@@ -160,7 +187,7 @@ const renderNode = (el: El, nested = false): unknown => {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => marginStyle(mp) ?? ""),
           ...bpStyleRules(`[data-vis="${visId}"] img`, el.bp!, p, (mp) =>
-            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp)]
+            [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp), elEffectBpStyle(mp, p, el.bp)]
               .filter(Boolean)
               .join(";"),
           ),
@@ -169,7 +196,7 @@ const renderNode = (el: El, nested = false): unknown => {
       const href = safeUrl(p.href);
       const img = (
         <img
-          class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          class={cls("ds-img", p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
           src={src}
           alt={p.alt ?? ""}
           loading="lazy"
@@ -189,13 +216,15 @@ const renderNode = (el: El, nested = false): unknown => {
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
-          ...bpStyleRules(`[data-vis="${visId}"] .ds-btn`, el.bp!, p, (mp) => elBorderShadowStyle(mp) ?? ""),
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-btn`, el.bp!, p, (mp) =>
+            [elVariantBpStyle("button", mp, el.bp), mp.color ? `color:${mp.color}` : null, elBorderShadowStyle(mp), elEffectBpStyle(mp, p, el.bp)].filter(Boolean).join(";"),
+          ),
         );
       }
       return p.label ? (
         <div data-vis={visId} style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>
           <a
-            class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+            class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
             href={safeUrl(p.href) ?? "#"}
             style={[p.color ? `color:${p.color}` : null, elBorderShadowStyle(p)].filter(Boolean).join(";") || undefined}
           >
@@ -206,12 +235,15 @@ const renderNode = (el: El, nested = false): unknown => {
     }
     case "badge": {
       const iconPath = p.name ? ICON_PATHS[p.name] : undefined;
-      const iconSize = { sm: "14", md: "16", lg: "20" }[p.scale ?? "md"] ?? "16";
+      const badgeIconPx = (scale?: string) => ({ sm: "14", md: "16", lg: "20" })[scale ?? "md"] ?? "16";
+      const iconSize = badgeIconPx(p.scale);
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-badge`, el.bp!, p, (mp) => [elVariantBpStyle("badge", mp, el.bp), mp.color ? `color:${mp.color}` : null].filter(Boolean).join(";")),
+          ...bpStyleRules(`[data-vis="${visId}"] .ds-badge svg`, el.bp!, p, (mp) => `width:${badgeIconPx(mp.scale)}px;height:${badgeIconPx(mp.scale)}px`),
         );
       }
       return (
@@ -243,12 +275,17 @@ const renderNode = (el: El, nested = false): unknown => {
     }
     case "icon": {
       const iconPath = ICON_PATHS[p.name ?? "check"] ?? ICON_PATHS.check;
-      const iconSize = lengthValue(p.size, { sm: "1rem", md: "1.5rem", lg: "2rem" }, "1.5rem");
+      const iconSizeOf = (size?: string) => lengthValue(size, { sm: "1rem", md: "1.5rem", lg: "2rem" }, "1.5rem");
+      const iconSize = iconSizeOf(p.size);
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
       if (visId) {
         responsiveRules.push(
           ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+          // CSS stroke beats the svg's stroke="" attribute.
+          ...bpStyleRules(`[data-vis="${visId}"] > svg`, el.bp!, p, (mp) =>
+            [`width:${iconSizeOf(mp.size)};height:${iconSizeOf(mp.size)}`, mp.color ? `stroke:${mp.color}` : null].filter(Boolean).join(";"),
+          ),
         );
       }
       return (
@@ -263,31 +300,30 @@ const renderNode = (el: El, nested = false): unknown => {
       const children = el.children ?? [];
       const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
       const visId = hasBp ? `${elId}-sym${visIdCounter++}` : undefined;
-      if (visId) {
-        responsiveRules.push(
-          ...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, (mp) => [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";")),
-        );
-      }
+      // One list for the inline base and the per-breakpoint rule.
+      const boxCss = (mp: typeof p) =>
+        [
+          "display:flex",
+          `flex-direction:${mp.flexDirection || "row"}`,
+          `justify-content:${mp.justifyContent || "flex-start"}`,
+          `align-items:${mp.alignItems || "stretch"}`,
+          `flex-wrap:${flexWrapFor(mp.flexDirection, mp.flexWrap)}`,
+          `gap:${mp.gap || "1rem"}`,
+          // A nested "N Columns" column's width share — see ContainerBlock.astro's boxStyle.
+          nested && mp.grow ? `flex:${mp.grow} 1 0%;min-width:min(15rem,100%)` : null,
+          mp.bg ? `background:${mp.bg}` : null,
+          `border-radius:${elRadius(mp)}`,
+          marginStyle(mp),
+          paddingStyle(mp),
+          elBorderShadowStyle(mp),
+        ]
+          .filter(Boolean)
+          .join(";");
+      if (visId) responsiveRules.push(...bpStyleRules(`[data-vis="${visId}"]`, el.bp!, p, boxCss));
       return (
         <div
           data-vis={visId}
-          style={[
-            "display:flex",
-            `flex-direction:${p.flexDirection || "row"}`,
-            `justify-content:${p.justifyContent || "flex-start"}`,
-            `align-items:${p.alignItems || "stretch"}`,
-            `flex-wrap:${flexWrapFor(p.flexDirection, p.flexWrap)}`,
-            `gap:${p.gap || "1rem"}`,
-            // A nested "N Columns" column's width share — see ContainerBlock.astro's boxStyle.
-            nested && p.grow ? `flex:${p.grow} 1 0%;min-width:min(15rem,100%)` : null,
-            p.bg ? `background:${p.bg}` : null,
-            `border-radius:${elRadius(p)}`,
-            marginStyle(p),
-            paddingStyle(p),
-            elBorderShadowStyle(p),
-          ]
-            .filter(Boolean)
-            .join(";")}
+          style={boxCss(p)}
         >
           {children.map((child) => renderNode(child, true))}
         </div>

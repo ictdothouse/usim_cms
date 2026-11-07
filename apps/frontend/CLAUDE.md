@@ -33,7 +33,8 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   strict-origin-when-cross-origin` on every response, plus a real `Content-Security-Policy` (added
   2026-09-11 — `apps/api`'s own `@fastify/helmet` deliberately sets `contentSecurityPolicy: false` and
   says this file is the real CSP surface, but no CSP existed here until now). Both are defense-in-depth
-  around the Custom HTML element's documented raw-HTML trust boundary, not a substitute for it —
+  behind the Custom HTML element's render-time sanitizer (`lib/sanitize-custom-html.ts`: static markup
+  only, no script/style/iframe/`style=""`), not a substitute for it —
   `style-src` keeps `'unsafe-inline'` (Designer's inline `style=""` everywhere); `script-src` is
   `'self' 'nonce-…'` (per-response nonce, `x-ucms-csp-nonce` → `cspNonce`; the HTML cache stores a
   placeholder that middleware.ts swaps). So: every `is:inline` script needs `nonce={cspNonce}`; no inline
@@ -43,7 +44,7 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   `<script type="module">` carries no nonce (tabs/announcement/map consent/menu were blocked in prod).
   Beyond that, blocks an injected `<script src="https://attacker.example/...">` (no external host in
   `script-src`) and exfiltration via `fetch`/`XHR` to a third-party server (`connect-src 'self'`). `img-src`/`frame-src` stay open to
-  any `https:` host since a webmaster can point an image/bgImage/Custom-HTML iframe at any external URL
+  any `https:` host since a webmaster can point an image/bgImage/Embed-element iframe at any external URL
   by design; `style-src`/`font-src` allow exactly `fonts.googleapis.com`/`fonts.gstatic.com`
   (`BaseLayout.astro`'s Google Fonts `<link>`), nothing broader. `frame-ancestors` (clickjacking
   protection) is only appended to the same header once `ADMIN_ORIGIN` is set on this container (wired
@@ -126,3 +127,22 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   - z-index 50 sits above any element's own (0-10).
   - `chrome-preview.astro` puts a transparent header over a stand-in dark hero, and adds 150vh
     of scroll room under a sticky one.
+- **Per-breakpoint hover/entrance/color (2026-11-06)**: an element's tablet/mobile
+  `hoverEffect`/`entrance` and button/badge/icon `color` are real now, through the
+  same per-file `bpStyleRules` as margin/padding (ElementBlock, SymbolBlock,
+  SliderBlock). `global.css`'s `.ds-hover`/`.ds-entrance` hold the mechanics and
+  `.ds-hover-<name>`/`.ds-entrance-<name>` only values (`--ds-hover-tf`/`-sh`,
+  `animation-name`), so a tier rule just re-sets those (`elEffectBpStyle`, lib/
+  element-render.ts). Pass `el.bp` to `elHoverClass`/`elEntranceClass` in any new
+  render path, or a tablet/mobile-only effect has no generic class to act on.
+  Same round: button/badge `variant` + badge `scale` (`elVariantBpStyle`,
+  first in the rule so the author's color/border win), icon size, embed
+  ratio, gallery/slider radius, the container's whole box (ContainerBlock had
+  no bp rule for a top-level container), SymbolBlock heading/text's full rule.
+  The admin only offers a BpToggle for fields in `BP_FIELDS`
+  (apps/admin/src/designer/elements.ts): when a render file starts reading a
+  new key per tier, add it there too. Details in apps/admin/CLAUDE.md.
+- **Custom HTML allowlist is shared (2026-11-06)**: `sanitize-custom-html.ts` reads
+  its tags/attributes/schemes from `@ucms/element-style`, where the Designer's
+  `customHtmlRemovals` hint reads them too. Change the lists there, not here; the
+  sanitizer test checks the hint against the real output.

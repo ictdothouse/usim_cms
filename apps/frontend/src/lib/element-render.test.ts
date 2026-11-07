@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   fluidTextSize,
   hexToRgba,
@@ -12,6 +13,8 @@ import {
   typoStyle,
   elHoverClass,
   elEntranceClass,
+  elEffectBpStyle,
+  elVariantBpStyle,
   elRadius,
   cls,
   headingTag,
@@ -136,8 +139,42 @@ test("typoStyle returns empty string when nothing is set", () => {
 
 test("elHoverClass/elEntranceClass skip the 'none' sentinel", () => {
   assert.equal(elHoverClass({ hoverEffect: "none" }), undefined);
-  assert.equal(elHoverClass({ hoverEffect: "lift" }), "ds-hover-lift");
-  assert.equal(elEntranceClass({ entrance: "fade" }), "ds-entrance-fade");
+  assert.equal(elHoverClass({ hoverEffect: "lift" }), "ds-hover ds-hover-lift");
+  assert.equal(elEntranceClass({ entrance: "fade" }), "ds-entrance ds-entrance-fade");
+});
+
+// A mobile-only effect on a heading: the class list and the string a
+// bpStyleRules build appends inside that element's mobile @media rule.
+test("a mobile-only hover/entrance reaches the element's class list and its mobile CSS", () => {
+  const base = { text: "Hi" };
+  const bp = { "mobile:hoverEffect": "scale", "mobile:entrance": "slide-up" };
+  assert.equal(elHoverClass(base, bp), "ds-hover");
+  assert.equal(elEntranceClass(base, bp), "ds-entrance");
+  assert.equal(
+    elEffectBpStyle({ ...base, hoverEffect: "scale", entrance: "slide-up" }, base, bp),
+    "--ds-hover-tf:scale(1.04);--ds-hover-sh:none;animation-name:ds-entrance-slide-up",
+  );
+});
+
+// elEffectBpStyle/elVariantBpStyle hard-code each class's values for the
+// @media rules; global.css's own classes must set the same ones. A value of
+// none/transparent stands for a property the class leaves at its initial value.
+const globalCss = readFileSync(new URL("../styles/global.css", import.meta.url), "utf8");
+function assertClassSets(cls: string, decls: string) {
+  const rule = (globalCss.split(`.${cls} {`)[1]?.split("}")[0] ?? "").replace(/\s/g, "");
+  for (const decl of decls.split(";").filter((d) => !/:(none|transparent)$/.test(d))) {
+    assert.ok(rule.includes(decl.replace(/\s/g, "")), `.${cls}: ${decl}`);
+  }
+}
+
+test("global.css hover classes match elEffectBpStyle's per-breakpoint values", () => {
+  for (const fx of ["scale", "lift", "glow"]) assertClassSets(`ds-hover-${fx}`, elEffectBpStyle({ hoverEffect: fx }, { hoverEffect: fx }, undefined));
+});
+
+test("global.css variant/scale classes match elVariantBpStyle's per-breakpoint values", () => {
+  for (const v of ["primary", "outline"]) assertClassSets(`ds-btn-${v}`, elVariantBpStyle("button", { variant: v }, { "mobile:variant": v }));
+  for (const v of ["filled", "outline", "soft"]) assertClassSets(`ds-badge-${v}`, elVariantBpStyle("badge", { variant: v }, { "mobile:variant": v }));
+  for (const sc of ["sm", "md", "lg"]) assertClassSets(`ds-badge-${sc}`, elVariantBpStyle("badge", { scale: sc }, { "mobile:scale": sc }));
 });
 
 test("elRadius resolves each corner independently, falling back to the shared radius", () => {

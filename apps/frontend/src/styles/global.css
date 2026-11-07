@@ -304,21 +304,26 @@ body {
    scroll-driven animation-timeline:view() where the browser supports it
    (Chrome/Edge/Firefox); elsewhere @supports skips straight to the
    time-based fallback, which just finishes once on page load instead of
-   on scroll — a silent, harmless degrade, not a broken animation. */
-.ds-hover-scale { transition: transform 0.2s ease; }
-.ds-hover-scale:hover { transform: scale(1.04); }
-.ds-hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
-.ds-hover-lift:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
-.ds-hover-glow { transition: box-shadow 0.2s ease; }
-.ds-hover-glow:hover { box-shadow: 0 0 24px rgba(15, 98, 254, 0.35); }
+   on scroll — a silent, harmless degrade, not a broken animation.
+   Per breakpoint: the generic .ds-hover/.ds-entrance carry the mechanics
+   and each effect class only sets the values, so a tablet/mobile override
+   is just an element's own @media rule re-setting --ds-hover-tf/-sh or
+   animation-name (@ucms/element-render's elEffectBpStyle — keep its
+   HOVER_FX values equal to these). The author's own shadow is inline and
+   still wins over the :hover one, as before. */
+.ds-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.ds-hover:hover { transform: var(--ds-hover-tf, none); box-shadow: var(--ds-hover-sh, none); }
+.ds-hover-scale { --ds-hover-tf: scale(1.04); }
+.ds-hover-lift { --ds-hover-tf: translateY(-4px); --ds-hover-sh: 0 8px 20px rgba(0, 0, 0, 0.12); }
+.ds-hover-glow { --ds-hover-sh: 0 0 24px rgba(15, 98, 254, 0.35); }
 
-.ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom {
+.ds-entrance {
   animation-duration: 0.6s;
   animation-timing-function: ease-out;
   animation-fill-mode: both;
 }
 @supports (animation-timeline: view()) {
-  .ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom {
+  .ds-entrance {
     animation-timeline: view();
     animation-range: entry 0% cover 30%;
   }
@@ -339,8 +344,10 @@ body {
   to { opacity: 1; transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ds-entrance-fade, .ds-entrance-slide-up, .ds-entrance-zoom { animation: none; }
-  .ds-hover-scale:hover, .ds-hover-lift:hover { transform: none; }
+  /* A breakpoint's own !important animation-name still wins on specificity,
+     but this zero duration leaves it nothing to animate. */
+  .ds-entrance { animation: none !important; }
+  .ds-hover:hover { transform: none; }
 }
 
 /* Core design-system element classes (heading/text/image/button/badge/

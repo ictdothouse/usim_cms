@@ -10,6 +10,7 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Check, Minus, Plus, Trash2 } from "lucide-react";
 import type { Menu, Category, Symbol } from "@/lib/api";
 import type { Key } from "@/i18n";
+import { customHtmlRemovals } from "@ucms/element-style";
 import type { Field, Bp, SlideItem, Block, SectionProps, El } from "./types";
 import { SHADOW_DEFAULT_PARTS } from "./fields";
 import { BufferedInput, BufferedTextarea, FontPickerInput, NumberStepper, DragNumber } from "./FieldControls";
@@ -208,8 +209,24 @@ export function FieldInput({
   };
   const base =
     "w-full rounded-lg border border-line/30 bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-line";
-  if (field.kind === "textarea")
-    return <BufferedTextarea rows={4} className={base} value={value} onCommit={onChange} />;
+  if (field.kind === "textarea") {
+    const area = <BufferedTextarea rows={4} className={base} value={value} onCommit={onChange} />;
+    if (field.key !== "html") return area;
+    // Custom HTML: the site's sanitizer (same allowlist, @ucms/element-style)
+    // drops these silently on render, so say which ones before they vanish.
+    const removed = customHtmlRemovals(value);
+    return (
+      <>
+        {area}
+        {removed.length > 0 && (
+          // A span, not a <p>: FieldGroups wraps this field in a <label>.
+          <span role="status" className="mt-1 block rounded-lg bg-amber-50 p-2 text-[11px] text-amber-900">
+            {t("designer-html-removed")} <code>{removed.join(", ")}</code>. {t("designer-html-removed-tip")}
+          </span>
+        )}
+      </>
+    );
+  }
   if (field.kind === "menu-select") {
     return (
       <select className={base} value={value} onChange={(e) => onChange(e.target.value)}>

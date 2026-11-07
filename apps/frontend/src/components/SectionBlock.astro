@@ -670,10 +670,10 @@ function buildRowOverride(row: Row, p: Record<string, string>): string {
               // know is WHETHER to render at all — any `el.bp` entry means
               // some descendant component may have emitted a matching
               // `[data-vis="${elId}"] ...` rule, so the id has to exist for
-              // that selector to ever match anything. hoverEffect/entrance/
-              // visibility stay the only concerns this file still computes
-              // itself (respId's own hideDesktop/hideTablet/hideMobile
-              // check above).
+              // that selector to ever match anything (per-bp hoverEffect/
+              // entrance/color included, see ElementBlock.astro). Visibility
+              // stays the only concern this file still computes itself
+              // (respId's own hideDesktop/hideTablet/hideMobile check above).
               const hasBp = !!el.bp && Object.keys(el.bp).length > 0;
               const elVisId = respId(elId, p) ?? (hasBp || el.type === "slider" ? elId : undefined);
               // Live Edit's empty-element placeholder (BaseLayout.astro) wears

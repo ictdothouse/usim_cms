@@ -32,6 +32,8 @@ import {
   elRadius,
   elHoverClass,
   elEntranceClass,
+  elEffectBpStyle as sharedElEffectBpStyle,
+  elVariantBpStyle as sharedElVariantBpStyle,
   elMarginStyle as sharedElMarginStyle,
   elPaddingStyle as sharedElPaddingStyle,
   elBorderShadowStyle as sharedElBorderShadowStyle,
@@ -257,6 +259,17 @@ export function elBorderShadowStyle(p: Record<string, string>): string | null {
 // Full typography escape hatch for heading/text/list.
 export function typoStyle(p: Record<string, string>): string {
   return toCssText(sharedTypoStyle(p));
+}
+// One tier's hover/entrance switch, appended to a bpStyleRules build aimed at
+// the node carrying elHoverClass/elEntranceClass — "" when the element has no
+// effect anywhere (see @ucms/element-render's elEffectBpStyle).
+export function elEffectBpStyle(mp: Record<string, string>, base: Record<string, string>, bp: Record<string, string> | undefined): string {
+  return toCssText(sharedElEffectBpStyle(mp, base, bp));
+}
+// One tier's button/badge variant (and badge scale), restated in full —
+// first in a bpStyleRules build so the author's own color/border win.
+export function elVariantBpStyle(type: "button" | "badge", mp: Record<string, string>, bp: Record<string, string> | undefined): string {
+  return toCssText(sharedElVariantBpStyle(type, mp, bp));
 }
 export const cls = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ");
 export const headingTag = (level?: string) => (["1", "2", "3", "4"].includes(level ?? "") ? `h${level}` : "h2");

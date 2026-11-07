@@ -37,6 +37,8 @@ import {
   typoStyle,
   elHoverClass,
   elEntranceClass,
+  elEffectBpStyle,
+  elVariantBpStyle,
   elRadius,
   imgAlignStyle,
   cls,
@@ -349,6 +351,8 @@ if (el.bp && Object.keys(el.bp).length > 0) {
       [marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp), navVars(mp)].filter(Boolean).join(";"),
     ),
     ...bpStyleRules(`[data-vis="${elId}"] .ds-slider-box`, el.bp, p, (mp) => `height:${lengthValue(mp.height, SLIDER_HEIGHT, SLIDER_HEIGHT.md)}`),
+    // The corner radius sits on the viewport (inline base below).
+    ...bpStyleRules(`[data-vis="${elId}"] .ds-slider-viewport`, el.bp, p, (mp) => `border-radius:${elRadius(mp)}`),
   );
 }
 ---
@@ -376,11 +380,9 @@ if (el.bp && Object.keys(el.bp).length > 0) {
   // shadow/border/typography/free-position are all real
   // per-breakpoint overrides (the fields the Inspector's own
   // FourSideControl/Typography/Position blocks let an author
-  // toggle a BpToggle on) — color/hoverEffect/entrance stay
-  // admin-canvas-preview-only for now (CSS classes / non-
-  // box-model fields, a different mechanism than reusing
-  // bpStyleRules against a margin/padding/border/shadow
-  // build), the one remaining scope reduction.
+  // toggle a BpToggle on), and so are button color/variant and
+  // hoverEffect/entrance (elEffectBpStyle on the node carrying
+  // the effect classes, as in ElementBlock.astro).
   // slideIdx/r/c/e address this element within the slider's
   // OWN slides[]/rows[]/columns[]/elements[] tree — separate
   // from the page's own [b,r,c,e] block-index path (which
@@ -427,6 +429,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
               posStyle(mp),
               mp.position === "custom" ? "min-width:min-content" : null,
               mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null,
+              elEffectBpStyle(mp, ep, el.bp),
             ]
               .filter(Boolean)
               .join(";"),
@@ -444,6 +447,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
               elBorderShadowStyle(mp),
               posStyle(mp),
               mp.position === "custom" ? "min-width:min-content" : null,
+              elEffectBpStyle(mp, ep, el.bp),
             ]
               .filter(Boolean)
               .join(";"),
@@ -460,6 +464,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
               imgAlignStyle(mp.align),
               paddingStyle(mp),
               elBorderShadowStyle(mp),
+              elEffectBpStyle(mp, ep, el.bp),
             ]
               .filter(Boolean)
               .join(";"),
@@ -472,7 +477,15 @@ if (el.bp && Object.keys(el.bp).length > 0) {
           // posFontSize has to land on the inner <a> specifically, not this
           // wrapper, same as the removed posFontSize-only block used to.
           ...bpStyleRules(`${outerSel} a`, el.bp, ep, (mp) =>
-            [mp.position === "custom" && mp.posWidth ? "width:100%" : null, mp.position === "custom" && mp.posHeight ? "height:100%" : null, mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null, elBorderShadowStyle(mp)]
+            [
+              elVariantBpStyle("button", mp, el.bp),
+              mp.color ? `color:${mp.color}` : null,
+              mp.position === "custom" && mp.posWidth ? "width:100%" : null,
+              mp.position === "custom" && mp.posHeight ? "height:100%" : null,
+              mp.position === "custom" && mp.posFontSize ? `font-size:${mp.posFontSize}` : null,
+              elBorderShadowStyle(mp),
+              elEffectBpStyle(mp, ep, el.bp),
+            ]
               .filter(Boolean)
               .join(";"),
           ),
@@ -496,7 +509,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         const Tag = headingTag(ep.level) as "h1";
         return (
           <Tag
-            class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+            class={cls("ds-h", `ds-h${ep.level ?? "2"}`, ep.cssClass, elHoverClass(ep, el.bp), elEntranceClass(ep, el.bp))}
             data-slide-el={el.id}
             {...editAttrs}
             style={[
@@ -522,7 +535,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
       case "text":
         return (
           <p
-            class={cls("ds-text", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+            class={cls("ds-text", ep.cssClass, elHoverClass(ep, el.bp), elEntranceClass(ep, el.bp))}
             data-slide-el={el.id}
             {...editAttrs}
             style={[
@@ -552,7 +565,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
         const epHref = safeUrl(ep.href);
         const epImg = (
           <img
-            class={cls("ds-img", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+            class={cls("ds-img", ep.cssClass, elHoverClass(ep, el.bp), elEntranceClass(ep, el.bp))}
             src={epSrc}
             srcset={epSrcset?.srcset}
             sizes={epSrcset ? epSrcset.sizes : undefined}
@@ -607,7 +620,7 @@ if (el.bp && Object.keys(el.bp).length > 0) {
             style={[ep.align ? `text-align:${ep.align}` : null, marginStyle(ep), paddingStyle(ep), posStyle(ep)].filter(Boolean).join(";")}
           >
             <a
-              class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass, elHoverClass(ep), elEntranceClass(ep))}
+              class={cls(ep.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", ep.cssClass, elHoverClass(ep, el.bp), elEntranceClass(ep, el.bp))}
               href={safeUrl(ep.href) ?? "#"}
               style={[
                 ep.color ? `color:${ep.color}` : null,

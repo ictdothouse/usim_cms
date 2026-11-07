@@ -28,7 +28,8 @@ const items: ResolvedMenuItem[] = menu ? await resolveMenuTree(menu.items, lang,
 // as custom properties global.css's .ds-menu rules read, so the dropdowns and
 // the mobile panel keep their own colors. Values are validated at write time
 // (@ucms/element-schema: hex colors, lengths, enums).
-const JUSTIFY: Record<string, string> = { center: "center", right: "flex-end" };
+// "left" too (= the CSS default) so a tablet/mobile "left" can undo a desktop center/right.
+const JUSTIFY: Record<string, string> = { left: "flex-start", center: "center", right: "flex-end" };
 function menuStyle(mp: Record<string, string>): string {
   return [
     marginStyle(mp),

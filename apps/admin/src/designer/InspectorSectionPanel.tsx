@@ -6,6 +6,7 @@ import { Lock } from "lucide-react";
 import { BASE_LANG, type DesignerCtx } from "./context";
 import { FieldGroups } from "./FieldGroups";
 import { SECTION_FIELDS } from "./fields";
+import { NODE_BASE_ONLY_KEYS } from "./elements";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_FALLBACK, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS } from "./style";
 import { ICONS } from "./icons";
 import type { SectionProps } from "./types";
@@ -148,7 +149,10 @@ export function InspectorSectionPanel({ ctx }: { ctx: DesignerCtx }) {
       />
       <FieldGroups
         fields={SECTION_FIELDS}
-        getValue={(f) => bpGetValue((sp as unknown as Record<string, string>)[f.key], sp.bp, f.key)}
+        getValue={(f) => {
+          const base = (sp as unknown as Record<string, string>)[f.key];
+          return NODE_BASE_ONLY_KEYS.includes(f.key) ? (base ?? "") : bpGetValue(base, sp.bp, f.key);
+        }}
         setValue={(f, v) => {
           const path = pathKey(b);
           if (activeLang !== BASE_LANG && langKeysOverridden(path, [f.key])) {
@@ -156,7 +160,8 @@ export function InspectorSectionPanel({ ctx }: { ctx: DesignerCtx }) {
             return;
           }
           mutate((bs) => {
-            if (bp === "desktop") {
+            // width/anchorId/cssClass can't vary per breakpoint: base value at any bp.
+            if (bp === "desktop" || NODE_BASE_ONLY_KEYS.includes(f.key)) {
               (bs[b].props as Record<string, unknown>)[f.key] = v;
             } else {
               const props = bs[b].props as unknown as SectionProps;
@@ -165,6 +170,7 @@ export function InspectorSectionPanel({ ctx }: { ctx: DesignerCtx }) {
           });
         }}
         hasOverride={(f) => bpKeysOverridden(sp.bp, [f.key])}
+        canBp={(f) => !NODE_BASE_ONLY_KEYS.includes(f.key)}
         onToggleOverride={(f) =>
           mutate((bs) => {
             const props = bs[b].props as unknown as SectionProps;

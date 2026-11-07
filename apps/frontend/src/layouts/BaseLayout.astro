@@ -2277,14 +2277,16 @@ const fontsHref = allFonts.length
       // run; anything genuinely below the fold is left alone so real
       // scroll-reveal still plays.
       (() => {
-        const SEL = ".ds-entrance-fade,.ds-entrance-slide-up,.ds-entrance-zoom";
+        // .ds-entrance: every element with an entrance at any breakpoint.
+        const SEL = ".ds-entrance";
         const settle = () => {
           document.querySelectorAll(SEL).forEach((el) => {
             if (el.dataset.dsEntranceDone) return;
             const r = el.getBoundingClientRect();
             if (r.top < window.innerHeight && r.bottom > 0) {
               el.dataset.dsEntranceDone = "1";
-              el.style.animation = "none";
+              // important: a breakpoint's own animation-name rule is !important.
+              el.style.setProperty("animation", "none", "important");
             }
           });
         };

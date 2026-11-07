@@ -12,7 +12,7 @@ import type { DesignerCtx } from "./context";
 import { FieldGroups } from "./FieldGroups";
 import { CSS_CLASS_FIELD, FIELD_GROUP_BY_KEY } from "./fields";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS } from "./style";
-import { ELS } from "./elements";
+import { ELS, bpBaseOnly } from "./elements";
 import { ICONS } from "./icons";
 import type { El, Field } from "./types";
 import { getNode, insertAt, moveWithin, removeAt } from "../designerTree";
@@ -68,7 +68,8 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
   const setValue = (key: string, v: string) =>
     mutate((bs) => {
       const target = getNode(bs, sel) as El;
-      if (bp === "desktop") target.props[key] = v;
+      // A field the site can't vary per breakpoint edits the base value at any bp.
+      if (bp === "desktop" || bpBaseOnly(node.type, key)) target.props[key] = v;
       else target.bp = { ...(target.bp ?? {}), [bpKey(key)]: v };
     });
   const toggleOverride = (keys: string[]) =>
@@ -78,10 +79,11 @@ export function InspectorNestedPanel({ ctx }: { ctx: DesignerCtx }) {
     });
   const nodeFieldGroupsProps = {
     fields: nodeFields,
-    getValue: (f: Field) => bpGetValue(node.props[f.key], node.bp, f.key),
+    getValue: (f: Field) => (bpBaseOnly(node.type, f.key) ? (node.props[f.key] ?? "") : bpGetValue(node.props[f.key], node.bp, f.key)),
     setValue: (f: Field, v: string) => setValue(f.key, v),
     hasOverride: (f: Field) => bpKeysOverridden(node.bp, [f.key]),
     onToggleOverride: (f: Field) => toggleOverride([f.key]),
+    canBp: (f: Field) => !bpBaseOnly(node.type, f.key),
     collapsedGroups, toggleGroup, bp, t, iconSearch, setIconSearch, uploading, siteTheme,
     sel, blocks, sliderSlideIdx, setSliderSlideIdx, sliderInnerSel, setSliderInnerSel,
     uploadImage, openMediaPicker, bpGetValue, bpKeysOverridden, toggleBpKeys, bpKey,

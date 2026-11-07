@@ -13,7 +13,7 @@ import { FieldGroups } from "./FieldGroups";
 import { CSS_CLASS_FIELD, FIELD_GROUP_BY_KEY, Z_INDEX_FIELD } from "./fields";
 import { parseSlides, stringifySlides, updateSlideElementBp, updateSlideElementProps } from "./parsers";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS } from "./style";
-import { ELS } from "./elements";
+import { ELS, bpBaseOnly } from "./elements";
 import { ICONS } from "./icons";
 import type { Field, SectionProps } from "./types";
 import { BoxModel, ContainerChildrenPanel, VisibilityToggle } from "./InspectorControls";
@@ -113,9 +113,10 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
           currentSlides[slideIdx] = apply(s0);
           target.props.slides = stringifySlides(currentSlides);
         });
+      // A field the site can't vary per breakpoint (bpBaseOnly) edits the base value at any bp.
       const childSetValue = (key: string, v: string) =>
         withChildSlide((s0) =>
-          bp === "desktop"
+          bp === "desktop" || bpBaseOnly(childEl.type, key)
             ? updateSlideElementProps(s0, innerSel.r, innerSel.c, innerSel.e, { [key]: v })
             : updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, { ...(childEl.bp ?? {}), [`${bp}:${key}`]: v }),
         );
@@ -123,10 +124,12 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
         withChildSlide((s0) => updateSlideElementBp(s0, innerSel.r, innerSel.c, innerSel.e, toggleBpKeys(childEl.bp, keys)));
       const childFieldGroupsProps = {
         fields: childFields,
-        getValue: (f: Field) => bpGetValue(childEl.props[f.key], childEl.bp, f.key),
+        getValue: (f: Field) =>
+          bpBaseOnly(childEl.type, f.key) ? (childEl.props[f.key] ?? "") : bpGetValue(childEl.props[f.key], childEl.bp, f.key),
         setValue: (f: Field, v: string) => childSetValue(f.key, v),
         hasOverride: (f: Field) => bpKeysOverridden(childEl.bp, [f.key]),
         onToggleOverride: (f: Field) => childToggleOverride([f.key]),
+        canBp: (f: Field) => !bpBaseOnly(childEl.type, f.key),
         collapsedGroups,
         toggleGroup,
         bp,
@@ -321,6 +324,7 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
       );
     }
   }
+  const noBp = (f: Field) => f.kind === "slides" || f.kind === "image" || bpBaseOnly(el.type, f.key);
   const fieldGroupsProps = {
     fields: elFields,
     // "slides" is a structured JSON blob, not a simple style value — its
@@ -342,8 +346,10 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
     // toggleBpKeys), which then out-ranked the real desktop src and made
     // the canvas show the no-image placeholder despite the real, saved
     // src being intact. Same bypass as slides fixes it the same way.
-    getValue: (f: Field) =>
-      f.kind === "slides" || f.kind === "image" ? el.props[f.key] ?? "" : bpGetValue(el.props[f.key], el.bp, f.key),
+    // Since 2026-11-06 every field the site can't vary per breakpoint takes
+    // that same bypass (noBp — elements.ts's bpBaseOnly allowlist), so the
+    // Inspector never offers a tablet/mobile value that would go nowhere.
+    getValue: (f: Field) => (noBp(f) ? el.props[f.key] ?? "" : bpGetValue(el.props[f.key], el.bp, f.key)),
     setValue: (f: Field, v: string) => {
       const path = pathKey(b, r, c, e);
       if (activeLang !== BASE_LANG && f.kind !== "slides" && f.kind !== "image") {
@@ -357,16 +363,17 @@ export function InspectorElementPanel({ ctx }: { ctx: DesignerCtx }) {
       }
       mutate((bs) => {
         const target = (bs[b].props as unknown as SectionProps).rows[r].columns[c].elements[e];
-        if (bp === "desktop" || f.kind === "slides" || f.kind === "image") {
+        if (bp === "desktop" || noBp(f)) {
           target.props[f.key] = v;
         } else {
           target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
         }
       });
     },
-    hasOverride: (f: Field) => f.kind !== "slides" && f.kind !== "image" && bpKeysOverridden(el.bp, [f.key]),
+    hasOverride: (f: Field) => !noBp(f) && bpKeysOverridden(el.bp, [f.key]),
+    canBp: (f: Field) => !noBp(f),
     onToggleOverride: (f: Field) => {
-      if (f.kind === "slides" || f.kind === "image") return;
+      if (noBp(f)) return;
       mutate((bs) => {
         const target = (bs[b].props as unknown as SectionProps).rows[r].columns[c].elements[e];
         target.bp = toggleBpKeys(target.bp, [f.key]);

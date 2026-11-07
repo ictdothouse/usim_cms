@@ -140,11 +140,84 @@ export function elRadius(p: Record<string, string>): string {
 // Hover/entrance effect class names — :hover and scroll-linked animation can't be expressed as an
 // inline style, so these just pick a fixed CSS class name; the actual rules live once in each
 // app's own stylesheet (index.css for the canvas preview, global.css for the published site).
-export function elHoverClass(p: Record<string, string>): string | undefined {
-  return p.hoverEffect && p.hoverEffect !== "none" ? `ds-hover-${p.hoverEffect}` : undefined;
+// An element whose effect is on at ANY breakpoint carries the generic `ds-hover`/`ds-entrance`
+// class (transition / animation timing, and the :hover rule reading --ds-hover-*), plus its
+// desktop value's own class. elEffectBpStyle below then switches the effect per breakpoint from
+// inside the site's bpStyleRules @media rule. The site passes the element's `bp` bag; the admin
+// canvas passes props already merged for its breakpoint and no bag.
+const fxOn = (v: string | undefined): v is string => !!v && v !== "none";
+function fxAnywhere(p: Record<string, string>, bp: Record<string, string> | undefined, key: string): boolean {
+  return fxOn(p[key]) || Object.entries(bp ?? {}).some(([k, v]) => k.endsWith(`:${key}`) && fxOn(v));
 }
-export function elEntranceClass(p: Record<string, string>): string | undefined {
-  return p.entrance && p.entrance !== "none" ? `ds-entrance-${p.entrance}` : undefined;
+export function elHoverClass(p: Record<string, string>, bp?: Record<string, string>): string | undefined {
+  if (!fxAnywhere(p, bp, "hoverEffect")) return undefined;
+  return fxOn(p.hoverEffect) ? `ds-hover ds-hover-${p.hoverEffect}` : "ds-hover";
+}
+export function elEntranceClass(p: Record<string, string>, bp?: Record<string, string>): string | undefined {
+  if (!fxAnywhere(p, bp, "entrance")) return undefined;
+  return fxOn(p.entrance) ? `ds-entrance ds-entrance-${p.entrance}` : "ds-entrance";
+}
+// [--ds-hover-tf, --ds-hover-sh] per effect — the same values global.css/index.css's
+// .ds-hover-<name> classes set (keep in sync; apps/frontend's element-render.test.ts checks
+// global.css). Unset = none.
+const HOVER_FX: Record<string, [string, string]> = {
+  scale: ["scale(1.04)", "none"],
+  lift: ["translateY(-4px)", "0 8px 20px rgba(0, 0, 0, 0.12)"],
+  glow: ["none", "0 0 24px rgba(15, 98, 254, 0.35)"],
+};
+// The per-breakpoint half: declarations a bpStyleRules build appends for one tier's merged props
+// (`mp`), aimed at the node carrying the effect classes. Only for an element that carries the
+// generic class (`base`/`bp` = its desktop props and override bag), so an element with no effect
+// anywhere gets nothing. "" or "none" at a tier turns the effect off there.
+export function elEffectBpStyle(
+  mp: Record<string, string>,
+  base: Record<string, string>,
+  bp: Record<string, string> | undefined,
+): Record<string, string> {
+  const s: Record<string, string> = {};
+  if (fxAnywhere(base, bp, "hoverEffect")) {
+    const [tf, sh] = HOVER_FX[mp.hoverEffect] ?? ["none", "none"];
+    s["--ds-hover-tf"] = tf;
+    s["--ds-hover-sh"] = sh;
+  }
+  if (fxAnywhere(base, bp, "entrance")) s.animationName = fxOn(mp.entrance) ? `ds-entrance-${mp.entrance}` : "none";
+  return s;
+}
+
+// Button/badge `variant` and badge `scale` per breakpoint. The base look is a class
+// (global.css's .ds-btn-<variant>, .ds-badge-<variant>, .ds-badge-<scale>), and a class can't
+// be swapped inside @media, so a tier's rule restates every property any variant sets — same
+// values as those classes (keep in sync; apps/frontend's element-render.test.ts checks).
+// "none"/"transparent" stand for a property the class leaves at its initial value.
+const PRIMARY = "var(--color-primary, #0f62fe)";
+const BTN_VARIANT: Record<string, Record<string, string>> = {
+  primary: { background: PRIMARY, color: "var(--color-primary-content, #fff)", border: "none" },
+  outline: { background: "transparent", color: "inherit", border: "2px solid currentColor" },
+};
+const BADGE_VARIANT: Record<string, Record<string, string>> = {
+  filled: { background: PRIMARY, color: "var(--color-primary-content, #fff)", border: "none" },
+  outline: { background: "transparent", color: "inherit", border: "1.5px solid currentColor" },
+  soft: { background: `color-mix(in srgb, ${PRIMARY} 15%, transparent)`, color: PRIMARY, border: "none" },
+};
+const BADGE_SCALE: Record<string, Record<string, string>> = {
+  sm: { padding: "0.1em 0.6em", fontSize: "0.7rem" },
+  md: { padding: "0.15em 0.75em", fontSize: "0.8rem" },
+  lg: { padding: "0.2em 0.9em", fontSize: "0.9rem" },
+};
+// Put it FIRST in the tier's declaration list: the author's own color/border come after and win,
+// as their inline style does over the class. Nothing unless a tier overrides variant/scale.
+export function elVariantBpStyle(
+  type: "button" | "badge",
+  mp: Record<string, string>,
+  bp: Record<string, string> | undefined,
+): Record<string, string> {
+  const keys = Object.keys(bp ?? {});
+  const s: Record<string, string> = {};
+  if (keys.some((k) => k.endsWith(":variant"))) {
+    Object.assign(s, type === "button" ? BTN_VARIANT[mp.variant === "outline" ? "outline" : "primary"] : (BADGE_VARIANT[mp.variant] ?? BADGE_VARIANT.soft));
+  }
+  if (type === "badge" && keys.some((k) => k.endsWith(":scale"))) Object.assign(s, BADGE_SCALE[mp.scale] ?? BADGE_SCALE.md);
+  return s;
 }
 
 // flex-wrap for a Row (flex mode, incl. its mobile stack) or Container. A column-direction box has

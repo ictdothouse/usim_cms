@@ -213,9 +213,9 @@ export const ELS: Record<ElType, { labelKey: Key; icon: typeof Type; defaults: R
   html: {
     labelKey: "designer-el-html",
     icon: Code2,
-    // Pairs with cssClass on section/column/element (see COLUMN_FIELDS):
-    // there's no separate site-wide custom-CSS field, so a <style> tag
-    // dropped in here is how a cssClass actually gets styled.
+    // Static markup only: the site sanitizes it on render (no script, style,
+    // iframe or style="" — @ucms/element-style's CUSTOM_HTML_* allowlist),
+    // and FieldInput shows the editor what will be dropped.
     defaults: { html: "" },
     fields: [{ key: "html", labelKey: "designer-f-html", kind: "textarea" }],
   },
@@ -916,3 +916,47 @@ export const PALETTE_CATEGORY: Record<Exclude<ElType, "container">, Key> = {
   symbol: "designer-category-advanced",
   html: "designer-category-advanced",
 };
+
+// Which element fields the live site really renders per breakpoint — the keys
+// each apps/frontend render file's bpStyleRules reads from a tier's merged
+// props (ElementBlock/SymbolBlock/SliderBlock/ContainerBlock/MiscBlock/
+// MenuBlock). Only these get a BpToggle and a Tablet/Mobile edit into `bp`;
+// any other ELS field (text/label/href, heading level, list style, Swiper
+// options, the blocks' layout/columns/colour knobs no render file reads per
+// tier yet, cssClass) edits its one base value at every breakpoint, and the
+// canvas ignores a stray old `bp` copy of it the way the site always has.
+// Keys that aren't ELS fields (BoxModel's margin/padding/radius sides, slide
+// free-position, the slider Navigation panel, zIndex) aren't governed here.
+// An allowlist on purpose: a new field starts base-only until a render file
+// really reads its tier value — never a toggle that saves into nothing.
+const TYPO_KEYS = ["fontFamily", "color", "fontSize", "lineHeight", "letterSpacing", "wordSpacing", "fontWeight", "textTransform", "fontStyle", "textDecoration"];
+const BORDER_SHADOW_KEYS = ["shadow", "borderWidth", "borderColor", "borderStyle"];
+const FX_KEYS = ["hoverEffect", "entrance"];
+export const BP_FIELDS: Partial<Record<ElType, readonly string[]>> = {
+  heading: ["align", ...TYPO_KEYS, ...BORDER_SHADOW_KEYS, ...FX_KEYS],
+  text: ["size", "align", ...TYPO_KEYS, ...BORDER_SHADOW_KEYS, ...FX_KEYS],
+  image: ["imgWidth", "align", ...BORDER_SHADOW_KEYS, ...FX_KEYS],
+  button: ["variant", "align", "color", ...BORDER_SHADOW_KEYS, ...FX_KEYS],
+  badge: ["variant", "scale", "align", "color"],
+  spacer: ["height"],
+  video: BORDER_SHADOW_KEYS,
+  embed: ["ratio", "shadow"],
+  icon: ["size", "color", "align"],
+  list: TYPO_KEYS,
+  gallery: ["columns"],
+  slider: ["height"],
+  cardgrid: ["columns"],
+  menu: [
+    "align", "fontFamily", "color", "fontSize", "letterSpacing", "fontWeight", "textTransform",
+    "hoverColor", "currentTextColor", "accentColor", "currentAccentColor", "gap", "bg", "dropdownBg", "dropdownColor",
+  ],
+  container: ["flexDirection", "justifyContent", "alignItems", "flexWrap", "gap", "grow", "bg", ...BORDER_SHADOW_KEYS],
+};
+export function bpBaseOnly(type: ElType, key: string): boolean {
+  if (key === "cssClass") return true;
+  return !!ELS[type]?.fields.some((f) => f.key === key) && !BP_FIELDS[type]?.includes(key);
+}
+// Section/Column FieldGroups: their style builds (SectionBlock.astro's
+// buildSectionStyle/colStyle) take every field per tier except these — an
+// id/class attribute, and section width, which is a class on .ds-inner.
+export const NODE_BASE_ONLY_KEYS = ["width", "anchorId", "cssClass"];

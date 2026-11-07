@@ -12,7 +12,7 @@
 // into a red test instead of a live 400 on someone's first save/publish.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ELS, SLIDER_ARROW_STYLES, SLIDER_DOT_STYLES, SLIDER_NAV_ICONS } from "./elements";
+import { BP_FIELDS, ELS, SLIDER_ARROW_STYLES, SLIDER_DOT_STYLES, SLIDER_NAV_ICONS, bpBaseOnly } from "./elements";
 import { LENGTH_KEYS, COLOR_KEYS, ENUM_VALUES, REPEATER_SCHEMAS, validateElement } from "@ucms/element-schema";
 
 // The slider Navigation panel (SliderNavPanel.tsx) writes props that are no
@@ -79,3 +79,24 @@ for (const [type, def] of Object.entries(ELS)) {
     });
   }
 }
+
+// BP_FIELDS lists the fields apps/frontend really renders per breakpoint; a
+// misspelt key there would silently strip a real field's BpToggle.
+test("every BP_FIELDS key is a real field of that element type", () => {
+  for (const [type, keys] of Object.entries(BP_FIELDS)) {
+    const fieldKeys = ELS[type as keyof typeof ELS].fields.map((f) => f.key);
+    for (const k of keys ?? []) assert.ok(fieldKeys.includes(k), `${type}.${k}`);
+  }
+});
+
+test("bpBaseOnly: content/semantic fields edit the base value, real per-breakpoint fields don't", () => {
+  for (const [type, key] of [["heading", "level"], ["heading", "text"], ["button", "label"], ["button", "href"], ["badge", "name"], ["list", "style"], ["slider", "slidesPerView"], ["text", "cssClass"]] as const) {
+    assert.equal(bpBaseOnly(type, key), true, `${type}.${key}`);
+  }
+  for (const [type, key] of [["button", "variant"], ["badge", "scale"], ["icon", "size"], ["heading", "align"], ["container", "flexDirection"]] as const) {
+    assert.equal(bpBaseOnly(type, key), false, `${type}.${key}`);
+  }
+  // Not ELS fields, so not governed here: BoxModel sides, the slider Navigation panel.
+  assert.equal(bpBaseOnly("heading", "marginTop"), false);
+  assert.equal(bpBaseOnly("slider", "navColor"), false);
+});

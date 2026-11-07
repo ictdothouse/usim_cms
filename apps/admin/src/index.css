@@ -184,10 +184,11 @@
    of the same name so what the author sees here matches the published
    site. Entrance animation has no admin-canvas equivalent (see style.ts's
    elHoverClass comment) — hover only. */
-.ds-hover-scale { transition: transform 0.2s ease; }
-.ds-hover-scale:hover { transform: scale(1.04); }
-.ds-hover-lift { transition: transform 0.2s ease, box-shadow 0.2s ease; }
-.ds-hover-lift:hover { transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
+.ds-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.ds-hover:hover { transform: var(--ds-hover-tf, none); box-shadow: var(--ds-hover-sh, none); }
+.ds-hover-scale { --ds-hover-tf: scale(1.04); }
+.ds-hover-lift { --ds-hover-tf: translateY(-4px); --ds-hover-sh: 0 8px 20px rgba(0, 0, 0, 0.12); }
+.ds-hover-glow { --ds-hover-sh: 0 0 24px rgba(15, 98, 254, 0.35); }
 
 /* Designer's dense controls need readable text, touch room and a visible
    keyboard focus state without changing the public site or other admin UI. */
@@ -221,5 +222,3 @@
   .designer-dialog select,
   .designer-dialog textarea { font-size: 1rem; }
 }
-.ds-hover-glow { transition: box-shadow 0.2s ease; }
-.ds-hover-glow:hover { box-shadow: 0 0 24px rgba(15, 98, 254, 0.35); }

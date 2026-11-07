@@ -36,6 +36,9 @@ export interface FieldGroupsProps {
   // `bp` bag (none currently omit it; Row doesn't use FieldGroups at all).
   hasOverride?: (f: Field) => boolean;
   onToggleOverride?: (f: Field) => void;
+  // Whether this field can vary per breakpoint on the live site at all
+  // (elements.ts's bpBaseOnly / NODE_BASE_ONLY_KEYS) — no BpToggle when not.
+  canBp?: (f: Field) => boolean;
   // Per-field per-language style-override toggle (LangToggle) — only ever
   // passed while a non-base language pill is active (see Inspector's own
   // call sites), and never rendered for a "content"-bucket (text) field,
@@ -81,7 +84,7 @@ export interface FieldGroupsProps {
 // renders each non-empty bucket as a collapsible section (Advanced starts
 // collapsed, everything else starts open — see collapsedGroups above).
 export function FieldGroups({
-  fields, getValue, setValue, only, hasOverride, onToggleOverride, hasLangOverride, onToggleLangOverride,
+  fields, getValue, setValue, only, hasOverride, onToggleOverride, canBp, hasLangOverride, onToggleLangOverride,
   collapsedGroups, toggleGroup, bp, t, confirmAction,
   iconSearch, setIconSearch, uploading, siteTheme, sel, blocks, sliderSlideIdx, setSliderSlideIdx,
   sliderInnerSel, setSliderInnerSel,
@@ -128,7 +131,7 @@ export function FieldGroups({
                         {hasLangOverride && onToggleLangOverride && g.key !== "content" && f.kind !== "slides" && f.kind !== "image" && (
                           <LangToggle active={hasLangOverride(f)} onToggle={() => onToggleLangOverride(f)} t={t} />
                         )}
-                        {hasOverride && onToggleOverride && f.kind !== "slides" && f.kind !== "image" && (
+                        {hasOverride && onToggleOverride && f.kind !== "slides" && f.kind !== "image" && (canBp?.(f) ?? true) && (
                           <BpToggle active={hasOverride(f)} onToggle={() => onToggleOverride(f)} bp={bp} t={t} />
                         )}
                       </span>

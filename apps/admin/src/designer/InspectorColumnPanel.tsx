@@ -7,6 +7,7 @@ import { BASE_LANG, type DesignerCtx } from "./context";
 import { BpToggle } from "./FieldControls";
 import { FieldGroups } from "./FieldGroups";
 import { COLUMN_FIELDS, FieldLabel } from "./fields";
+import { NODE_BASE_ONLY_KEYS } from "./elements";
 import { MARGIN_SIDE_FALLBACK, MARGIN_SIDE_KEYS, PADDING_SIDE_KEYS, RADIUS_CORNER_KEYS } from "./style";
 import { ICONS } from "./icons";
 import type { SectionProps } from "./types";
@@ -167,7 +168,7 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
       />
       <FieldGroups
         fields={COLUMN_FIELDS}
-        getValue={(f) => bpGetValue(col.props?.[f.key], col.bp, f.key)}
+        getValue={(f) => (NODE_BASE_ONLY_KEYS.includes(f.key) ? (col.props?.[f.key] ?? "") : bpGetValue(col.props?.[f.key], col.bp, f.key))}
         setValue={(f, v) => {
           const path = pathKey(b, r, c);
           if (activeLang !== BASE_LANG && langKeysOverridden(path, [f.key])) {
@@ -176,7 +177,8 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
           }
           mutate((bs) => {
             const target = (bs[b].props as unknown as SectionProps).rows[r].columns[c];
-            if (bp === "desktop") {
+            // cssClass can't vary per breakpoint: base value at any bp.
+            if (bp === "desktop" || NODE_BASE_ONLY_KEYS.includes(f.key)) {
               target.props = { ...(target.props ?? {}), [f.key]: v };
             } else {
               target.bp = { ...(target.bp ?? {}), [bpKey(f.key)]: v };
@@ -184,6 +186,7 @@ export function InspectorColumnPanel({ ctx }: { ctx: DesignerCtx }) {
           });
         }}
         hasOverride={(f) => bpKeysOverridden(col.bp, [f.key])}
+        canBp={(f) => !NODE_BASE_ONLY_KEYS.includes(f.key)}
         onToggleOverride={(f) =>
           mutate((bs) => {
             const target = (bs[b].props as unknown as SectionProps).rows[r].columns[c];

@@ -53,7 +53,7 @@ import {
 import type { El, Sel, SectionProps, SlideItem } from "./types";
 import type { DesignerCtx } from "./context";
 import { getNode } from "../designerTree";
-import { ELS } from "./elements";
+import { ELS, bpBaseOnly } from "./elements";
 import { ICONS } from "./icons";
 import { bestTextColor } from "../lib/utils";
 import {
@@ -346,6 +346,10 @@ function mergeElBp(
   // empty "mobile:src"/"tablet:src" override from the old footgun, self-
   // heals on next render instead of permanently masking the real src.
   for (const f of ELS[type].fields) if (f.kind === "image") keys.delete(f.key);
+  // Same for every field the site can't vary per breakpoint (bpBaseOnly):
+  // an old saved `bp` copy of it (heading level, a button label, …) is
+  // ignored here exactly as the site ignores it.
+  for (const k of keys) if (bpBaseOnly(type, k)) keys.delete(k);
   const merged: Record<string, string> = { ...props };
   for (const k of keys) merged[k] = bpGetValue(props[k], bpBag, k);
   return merged;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { escapeHtml, sanitizeUrl } from "./index.js";
+import { customHtmlRemovals, escapeHtml, sanitizeUrl } from "./index.js";
 
 test("escapeHtml escapes all 5 HTML-special chars", () => {
   assert.equal(escapeHtml(`<script>alert("x") & 'y'</script>`), "&lt;script&gt;alert(&quot;x&quot;) &amp; &#39;y&#39;&lt;/script&gt;");
@@ -30,4 +30,26 @@ test("sanitizeUrl strips control/space chars before the scheme check (evasion)",
 test("sanitizeUrl returns null for an empty or whitespace-only string", () => {
   assert.equal(sanitizeUrl(""), null);
   assert.equal(sanitizeUrl("   "), null);
+});
+
+test("customHtmlRemovals lists disallowed tags and attributes once each, in order", () => {
+  assert.deepEqual(
+    customHtmlRemovals('<p class="note" style="color:red" onclick="go()">Hi</p><SCRIPT>x()</SCRIPT><p style="x">again</p>'),
+    ["style", "onclick", "<script>"],
+  );
+  assert.deepEqual(customHtmlRemovals('<iframe src="https://youtube.com/embed/x"></iframe>'), ["<iframe>"]);
+});
+
+test("customHtmlRemovals flags an href/src whose scheme the site refuses", () => {
+  assert.deepEqual(customHtmlRemovals('<a href="java\tscript:alert(1)">x</a>'), ["href"]);
+  assert.deepEqual(customHtmlRemovals("<img src='//evil.example/x.png'>"), ["src"]);
+  assert.deepEqual(customHtmlRemovals('<a href="mailto:a@b.c">m</a><a href=/about>r</a><img src="https://x/y.png" alt="">'), []);
+});
+
+test("customHtmlRemovals reads script/style bodies and comments as text, not markup", () => {
+  assert.deepEqual(customHtmlRemovals("<script>if (a<b) go()</script><style>p>b{}</style><!-- <iframe> -->"), ["<script>", "<style>"]);
+});
+
+test("customHtmlRemovals is empty for allowed markup", () => {
+  assert.deepEqual(customHtmlRemovals('<table><tr><td aria-label="x">1</td></tr></table><br/>plain text'), []);
 });
