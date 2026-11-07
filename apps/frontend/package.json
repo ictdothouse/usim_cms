@@ -13,15 +13,15 @@
   },
   "dependencies": {
     "@astrojs/node": "^11.1.9",
-    "@tailwindcss/vite": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.4",
     "@ucms/element-render": "workspace:*",
     "@ucms/element-style": "workspace:*",
-    "astro": "^7.4.2",
+    "astro": "^7.4.5",
     "daisyui": "^5.7.50",
     "ioredis": "^5.11.1",
     "sanitize-html": "^2.18.1",
     "swiper": "^12.2.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.4"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
