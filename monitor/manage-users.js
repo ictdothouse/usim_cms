@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Emergency recovery from the VPS console. Password never appears in argv.
 import crypto from "node:crypto";
+import process from "node:process";
+import console from "node:console";
 import { listUsers, resetUserFromConsole } from "./users.js";
 
 if (process.getuid?.() !== 0) {
