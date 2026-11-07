@@ -78,3 +78,47 @@ export function customHtmlRemovals(raw: string): string[] {
   }
   return [...out];
 }
+
+// Curated Google Fonts. The Theme and Designer font pickers offer these as
+// suggestions and still take a typed name. A post body's font is limited to
+// this list: the site loads every post font from Google, and one unknown
+// family fails that whole stylesheet request, theme fonts included.
+export const GOOGLE_FONTS = [
+  "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Nunito", "Raleway",
+  "Playfair Display", "Merriweather", "Oswald", "Source Sans Pro", "PT Sans", "Ubuntu", "Rubik",
+  "Work Sans", "Fira Sans", "Noto Sans", "Quicksand", "Josefin Sans", "Karla", "Mulish",
+  "DM Sans", "Barlow", "Manrope", "Space Grotesk", "Outfit", "Plus Jakarta Sans",
+  "Libre Baskerville", "Crimson Text", "Cormorant Garamond", "Bitter", "Domine", "Lora",
+  "EB Garamond", "Vollkorn", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", "Archivo",
+  "Heebo", "Hind", "Titillium Web", "Cabin", "Dosis", "Comfortaa", "Pacifico", "Caveat",
+  "Dancing Script", "Lobster", "Bebas Neue", "Anton", "Abril Fatface", "Righteous",
+  "Permanent Marker", "Shadows Into Light", "Amatic SC", "Indie Flower",
+];
+
+// Inline styles a post body keeps: the editor's alignment, text/background
+// colors and font, plus the bookmark card's own layout. apps/api's save
+// sanitizer and apps/frontend's render sanitizer both use these, so what
+// the editor saves is what the site shows. Every value is a closed shape
+// (hex, keyword, plain number, listed font): no url(), no expressions.
+const HEX = /^#[0-9a-fA-F]{3,8}$/;
+const BOOKMARK_VALUE = [/^(inherit|none|flex|inline-block|cover|uppercase)$/, /^-?\d+(\.\d+)?(px|%)?$/, HEX, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
+const FONT_FAMILY = new RegExp(`^["']?(${GOOGLE_FONTS.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})["']?$`);
+export const POST_BODY_STYLE_TAGS = ["a", "img", "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"];
+export const POST_BODY_ALLOWED_STYLES: Record<string, RegExp[]> = {
+  ...Object.fromEntries(
+    ["display", "gap", "border", "border-radius", "padding", "text-decoration", "width", "height", "object-fit", "flex-shrink", "min-width", "flex", "font-size", "font-weight", "text-transform", "margin-bottom", "margin-top"].map((k) => [k, BOOKMARK_VALUE]),
+  ),
+  color: BOOKMARK_VALUE,
+  "background-color": [HEX],
+  "text-align": [/^(left|center|right|justify)$/],
+  "font-family": [FONT_FAMILY],
+};
+
+// The listed fonts a saved post body uses, for its page's Google Fonts link.
+export function postBodyFonts(html: string): string[] {
+  const out = new Set<string>();
+  for (const [, name] of html.matchAll(/font-family:\s*(?:&quot;|["'])?([^;"'&]+)/g)) {
+    if (GOOGLE_FONTS.includes(name.trim())) out.add(name.trim());
+  }
+  return [...out];
+}

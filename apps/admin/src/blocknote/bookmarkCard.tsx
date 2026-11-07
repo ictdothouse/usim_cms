@@ -1,5 +1,6 @@
-import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
+import { BlockNoteSchema, defaultBlockSpecs, defaultStyleSpecs } from "@blocknote/core";
 import { createReactBlockSpec } from "@blocknote/react";
+import { fontStyleSpec } from "./fontStyle";
 
 // Snapshot captured at insert time — not live-refetched on render. Known
 // ceiling: if the source post/page is later renamed/deleted, the card shows
@@ -158,6 +159,8 @@ const createBookmarkCardBlockSpec = createReactBlockSpec(
 // the actual BlockSpec object BlockNoteSchema.create expects.
 export const bookmarkCardBlockSpec = createBookmarkCardBlockSpec();
 
+// The post editor's schema: the bookmark card block plus the font style.
 export const bookmarkCardSchema = BlockNoteSchema.create({
   blockSpecs: { ...defaultBlockSpecs, bookmarkCard: bookmarkCardBlockSpec },
+  styleSpecs: { ...defaultStyleSpecs, font: fontStyleSpec },
 });

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker, useNavigate, useParams } from "react-router-dom";
 import { SuggestionMenuController, useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
+import type { BlockNoteEditor } from "@blocknote/core";
 import { bookmarkCardSchema } from "./blocknote/bookmarkCard";
+import { GOOGLE_FONTS, preloadFontPicker } from "@/lib/utils";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import {
@@ -63,7 +65,13 @@ function autoExcerpt(html: string): string {
 // Word/Google Docs-style always-visible toolbar instead of "/"-commands.
 // Moved here from App.tsx (Task 15) — it was only ever used by the old
 // inline PostEditor, which this full-page editor replaces.
-function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNote> }) {
+type PostEditor = BlockNoteEditor<
+  typeof bookmarkCardSchema.blockSchema,
+  typeof bookmarkCardSchema.inlineContentSchema,
+  typeof bookmarkCardSchema.styleSchema
+>;
+
+function EditorToolbar({ editor }: { editor: PostEditor }) {
   const [, forceUpdate] = useState(0);
   useEffect(() => editor.onSelectionChange(() => forceUpdate((n) => n + 1)), [editor]);
 
@@ -113,6 +121,25 @@ function EditorToolbar({ editor }: { editor: ReturnType<typeof useCreateBlockNot
       {styleBtn(<Underline className="h-3.5 w-3.5" />, "underline", "Underline")}
       {styleBtn(<Strikethrough className="h-3.5 w-3.5" />, "strike", "Strikethrough")}
       {styleBtn(<Code className="h-3.5 w-3.5" />, "code", "Code")}
+      {/* Font of the selected text. Empty = no mark, so it follows the theme. */}
+      <select
+        title="Font"
+        value={active.font ?? ""}
+        onChange={(e) => {
+          if (e.target.value) editor.addStyles({ font: e.target.value });
+          else editor.removeStyles({ font: "" });
+          editor.focus();
+        }}
+        className="ml-1 h-7 max-w-[10rem] rounded border border-line/30 bg-white px-1.5 text-xs text-body"
+        style={{ fontFamily: active.font ? `"${active.font}"` : undefined }}
+      >
+        <option value="">Default (theme)</option>
+        {GOOGLE_FONTS.map((f) => (
+          <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>
+            {f}
+          </option>
+        ))}
+      </select>
       <span className="mx-1 h-4 w-px bg-line/30" />
       {blockBtn(<Heading1 className="h-3.5 w-3.5" />, "heading", { level: 1 }, "Heading 1")}
       {blockBtn(<Heading2 className="h-3.5 w-3.5" />, "heading", { level: 2 }, "Heading 2")}
@@ -435,6 +462,10 @@ export default function PostEditorPage({ tenantHost, token }: { tenantHost: stri
     }
     void switchLanguage(code === language ? BASE_LANG : code);
   }
+
+  // The toolbar's font menu shows each option in its own face, and a post's
+  // chosen fonts render in the editor.
+  useEffect(() => preloadFontPicker(), []);
 
   const editor = useCreateBlockNote({
     schema: bookmarkCardSchema,

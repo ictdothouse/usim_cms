@@ -1211,9 +1211,16 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   panel; a feature-image band whose empty state opens `MediaPickerModal` — a small upload-or-pick modal
   (its own component, shared wherever the editor needs exactly one image) distinct from the full
   `MediaManager` panel's folders/search/bulk-select; the title/excerpt fields; and the BlockNote editor
-  wrapped in its own fixed `EditorToolbar` (bold/italic/underline/strike/code, heading 1-3, quote, lists,
-  alignment, link) — an always-visible bar for people used to a Word/Docs-style toolbar, layered on top of
-  BlockNote's own slash-menu and selection popup rather than replacing them. The collapsible settings
+  wrapped in its own fixed `EditorToolbar` (bold/italic/underline/strike/code, font, heading 1-3, quote,
+  lists, alignment, link) — an always-visible bar for people used to a Word/Docs-style toolbar, layered on top of
+  BlockNote's own slash-menu and selection popup rather than replacing them. **Font (2026-11-07)**: a
+  `<select>` of `GOOGLE_FONTS` (now in `@ucms/element-style`) puts the `font` style
+  (`blocknote/fontStyle.ts`, a core `createStyleSpec` for its `parse()`) on the selection; "Default
+  (theme)" removes it, so unmarked text follows the theme. Alignment, colors, font and the bookmark
+  card's layout reach the site only through `POST_BODY_ALLOWED_STYLES` (same package), which apps/api's
+  save sanitizer and apps/frontend's `sanitizePostBody` both use. Before that, alignment and background
+  colors were dropped on save and the site dropped every inline style, so those buttons only worked in
+  the editor. Reopening reads each value back from the inline style (colors come back as hex). The collapsible settings
   panel (`panelOpen`, open by default) holds a `<select>` of this tenant's `categories` plus an inline
   new-category name input + button that calls `POST /api/categories` and immediately selects the result,
   so creating a category never requires leaving the editor for `CategoriesPanel`'s own route

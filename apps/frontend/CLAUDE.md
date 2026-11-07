@@ -146,3 +146,10 @@ Loaded when working under apps/frontend/. See the repo root CLAUDE.md for cross-
   its tags/attributes/schemes from `@ucms/element-style`, where the Designer's
   `customHtmlRemovals` hint reads them too. Change the lists there, not here; the
   sanitizer test checks the hint against the real output.
+- **A post's body renders through `sanitizePostBody` (2026-11-07)**, not
+  `sanitizeCustomHtml`: the same allowlist plus `style` on the post editor's tags,
+  limited to `@ucms/element-style`'s `POST_BODY_ALLOWED_STYLES` (alignment, hex
+  colors, a `GOOGLE_FONTS` font, the bookmark card's layout), the same list
+  apps/api saves with. Through sanitizeCustomHtml (since c5957b0) every one of those
+  was dropped. `posts/[slug].astro` passes `postBodyFonts(body)` to BaseLayout's
+  `fonts` so the chosen fonts load. Custom HTML still keeps no `style` at all.

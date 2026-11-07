@@ -4,6 +4,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import type { AccessArgs, CollectionConfig } from "../collections/config-types.js";
 import { validateLayout, validateOverrides, validateElement, isSafeUrl, layoutHasUnsafeHtml, elementHasUnsafeHtml, overridesHaveUnsafeHtml } from "../collections/validate-layout.js";
 import { validateMenuItems } from "../collections/validate-menu.js";
+import { POST_BODY_ALLOWED_STYLES, POST_BODY_STYLE_TAGS } from "@ucms/element-style";
 import * as schema from "../db/schema.js";
 import { getTenantLanguageSelection } from "../db/tenant-pool.js";
 import { hasPermission } from "./permissions.js";
@@ -353,16 +354,18 @@ export const pagesCollection: CollectionConfig = {
 // layout, so they must survive this trust-boundary sanitize on every save.
 // `style` isn't allowed unrestricted (that would let arbitrary saved HTML
 // carry CSS-injection payloads, e.g. url()-based exfiltration) —
-// allowedStyles below whitelists only the exact property/value shapes
-// BOOKMARK_CARD_STYLE ever emits. Shared by the top-level `body` and every
-// i18n Phase 5 `translations[code].body` — a translation's body is exactly
-// as much of a trust boundary as the base one.
-function sanitizePostBodyHtml(html: string): string {
-  const bookmarkCardStyleValue = [/^inherit$|^none$|^flex$|^inline-block$|^cover$|^uppercase$/, /^-?\d+(\.\d+)?(px|%)?$/, /^#[0-9a-fA-F]{3,8}$/, /^\d+px solid #[0-9a-fA-F]{3,8}$/];
+// POST_BODY_ALLOWED_STYLES (@ucms/element-style) whitelists only closed
+// shapes: the card's layout plus the editor's own alignment, colors and
+// listed fonts. The site's render sanitizer uses the same list. Before it,
+// alignment and background colors were dropped here on every save. Shared by
+// the top-level `body` and every i18n Phase 5 `translations[code].body` — a
+// translation's body is exactly as much of a trust boundary as the base one.
+export function sanitizePostBodyHtml(html: string): string {
   return sanitizeHtml(html, {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
     allowedAttributes: {
       ...sanitizeHtml.defaults.allowedAttributes,
+      ...Object.fromEntries(POST_BODY_STYLE_TAGS.map((tag) => [tag, ["style"]])),
       a: [
         ...sanitizeHtml.defaults.allowedAttributes.a,
         "style",
@@ -374,31 +377,8 @@ function sanitizePostBodyHtml(html: string): string {
         "data-bookmark-url",
       ],
       img: ["src", "alt", "style"],
-      div: ["style"],
-      span: ["style"],
     },
-    allowedStyles: {
-      "*": {
-        display: bookmarkCardStyleValue,
-        gap: bookmarkCardStyleValue,
-        border: bookmarkCardStyleValue,
-        "border-radius": bookmarkCardStyleValue,
-        padding: bookmarkCardStyleValue,
-        "text-decoration": bookmarkCardStyleValue,
-        color: bookmarkCardStyleValue,
-        width: bookmarkCardStyleValue,
-        height: bookmarkCardStyleValue,
-        "object-fit": bookmarkCardStyleValue,
-        "flex-shrink": bookmarkCardStyleValue,
-        "min-width": bookmarkCardStyleValue,
-        flex: bookmarkCardStyleValue,
-        "font-size": bookmarkCardStyleValue,
-        "font-weight": bookmarkCardStyleValue,
-        "text-transform": bookmarkCardStyleValue,
-        "margin-bottom": bookmarkCardStyleValue,
-        "margin-top": bookmarkCardStyleValue,
-      },
-    },
+    allowedStyles: { "*": POST_BODY_ALLOWED_STYLES },
   });
 }
 

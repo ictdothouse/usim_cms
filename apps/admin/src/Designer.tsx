@@ -3,7 +3,7 @@ import { useBlocker } from "react-router-dom";
 import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
 import * as api from "@/lib/api";
-import { GOOGLE_FONTS, clone } from "@/lib/utils";
+import { clone, preloadFontPicker } from "@/lib/utils";
 import type { Key } from "@/i18n";
 import { childrenOf, moveSection, moveColumn } from "./designerTree";
 import { section } from "./designer/blockPath";
@@ -590,18 +590,8 @@ export default function Designer({
 
   // Preloads the whole curated GOOGLE_FONTS list as one stylesheet so the
   // Typography font picker's dropdown can render every option in its own
-  // face (not just whichever font is already applied somewhere) — same
-  // batched-<link> approach ThemeForm uses for its own font pickers
-  // (App.tsx, id="admin-font-picker-preview"), guarded by the same id since
-  // this admin build never mounts both pages at once but the guard is free.
-  useEffect(() => {
-    if (document.getElementById("admin-font-picker-preview")) return;
-    const link = document.createElement("link");
-    link.id = "admin-font-picker-preview";
-    link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`;
-    document.head.appendChild(link);
-  }, []);
+  // face (not just whichever font is already applied somewhere).
+  useEffect(() => preloadFontPicker(), []);
 
   // Keeps a Google Font <link> in document.head for every distinct
   // fontFamily in use, so the canvas preview approximates the real render

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { customHtmlRemovals, escapeHtml, sanitizeUrl } from "./index.js";
+import { customHtmlRemovals, escapeHtml, GOOGLE_FONTS, POST_BODY_ALLOWED_STYLES, postBodyFonts, sanitizeUrl } from "./index.js";
 
 test("escapeHtml escapes all 5 HTML-special chars", () => {
   assert.equal(escapeHtml(`<script>alert("x") & 'y'</script>`), "&lt;script&gt;alert(&quot;x&quot;) &amp; &#39;y&#39;&lt;/script&gt;");
@@ -52,4 +52,32 @@ test("customHtmlRemovals reads script/style bodies and comments as text, not mar
 
 test("customHtmlRemovals is empty for allowed markup", () => {
   assert.deepEqual(customHtmlRemovals('<table><tr><td aria-label="x">1</td></tr></table><br/>plain text'), []);
+});
+
+const styleOk = (prop: string, value: string) => (POST_BODY_ALLOWED_STYLES[prop] ?? []).some((re) => re.test(value));
+
+test("POST_BODY_ALLOWED_STYLES keeps the editor's alignment, colors and listed fonts", () => {
+  assert.ok(styleOk("text-align", "center"));
+  assert.ok(styleOk("color", "#e03e3e"));
+  assert.ok(styleOk("background-color", "#fbf3db"));
+  assert.ok(styleOk("font-family", "Roboto"));
+  assert.ok(styleOk("font-family", '"Playfair Display"'));
+});
+
+test("POST_BODY_ALLOWED_STYLES refuses unlisted fonts and anything that isn't a closed shape", () => {
+  assert.ok(!styleOk("font-family", "Calibri"));
+  assert.ok(!styleOk("font-family", 'Roboto", x'));
+  assert.ok(!styleOk("text-align", "start"));
+  assert.ok(!styleOk("position", "fixed"));
+  for (const prop of Object.keys(POST_BODY_ALLOWED_STYLES)) {
+    for (const bad of ["url(https://evil.example/x)", "expression(alert(1))", "#fff;background:url(x)", "var(--x)"]) {
+      assert.ok(!styleOk(prop, bad), `${prop}: ${bad}`);
+    }
+  }
+});
+
+test("postBodyFonts lists each listed font once and skips unlisted ones", () => {
+  const html = '<span style="font-family:&quot;Playfair Display&quot;">a</span><span style="font-family:Roboto">b</span><span style="font-family:Roboto">c</span><span style="font-family:Calibri">d</span>';
+  assert.deepEqual(postBodyFonts(html), ["Playfair Display", "Roboto"]);
+  assert.ok(GOOGLE_FONTS.includes("Inter"));
 });

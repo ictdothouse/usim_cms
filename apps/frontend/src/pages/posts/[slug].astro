@@ -1,7 +1,8 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import HeroBlock from "../../components/HeroBlock.astro";
-import { sanitizeCustomHtml } from "../../lib/sanitize-custom-html";
+import { postBodyFonts } from "@ucms/element-style";
+import { sanitizePostBody } from "../../lib/sanitize-custom-html";
 import { getPostBySlug, getTheme, getLanguages, getSeoDefaults, resolvePostContent, resolveCategoryName, resolveDefaultHeaderFooter } from "../../lib/api";
 
 // Same tenant resolution as [...slug].astro (see its comment for why this
@@ -35,6 +36,7 @@ const { enabled: siteLanguages, showHeaderSwitcher, switcherPosition, switcherSt
 const tenantSeoDefaults = await getSeoDefaults(tenantHost);
 const requestedLang = Astro.url.searchParams.get("lang");
 const content = post ? resolvePostContent(post, requestedLang) : null;
+const bodyHtml = content ? sanitizePostBody(content.body) : "";
 // Bare language codes (e.g. "ar", "zh") work fine as Intl locales — no need
 // for a code->region mapping table just to format a date in the currently
 // viewed language.
@@ -109,6 +111,7 @@ const jsonLd = post
   footerChrome={footerChrome}
   tenantHost={tenantHost}
   requestedLang={requestedLang}
+  fonts={postBodyFonts(bodyHtml)}
 >
   {!post || !content ? (
     <HeroBlock title="Artikel tidak dijumpai" subtitle="Artikel ini belum tersedia atau telah dialihkan." />
@@ -147,7 +150,7 @@ const jsonLd = post
           </p>
         )}
         {/* Sanitize at render too, so old rows and restored backups stay inert. */}
-        <div class="ds-html" set:html={sanitizeCustomHtml(content.body)} />
+        <div class="ds-html" set:html={bodyHtml} />
       </article>
     </>
   )}

@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { GOOGLE_FONTS } from "@ucms/element-style";
 export { contrastRatio, bestTextColor } from "@ucms/element-render";
 
 export function cn(...inputs: ClassValue[]) {
@@ -60,16 +61,19 @@ export function oklchToHex(l: number, c: number, hDeg: number): string {
 
 // Curated, not exhaustive — a scrollable/typeable starting list (every font
 // picker built on this still accepts any Google Font name typed by hand,
-// curated or not). Shared by App.tsx's ThemeForm font pickers and
-// Designer.tsx's Typography fontFamily field so both draw from one list.
-export const GOOGLE_FONTS = [
-  "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Nunito", "Raleway",
-  "Playfair Display", "Merriweather", "Oswald", "Source Sans Pro", "PT Sans", "Ubuntu", "Rubik",
-  "Work Sans", "Fira Sans", "Noto Sans", "Quicksand", "Josefin Sans", "Karla", "Mulish",
-  "DM Sans", "Barlow", "Manrope", "Space Grotesk", "Outfit", "Plus Jakarta Sans",
-  "Libre Baskerville", "Crimson Text", "Cormorant Garamond", "Bitter", "Domine", "Lora",
-  "EB Garamond", "Vollkorn", "Zilla Slab", "IBM Plex Sans", "IBM Plex Serif", "Archivo",
-  "Heebo", "Hind", "Titillium Web", "Cabin", "Dosis", "Comfortaa", "Pacifico", "Caveat",
-  "Dancing Script", "Lobster", "Bebas Neue", "Anton", "Abril Fatface", "Righteous",
-  "Permanent Marker", "Shadows Into Light", "Amatic SC", "Indie Flower",
-];
+// curated or not). Shared by ThemeForm, Designer's Typography fontFamily
+// field and the post editor's font menu. It lives in @ucms/element-style
+// because a post body's font is limited to it on save and on the site too.
+export { GOOGLE_FONTS };
+
+// One stylesheet with the whole curated list, so a font menu shows every
+// option in its own face. Guarded by id: Designer and the post editor both
+// call it.
+export function preloadFontPicker(): void {
+  if (document.getElementById("admin-font-picker-preview")) return;
+  const link = document.createElement("link");
+  link.id = "admin-font-picker-preview";
+  link.rel = "stylesheet";
+  link.href = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map((f) => `family=${encodeURIComponent(f)}`).join("&")}&display=swap`;
+  document.head.appendChild(link);
+}

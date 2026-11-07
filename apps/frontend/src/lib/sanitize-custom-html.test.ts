@@ -1,7 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { customHtmlRemovals } from "@ucms/element-style";
-import { sanitizeCustomHtml } from "./sanitize-custom-html.js";
+import { sanitizeCustomHtml, sanitizePostBody } from "./sanitize-custom-html.js";
+
+// What apps/api saves for a post using the editor's alignment, colors, font
+// and a bookmark card.
+const savedPostBody =
+  '<p style="text-align:center">c</p><p style="background-color:#fbf3db;color:#e03e3e">b</p>' +
+  '<span style="font-family:&quot;Playfair Display&quot;">f</span>' +
+  '<a href="https://x.test/p" style="display:flex;gap:12px;border:1px solid #e5e7eb" data-bookmark-type="post"><img src="https://x.test/i.png" style="width:96px;object-fit:cover" /></a>';
+
+test("a post body keeps the editor's styles and the bookmark card layout on the site", () => {
+  const result = sanitizePostBody(savedPostBody);
+  assert.match(result, /<p style="text-align:center">/);
+  assert.match(result, /<p style="background-color:#fbf3db;color:#e03e3e">/);
+  assert.match(result, /font-family:&quot;Playfair Display&quot;/);
+  assert.match(result, /<a href="https:\/\/x\.test\/p" style="display:flex;gap:12px;border:1px solid #e5e7eb" rel="noopener noreferrer">/);
+  assert.match(result, /<img src="https:\/\/x\.test\/i\.png" style="width:96px;object-fit:cover" \/>/);
+});
+
+test("a post body still drops scripts, handlers and open-ended styles", () => {
+  const result = sanitizePostBody('<p style="background:url(https://evil.example/x);position:fixed" onclick="x()">a</p><script>alert(1)</script><span style="font-family:Calibri">b</span>');
+  assert.equal(result, "<p>a</p><span>b</span>");
+});
+
+test("Custom HTML still keeps no style attribute at all", () => {
+  assert.equal(sanitizeCustomHtml('<p style="text-align:center">c</p>'), "<p>c</p>");
+});
 
 test("custom HTML keeps basic static markup and safe links", () => {
   const result = sanitizeCustomHtml('<p class="notice"><a href="https://example.com">Read</a></p>');
