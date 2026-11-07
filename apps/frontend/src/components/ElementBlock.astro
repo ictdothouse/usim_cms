@@ -22,6 +22,8 @@ import {
   typoStyle,
   elHoverClass,
   elEntranceClass,
+  elEffectBpStyle,
+  elVariantBpStyle,
   elRadius,
   imgAlignStyle,
   cls,
@@ -34,6 +36,7 @@ import { sanitizeCustomHtml } from "../lib/sanitize-custom-html";
 // across .astro files. Same duplication convention as ContainerBlock.astro/
 // RepeaterBlock.astro/MiscBlock.astro's own local copies.
 const RATIO: Record<string, string> = { "16:9": "16 / 9", "4:3": "4 / 3", "1:1": "1 / 1" };
+const BADGE_ICON_PX: Record<string, number> = { sm: 10, md: 12, lg: 14 };
 const SRCSET_WIDTHS = [400, 800, 1200, 1600];
 function buildSrcset(url: string): { srcset: string; sizes: string } | null {
   const m = /[?&]w=(\d+)/.exec(url);
@@ -74,9 +77,14 @@ const p = el.props ?? {};
 // carries (passed in, so its header/footer prefix comes along) — a CSS
 // selector matches regardless of which component's <style> tag declares it,
 // so this works without that wrapper needing to know this file's per-type
-// selectors. hoverEffect/entrance/color stay admin-canvas-preview-only for
-// now — those are CSS classes / non-box-model fields, a different mechanism
-// than reusing bpStyleRules against a margin/padding/border/shadow build.
+// selectors. hoverEffect/entrance ride the same rules: elEffectBpStyle
+// re-sets the effect's custom properties / animation-name per tier on the
+// node carrying elHoverClass/elEntranceClass (both get `el.bp`, so a
+// tablet/mobile-only effect still gets its generic class). button/badge/icon
+// color too — heading/text/list color already came through typoStyle — and
+// button/badge variant + badge scale (elVariantBpStyle restates the class's
+// look), icon size, embed ratio and gallery image radius. Fields with no rule
+// here (text/label/href, heading level, …) are base-only in the Inspector.
 const responsiveRules: string[] = [];
 function bpMerge(base: Record<string, string>, bp: Record<string, string>, tier: "tablet" | "mobile"): Record<string, string> {
   const prefix = `${tier}:`;
@@ -109,7 +117,7 @@ if (hasBp) {
     case "heading":
       responsiveRules.push(
         ...bpStyleRules(`${sel} .ds-h`, el.bp!, p, (mp) =>
-          [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp), typoStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
+          [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp), typoStyle(mp), elBorderShadowStyle(mp), elEffectBpStyle(mp, p, el.bp)].filter(Boolean).join(";"),
         ),
       );
       break;
@@ -123,6 +131,7 @@ if (hasBp) {
             paddingStyle(mp),
             typoStyle(mp),
             elBorderShadowStyle(mp),
+            elEffectBpStyle(mp, p, el.bp),
           ]
             .filter(Boolean)
             .join(";"),
@@ -132,7 +141,7 @@ if (hasBp) {
     case "image":
       responsiveRules.push(
         ...bpStyleRules(`${sel} img`, el.bp!, p, (mp) =>
-          [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp)]
+          [`border-radius:${elRadius(mp)}`, mp.imgWidth ? `width:${mp.imgWidth}` : null, imgAlignStyle(mp.align), paddingStyle(mp), elBorderShadowStyle(mp), elEffectBpStyle(mp, p, el.bp)]
             .filter(Boolean)
             .join(";"),
         ),
@@ -149,12 +158,19 @@ if (hasBp) {
     case "button":
       responsiveRules.push(
         ...bpStyleRules(`${sel} .ds-btn-wrap`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
-        ...bpStyleRules(`${sel} .ds-btn`, el.bp!, p, (mp) => elBorderShadowStyle(mp) ?? ""),
+        ...bpStyleRules(`${sel} .ds-btn`, el.bp!, p, (mp) =>
+          [elVariantBpStyle("button", mp, el.bp), mp.color ? `color:${mp.color}` : null, elBorderShadowStyle(mp), elEffectBpStyle(mp, p, el.bp)].filter(Boolean).join(";"),
+        ),
       );
       break;
     case "badge":
       responsiveRules.push(
         ...bpStyleRules(`${sel} .ds-badge-wrap`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        ...bpStyleRules(`${sel} .ds-badge`, el.bp!, p, (mp) => [elVariantBpStyle("badge", mp, el.bp), mp.color ? `color:${mp.color}` : null].filter(Boolean).join(";")),
+        ...bpStyleRules(`${sel} .ds-badge svg`, el.bp!, p, (mp) => {
+          const px = BADGE_ICON_PX[mp.scale ?? "md"] ?? 12;
+          return `width:${px}px;height:${px}px`;
+        }),
       );
       break;
     case "spacer":
@@ -171,6 +187,7 @@ if (hasBp) {
       responsiveRules.push(
         ...bpStyleRules(`${sel} .ds-embed`, el.bp!, p, (mp) =>
           [
+            `aspect-ratio:${RATIO[mp.ratio ?? "16:9"] ?? RATIO["16:9"]}`,
             `border-radius:${elRadius(mp)}`,
             shadowToCss(mp.shadow) ? `box-shadow:${shadowToCss(mp.shadow)}` : null,
             marginStyle(mp),
@@ -184,6 +201,11 @@ if (hasBp) {
     case "icon":
       responsiveRules.push(
         ...bpStyleRules(`${sel} .ds-icon-wrap`, el.bp!, p, (mp) => [mp.align ? `text-align:${mp.align}` : null, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";")),
+        // The svg's stroke="" attribute is a presentation hint; CSS stroke beats it.
+        ...bpStyleRules(`${sel} .ds-icon-wrap svg`, el.bp!, p, (mp) => {
+          const size = lengthValue(mp.size, ICON_SIZE, ICON_SIZE.md);
+          return [`width:${size};height:${size}`, mp.color ? `stroke:${mp.color}` : null].filter(Boolean).join(";");
+        }),
       );
       break;
     case "list":
@@ -197,6 +219,7 @@ if (hasBp) {
         ...bpStyleRules(`${sel} .ds-gallery`, el.bp!, p, (mp) =>
           [`grid-template-columns:repeat(${mp.columns ?? "3"},1fr)`, marginStyle(mp), paddingStyle(mp)].filter(Boolean).join(";"),
         ),
+        ...bpStyleRules(`${sel} .ds-gallery img`, el.bp!, p, (mp) => `border-radius:${elRadius(mp)}`),
       );
       break;
   }
@@ -209,7 +232,7 @@ switch (el.type) {
     const Tag = headingTag(p.level) as "h1";
     return (
       <Tag
-        class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p), elEntranceClass(p))}
+        class={cls("ds-h", `ds-h${p.level ?? "2"}`, p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
         style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p), typoStyle(p), elBorderShadowStyle(p)]
           .filter(Boolean)
           .join(";")}
@@ -220,7 +243,7 @@ switch (el.type) {
   case "text":
     return (
       <p
-        class={cls("ds-text", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+        class={cls("ds-text", p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
         style={[
           `font-size:${fluidTextSize(lengthValue(p.size, TEXT_SIZE, TEXT_SIZE.md))}`,
           p.align ? `text-align:${p.align}` : null,
@@ -247,7 +270,7 @@ switch (el.type) {
     const imgHref = safeUrl(p.href);
     const img = (
       <img
-        class={cls("ds-img", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+        class={cls("ds-img", p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
         src={imgSrc}
         srcset={imgSrcset?.srcset}
         sizes={imgSrcset ? imgSrcset.sizes : undefined}
@@ -297,7 +320,7 @@ switch (el.type) {
         style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}
       >
         <a
-          class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p), elEntranceClass(p))}
+          class={cls(p.variant === "outline" ? "ds-btn ds-btn-outline" : "ds-btn ds-btn-primary", p.cssClass, elHoverClass(p, el.bp), elEntranceClass(p, el.bp))}
           href={safeUrl(p.href) ?? "#"}
           style={[p.color ? `color:${p.color}` : null, elBorderShadowStyle(p)].filter(Boolean).join(";") || undefined}
         >
@@ -307,7 +330,7 @@ switch (el.type) {
     ) : null;
   case "badge": {
     if (!p.label) return null;
-    const badgeIconSize = { sm: 10, md: 12, lg: 14 }[p.scale ?? "md"] ?? 12;
+    const badgeIconSize = BADGE_ICON_PX[p.scale ?? "md"] ?? 12;
     const badgeIconPath = p.name ? ICON_PATHS[p.name] : undefined;
     return (
       <div class="ds-badge-wrap" style={[p.align ? `text-align:${p.align}` : null, marginStyle(p), paddingStyle(p)].filter(Boolean).join(";")}>

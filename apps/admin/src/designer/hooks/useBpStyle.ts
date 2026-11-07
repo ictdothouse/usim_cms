@@ -90,11 +90,12 @@ export function useBpStyle(): BpStyleApi {
   const [linkedPadding, setLinkedPadding] = useState(false);
   const [linkedRadius, setLinkedRadius] = useState(true);
   const [linkedMargin, setLinkedMargin] = useState(false);
-  // Breakpoint edit mode — admin-preview only (Framer-style Desktop/Tablet/
-  // Mobile toggle). Narrows the canvas width and routes Inspector field
-  // edits into each node's `bp` override bag instead of its base props.
-  // apps/frontend never reads `bp` — the real site is unaffected, this is
-  // purely how the page looks/edits inside this Designer session.
+  // Breakpoint edit mode (Framer-style Desktop/Tablet/Mobile toggle).
+  // Narrows the canvas width and routes Inspector field edits into each
+  // node's `bp` override bag instead of its base props. apps/frontend turns
+  // that bag into real @media rules (each render file's bpStyleRules) for
+  // margin/padding/border/shadow/align/typography, element color and
+  // hoverEffect/entrance, among others.
   const [bp, setBp] = useState<Bp>("desktop");
 
   const { bpKey, bpKeysOverridden, toggleBpKeys, bpGetValue, sideValue } = bpStyleFns(bp);

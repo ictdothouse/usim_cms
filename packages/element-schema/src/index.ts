@@ -24,9 +24,10 @@
 // a mechanical relocation, not a rewrite; every check below is unchanged
 // from before the move.
 //
-// `html` (the Custom HTML element) is deliberately NOT validated — a raw
-// HTML/CSS/JS embed is an intentional, documented trust boundary (same as
-// any page builder's "custom code" block), not a gap to close.
+// `html` (the Custom HTML element) is deliberately NOT validated here: the
+// site sanitizes it on every render (apps/frontend's sanitize-custom-html.ts,
+// allowlist in @ucms/element-style), so old rows are covered too, and the
+// Designer shows the editor what that will strip (customHtmlRemovals).
 
 import { sanitizeUrl } from "@ucms/element-style";
 

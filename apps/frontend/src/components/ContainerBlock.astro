@@ -106,6 +106,12 @@ function boxStyle(cp: Record<string, string>, nested: boolean): string {
     .filter(Boolean)
     .join(";");
 }
+// The box's own tablet/mobile override (flex layout, gap, background, radius,
+// margin/padding, border/shadow): the whole boxStyle again, from merged
+// props. Top level, SectionBlock.astro's display:contents data-vis wrapper
+// sits right around this file's .ds-container; a nested box carries its
+// data-vis itself (renderChild below).
+if (el.bp && Object.keys(el.bp).length > 0) responsiveRules.push(...bpStyleRules(`[data-vis="${elId}"] > .ds-container`, el.bp, p, (mp) => boxStyle(mp, false)));
 ---
 
 {(() => {
@@ -118,9 +124,7 @@ const renderChild = (child: El, childPath: string, visId: string): unknown => {
   if (child.type === "container") {
     if (hasBp) {
       responsiveRules.push(
-        ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) =>
-          [`border-radius:${elRadius(mp)}`, marginStyle(mp), paddingStyle(mp), elBorderShadowStyle(mp)].filter(Boolean).join(";"),
-        ),
+        ...bpStyleRules(`[data-vis="${visId}"]`, child.bp!, cp, (mp) => boxStyle(mp, true)),
       );
     }
     const boxVis = hideRules(cp, visId) || hasBp;

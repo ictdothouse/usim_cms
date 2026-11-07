@@ -8,6 +8,10 @@ import {
   bestTextColor,
   zIndexValue,
   imgAlignStyle,
+  elHoverClass,
+  elEntranceClass,
+  elEffectBpStyle,
+  elVariantBpStyle,
   SOCIAL_ICONS,
 } from "./index.js";
 
@@ -98,4 +102,51 @@ test("elBorderShadowStyle omits unset keys entirely", () => {
 test("bestTextColor picks white on a dark background, black on a light one", () => {
   assert.equal(bestTextColor("#000000"), "#ffffff");
   assert.equal(bestTextColor("#ffffff"), "#000000");
+});
+
+test("elHoverClass/elEntranceClass add the generic class when the effect is on at any breakpoint", () => {
+  assert.equal(elHoverClass({ hoverEffect: "none" }), undefined);
+  assert.equal(elHoverClass({ hoverEffect: "lift" }), "ds-hover ds-hover-lift");
+  // Desktop off, mobile on: the element still needs the generic class for its mobile rule to act on.
+  assert.equal(elHoverClass({}, { "mobile:hoverEffect": "glow" }), "ds-hover");
+  assert.equal(elHoverClass({}, { "mobile:hoverEffect": "none", "tablet:marginTop": "4" }), undefined);
+  assert.equal(elEntranceClass({ entrance: "fade" }), "ds-entrance ds-entrance-fade");
+  assert.equal(elEntranceClass({}, { "tablet:entrance": "zoom" }), "ds-entrance");
+});
+
+// What a render file's bpStyleRules does for one tier: merge the tier's keys over the base, build.
+test("elEffectBpStyle turns a tier's own hover/entrance into that tier's CSS", () => {
+  const base = { hoverEffect: "lift", entrance: "fade" };
+  const bp = { "mobile:hoverEffect": "none", "mobile:entrance": "zoom" };
+  const mobile = { ...base, hoverEffect: "none", entrance: "zoom" };
+  assert.equal(toCssText(elEffectBpStyle(mobile, base, bp)), "--ds-hover-tf:none;--ds-hover-sh:none;animation-name:ds-entrance-zoom");
+  // Tablet has no override of its own: it restates the desktop effect.
+  assert.equal(
+    toCssText(elEffectBpStyle(base, base, bp)),
+    "--ds-hover-tf:translateY(-4px);--ds-hover-sh:0 8px 20px rgba(0, 0, 0, 0.12);animation-name:ds-entrance-fade",
+  );
+  // "" (a freshly toggled override) is off, like "none".
+  assert.equal(elEffectBpStyle({ entrance: "" }, {}, { "mobile:entrance": "" }).animationName, undefined);
+  assert.equal(elEffectBpStyle({ entrance: "" }, { entrance: "fade" }, { "mobile:entrance": "" }).animationName, "none");
+});
+
+test("elEffectBpStyle adds nothing for an element with no effect anywhere", () => {
+  assert.deepEqual(elEffectBpStyle({ marginTop: "8" }, {}, { "mobile:marginTop": "8" }), {});
+});
+
+test("elVariantBpStyle restates a tier's variant/scale in full, only when a tier overrides one", () => {
+  const bp = { "mobile:variant": "outline" };
+  assert.deepEqual(elVariantBpStyle("button", { variant: "outline" }, bp), {
+    background: "transparent",
+    color: "inherit",
+    border: "2px solid currentColor",
+  });
+  // Tablet has no override of its own: it restates the desktop (default primary) look.
+  assert.equal(elVariantBpStyle("button", {}, bp).border, "none");
+  assert.equal(
+    toCssText(elVariantBpStyle("badge", { variant: "filled", scale: "lg" }, { "tablet:scale": "lg", "tablet:variant": "filled" })),
+    "background:var(--color-primary, #0f62fe);color:var(--color-primary-content, #fff);border:none;padding:0.2em 0.9em;font-size:0.9rem",
+  );
+  assert.deepEqual(elVariantBpStyle("badge", { scale: "sm" }, { "mobile:marginTop": "4" }), {});
+  assert.deepEqual(elVariantBpStyle("button", { scale: "sm" }, { "mobile:scale": "sm" }), {});
 });

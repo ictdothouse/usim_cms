@@ -474,9 +474,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   `SectionBlock.astro` and `DesignerCanvas.tsx`. Blocks mode stays the editing approximation.
   **Was admin-canvas-preview-only, now real (2026-10-09 generalization)**: shadow/border/typography on
   slide-nested heading/text/image/button now also get a real `bpStyleRules` CSS rule in
-  `SliderBlock.astro`'s `renderSlideEl` (previously only margin/padding/position did) — `color` and
-  `hoverEffect`/`entrance` are the only fields still desktop-value-only for slide children (CSS
-  classes/non-box-model fields, a different mechanism). This was the last piece of a much larger sweep
+  `SliderBlock.astro`'s `renderSlideEl` (previously only margin/padding/position did); `color` and
+  `hoverEffect`/`entrance` followed on 2026-11-06 (see the dated entry at the end). This was the last piece of a much larger sweep
   that made per-breakpoint margin/padding/border/shadow/align real for virtually every ElType across
   every render file (`ElementBlock.astro`, `MiscBlock.astro`, `RepeaterBlock.astro`,
   `ContainerBlock.astro`, `SymbolBlock.astro`), plus Row's own margin/padding/gap bp
@@ -487,9 +486,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   wholesale as the bp `build()` function); Element was the one level still built case-by-case with no
   generic fallback. Each render file still duplicates its own local `bpMerge`/`bpStyleRules` rather than
   importing a shared copy — same established "god-file breakup" convention as everything else in this
-  list. Out of scope, deliberately: `color`/`hoverEffect`/`entrance` per-breakpoint (CSS classes, not
-  CSS declarations — `bpStyleRules` only emits property:value pairs, so making these real needs a
-  different mechanism, not just more call sites).
+  list. `color`/`hoverEffect`/`entrance` per-breakpoint were left out here and made real on
+  2026-11-06 (dated entry at the end).
   **Effects parity**: heading/text/button gained `shadow`+`borderWidth`/`borderColor`/`borderStyle`
   (button also gained `color`) — fields that already existed on image/embed or as a generic kind, just
   not previously offered on these 3 types; `style.ts`/`SectionBlock.astro`'s `elBorderShadowStyle()` is
@@ -504,10 +502,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   (published site). Entrance is site-only — applying it in `ElPreview`'s canvas would replay the
   animation on every React re-render. `entrance` uses `animation-timeline: view()` for real scroll-
   triggered playback where supported (Chrome/Edge/Firefox), `@supports`-gated; elsewhere it silently
-  degrades to a one-shot animation that finishes on page load, never a broken/stuck state. Both fields
-  are the same "admin-canvas-preview-only, no real per-bp" bucket `color` still is for slide-nested
-  elements (shadow/border/typography were closed in the 2026-10-09 generalization above — see that
-  entry and `SliderBlock.astro`'s `renderSlideEl` comment).
+  degrades to a one-shot animation that finishes on page load, never a broken/stuck state. Per-bp
+  values of both are real since 2026-11-06 (dated entry at the end).
   **Slide overlay bug fix**: `SLIDE_DEFAULTS.overlayOpacity` used to default to `"35"`, so a freshly-
   added slide showed a darkening scrim the author never asked for; it now defaults to `"0"` (no overlay
   until the author sets one), fixed in both `parsers.ts` and `SectionBlock.astro`'s 2 legacy-shape
@@ -526,8 +522,8 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   radius only ever appears when the author explicitly sets one.
   **Not done** (deliberately out of scope, tracked as follow-ups if ever asked for): Designer admin-panel
   UI responsiveness (sidebar/Inspector/canvas on a narrow browser window) — a separate concern, no code
-  overlap; real per-bp shadow/border/color/typography/hoverEffect/entrance on nested elements (see
-  above). See
+  overlap. (Real per-bp shadow/border/color/typography/hoverEffect/entrance on nested elements,
+  once listed here, are all done.) See
   `docs/superpowers/specs/2026-09-05-slider-banner-rework-design.md` for the original design.
 
   Slider/banner's `slides` field is a **JSON array**, one object per slide (`imageUrl`, `heading`,
@@ -2003,3 +1999,70 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   the Live Edit badges/drag in an iframe). Still open: ElPreview's slide
   canvas ignores a free child's margin/padding, and the siteChrome Blocks
   canvas puts an image's padding outside its border (published: inside).
+- **Per-breakpoint hover/entrance/color made real (2026-11-06, audit §3.5)**: the
+  Inspector's BpToggle on `hoverEffect`, `entrance` and button/badge/icon `color`
+  saved fine and showed on the canvas, but the site rendered the desktop value.
+  All three now go through each render file's existing `bpStyleRules`
+  (ElementBlock — so container children too — SymbolBlock, SliderBlock slide
+  children); no toggle was removed.
+  - Color: button `.ds-btn`/badge `.ds-badge` get `color`, icon's svg `stroke`
+    (CSS beats its `stroke=""` attribute).
+  - Hover/entrance: `global.css` (and `index.css` for the canvas, which also
+    gained the missing glow) split mechanics from values. Generic `.ds-hover`
+    owns the transition and `:hover { transform: var(--ds-hover-tf);
+    box-shadow: var(--ds-hover-sh) }`, `.ds-hover-<name>` only sets those two
+    vars; generic `.ds-entrance` owns duration/fill/timeline,
+    `.ds-entrance-<name>` only `animation-name`. A tier's rule is then plain
+    property:value pairs from `@ucms/element-render`'s `elEffectBpStyle(mp,
+    base, bp)` (vars or `animation-name`, "" = off like "none"), whose
+    `HOVER_FX` values must equal global.css's (a frontend test checks).
+  - `elHoverClass`/`elEntranceClass(p, bp?)` add the generic class when the
+    effect is on at ANY tier, so a mobile-only effect has something to switch;
+    the canvas still passes merged props and no bag. BaseLayout's entrance
+    settle script selects `.ds-entrance` and sets `animation:none` as
+    `important` (a tier rule's `animation-name` is `!important`). Reduced
+    motion: `.ds-entrance { animation:none !important }`, `.ds-hover:hover
+    { transform:none }`.
+  - The rest of the placebo toggles went in the follow-up entry below.
+- **No placebo BpToggle left on elements (2026-11-06, audit §3.5 follow-up)**:
+  `elements.ts`'s `BP_FIELDS` lists, per element type, the ELS fields some
+  apps/frontend render file really reads from a tier's merged props.
+  `bpBaseOnly(type, key)` is true for every other ELS field and `cssClass`;
+  keys that aren't ELS fields (BoxModel sides, slide free-position, the
+  slider Navigation panel, zIndex) aren't governed by it.
+  - For a base-only field the Inspector shows no BpToggle (FieldGroups'
+    `canBp`), `getValue` reads the base value and a Tablet/Mobile edit writes
+    the base value: InspectorElementPanel (element + slide child, same
+    bypass slides/image already had), InspectorNestedPanel. ElPreview's
+    `mergeElBp` skips those keys, so an old saved `bp` copy is ignored as the
+    site ignores it. Section/Column use `NODE_BASE_ONLY_KEYS` (width,
+    anchorId, cssClass) the same way.
+  - Made real on the site: icon `size` (svg width/height), button/badge
+    `variant` and badge `scale` (`@ucms/element-render`'s `elVariantBpStyle`
+    restates the class's background/color/border or padding/font-size, first
+    in the rule so the author's color/border still win; frontend test checks
+    the values against global.css), badge icon size, embed `ratio`, gallery
+    and slider radius, container flex/gap/bg/border/shadow (top-level box had
+    no bp rule at all; nested had box-model only), menu align "left" undoing
+    a desktop center/right, and SymbolBlock heading/text now carry the full
+    align/margin/padding/typography/border/size rule.
+  - Base-only (toggle gone): heading `level`, list `style` (semantic tags),
+    all content fields (text/label/href/alt/url/items/html/images/icon
+    name/…), slider Swiper options, accordion `exclusive`, menu
+    `layout`/`menuEffect`/`megaMenuWidth`/`dropdownTrigger`, and the
+    blocks' knobs no render file reads per tier: infobox color/align/
+    iconPosition, ctabanner align/bgColor, announcementbar/ticker colors and
+    speed, googlemap height, socialicons align/style, cardgrid equalHeight,
+    postlist/eventlist/repeater columns and layouts. To make one real later,
+    add its bpStyleRules build in the render file, then its key to BP_FIELDS
+    (elements.test.ts rejects a key that isn't a field of that type).
+- **Custom HTML removal hint (2026-11-06, audit §3.8)**: the site sanitizes the
+  html element on render (`apps/frontend`'s `sanitize-custom-html.ts`) and used
+  to drop scripts/iframes/`style=""` without a word. Its allowlist moved to
+  `@ucms/element-style` (`CUSTOM_HTML_ALLOWED_TAGS`/`_ATTRIBUTES`/`_SCHEMES`),
+  which the sanitizer now imports, and `customHtmlRemovals(raw)` there lists
+  what it will strip (`<tag>`, attribute names, a refused-scheme href/src).
+  FieldInput shows that list under the html textarea, with a pointer to the
+  Embed element. The admin can't run sanitize-html itself (no such dependency
+  here), so the helper is a regex scan of the same lists; the frontend's
+  `sanitize-custom-html.test.ts` pins it to the real sanitizer's output.
