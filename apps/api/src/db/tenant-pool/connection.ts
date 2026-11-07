@@ -16,6 +16,20 @@ export class UnknownTenantError extends Error {
   }
 }
 
+// The tenant pool couldn't hand out a client within TENANT_POOL_CONNECT_TIMEOUT_MS
+// (all 5 checked out, or the database/PgBouncer not answering). plugins/tenant.ts
+// answers 503; statusCode gives any other caller the same through Fastify.
+export class TenantDbUnavailableError extends Error {
+  statusCode = 503;
+  constructor(host: string, cause: unknown) {
+    super(`Database for ${host} is busy or unreachable`, { cause });
+  }
+}
+
+// Without it a request queued on an exhausted pool waited forever, and a
+// leak of 5 clients hung the tenant for good (the 2026-11-05 live test).
+const TENANT_POOL_CONNECT_TIMEOUT_MS = 10_000;
+
 export function tenantDbName(tenantHost: string): string {
   return `tenant_${tenantHost.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
 }
@@ -101,6 +115,7 @@ function getTenantPool(connectionString: string): Pool {
       connectionString,
       max: 5,
       idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: TENANT_POOL_CONNECT_TIMEOUT_MS,
     });
     tp.on("connect", (client) => {
       client.query("SET statement_timeout = 10000").catch(() => {});
@@ -589,6 +604,10 @@ export async function getTenantConnection(tenantHost: string): Promise<TenantCon
   }
 
   const connectionString = await ensureTenantDatabase(tenantHost, (tenant.dbUrl as string | null) ?? null);
-  const client = await getTenantPool(connectionString).connect();
+  const client = await getTenantPool(connectionString)
+    .connect()
+    .catch((err: unknown) => {
+      throw new TenantDbUnavailableError(tenantHost, err);
+    });
   return { db: drizzle(client, { schema }), release: () => client.release() };
 }

@@ -4,8 +4,10 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { zipSync, unzipSync, strToU8, strFromU8 } from "fflate";
 import { sql } from "drizzle-orm";
-import { getTenantConnection, getTenantRecord, getTenantTheme, setTenantTheme } from "./db/tenant-pool.js";
-import { localUploadsDir, dirSizeBytes, isValidMediaKey, tenantMediaPrefix } from "./storage.js";
+import type { PgTable } from "drizzle-orm/pg-core";
+import { getTenantConnection, getTenantRecord, getTenantTheme, setTenantTheme, type TenantDb } from "./db/tenant-pool.js";
+import { contentTypeFor, localUploadsDir, dirSizeBytes, isValidMediaKey, tenantMediaPrefix, LEGACY_MOVED_MARKER } from "./storage.js";
+import { matchesAllowedMediaSignature } from "./file-validation.js";
 import * as schema from "./db/schema.js";
 
 // Tenant backup/restore/static-export. JSON dump instead of pg_dump on
@@ -20,14 +22,31 @@ import * as schema from "./db/schema.js";
 const BACKUP_VERSION = 1;
 const tenantFolder = (host: string) => host.toLowerCase().replace(/[^a-z0-9]/g, "_");
 
-type BackupTables = {
-  pages: Record<string, unknown>[];
-  posts: Record<string, unknown>[];
-  media: Record<string, unknown>[];
-  mediaFolders?: Record<string, unknown>[];
-  siteChrome?: Record<string, unknown>[];
-  categories?: Record<string, unknown>[];
-};
+// Every tenant table, in FK-safe insert order (a table only references ones
+// above it); the first element is its key under backup.json's `tables`.
+// backup-manifest.test.ts fails if a tenant migration creates a table that
+// is missing here, or if this order would break an FK on restore.
+export const BACKUP_TABLES = [
+  ["siteChrome", schema.siteChrome],
+  ["mediaFolders", schema.mediaFolders],
+  ["categories", schema.categories],
+  ["menus", schema.menus],
+  ["symbols", schema.symbols],
+  ["designTemplates", schema.designTemplates],
+  ["events", schema.events],
+  ["pages", schema.pages],
+  ["posts", schema.posts],
+  ["media", schema.media],
+  ["pageRevisions", schema.pageRevisions],
+  ["postRevisions", schema.postRevisions],
+] as const satisfies ReadonlyArray<readonly [string, PgTable]>;
+
+type TableKey = (typeof BACKUP_TABLES)[number][0];
+type Row = Record<string, unknown>;
+// In every backup ever written. Any other key can be missing from an older
+// zip, and restore then leaves that table exactly as it is.
+const REQUIRED_TABLES: readonly TableKey[] = ["pages", "posts", "media"];
+type BackupTables = Partial<Record<TableKey, Row[]>> & Record<"pages" | "posts" | "media", Row[]>;
 
 type TenantBackup = {
   version: number;
@@ -52,9 +71,9 @@ export function parseTenantBackupManifest(raw: string): TenantBackup {
     throw new Error("Invalid backup source host");
   }
   if (!isPlainRecord(backup.tables)) throw new Error("Backup tables are missing or invalid");
-  for (const table of ["pages", "posts", "media", "mediaFolders", "siteChrome", "categories"] as const) {
+  for (const [table] of BACKUP_TABLES) {
     const rows = backup.tables[table];
-    if (rows === undefined && ["mediaFolders", "siteChrome", "categories"].includes(table)) continue;
+    if (rows === undefined && !REQUIRED_TABLES.includes(table)) continue;
     if (!Array.isArray(rows) || rows.some((row) => !isPlainRecord(row))) {
       throw new Error(`Backup table '${table}' must be an array of records`);
     }
@@ -95,9 +114,10 @@ function rewriteBackupStrings(value: unknown, replacements: Array<[string, strin
 // migration until this path is replaced with streaming archive I/O.
 const MAX_LOCAL_MEDIA_BACKUP_BYTES = 128 * 1024 * 1024; // 128 MiB
 const MAX_BACKUP_ARCHIVE_BYTES = 64 * 1024 * 1024; // 64 MiB compressed upload
+const MAX_MANIFEST_BYTES = 64 * 1024 * 1024; // backup.json, checked on both sides
 
-const DATE_KEYS = new Set(["createdAt", "updatedAt", "publishedAt"]);
-function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+const DATE_KEYS = new Set(["createdAt", "updatedAt", "publishedAt", "startDate", "endDate"]);
+function reviveDates(rows: Row[]): Row[] {
   for (const row of rows) {
     for (const key of DATE_KEYS) {
       if (typeof row[key] === "string") row[key] = new Date(row[key] as string);
@@ -106,42 +126,69 @@ function reviveDates(rows: Record<string, unknown>[]): Record<string, unknown>[]
   return rows;
 }
 
-export async function exportTenantBackup(host: string): Promise<Uint8Array> {
+type TenantTx = Parameters<Parameters<TenantDb["transaction"]>[0]>[0];
+
+// Every table at once, in one transaction so the FKs between them agree.
+async function dumpTables<K extends TableKey>(host: string, keys: readonly K[]): Promise<Record<K, Row[]>> {
   const { db, release } = await getTenantConnection(host);
-  let pages, posts, media, mediaFolders, siteChrome, categories;
   try {
-    [pages, posts, media, mediaFolders, siteChrome, categories] = await db.transaction(async (tx) => {
+    return await db.transaction(async (tx) => {
       // LOCAL scopes privileged RLS access to this transaction and cannot
       // survive when the pooled connection is returned to another request.
       await tx.execute(sql`SET LOCAL app.authenticated = 'true'`);
-      return Promise.all([
-        tx.select().from(schema.pages),
-        tx.select().from(schema.posts),
-        tx.select().from(schema.media),
-        tx.select().from(schema.mediaFolders),
-        // pages.headerId/footerId are real FKs into site_chrome — without this
-        // table in the dump, restoring into a fresh tenant (clone/promote) 400s
-        // on the very first page insert since those ids don't exist yet there.
-        tx.select().from(schema.siteChrome),
-        // posts.categoryId is a real FK into categories — same failure mode as
-        // site_chrome above, just surfaces on the posts insert instead.
-        tx.select().from(schema.categories),
-      ]);
+      const tables = BACKUP_TABLES.filter(([key]) => keys.includes(key as K));
+      const rows = await Promise.all(tables.map(([, table]) => tx.select().from(table as PgTable)));
+      return Object.fromEntries(tables.map(([key], i) => [key, rows[i]])) as Record<K, Row[]>;
     });
   } finally {
     release();
   }
-  const files: Record<string, Uint8Array> = {
-    "backup.json": strToU8(
-      JSON.stringify({
-        version: BACKUP_VERSION,
-        sourceHost: host,
-        exportedAt: new Date().toISOString(),
-        tables: { pages, posts, media, mediaFolders, siteChrome, categories },
-        theme: await getTenantTheme(host),
-      }),
-    ),
-  };
+}
+
+// Postgres caps one statement at 65,535 bind parameters: a ~20-column table
+// hits that near 3,000 rows (revisions pile up over a site's lifetime), so
+// rows go in fixed-size batches.
+async function insertRows(tx: TenantTx, table: PgTable, rows: Row[]): Promise<void> {
+  for (let i = 0; i < rows.length; i += 500) {
+    // Rows are this table's own dump, so their shape is the table's insert shape.
+    await tx.insert(table).values(rows.slice(i, i + 500) as never);
+  }
+}
+
+// page_revisions/post_revisions are history. Deleting pages/posts cascades
+// them away (the FK action bypasses RLS) and they have no DELETE policy of
+// their own. A restore therefore re-inserts the tenant's existing revisions
+// plus the backup's (backup wins on the same id), keeping every one whose
+// page/post exists afterwards — an older backup, or one without revisions,
+// no longer erases the "restore to last known good" history.
+export function mergeRevisions(fromBackup: Row[], existing: Row[], parentKey: "pageId" | "postId", parentIds: Set<unknown>): Row[] {
+  const byId = new Map<unknown, Row>();
+  for (const row of [...existing, ...fromBackup]) byId.set(row.id, row);
+  return [...byId.values()].filter((row) => parentIds.has(row[parentKey]));
+}
+
+// Restore writes zip entries straight onto the public /uploads/ tree, so they
+// get POST /api/media's own gate: an extension that maps (contentTypeFor) to a
+// type matchesAllowedMediaSignature allows, with bytes that match it. A
+// crafted zip can no longer plant .html/.svg that runs script on this origin.
+export const isRestorableMediaFile = (name: string, data: Uint8Array): boolean =>
+  matchesAllowedMediaSignature(contentTypeFor(name), data);
+
+export async function exportTenantBackup(host: string): Promise<Uint8Array> {
+  const tables = await dumpTables(host, BACKUP_TABLES.map(([key]) => key));
+  const manifest = strToU8(
+    JSON.stringify({
+      version: BACKUP_VERSION,
+      sourceHost: host,
+      exportedAt: new Date().toISOString(),
+      tables,
+      theme: await getTenantTheme(host),
+    }),
+  );
+  if (manifest.byteLength > MAX_MANIFEST_BYTES) {
+    throw new Error(`${host}'s backup.json would be ${(manifest.byteLength / 1024 / 1024).toFixed(0)} MB — over the ${MAX_MANIFEST_BYTES / 1024 / 1024} MB restore limit`);
+  }
+  const files: Record<string, Uint8Array> = { "backup.json": manifest };
   const dir = path.join(localUploadsDir, tenantFolder(host));
   // Phase-1 tree (storage.ts): tenants/<id>/<yyyy>/<mm>/<file>, bundled as
   // media/<yyyy>/<mm>/<file> — tenant-relative, so a restore re-homes it under
@@ -149,9 +196,10 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
   const tenant = await getTenantRecord(host);
   const mediaDir = tenant ? path.join(localUploadsDir, tenantMediaPrefix(tenant.id)) : null;
   const mediaBytes = ((await dirSizeBytes(dir)) ?? 0) + (mediaDir ? ((await dirSizeBytes(mediaDir)) ?? 0) : 0);
-  if (mediaBytes > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
+  // Restore refuses an archive that inflates past this, manifest included.
+  if (mediaBytes + manifest.byteLength > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
     throw new Error(
-      `${host}'s uploads are ${(mediaBytes / 1024 / 1024).toFixed(0)} MB — too large for this zip-backup ` +
+      `${host}'s uploads plus database rows are ${((mediaBytes + manifest.byteLength) / 1024 / 1024).toFixed(0)} MB — too large for this zip-backup ` +
         `path (buffers everything in memory). Use a filesystem copy (rsync/tar) of uploads/${tenantFolder(host)}/ ` +
         `and uploads/${tenant ? tenantMediaPrefix(tenant.id) : "tenants/<id>"}/ instead; this export still covers the database rows and theme.`,
     );
@@ -176,16 +224,7 @@ export async function exportTenantBackup(host: string): Promise<Uint8Array> {
 // Produces the same backup.json shape as exportTenantBackup, so it imports
 // through the existing importTenantBackup unchanged.
 export async function exportTenantDesignClone(host: string): Promise<Uint8Array> {
-  const { db, release } = await getTenantConnection(host);
-  let pages, siteChrome;
-  try {
-    [pages, siteChrome] = await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL app.authenticated = 'true'`);
-      return Promise.all([tx.select().from(schema.pages), tx.select().from(schema.siteChrome)]);
-    });
-  } finally {
-    release();
-  }
+  const { pages, siteChrome, menus, symbols } = await dumpTables(host, ["pages", "siteChrome", "menus", "symbols"]);
   const skeletonPages = pages.map((p) => ({
     ...p,
     layout: (p.layout as Array<{ type: string }>).map((block) => ({ type: block.type })),
@@ -199,12 +238,12 @@ export async function exportTenantDesignClone(host: string): Promise<Uint8Array>
         version: BACKUP_VERSION,
         sourceHost: host,
         exportedAt: new Date().toISOString(),
-        // A page's headerId/footerId still points at these real site_chrome
-        // rows even in a skeleton clone (see exportTenantBackup's own comment
-        // on why this table can't be dropped) — header/footer design is
-        // structure, not content, so keeping it here matches this clone
-        // type's own "site structure + theme survive" premise anyway.
-        tables: { pages: skeletonPages, posts: [], media: [], mediaFolders: [], siteChrome },
+        // A page's headerId/footerId is a real FK into site_chrome even in a
+        // skeleton clone, so the page insert would fail without these rows.
+        // Header/footer layouts are kept whole and reference menus/symbols by
+        // id (a Menu or Symbol element), so those come along too — all
+        // structure, not content, matching this clone's own premise.
+        tables: { pages: skeletonPages, posts: [], media: [], mediaFolders: [], siteChrome, menus, symbols },
         theme: await getTenantTheme(host),
       }),
     ),
@@ -259,7 +298,7 @@ export function deleteClone(id: string): boolean {
   return cloneStore.delete(id);
 }
 
-export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[] }> {
+export async function importTenantBackup(host: string, zip: Uint8Array): Promise<{ restored: string[]; skipped: string[] }> {
   if (zip.byteLength > MAX_BACKUP_ARCHIVE_BYTES) {
     throw new Error(`backup archive exceeds ${MAX_BACKUP_ARCHIVE_BYTES} bytes — refusing to restore`);
   }
@@ -273,7 +312,7 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
       if (decompressedTotal > MAX_LOCAL_MEDIA_BACKUP_BYTES) {
         throw new Error(`backup decompresses to more than ${MAX_LOCAL_MEDIA_BACKUP_BYTES} bytes — refusing to restore`);
       }
-      if (file.name === "backup.json" && file.originalSize > 64 * 1024 * 1024) {
+      if (file.name === "backup.json" && file.originalSize > MAX_MANIFEST_BYTES) {
         throw new Error("Backup manifest is too large");
       }
       return true;
@@ -302,24 +341,21 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL app.authenticated = 'true'`);
       // Full replace, not merge — a restore means "make the tenant look like
-      // the backup". Keep the delete and insert phases atomic so a malformed
-      // row/FK error cannot leave a tenant empty or only partly restored.
-      await tx.delete(schema.media);
-      await tx.delete(schema.posts);
-      await tx.delete(schema.pages);
-      await tx.delete(schema.mediaFolders);
-      await tx.delete(schema.siteChrome);
-      await tx.delete(schema.categories);
-      const { pages, posts, media, mediaFolders = [], siteChrome = [], categories = [] } = backup.tables;
-      if (siteChrome.length)
-        await tx.insert(schema.siteChrome).values(reviveDates(siteChrome) as (typeof schema.siteChrome.$inferInsert)[]);
-      if (mediaFolders.length)
-        await tx.insert(schema.mediaFolders).values(reviveDates(mediaFolders) as (typeof schema.mediaFolders.$inferInsert)[]);
-      if (categories.length)
-        await tx.insert(schema.categories).values(reviveDates(categories) as (typeof schema.categories.$inferInsert)[]);
-      if (pages.length) await tx.insert(schema.pages).values(reviveDates(pages) as (typeof schema.pages.$inferInsert)[]);
-      if (posts.length) await tx.insert(schema.posts).values(reviveDates(posts) as (typeof schema.posts.$inferInsert)[]);
-      if (media.length) await tx.insert(schema.media).values(reviveDates(media) as (typeof schema.media.$inferInsert)[]);
+      // the backup" — for every table the backup carries. A table an older
+      // backup predates is left as it is; revisions merge (mergeRevisions).
+      // Delete and insert stay atomic so a malformed row/FK error cannot
+      // leave a tenant empty or only partly restored.
+      const [pageRevisions, postRevisions] = await Promise.all([
+        tx.select().from(schema.pageRevisions),
+        tx.select().from(schema.postRevisions),
+      ]);
+      const tables = BACKUP_TABLES.filter(([key]) => key !== "pageRevisions" && key !== "postRevisions" && backup.tables[key]);
+      for (const [, table] of [...tables].reverse()) await tx.delete(table as PgTable);
+      for (const [key, table] of tables) await insertRows(tx, table, reviveDates(backup.tables[key]!));
+      const pageIds = new Set(backup.tables.pages.map((row) => row.id));
+      const postIds = new Set(backup.tables.posts.map((row) => row.id));
+      await insertRows(tx, schema.pageRevisions, mergeRevisions(reviveDates(backup.tables.pageRevisions ?? []), pageRevisions, "pageId", pageIds));
+      await insertRows(tx, schema.postRevisions, mergeRevisions(reviveDates(backup.tables.postRevisions ?? []), postRevisions, "postId", postIds));
     });
   } finally {
     release();
@@ -329,23 +365,35 @@ export async function importTenantBackup(host: string, zip: Uint8Array): Promise
   const dir = path.join(localUploadsDir, tenantFolder(host));
   const tenant = await getTenantRecord(host);
   const restored: string[] = [];
+  const skipped: string[] = [];
   for (const [name, data] of Object.entries(entries)) {
+    if (name.endsWith("/")) continue; // directory entry
     if (name.startsWith("media/") && tenant) {
       // isValidMediaKey doubles as the zip-slip guard (no "..", fixed shape).
       const key = name.slice("media/".length);
-      if (!isValidMediaKey(key)) continue;
+      if (!isValidMediaKey(key) || !isRestorableMediaFile(key, data)) {
+        skipped.push(name);
+        continue;
+      }
       const target = path.join(localUploadsDir, tenantMediaPrefix(tenant.id), key);
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, data);
       restored.push(name);
       continue;
     }
-    if (!name.startsWith("uploads/") || name === "uploads/") continue;
+    if (!name.startsWith("uploads/")) continue;
+    const file = path.basename(name);
+    // The normalize job's dotfile marker is never served; its month is
+    // re-validated on read (routes/media.ts) before the legacy route 301s.
+    if (file !== LEGACY_MOVED_MARKER && !isRestorableMediaFile(file, data)) {
+      skipped.push(name);
+      continue;
+    }
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, path.basename(name)), data);
+    writeFileSync(path.join(dir, file), data);
     restored.push(name);
   }
-  return { restored };
+  return { restored, skipped };
 }
 
 // ---------- static export ----------

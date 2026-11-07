@@ -18,6 +18,7 @@ import {
   getMfaRequired,
   setUserTotpSecret,
   setUserTotpEnabled,
+  consumeTotpStep,
   insertAuditLog,
 } from "../db/tenant-pool.js";
 import {
@@ -27,7 +28,7 @@ import {
   verifySession,
   SESSION_TTL_MS,
   generateTotpSecret,
-  verifyTotpCode,
+  matchTotpStep,
   totpAuthUri,
   generateCsrfToken,
   isMfaSetupRequired,
@@ -38,6 +39,17 @@ import {
 } from "../db/auth.js";
 import { setSessionCookie, clearSessionCookie, setEntraStateCookie, getEntraStateCookie, clearEntraStateCookie } from "../lib/cookies.js";
 import { getEntraAuthorizeUrl, exchangeEntraCode, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "../entra.js";
+
+// Every route that takes a TOTP code goes through this: the code must match
+// the secret AND its time step must be newer than the last one this user
+// spent (consumeTotpStep), so a phished or shoulder-surfed code can't be
+// replayed inside its ~90s window. Both failures count as a failed attempt.
+async function acceptTotpCode(userId: string, secret: string | null, code: unknown): Promise<"ok" | "invalid" | "reused"> {
+  const step = secret ? matchTotpStep(secret, code) : null;
+  if (step === null) return "invalid";
+  return (await consumeTotpStep(userId, step)) ? "ok" : "reused";
+}
+const TOTP_REUSED_ERROR = "this code was already used — wait for the next one";
 
 // First-run bootstrap, password + Entra ID login, session read-back, and TOTP
 // MFA enrollment/challenge/disable routes — moved out of index.ts verbatim
@@ -342,15 +354,15 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       reply.code(401);
       return { error: "credentials or MFA settings changed; sign in again" };
     }
-    const valid = !!user?.totpEnabled && !!user.totpSecret && verifyTotpCode(user.totpSecret, code);
-    await recordLoginAttempt(pending.email, req.ip, valid);
-    if (!user?.totpEnabled || !user.totpSecret) {
+    const totp = user.totpEnabled ? await acceptTotpCode(user.id, user.totpSecret, code) : "invalid";
+    await recordLoginAttempt(pending.email, req.ip, totp === "ok");
+    if (!user.totpEnabled || !user.totpSecret) {
       reply.code(401);
       return { error: "MFA is not enabled for this account" };
     }
-    if (!valid) {
+    if (totp !== "ok") {
       reply.code(401);
-      return { error: "invalid code" };
+      return { error: totp === "reused" ? TOTP_REUSED_ERROR : "invalid code" };
     }
     const tenantHosts = pending.tenantHosts ?? [];
     const csrfToken = generateCsrfToken();
@@ -394,15 +406,15 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       reply.code(401);
       return { error: "credentials or MFA settings changed; sign in again" };
     }
-    const valid = !!user?.totpSecret && verifyTotpCode(user.totpSecret, code);
-    await recordLoginAttempt(pending.email, req.ip, valid);
-    if (!user?.totpSecret) {
+    const totp = await acceptTotpCode(user.id, user.totpSecret, code);
+    await recordLoginAttempt(pending.email, req.ip, totp === "ok");
+    if (!user.totpSecret) {
       reply.code(400);
       return { error: "call /api/auth/login first" };
     }
-    if (!valid) {
+    if (totp !== "ok") {
       reply.code(401);
-      return { error: "invalid code" };
+      return { error: totp === "reused" ? TOTP_REUSED_ERROR : "invalid code" };
     }
     await setUserTotpEnabled(pending.userId, true);
     await insertAuditLog({ actorUserId: pending.userId, actorEmail: pending.email, action: "mfa.enabled_self", ip: req.ip });
@@ -467,11 +479,11 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
         reply.code(429);
         return { error: "Too many failed attempts — try again later" };
       }
-      const valid = !!user.totpSecret && !!code && verifyTotpCode(user.totpSecret, code);
-      await recordLoginAttempt(session.email, req.ip, valid);
-      if (!valid) {
+      const totp = await acceptTotpCode(user.id, user.totpSecret, code);
+      await recordLoginAttempt(session.email, req.ip, totp === "ok");
+      if (totp !== "ok") {
         reply.code(401);
-        return { error: "current MFA code required to re-enroll" };
+        return { error: totp === "reused" ? TOTP_REUSED_ERROR : "current MFA code required to re-enroll" };
       }
     }
     const secret = generateTotpSecret();
@@ -498,11 +510,11 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       reply.code(429);
       return { error: "Too many failed attempts — try again later" };
     }
-    const valid = !!code && verifyTotpCode(user.totpSecret, code);
-    await recordLoginAttempt(session.email, req.ip, valid);
-    if (!valid) {
+    const totp = await acceptTotpCode(user.id, user.totpSecret, code);
+    await recordLoginAttempt(session.email, req.ip, totp === "ok");
+    if (totp !== "ok") {
       reply.code(401);
-      return { error: "invalid code" };
+      return { error: totp === "reused" ? TOTP_REUSED_ERROR : "invalid code" };
     }
     await setUserTotpEnabled(session.userId, true);
     await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.enabled_self", ip: req.ip });
@@ -535,11 +547,11 @@ export function registerAuthRoutes(app: FastifyInstance, adminOrigins: string[] 
       reply.code(429);
       return { error: "Too many failed attempts — try again later" };
     }
-    const valid = !!user.totpSecret && !!code && verifyTotpCode(user.totpSecret, code);
-    await recordLoginAttempt(session.email, req.ip, valid);
-    if (!valid) {
+    const totp = await acceptTotpCode(user.id, user.totpSecret, code);
+    await recordLoginAttempt(session.email, req.ip, totp === "ok");
+    if (totp !== "ok") {
       reply.code(401);
-      return { error: "current MFA code required to disable" };
+      return { error: totp === "reused" ? TOTP_REUSED_ERROR : "current MFA code required to disable" };
     }
     await setUserTotpEnabled(session.userId, false);
     await insertAuditLog({ actorUserId: session.userId, actorEmail: session.email, action: "mfa.disabled_self", ip: req.ip });

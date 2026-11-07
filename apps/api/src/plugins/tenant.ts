@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { sql } from "drizzle-orm";
-import { getTenantConnection, UnknownTenantError, type TenantDb } from "../db/tenant-pool.js";
+import { getTenantConnection, TenantDbUnavailableError, UnknownTenantError, type TenantDb } from "../db/tenant-pool.js";
 import { isTenantRateLimited } from "../rate-limit.js";
 
 declare module "fastify" {
@@ -47,6 +47,11 @@ export async function tenantPlugin(app: FastifyInstance) {
         // the one place an unrecognized/inactive domain's visitor could see
         // the raw error text.
         return reply.code(404).send({ error: "Unknown site" });
+      }
+      if (err instanceof TenantDbUnavailableError) {
+        // Pool exhausted or DB down: fail fast instead of hanging the request.
+        req.log.warn({ err }, err.message);
+        return reply.code(503).header("retry-after", "5").send({ error: "Site is busy — try again shortly" });
       }
       throw err;
     }

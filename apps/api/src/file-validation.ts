@@ -1,11 +1,34 @@
+import { unzipSync } from "fflate";
+
 const ZIP_SIGNATURES = [
   [0x50, 0x4b, 0x03, 0x04],
   [0x50, 0x4b, 0x05, 0x06],
   [0x50, 0x4b, 0x07, 0x08],
 ];
 
+// .docx/.xlsx/.pptx are ZIP containers, so the ZIP magic alone also let any
+// plain .zip be stored as a .docx. A real Office Open XML package carries
+// [Content_Types].xml plus its own application's part folder.
+const OOXML_PART_PREFIX: Record<string, string> = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "word/",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xl/",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "ppt/",
+};
+
 function beginsWith(bytes: Uint8Array, signature: number[]): boolean {
   return bytes.length >= signature.length && signature.every((byte, index) => bytes[index] === byte);
+}
+
+function isOoxmlPackage(bytes: Uint8Array, partPrefix: string): boolean {
+  const names: string[] = [];
+  try {
+    // A filter that returns false walks the central directory without
+    // inflating any entry, so a zip bomb costs nothing here.
+    unzipSync(bytes, { filter: (file) => (names.push(file.name), false) });
+  } catch {
+    return false; // no readable central directory
+  }
+  return names.includes("[Content_Types].xml") && names.some((name) => name.startsWith(partPrefix));
 }
 
 /** Check content signatures; multipart Content-Type is supplied by the client. */
@@ -33,6 +56,7 @@ export function matchesAllowedMediaSignature(mime: string, bytes: Uint8Array): b
     case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+      return ZIP_SIGNATURES.some((signature) => beginsWith(bytes, signature)) && isOoxmlPackage(bytes, OOXML_PART_PREFIX[mime]);
     case "application/zip":
       return ZIP_SIGNATURES.some((signature) => beginsWith(bytes, signature));
     default:

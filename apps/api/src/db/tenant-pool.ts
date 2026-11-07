@@ -9,6 +9,7 @@ export { checkControlDatabaseConnection } from "./tenant-pool/internal.js";
 export type { TenantDb, TenantConnection, SharedContentEntry } from "./tenant-pool/connection.js";
 export {
   UnknownTenantError,
+  TenantDbUnavailableError,
   tenantDbName,
   getPoolStats,
   closePool,
@@ -39,6 +40,7 @@ export {
   deleteUser,
   setUserTotpSecret,
   setUserTotpEnabled,
+  consumeTotpStep,
   listRoles,
   createRole,
   updateRole,
