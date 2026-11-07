@@ -13,7 +13,8 @@ Package manager is pnpm (via corepack — run `corepack enable` once if `pnpm` i
 - `pnpm dev:admin` — run the Vite admin dev server (`apps/admin`)
 - `pnpm dev:frontend` — run the Astro SSR site renderer (`apps/frontend`)
 - `pnpm build` — build all workspace packages
-- `pnpm typecheck` — typecheck all workspace packages
+- `pnpm typecheck` — build `packages/*` first (apps resolve their types from the gitignored
+  `dist/`, so a fresh clone fails without it), then typecheck all workspace packages
 - `pnpm --filter @ucms/api db:generate` — generate a Drizzle migration `.sql` file from
   `apps/api/src/db/schema.ts` into `src/db/migrations` (authoring only — writes the file, applies nothing)
 - pnpm --filter @ucms/api db:migrate is not the tenant migration runner. The API applies files from src/db/migrations under a PostgreSQL advisory lock and records each filename plus SHA-256 checksum in public.ucms_schema_migrations. Existing databases establish their baseline by replaying the idempotent history once; later deploys apply only new files. Add migrations as new files and do not edit an applied migration.

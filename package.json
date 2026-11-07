@@ -11,7 +11,7 @@
     "dev:admin": "pnpm --filter @ucms/admin dev",
     "dev:frontend": "pnpm --filter @ucms/frontend dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm --filter \"./packages/**\" build && pnpm -r typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
