@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from "node:crypto";
 import { getEntraAuthorizeUrl, verifyEntraIdToken, isPasswordLoginAllowed, isEntraStateValid } from "./entra.js";
 
 test("isPasswordLoginAllowed: superadmin break-glass exempt, webmaster blocked, only when entraOnly is on", () => {
@@ -34,7 +34,7 @@ function base64Url(input: Buffer | string): string {
 }
 
 function signTestIdToken(
-  privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"],
+  privateKey: KeyObject,
   kid: string,
   claims: Record<string, unknown>,
 ): string {

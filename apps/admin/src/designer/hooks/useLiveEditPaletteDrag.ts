@@ -29,8 +29,8 @@ export interface LiveEditPaletteDragDeps {
   // ref objects whose `.current` is mutated in place by Designer.tsx, so
   // reading through them at call time always sees the live value (found
   // by the final branch review).
-  frameARef: React.RefObject<HTMLIFrameElement>;
-  frameBRef: React.RefObject<HTMLIFrameElement>;
+  frameARef: React.RefObject<HTMLIFrameElement | null>;
+  frameBRef: React.RefObject<HTMLIFrameElement | null>;
   activeSlotRef: MutableRefObject<"a" | "b">;
   dropIntoColumn: (colPath: number[], index?: number) => void;
   dropIntoNewSection: (afterBlockIndex?: number) => void;
@@ -45,7 +45,7 @@ export interface LiveEditPaletteDragApi {
   // used to be one `{label,x,y}` state object replaced every move).
   // Designer.tsx attaches ghostElRef to the actual ghost <div>.
   ghostLabel: string | null;
-  ghostElRef: React.RefObject<HTMLDivElement>;
+  ghostElRef: React.RefObject<HTMLDivElement | null>;
   startPaletteDrag: (e: React.PointerEvent<HTMLElement>, payload: Drag, label: string) => void;
 }
 

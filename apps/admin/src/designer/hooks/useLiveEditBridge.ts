@@ -86,9 +86,9 @@ export interface LiveEditBridgeApi {
   liveSrcA: string | null;
   liveSrcB: string | null;
   activeSlot: "a" | "b";
-  frameARef: React.RefObject<HTMLIFrameElement>;
-  frameBRef: React.RefObject<HTMLIFrameElement>;
-  liveFrame: React.RefObject<HTMLIFrameElement>;
+  frameARef: React.RefObject<HTMLIFrameElement | null>;
+  frameBRef: React.RefObject<HTMLIFrameElement | null>;
+  liveFrame: React.RefObject<HTMLIFrameElement | null>;
   liveSpacing: LiveSpacing | null;
   enterLive: (cold?: boolean) => Promise<void>;
   toggleLive: () => Promise<void>;
