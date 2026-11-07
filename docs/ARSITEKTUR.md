@@ -70,7 +70,7 @@ terhadap vektor ujian rasmi RFC 6238 Appendix B dalam `auth.test.ts`). Pilihan "
 | **Astro** | ^7.3 | Render tapak awam melalui SSR. |
 | **@astrojs/node** | ^11 | Adapter **SSR** mod `"middleware"` (`output: "server"`) — `server.mjs` sendiri milik `http.Server` supaya boleh tutup elegan pada `SIGTERM`/`SIGINT`. |
 | **Tailwind CSS v4 + daisyUI** | ^4.3 / ^5.6 | Styling; daisyUI bekalkan set warna tema (UI Themes) yang dipetakan ke sistem tema tenant. |
-| **swiper** | ^12.2 | Carousel elemen slider pada tapak awam. |
+| **swiper** | ^14.4 | Carousel elemen slider pada tapak awam. |
 
 **Kenapa SSR, bukan SSG?** Identiti tenant diselesaikan daripada **Host header semasa runtime** — satu
 instance melayani berpuluh domain berbeza. Pra-render statik tak boleh, sebab kandungan bergantung tenant
