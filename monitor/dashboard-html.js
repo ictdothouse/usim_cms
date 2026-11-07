@@ -1063,11 +1063,18 @@ async function stackUpdate(key, label, btn) {
   btn.textContent = "Updating…";
   setStackMsg(key, "starting…");
   try {
-    await api("/api/stack/" + key + "/update", {
+    const r = await api("/api/stack/" + key + "/update", {
       method: "POST",
       body: JSON.stringify({ acceptDowntime: !!downtime }),
       headers: { "Content-Type": "application/json" },
     });
+    // Nothing to bump is a normal outcome, not a failure: no job was started.
+    if (r && r.upToDate) {
+      setStackMsg(key, "✓ " + r.message, "#2e7d32");
+      btn.disabled = false;
+      btn.textContent = origText;
+      return;
+    }
     pollDeployLog();
     refresh();
     pollStackMsg(key, label);

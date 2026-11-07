@@ -1984,7 +1984,7 @@ function handleNodeUpdate(req, res) {
     getStackVersions((v) => {
       const curMajor = v.node.dockerImage ? (v.node.dockerImage.match(/^node:(\d+)/) || [])[1] : null;
       if (curMajor && Number(curMajor) >= Number(latest.node)) {
-        return sendJson(res, 400, { error: `already on node:${curMajor} — nothing to bump` });
+        return sendJson(res, 200, { upToDate: true, message: `already on node:${curMajor} — nothing to bump` });
       }
       const dockerfiles = ["apps/api/Dockerfile", "apps/admin/Dockerfile", "apps/frontend/Dockerfile"];
       const oldContents = {};
@@ -2034,7 +2034,7 @@ function handlePnpmUpdate(req, res) {
     }
     const curPnpm = (content.match(re) || [])[0];
     if (curPnpm && curPnpm.includes(`pnpm@${latest.pnpm}"`)) {
-      return sendJson(res, 400, { error: `already on pnpm@${latest.pnpm} — nothing to bump` });
+      return sendJson(res, 200, { upToDate: true, message: `already on pnpm@${latest.pnpm} — nothing to bump` });
     }
     const updated = content.replace(re, `"packageManager": "pnpm@${latest.pnpm}"`);
     fs.writeFileSync(full, updated, "utf8");
@@ -2204,8 +2204,9 @@ function handleDepsUpdate(req, res) {
   getOutdatedBreakdown((breakdownErr, breakdown) => {
     const haveBreakdown = !breakdownErr && breakdown && typeof breakdown.compatibleCount === "number";
     if (haveBreakdown && breakdown.compatibleCount === 0) {
-      return sendJson(res, 400, {
-        error: breakdown.totalCount
+      return sendJson(res, 200, {
+        upToDate: true,
+        message: breakdown.totalCount
           ? `already up to date within declared ranges — ${breakdown.totalCount} package(s) need a manual major-version bump (see Test)`
           : "already on the latest versions within declared ranges — nothing to bump",
       });
