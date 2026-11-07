@@ -1,6 +1,6 @@
 # Arkitektur & Tech Stack - USIM CMS
 
-> Dikemas kini pada 13 Oktober 2026. Dokumen ini menerangkan seni bina yang dilaksanakan. architecture.md ialah product brief asal dan disimpan sebagai konteks sejarah; CLAUDE.md menerangkan workflow repo.
+> Dikemas kini pada 6 November 2026. Dokumen ini menerangkan seni bina yang dilaksanakan. architecture.md ialah product brief asal dan disimpan sebagai konteks sejarah; CLAUDE.md menerangkan workflow repo.
 
 ---
 
@@ -70,7 +70,7 @@ terhadap vektor ujian rasmi RFC 6238 Appendix B dalam `auth.test.ts`). Pilihan "
 | **Astro** | ^7.3 | Render tapak awam melalui SSR. |
 | **@astrojs/node** | ^11 | Adapter **SSR** mod `"middleware"` (`output: "server"`) — `server.mjs` sendiri milik `http.Server` supaya boleh tutup elegan pada `SIGTERM`/`SIGINT`. |
 | **Tailwind CSS v4 + daisyUI** | ^4.3 / ^5.6 | Styling; daisyUI bekalkan set warna tema (UI Themes) yang dipetakan ke sistem tema tenant. |
-| **swiper** | ^11.2 | Carousel elemen slider pada tapak awam. |
+| **swiper** | ^12.2 | Carousel elemen slider pada tapak awam. |
 
 **Kenapa SSR, bukan SSG?** Identiti tenant diselesaikan daripada **Host header semasa runtime** — satu
 instance melayani berpuluh domain berbeza. Pra-render statik tak boleh, sebab kandungan bergantung tenant
@@ -82,7 +82,7 @@ mana yang meminta pada masa request, bukan masa build.
 - **`tsconfig.base.json`** — `strict: true`, `target: ES2022`; tiap app override module-resolution ikut
   runtime (api = NodeNext; admin = Bundler + JSX; frontend = extend `astro/tsconfigs/strict`).
 - **ESLint 9 (flat config) + Prettier 3** di root — `pnpm lint` / `pnpm format`.
-- **Ujian:** node:test untuk helper dan unit logic. CI menjalankan lint, typecheck, build serta ujian setiap package. Job E2E berasingan memulakan PostgreSQL/API terpencil dan menjalankan smoke test Designer melalui Playwright.
+- **Ujian:** node:test untuk helper dan unit logic. CI menjalankan lint, typecheck, build serta ujian setiap package. Job E2E berasingan memulakan PostgreSQL/API terpencil dan menjalankan smoke test Designer melalui Playwright. Imej Docker hanya diterbitkan selepas semakan ini lulus: job `publish` dalam `.github/workflows/ci.yml` bergantung pada kedua-dua job tersebut, dan `publish-images` dalam `.gitlab-ci.yml` berada selepas peringkat `test` (tanpa E2E). Setiap Dockerfile app juga menjalankan ujian app itu semasa build.
 
 ---
 
@@ -198,7 +198,7 @@ berulang):
 **Model peranan:**
 - **superadmin** — `tenant_host` null. Urus tenant, pengguna, tema global, bahasa sistem. Dijaga
   `verifySuperadmin`.
-- **webmaster** — dikunci ke **satu** tenant (`session.tenantHost !== req.tenantHost` → 403).
+- **webmaster** — dikunci kepada tenant dalam senarai `tenantHosts` akaunnya (host lain → 403).
 
 **Kata laluan:** `scryptSync` + salt 16-byte, banding `timingSafeEqual`.
 
@@ -214,16 +214,24 @@ senyap, itu sebab role khas ini wajib.
 
 **Pengerasan auth (respons kepada audit keselamatan "wajib diperbaiki"):**
 - **Rate-limit log masuk** — jadual `login_attempts` (bukan kaunter in-memory, sebab blue-green/replika
-  berbilang tak kongsi memori): 5 percubaan gagal per e-mel ATAU per IP dalam 15 minit → **429**, disemak
-  **sebelum** kata laluan dicari (elak *timing oracle* pada akaun terkunci).
+  berbilang tak kongsi memori): dalam 15 minit, 10 kegagalan bagi pasangan e-mel+IP, 50 bagi satu e-mel
+  atau 30 bagi satu IP → **429**, disemak **sebelum** kata laluan dicari (elak *timing oracle* pada akaun
+  terkunci). IP datang daripada `req.ip`, jadi API di belakang reverse proxy memerlukan
+  `TRUST_PROXY=true` (lihat `docs/DEPLOY.md`); tanpanya semua pengguna berkongsi IP proxy dan had per-IP.
 - **Log audit** — `audit_log` merekod pemadaman tenant/pengguna, toggle MFA — jawapan "siapa buat apa"
   peringkat superadmin, bukan change-data-capture penuh.
-- **MFA (TOTP)** — `node:crypto` sahaja, RFC 6238. Suis dua peringkat: suis induk instance-wide
-  (`platformSettings.mfaEnabled`, Settings tab) + suis pendaftaran individu pengguna
-  (`users.totpEnabled`). Log masuk pulang `{mfaRequired: true, pendingToken}` bila diperlukan;
-  `POST /api/auth/totp-verify` (turut dihadkan kadar) tukar kepada sesi sebenar. Titik lanjutan untuk
-  Entra ID/SSO kelak (kad "coming soon" sudah ada di UI Settings, `signSession` tak kisah macam mana
-  sesi terbentuk).
+- **MFA (TOTP)** — `node:crypto` sahaja, RFC 6238. Login kata laluan **superadmin sentiasa memerlukan
+  TOTP**, dalam semua persekitaran. Pengguna lain wajib MFA apabila `NODE_ENV=production` atau
+  `platformSettings.mfaRequired` dihidupkan (Settings); dalam production kedua-dua suis MFA tidak boleh
+  dimatikan. Akaun tanpa TOTP mesti mendaftar semasa log masuk itu juga (`{mfaSetupRequired: true, ...}`);
+  akaun berdaftar menerima `{mfaRequired: true, pendingToken}`, dan `POST /api/auth/totp-verify` (turut
+  dihadkan kadar) menukarnya kepada sesi sebenar. Dalam production, sesi tanpa bukti MFA ditolak.
+  **Amaran:** deploy production yang tidak menetapkan `NODE_ENV=production` tidak memaksa MFA untuk
+  bukan-superadmin (melainkan `mfaRequired` dihidupkan). Dockerfile api, kedua-dua fail compose dan
+  `install.sh` bare-metal menetapkannya; pemasangan manual mesti menetapkannya sendiri.
+- **Microsoft Entra ID (OIDC)** — log masuk SSO bagi akaun yang sudah dipautkan (tiada auto-provision).
+  Mod Entra-sahaja mengekalkan login kata laluan untuk superadmin sebagai *break-glass*. Dalam production,
+  token Entra mesti membawa tuntutan `amr` yang mengandungi `mfa`.
 - **`@fastify/helmet`** dipasang; CSP dimatikan sengaja (API JSON sahaja).
 
 **Auth semasa:** kredensial sesi admin berada dalam cookie httpOnly; request mutasi membawa token CSRF melalui header. Admin menyimpan metadata sesi dan pilihan UI dalam localStorage.
@@ -237,9 +245,11 @@ senyap, itu sebab role khas ini wajib.
 
 Kanvas seret-lepas (Section → Row → Column → Element) dengan Inspector data-driven, sistem klip
 (copy/paste/duplicate/save-as-template pada 4 tahap: section/row/column/element), kawalan responsif
-sebenar per-breakpoint untuk **visibility** (`hideDesktop`/`hideTablet`/`hideMobile`, dirender sebagai
-CSS `@media` sebenar di frontend) dan kawalan preview-sahaja untuk kebanyakan **style** override (bag
-`bp`), kecuali teks slide (heading/subtitle slider) yang kini turut sebenar.
+sebenar per-breakpoint untuk **visibility** (`hideDesktop`/`hideTablet`/`hideMobile`) dan **style**
+override (bag `bp`) bagi margin, padding, border, shadow, radius, align, typography (termasuk `color`
+heading/text/list), span dan flexDirection, semuanya dirender sebagai CSS `@media` sebenar di frontend.
+Pengecualian: `color` butang/badge/ikon, `hoverEffect` dan `entrance` hanya guna nilai desktop di tapak
+sebenar.
 
 **Live Edit** — iframe tapak sebenar dengan jambatan `postMessage`, klik-untuk-pilih + edit dalam talian,
 sentiasa mint token pratonton walaupun untuk halaman draf/private.
@@ -248,7 +258,11 @@ Elemen: heading/text/image/button/spacer/divider/embed/icon/list/html/gallery, d
 info-box, dan **slider/banner** (paling kaya — `slides` JSON array, setiap slaid ada imej/warna latar,
 heading & subtitle boleh diposisi bebas + Typography penuh + resize seret pada kanvas dengan smart-guide
 Figma-style, butang boleh diposisi bebas dengan warna/saiz/radius sendiri, transisi slide/fade,
-navigasi/dots boleh gaya). Dirender di frontend guna **Embla Carousel**.
+navigasi/dots boleh gaya). Dirender di frontend guna **Swiper** (`SliderBlock.astro`).
+
+Elemen **Custom HTML** disanitasi ketat semasa render (`apps/frontend/src/lib/sanitize-custom-html.ts`)
+dengan allowlist tag teks/senarai/jadual/pautan/imej asas: `script`, `style`, `iframe` dan atribut `style`
+dibuang. Ia bukan saluran embed mentah; guna elemen Embed untuk iframe.
 
 **Save as Template** peribadi (jadual `design_templates`) pada semua 4 tahap, dengan pratonton bentuk
 (bukan screenshot sebenar) dalam modal carian/tapis.
@@ -325,7 +339,7 @@ flowchart TB
     Caddy --> Admin
     Caddy --> API
     Frontend -->|panggilan API SSR| API
-    Admin -->|REST + Bearer token| API
+    Admin -->|REST + cookie sesi + CSRF| API
     API -->|carian registry tenant| ControlDB
     API --> TenantA
     API --> TenantB
@@ -407,7 +421,8 @@ monitor/ (agen Node berasingan pada host, dikawal auth Basic) menyediakan status
 **Jurang diketahui:**
 - Tiada HA/replikasi PostgreSQL atau load-test/capacity baseline rasmi.
 - Tiada rollback automatik berdasarkan kegagalan selepas deployment dipromosikan; rollback manual tersedia.
-- Sebahagian style-override responsif (bag bp pada Section/Row/Column/Element) masih preview-admin sahaja.
+- Override per-breakpoint untuk `color` butang/badge/ikon, `hoverEffect` dan `entrance` tidak sampai ke
+  tapak sebenar (nilai desktop sahaja); override `bp` lain dirender sebenar.
 - `Designer.tsx` kekal sebagai orchestration component yang besar (~930 baris); hooks domain serta canvas, palette, Inspector, element preview dan modal sudah diekstrak. CI menjalankan smoke test Playwright terhadap PostgreSQL terpencil.
 ---
 

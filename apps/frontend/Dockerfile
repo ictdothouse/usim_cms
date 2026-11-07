@@ -25,10 +25,11 @@ COPY apps/frontend apps/frontend
 # identical comment on why this step can't be skipped.
 RUN pnpm --filter @ucms/element-style build
 RUN pnpm --filter @ucms/element-render build
-# Test gate — no test files here, but `astro build` alone doesn't fully
-# type-check (unlike api/admin's tsc-based builds), so run `astro check`
-# explicitly. See apps/api/Dockerfile's own comment for why this is enough
-# on its own to block a bad deploy.
+# Test gate: unit tests (incl. the Custom HTML XSS sanitizer), then `astro
+# check`, since `astro build` alone doesn't fully type-check (unlike api/
+# admin's tsc-based builds). See apps/api/Dockerfile's own comment for why
+# this is enough on its own to block a bad deploy.
+RUN pnpm --filter @ucms/frontend test
 RUN pnpm --filter @ucms/frontend typecheck
 RUN pnpm --filter @ucms/frontend build
 # Same dependency/app layer split as apps/api/Dockerfile — see its comments.

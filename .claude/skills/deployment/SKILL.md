@@ -452,6 +452,12 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   - **Postgres pre-dump:** it runs the root-owned backup.sh copy and needs an up-to-date
     backup cron.
   - **PgBouncer** stays commit-only because its tag is pinned in docker-compose.yml.
+  - **Code:** the orchestration is `refreshFloatingImage` in `monitor/stack-refresh.js`, with
+    docker/compose injected; `monitor/stack-refresh.test.js` covers every branch. server.js keeps
+    deployState (`pid: process.pid`, saveDeployState at start and finish).
+  - **Test button** (2026-11-06): `pullForStagingTest` re-tags the image the ref had before the pull
+    once the staging test ends, pass or fail. Before this, a Test moved the local tag and the next
+    deploy's `docker compose up -d db` recreated Postgres on it with no pre-dump or rollback.
 - `install.sh` (one-shot VPS installer, docker or bare-metal mode) prompts for a
   superadmin email/password up front and, once its mode's stack is verified reachable,
   POSTs them straight to the running API's own `POST /api/setup` (`apps/api/src/index.ts`'s
@@ -524,8 +530,12 @@ description: Deployment, infra, and ops reference for usim_cms — docker-compos
   lowered from 85 in the 2026-10-10 disk-hygiene pass — on a small disk, 85% left too little runway
   between "alert fires" and "actually full") —
   edge-triggered the same way, once on crossing, once again dropping back under, never on every poll
-  while it stays over. `POST /api/alerts/test` (same basic-auth as every other monitor route) fires a
-  one-off test message to verify wiring without waiting for a real outage. Deliberately no email/SMTP
+  while it stays over. A stale-backup alert (2026-11-06) uses the same edge trigger: when
+  install.sh's crontab block exists, it fires once the newest `usim_cms_control_*.dump` in the
+  crontab's `BACKUP_DIR` is older than 26 hours or none exists, and again once a fresh one lands
+  (`monitor/backup-status.js`; the Storage & backups tab shows the same age). `POST /api/alerts/test`
+  (same basic-auth as every other monitor route, and the Overview tab's "Send test alert" button
+  when a webhook is set) fires a one-off test message to verify wiring without waiting for a real outage. Deliberately no email/SMTP
   client — this file's whole point is staying dependency-free (`node monitor/server.js`, no `npm
   install`), and a webhook covers the same "someone gets pinged" need without one. Still a gap: no real
   metrics/dashboards (CPU/memory/request-rate time series) — this is up/down + disk-threshold alerting
@@ -686,7 +696,7 @@ the failed new color — safe to re-run.
   concern it still fully controls. Guarded by a shared secret (`DEPLOY_SECRET`,
   `x-deploy-secret` header, `crypto.timingSafeEqual`), never a session token, since it's
   called container-to-container by `deploy.sh` (via `docker compose exec` running a small
-  inline `node -e` using Node 22's built-in `fetch`, not the image's busybox `wget` —
+  inline `node -e` using Node's built-in `fetch`, not the image's busybox `wget` —
   its `--post-data`/`--header` support isn't reliably consistent across busybox builds).
   `caddyRequest` (`proxy-sync.ts`) talks to Caddy's admin API via `node:http`, deliberately
   not the global `fetch()` — undici's `fetch` sends an empty `Origin` header on a plain
@@ -764,8 +774,8 @@ the failed new color — safe to re-run.
   to one CI or registry.
   - `scripts/build-images.sh` is the only build recipe. It runs plain `docker build` (no
     compose, so CI needs no `.env`), tags `<repo>/{api,frontend,admin}:<commit>` plus `:latest`,
-    and `--push` publishes to any OCI registry. `.github/workflows/images.yml` and
-    `.gitlab-ci.yml` only log in and call it, and stay off until `UCMS_PUBLISH_IMAGES=true`
+    and `--push` publishes to any OCI registry. ci.yml's `publish` job (after `build` and `e2e`)
+    and `.gitlab-ci.yml`'s `publish-images` (after `test`) only log in and call it, and stay off until `UCMS_PUBLISH_IMAGES=true`
     (repository / CI variable); Jenkins and others call the script directly.
   - `deploy.sh`: `UCMS_IMAGE_REPO` unset (default) builds on the server through the script, as
     `localhost/ucms/*` (a `localhost/` name can never resolve to Docker Hub). Set, it pulls

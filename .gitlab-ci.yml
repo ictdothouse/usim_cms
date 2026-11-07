@@ -1,3 +1,25 @@
+stages: [test, publish]
+
+# Same checks as .github/workflows/ci.yml's build job, on every branch and tag
+# pipeline. publish-images is in a later stage, so it never runs unless this
+# passed. The browser e2e job is GitHub-only for now.
+test:
+  stage: test
+  image: node:26
+  before_script:
+    # Node 25+ ships without corepack; same pin as the Dockerfiles.
+    - npm install -g corepack@0.36.0 && corepack enable
+  script:
+    - pnpm install --frozen-lockfile
+    - pnpm audit
+    - pnpm lint
+    - pnpm typecheck
+    - pnpm build
+    - pnpm --filter @ucms/api test
+    - pnpm --filter @ucms/admin test
+    - pnpm --filter @ucms/frontend test
+    - node --test monitor/*.test.js scripts/*.test.mjs
+
 # Builds the api/frontend/admin images once per commit on the default branch,
 # and once per release tag (v1.2.3, also tagged with that version), and
 # pushes them to this project's container registry
@@ -8,6 +30,7 @@
 # scripts/build-images.sh, which GitHub Actions or any other CI runs the same
 # way.
 publish-images:
+  stage: publish
   image: docker:29-cli
   services:
     - docker:29-dind

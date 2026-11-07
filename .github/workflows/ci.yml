@@ -1,9 +1,17 @@
 name: CI
 
+# Only main and v* tags publish images (the publish job below); deliberately
+# no workflow_dispatch, which would let any branch push images under this
+# repository's name.
 on:
   push:
     branches: [main]
+    # Release tags run the full CI too: the publish job needs it green.
+    tags: ["v*"]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -23,6 +31,8 @@ jobs:
       - run: pnpm --filter @ucms/api test
       - run: pnpm --filter @ucms/admin test
       - run: pnpm --filter @ucms/frontend test
+      # monitor/ isn't a workspace package; its tests run straight on node.
+      - run: node --test monitor/*.test.js scripts/*.test.mjs
 
   e2e:
     runs-on: ubuntu-latest
@@ -75,7 +85,50 @@ jobs:
           done
           cat "$RUNNER_TEMP/ucms-api.log"
           exit 1
+      # The Live Edit test frames the real site; server.mjs only allows that
+      # for ADMIN_ORIGIN (job env above) via its frame-ancestors CSP.
+      - name: Start frontend
+        working-directory: apps/frontend
+        run: |
+          PORT=4321 HOST=127.0.0.1 API_URL=http://127.0.0.1:3001 node server.mjs > "$RUNNER_TEMP/ucms-frontend.log" 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null http://127.0.0.1:4321/; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/ucms-frontend.log"
+          exit 1
       - name: Install Playwright Chromium
         run: pnpm --filter @ucms/admin exec playwright install --with-deps chromium
       - name: Run browser smoke tests against isolated PostgreSQL
         run: pnpm --filter @ucms/admin test:e2e
+
+  # Builds the api/frontend/admin images for a main commit or a release tag
+  # (v1.2.3, also tagged with that version), only after build and e2e pass,
+  # and pushes them to this repository's container registry
+  # (ghcr.io/<owner>/<repo>/{api,frontend,admin}); a server with
+  # UCMS_IMAGE_REPO set in .env then pulls them instead of building. Off until
+  # the repository variable UCMS_PUBLISH_IMAGES is "true" (Settings > Secrets
+  # and variables > Actions > Variables). The logic lives in
+  # scripts/build-images.sh, which GitLab CI (.gitlab-ci.yml) or any other CI
+  # runs the same way.
+  publish:
+    needs: [build, e2e]
+    if: github.event_name == 'push' && vars.UCMS_PUBLISH_IMAGES == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      # Plain docker login, no third-party action: this token can push the
+      # images production servers run.
+      - run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Registry paths must be lowercase.
+      - run: UCMS_IMAGE_REPO="ghcr.io/${GITHUB_REPOSITORY,,}" bash scripts/build-images.sh --push
+        env:
+          # A release tag push (v1.2.3) also tags the images with that version.
+          UCMS_IMAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
