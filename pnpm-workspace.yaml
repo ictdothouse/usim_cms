@@ -7,8 +7,6 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - astro@7.1.1
 overrides:
-  "@mantine/core": "^8.3.18"
-  "@mantine/hooks": "^8.3.18"
   "esbuild@<=0.24.2": "^0.25.0"
   # GHSA-3g3m-2fjr-6pw4 (via @fastify/static <10.1.9) and GHSA-g3hv-75wg-m249
   # (typescript-eslint still pins minimatch ^10). Drop once upstream catches up.

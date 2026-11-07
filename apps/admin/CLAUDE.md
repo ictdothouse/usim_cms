@@ -1228,7 +1228,7 @@ Loaded when working under apps/admin/. See the repo root CLAUDE.md for cross-cut
   re-fetched on render — an accepted staleness ceiling (a later rename or delete of the linked post/page
   leaves the card showing the old snapshot; a background re-sync job is the upgrade path if that's ever a
   real complaint, not built now). Building that block surfaced two real deviations from the naive
-  BlockNote API in the installed `@blocknote/react@0.51.4`: `createReactBlockSpec(config, implementation)`
+  BlockNote API (found on 0.51.4, still true on 0.57): `createReactBlockSpec(config, implementation)`
   returns a factory function (`(options?) => BlockSpec`), not a `BlockSpec` itself, so it has to be
   invoked once (`createBookmarkCardBlockSpec()`) before going into `blockSpecs` alongside
   `defaultBlockSpecs`'s already-plain entries; and a React block spec's `toExternalHTML` is typed as a

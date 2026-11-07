@@ -59,7 +59,7 @@ terhadap vektor ujian rasmi RFC 6238 Appendix B dalam `auth.test.ts`). Pilihan "
 | **Vite** | ^8.3 | Dev server dan bundler admin. |
 | **Tailwind CSS** | ^4.3 | Styling admin. |
 | **Radix UI (13 primitif) + shadcn convention** | — | Accordion, Dialog, Dropdown, Popover, Select, Tabs, Tooltip, dll. `components.json` + helper `cn()` — **sudah dipakai sebenar** (bukan scaffolding kosong seperti versi lama dokumen ini pernah nyatakan). |
-| **@blocknote/core + react + mantine** | ^0.51 | Editor kaya (rich-text) untuk Post body, dengan toolbar tersuai + custom block `bookmarkCard` (`@`-mention content-search). |
+| **@blocknote/core + react + mantine** | ^0.57 (Mantine ^9) | Editor kaya (rich-text) untuk Post body, dengan toolbar tersuai + custom block `bookmarkCard` (`@`-mention content-search). |
 | **react-hook-form + zod + @hookform/resolvers** | — | Borang. |
 | **lucide-react** | — | Ikon (termasuk untuk medan `icon` info-box/mega-menu). |
 
