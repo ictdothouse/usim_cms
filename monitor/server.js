@@ -29,6 +29,8 @@ import { setInterval, setTimeout } from "node:timers";
 import { initializeUsers, authenticate, listUsers, changePassword, addUser, removeUser } from "./users.js";
 import { getSecurityStatus } from "./security.js";
 import { DASHBOARD_HTML } from "./dashboard-html.js";
+import { STACK_FLOATING_TARGETS, isServiceUp, pullForStagingTest, refreshFloatingImage } from "./stack-refresh.js";
+import { backupCronSettings, backupFreshness } from "./backup-status.js";
 
 const PORT = Number(process.env.MONITOR_PORT || 5555);
 // The monitor runs as root and can operate the deployment. Bind it to a
@@ -716,16 +718,7 @@ let lastAlertedRemoteSha = null;
 // Caddyfile edit, crashed migration) doesn't get restarted forever; same
 // one-shot philosophy as install.sh's own ensure_reachable_or_selfheal.
 let selfHealAttempted = {};
-
-// docker compose ps reports an unhealthy container's State as "running
-// (unhealthy)" — which the naive /healthy/i regex below would also match,
-// since "unhealthy" contains "healthy" as a substring. Checked first so a
-// container that's alive-but-failing its healthcheck (e.g. proxy's Caddy
-// admin-API probe, see docker-compose.yml) is correctly reported down
-// instead of silently passing as up.
-function isServiceUp(state) {
-  return !/unhealthy/i.test(state || "") && /running|healthy|active/i.test(state || "");
-}
+let lastBackupStale = false;
 
 // docker-mode only: composeArgsFor already resolves the right compose
 // file/project per service (base docker-compose.yml vs the currently
@@ -1302,6 +1295,20 @@ function pollForAlerts() {
     }
     lastDiskOver = over;
   });
+  // Same edge trigger for backups: once when the newest control-plane dump
+  // goes stale (or none exists), once when a fresh one lands. Boxes without
+  // install.sh's backup cron are skipped; the Storage card says so instead.
+  getBackupFreshness((backup) => {
+    if (!backup.cronInstalled) return;
+    if (backup.stale !== lastBackupStale) {
+      const prefix = `[usim_cms/${PUBLIC_HOST}]`;
+      const hint = "check /var/log/ucms-backup.log";
+      if (!backup.stale) sendAlert(`${prefix} backups are fresh again (newest ${backup.newestAt} in ${backup.backupDir})`);
+      else if (!backup.newestAt) sendAlert(`${prefix} no control-plane backup found in ${backup.backupDir}; ${hint}`);
+      else sendAlert(`${prefix} newest backup is ${Math.round(backup.ageMs / 3600_000)}h old (${backup.newestAt} in ${backup.backupDir}); ${hint}`);
+    }
+    lastBackupStale = backup.stale;
+  });
 }
 
 function handleAlertTest(req, res) {
@@ -1542,12 +1549,6 @@ function handleRollback(req, res) {
   });
 }
 
-// Shared db/proxy/pooler/cache are single instances. Updating them from this
-// console would violate the zero-downtime update policy.
-function handleApplyBaseTier(req, res) {
-  sendJson(res, 409, { error: "Shared database, proxy, pooler and cache updates require redundant infrastructure or a maintenance window." });
-}
-
 function handlePullStatus(req, res) {
   reconcileDeployState();
   sendJson(res, 200, deployState);
@@ -1614,71 +1615,12 @@ function handleGitSync(req, res) {
 // App packages (api/admin/frontend) aren't included either — those are this
 // repo's own semver, not an upstream dependency to bump.
 
-// docker-compose.yml only pins the MAJOR for these three (e.g. "16-alpine"),
-// so re-pulling the same tag always gets the newest patch/minor already in
-// that major — there's no separate patch pin to bump.
-const STACK_FLOATING_TARGETS = { postgres: "db", redis: "redis", caddy: "proxy" };
-
+// STACK_FLOATING_TARGETS and the refresh itself live in stack-refresh.js.
 function stackImageRef(v, key) {
   if (key === "postgres") return v.infra.db;
   if (key === "redis") return v.infra.redis;
   if (key === "caddy") return v.infra.proxy;
-  if (key === "pgbouncer") return v.infra.pgbouncer;
   return null;
-}
-
-// Polls the same getComposeStatus/isServiceUp the dashboard already renders
-// with, same one-shot-not-a-retry-loop shape as selfHealRestart. If the
-// freshly recreated container isn't healthy within the timeout, tags the
-// previously-running image back onto the target name and recreates again —
-// the container ends up back on exactly what it was running before this
-// update started. `oldImageId` null (pgbouncer's case, see below) means
-// there's nothing to re-tag; the caller handles that by restoring the
-// compose file text instead.
-function pollHealthThenMaybeRollback(service, imageRef, oldImageId, logLine, done) {
-  const deadline = Date.now() + 90_000;
-  const tick = () => {
-    getComposeStatus((err, services) => {
-      const entry = !err && services ? services.find((s) => s.Service === service) : null;
-      logLine(`health check (${service}): ${entry ? entry.State + (entry.Health ? ` (${entry.Health})` : "") : "(not found)"}`);
-      // "running" comes before the compose healthcheck passes (Postgres is
-      // running long before it accepts connections), so wait for "healthy".
-      if (entry && isServiceUp(entry.State) && (!entry.Health || entry.Health === "healthy")) {
-        if (service !== "pgbouncer") return done(true);
-        // PgBouncer's own image has no psql. Its TCP listener can be healthy
-        // while every server login fails, so probe through it from the db
-        // container before accepting an update as successful.
-        return runCompose(
-          ["exec", "-T", "db", "sh", "-ec", 'PGPASSWORD="$POSTGRES_APP_PASSWORD" psql -h pgbouncer -p 6432 -U usim_cms_app -d usim_cms -Atq -c "SELECT 1"'],
-          (authErr, authOut, authErrText) => {
-            if (!authErr && String(authOut).trim() === "1") {
-              logLine("PgBouncer backend login: healthy");
-              return done(true);
-            }
-            logLine(`PgBouncer backend login failed: ${(authErrText || authErr?.message || "unexpected response").trim().slice(-300)}`);
-            if (Date.now() >= deadline) return done(false);
-            setTimeout(tick, 3000);
-          },
-        );
-      }
-      if (Date.now() >= deadline) {
-        if (!oldImageId) {
-          logLine(`timed out waiting for ${service} to become healthy`);
-          return done(false);
-        }
-        logLine(`timed out waiting for ${service} to become healthy — rolling back to previous image (${oldImageId})`);
-        execFile("docker", ["tag", oldImageId, imageRef], { timeout: 10_000 }, () => {
-          runCompose(["up", "-d", "--force-recreate", service], (rbErr, rbOut, rbErrText) => {
-            logLine(rbOut || rbErrText || (rbErr ? rbErr.message : "rollback recreate issued"));
-            done(false);
-          });
-        });
-        return;
-      }
-      setTimeout(tick, 3000);
-    });
-  };
-  tick();
 }
 
 function finishStackDeploy(label, logFd, code) {
@@ -1797,6 +1739,28 @@ function logStackTestResult(key, imageRef, ok, note) {
   fs.appendFileSync(DEPLOY_LOG, `\n\n=== staging test: ${key} (${imageRef}) ${new Date().toISOString()} ===\n${ok ? "PASS" : "FAIL"}: ${note}\n`);
 }
 
+// pullForStagingTest (stack-refresh.js) puts the tag back after the test, so
+// a Test never changes what the next deploy's `docker compose up` runs.
+// PgBouncer's ref is the newest upstream tag; when that equals the tag compose
+// pins, Percona re-pushing it could move it the same way, so it goes through
+// the same path. Known gap: a deploy started while a test is still running
+// sees the moved tag; a test-in-flight gate on handlePull/applyStackUpdate
+// would close it.
+function pullAndStagingTest(res, key, imageRef) {
+  pullForStagingTest({ imageRef, execFile, stagingTest: (cb) => stagingBootTest(key, imageRef, cb) }, (r) => {
+    logStackTestResult(key, imageRef, r.ok, r.note);
+    if (r.restoreError) {
+      const error = `couldn't point ${imageRef} back at ${r.previousId}: ${r.restoreError}. ` +
+        `The next deploy would recreate this service on the tested image; run \`docker tag ${r.previousId} ${imageRef}\` on the VPS.`;
+      logStackTestResult(key, imageRef, false, error);
+      return sendJson(res, 500, { ok: false, error });
+    }
+    if (!r.pulled) return sendJson(res, 502, { ok: false, error: r.note });
+    if (!r.ok) return sendJson(res, 502, { ok: false, error: `pulled ${imageRef} but staging test failed: ${r.note}` });
+    sendJson(res, 200, { ok: true, message: `${imageRef}: ${r.note}. Nothing in production touched.` });
+  });
+}
+
 // POST /api/stack/:key/test — pulls the candidate image, then boot-tests it
 // in isolation (stagingBootTest). Never touches the running container; the
 // separate risk /update guards against (a bad image breaking the live
@@ -1820,34 +1784,12 @@ function handleStackTest(req, res, key) {
     if (STACK_FLOATING_TARGETS[key]) {
       const imageRef = stackImageRef(v, key);
       if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
-      execFile("docker", ["pull", imageRef], { timeout: 120_000 }, (err, stdout, stderr) => {
-        if (err) {
-          logStackTestResult(key, imageRef, false, stderr || err.message);
-          return sendJson(res, 502, { ok: false, error: stderr || err.message });
-        }
-        stagingBootTest(key, imageRef, (ok, note) => {
-          logStackTestResult(key, imageRef, ok, note);
-          if (!ok) return sendJson(res, 502, { ok: false, error: `pulled ${imageRef} but staging test failed: ${note}` });
-          sendJson(res, 200, { ok: true, message: `${imageRef}: ${note}. Nothing in production touched.` });
-        });
-      });
-      return;
+      return pullAndStagingTest(res, key, imageRef);
     }
     if (key === "pgbouncer") {
       getUpstreamLatest((latest) => {
         if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
-        const newRef = `percona/percona-pgbouncer:${latest.pgbouncer}`;
-        execFile("docker", ["pull", newRef], { timeout: 120_000 }, (err, stdout, stderr) => {
-          if (err) {
-            logStackTestResult("pgbouncer", newRef, false, stderr || err.message);
-            return sendJson(res, 502, { ok: false, error: stderr || err.message });
-          }
-          stagingBootTest("pgbouncer", newRef, (ok, note) => {
-            logStackTestResult("pgbouncer", newRef, ok, note);
-            if (!ok) return sendJson(res, 502, { ok: false, error: `pulled ${newRef} but staging test failed: ${note}` });
-            sendJson(res, 200, { ok: true, message: `${newRef}: ${note}. Nothing in production touched.` });
-          });
-        });
+        pullAndStagingTest(res, "pgbouncer", `percona/percona-pgbouncer:${latest.pgbouncer}`);
       });
       return;
     }
@@ -1880,22 +1822,17 @@ function handleStackUpdate(req, res, key) {
   });
 }
 
-// Postgres gets a full dump first (control plane and every tenant, through the
-// root-owned backup.sh copy the nightly cron runs), and the refresh stops if
-// that dump is incomplete. Redis holds only cache and Caddy only config the
-// repo already has, so they skip it.
-function backupBeforeRefresh(key, imageRef, logLine, cb) {
-  if (key !== "postgres") return cb(true);
+// Postgres's refresh takes a full dump first (control plane and every tenant,
+// through the root-owned backup.sh copy the nightly cron runs), and stops if
+// that dump is incomplete. stack-refresh.js decides which keys need it.
+function backupBeforeRefresh(imageRef, logLine, cb) {
   const cronStatus = getBackupCronStatus();
   if (!cronStatus.cronExists || cronStatus.needsUpdate) {
     logLine("pre-update backup: the backup cron isn't installed or is out of date. Apply the backup-cron update first. Nothing was changed.");
     return cb(false);
   }
   execFile("crontab", ["-l"], { timeout: 5_000 }, (_err, cron) => {
-    const setting = (name) => (String(cron || "").match(new RegExp(`^${name}=(.+)$`, "m")) || [])[1]?.trim() || "";
-    const dir = setting("BACKUP_DIR");
-    const backupDir = dir.startsWith("/") ? dir : "/var/backups/usim_cms";
-    const retention = /^\d+$/.test(setting("RETENTION_DAYS")) ? setting("RETENTION_DAYS") : "14";
+    const { backupDir, retention } = backupCronSettings(cron);
     logLine(`--- pre-update backup into ${backupDir} ---`);
     execFile(
       "docker",
@@ -1923,7 +1860,6 @@ function applyStackUpdate(res, key) {
 
   getStackVersions((v) => {
     if (STACK_FLOATING_TARGETS[key]) {
-      const service = STACK_FLOATING_TARGETS[key];
       const imageRef = stackImageRef(v, key);
       if (!imageRef) return sendJson(res, 400, { error: `${key} isn't running under docker-compose.yml on this box` });
 
@@ -1935,114 +1871,13 @@ function applyStackUpdate(res, key) {
       const logLine = (s) => fs.appendFileSync(DEPLOY_LOG, s + "\n");
       logLine(`\n\n=== ${key} patch refresh started ${deployState.startedAt} ===`);
       sendJson(res, 202, { ok: true, started: true });
-      const done = (code) => finishStackDeploy(`${key} patch refresh`, logFd, code);
-
-      runCompose(["ps", "-q", service], (psErr, psOut) => {
-        const cid = (psOut || "").trim().split("\n")[0];
-        execFile("docker", ["inspect", "--format", "{{.Image}}", cid], { timeout: 10_000 }, (inspectErr, oldImageId) => {
-          const oldImage = inspectErr ? null : oldImageId.trim();
-          if (!oldImage) {
-            logLine(`couldn't read ${service}'s current image, so there'd be nothing to roll back to. Nothing was changed.`);
-            return done(1);
-          }
-          logLine(`previous image id: ${oldImage}`);
-          logLine(`--- pulling ${imageRef} ---`);
-          runCompose(["pull", service], (pullErr, pullOut, pullErrText) => {
-            logLine(pullOut || pullErrText || "");
-            if (pullErr) {
-              logLine(`pull failed: ${pullErr.message}`);
-              return done(1);
-            }
-            execFile("docker", ["image", "inspect", "--format", "{{.Id}}", imageRef], { timeout: 10_000 }, (_e, newImageId) => {
-              if (String(newImageId || "").trim() === oldImage) {
-                logLine(`${imageRef} is already the newest patch. Nothing restarted.`);
-                return done(0);
-              }
-              backupBeforeRefresh(key, imageRef, logLine, (backedUp) => {
-                // The pull moved the tag; point it back so no later restart picks up the new image unchecked.
-                if (!backedUp) return execFile("docker", ["tag", oldImage, imageRef], { timeout: 10_000 }, () => done(1));
-                logLine(`--- recreating ${service} ---`);
-                // 30s instead of compose's 10s, so Postgres can finish a clean shutdown;
-                // it must leave room inside runCompose's own 60s kill timeout.
-                runCompose(["up", "-d", "-t", "30", service], (upErr, upOut, upErrText) => {
-                  logLine(upOut || upErrText || "");
-                  if (!upErr) {
-                    return pollHealthThenMaybeRollback(service, imageRef, oldImage, logLine, (ok) => done(ok ? 0 : 1));
-                  }
-                  logLine(`recreate failed: ${upErr.message}. Rolling back to ${oldImage}`);
-                  execFile("docker", ["tag", oldImage, imageRef], { timeout: 10_000 }, () =>
-                    runCompose(["up", "-d", "--force-recreate", service], () => done(1)),
-                  );
-                });
-              });
-            });
-          });
-        });
-      });
-      return;
-    }
-
-    if (key === "pgbouncer") {
-      if (!v.infra.pgbouncer) {
-        return sendJson(res, 400, { error: "pgbouncer isn't running under docker-compose.yml on this box" });
-      }
-      getUpstreamLatest((latest) => {
-        if (!latest.pgbouncer) return sendJson(res, 502, { error: "couldn't resolve latest PgBouncer tag" });
-        const newRef = `percona/percona-pgbouncer:${latest.pgbouncer}`;
-        if (newRef === v.infra.pgbouncer) return sendJson(res, 400, { error: "already on the latest PgBouncer tag" });
-
-        const composePath = path.join(REPO_DIR, "docker-compose.yml");
-        let oldContent;
-        try {
-          oldContent = fs.readFileSync(composePath, "utf8");
-        } catch (e) {
-          return sendJson(res, 500, { error: `couldn't read docker-compose.yml: ${e.message}` });
-        }
-        const re = /^(\s*image:\s*)percona\/percona-pgbouncer:\S+/m;
-        if (!re.test(oldContent)) {
-          return sendJson(res, 500, { error: "pgbouncer image: line not found in docker-compose.yml" });
-        }
-        const newContent = oldContent.replace(re, `$1${newRef}`);
-
-        deployState = { running: true, exitCode: null, startedAt: new Date().toISOString(), finishedAt: null };
-        const logFd = fs.openSync(DEPLOY_LOG, "a");
-        const logLine = (s) => fs.appendFileSync(DEPLOY_LOG, s + "\n");
-        logLine(`\n\n=== pgbouncer update started ${deployState.startedAt} (${v.infra.pgbouncer} -> ${newRef}) ===`);
-        sendJson(res, 202, { ok: true, started: true });
-
-        const restore = (cb) => fs.writeFile(composePath, oldContent, "utf8", cb);
-        fs.writeFile(composePath, newContent, "utf8", (writeErr) => {
-          if (writeErr) {
-            logLine(`couldn't write docker-compose.yml: ${writeErr.message}`);
-            return finishStackDeploy("pgbouncer update", logFd, 1);
-          }
-          logLine(`--- pulling ${newRef} ---`);
-          runCompose(["pull", "pgbouncer"], (pullErr, pullOut, pullErrText) => {
-            logLine(pullOut || pullErrText || "");
-            if (pullErr) {
-              logLine(`pull failed: ${pullErr.message} — reverting docker-compose.yml`);
-              return restore(() => finishStackDeploy("pgbouncer update", logFd, 1));
-            }
-            logLine(`--- recreating pgbouncer ---`);
-            runCompose(["up", "-d", "pgbouncer"], (upErr, upOut, upErrText) => {
-              logLine(upOut || upErrText || "");
-              if (upErr) {
-                logLine(`recreate failed: ${upErr.message} — reverting docker-compose.yml`);
-                return restore(() =>
-                  runCompose(["up", "-d", "pgbouncer"], () => finishStackDeploy("pgbouncer update", logFd, 1)),
-                );
-              }
-              pollHealthThenMaybeRollback("pgbouncer", newRef, null, logLine, (ok) => {
-                if (ok) return finishStackDeploy("pgbouncer update", logFd, 0);
-                logLine(`rolling back docker-compose.yml to ${v.infra.pgbouncer}`);
-                restore(() =>
-                  runCompose(["up", "-d", "pgbouncer"], () => finishStackDeploy("pgbouncer update", logFd, 1)),
-                );
-              });
-            });
-          });
-        });
-      });
+      refreshFloatingImage(
+        {
+          key, imageRef, execFile, runCompose, getComposeStatus, logLine,
+          backup: (cb) => backupBeforeRefresh(imageRef, logLine, cb),
+        },
+        (code) => finishStackDeploy(`${key} patch refresh`, logFd, code),
+      );
       return;
     }
 
@@ -2070,8 +1905,7 @@ function applyStackUpdate(res, key) {
 // oldContents: { "relative/path": originalFileContent } — every file this
 // bump touched, captured BEFORE the edit, so a failure anywhere in the
 // pipeline (lockfile regen, commit, build/test gate, deploy) can put the
-// working tree back exactly how it was. Mirrors the pgbouncer update's
-// own restore-on-failure pattern. A failure after the commit already
+// working tree back exactly how it was. A failure after the commit already
 // landed leaves that commit in git history (harmless — just not what's
 // deployed) but still reverts the files on disk, since getStackVersions
 // reads "current" straight off disk, not off git HEAD — without this, a
@@ -2682,8 +2516,19 @@ function getBackupCronStatus() {
   return { cronExists, pgConfigured, installedVersion, expectedVersion, needsUpdate };
 }
 
+// Whether install.sh's crontab block exists, and how old the newest
+// control-plane dump in its BACKUP_DIR is (see backup-status.js). Feeds both
+// the stale-backup alert in pollForAlerts and the Storage card.
+function getBackupFreshness(cb) {
+  execFile("crontab", ["-l"], { timeout: 5_000 }, (_err, cron) => {
+    const { installed, backupDir } = backupCronSettings(cron);
+    if (!installed) return cb({ cronInstalled: false });
+    cb({ cronInstalled: true, backupDir, ...backupFreshness(backupDir) });
+  });
+}
+
 function handleBackupCronStatus(req, res) {
-  sendJson(res, 200, getBackupCronStatus());
+  getBackupFreshness((lastBackup) => sendJson(res, 200, { ...getBackupCronStatus(), lastBackup }));
 }
 
 // Runs `install.sh --reapply-backup-cron` — a non-interactive re-run of just
@@ -2831,8 +2676,6 @@ const server = http.createServer(async (req, res) => {
       handleRollback(req, res);
     } else if (req.method === "POST" && url.pathname === "/api/git/sync") {
       handleGitSync(req, res);
-    } else if (req.method === "POST" && url.pathname === "/api/base/apply") {
-      handleApplyBaseTier(req, res);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "test") {
       handleStackTest(req, res, parts[2]);
     } else if (req.method === "POST" && parts[0] === "api" && parts[1] === "stack" && parts[2] && parts[3] === "update") {

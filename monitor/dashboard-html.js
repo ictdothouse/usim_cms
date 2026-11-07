@@ -220,6 +220,10 @@ export const DASHBOARD_HTML = `<!doctype html>
   <div class="grid" id="hostGrid"></div>
   <div class="section-head"><h3>Services</h3><span class="muted">Live status</span></div>
   <div class="services-grid" id="services"></div>
+  <div id="alertTestSection" style="display:none">
+    <div class="section-head"><h3>Alerts</h3><span class="muted">Service, disk and backup alerts go to <code>ALERT_WEBHOOK_URL</code></span></div>
+    <div class="row"><button class="secondary" data-action="send-test-alert">Send test alert</button><span class="muted" id="alertTestMsg" role="status"></span></div>
+  </div>
 </div>
 
 <div class="tab-panel" id="panel-deploy">
@@ -232,7 +236,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       <button class="secondary" data-action="rollback">Rollback</button>
       <button class="secondary" data-action="git-sync">Sync local commits to GitHub</button>
     </div>
-    <p class="muted">To refresh the app services, use Pull latest &amp; deploy; it checks the release before switching traffic. Restarting every service would interrupt the shared database and proxy on this single VPS, so that action is unavailable. Shared database, proxy, pooler and cache updates also require redundant infrastructure.</p>
+    <p class="muted">To refresh the app services, use Pull latest &amp; deploy; it checks the release before switching traffic. Restarting every service would interrupt the shared database and proxy on this single VPS, so that action is unavailable. Postgres, Redis and Caddy patch refreshes are under Stack &amp; versions, with a brief confirmed outage.</p>
     <p class="muted">Sync local commits to GitHub pushes anything this VPS committed itself (e.g. a dependency update whose automatic push failed) up to GitHub. It refuses if GitHub also has new commits this VPS hasn't deployed yet — that case needs Pull latest &amp; deploy, or Claude's help, instead.</p>
   </div>
   <div class="section-head"><h3>Deployment activity</h3></div>
@@ -321,6 +325,9 @@ export const DASHBOARD_HTML = `<!doctype html>
   <div class="row">
     <button class="secondary" data-action="refresh-db-sizes">Refresh</button>
   </div>
+
+  <h3>Last backup</h3>
+  <p class="muted" id="backupFreshness">Checking…</p>
 
   <h3>Backup destination</h3>
   <p class="muted">Where the nightly backup cron (<code>/opt/ucms/backup/run.sh</code>) pushes a copy after the local dump finishes. Same setting as the admin panel's Settings tab — editing it here or there updates the same row.</p>
@@ -653,8 +660,40 @@ async function refreshBackupCronStatus() {
     } else {
       el.style.display = "none";
     }
+    renderBackupFreshness(info.lastBackup);
   } catch (e) {
     el.style.display = "none";
+    document.getElementById("backupFreshness").textContent = "Unavailable: " + e.message;
+  }
+}
+
+// Same 26-hour line the server's stale-backup alert uses (backup-status.js).
+function renderBackupFreshness(b) {
+  const el = document.getElementById("backupFreshness");
+  el.style.color = "";
+  if (!b || !b.cronInstalled) {
+    el.textContent = "No backup cron installed on this server, so nothing is backed up nightly.";
+    return;
+  }
+  el.style.color = b.stale ? "#d32f2f" : "";
+  if (!b.newestAt) {
+    el.textContent = "No control-plane backup found in " + b.backupDir + ". Check /var/log/ucms-backup.log.";
+    return;
+  }
+  const hours = b.ageMs / 3600000;
+  el.textContent = (hours < 1 ? Math.round(hours * 60) + " minutes" : hours.toFixed(1) + " hours") + " ago (" +
+    new Date(b.newestAt).toLocaleString() + ") in " + b.backupDir +
+    (b.stale ? ". Older than 26 hours: check /var/log/ucms-backup.log." : ".");
+}
+
+async function sendTestAlert() {
+  const msg = document.getElementById("alertTestMsg");
+  msg.textContent = "Sending…";
+  try {
+    const r = await api("/api/alerts/test", { method: "POST" });
+    msg.textContent = "Sent; the webhook answered HTTP " + r.status + ".";
+  } catch (e) {
+    msg.textContent = "Error: " + e.message;
   }
 }
 
@@ -829,6 +868,7 @@ async function init() {
   document.getElementById("mode").textContent = cfg.mode === "docker" ? "Docker mode" : "Systemd mode";
   document.getElementById("dbRestartBtn").style.display = DB_MANAGED ? "" : "none";
   document.getElementById("alertWebhookBanner").style.display = cfg.alertWebhookConfigured ? "none" : "block";
+  document.getElementById("alertTestSection").style.display = cfg.alertWebhookConfigured ? "" : "none";
   const logButtons = document.getElementById("logButtons");
   for (const name of SERVICES) {
     const b = document.createElement("button");
@@ -1494,6 +1534,7 @@ const dashboardActions = new Map([
   ["refresh-db-sizes", refreshDbSizes],
   ["save-backup-destination", saveBackupDestination],
   ["apply-backup-cron-update", applyBackupCronUpdate],
+  ["send-test-alert", sendTestAlert],
   ["issue-ssl", issueSsl],
   ["change-account-password", changeAccountPassword],
   ["add-account", addAccount],

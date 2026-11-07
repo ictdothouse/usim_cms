@@ -38,7 +38,9 @@ as in the browser:
   compose healthcheck within 90 seconds. Otherwise the previous image is
   re-tagged and recreated. PgBouncer pins an exact tag, so it is bumped with
   a repo commit instead. Major versions (for example Postgres 16 to 18) are
-  never offered.
+  never offered. **Test** pulls and boot-tests the candidate image, then
+  points the tag back at the previous image, so a test never changes what
+  the next deploy runs.
 - The new revision's dependency audit must pass at every severity. Docker
   builds run the app test/build gates, `/ready` checks the API and PgBouncer,
   and the idle frontend and admin must serve real HTML before Caddy flips.
@@ -46,6 +48,14 @@ as in the browser:
   first. Failure leaves the current color serving and restores the source
   checkout. A successful release leaves the previous color stopped and ready
   for rollback.
+
+## Alerts and backup freshness
+
+With `ALERT_WEBHOOK_URL` set, the Overview tab has a **Send test alert**
+button. Besides service up/down and disk alerts, the monitor alerts once when
+the newest control-plane backup (`usim_cms_control_*.dump` in the backup
+cron's `BACKUP_DIR`) is older than 26 hours or missing, and once when a fresh
+one appears. **Storage & backups** shows the age of the last backup.
 
 These gates protect planned software updates. They cannot guarantee
 availability during a host, network, Caddy, PostgreSQL, or Redis failure on a
