@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "../schema.js";
 import { pool, ensurePublicSchema } from "./internal.js";
@@ -207,8 +207,29 @@ export async function setUserTotpSecret(id: string, secret: string): Promise<voi
     const db = drizzle(client, { schema });
     await db
       .update(schema.users)
-      .set({ totpSecret: secret, totpEnabled: false, authVersion: sql`${schema.users.authVersion} + 1` })
+      .set({ totpSecret: secret, totpEnabled: false, totpLastStep: null, authVersion: sql`${schema.users.authVersion} + 1` })
       .where(eq(schema.users.id, id));
+  } finally {
+    client.release();
+  }
+}
+
+// TOTP replay guard (RFC 6238 §5.2): records `step` as this user's last
+// accepted time step only when it is newer than the stored one, so a code —
+// or an older one from the same drift window — is accepted once. A single
+// conditional UPDATE: of two concurrent requests with the same code, the
+// second re-checks the row after the first commits and matches nothing.
+export async function consumeTotpStep(id: string, step: number): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await ensurePublicSchema(client);
+    const db = drizzle(client, { schema });
+    const [row] = await db
+      .update(schema.users)
+      .set({ totpLastStep: step })
+      .where(and(eq(schema.users.id, id), or(isNull(schema.users.totpLastStep), lt(schema.users.totpLastStep, step))))
+      .returning({ id: schema.users.id });
+    return !!row;
   } finally {
     client.release();
   }
@@ -226,7 +247,7 @@ export async function setUserTotpEnabled(id: string, enabled: boolean): Promise<
       .update(schema.users)
       .set(enabled
         ? { totpEnabled: true, authVersion: sql`${schema.users.authVersion} + 1` }
-        : { totpEnabled: false, totpSecret: null, authVersion: sql`${schema.users.authVersion} + 1` })
+        : { totpEnabled: false, totpSecret: null, totpLastStep: null, authVersion: sql`${schema.users.authVersion} + 1` })
       .where(eq(schema.users.id, id));
   } finally {
     client.release();

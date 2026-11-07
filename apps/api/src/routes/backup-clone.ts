@@ -41,8 +41,9 @@ export function registerBackupCloneRoutes(app: FastifyInstance) {
     }
     const buf = await file.toBuffer();
     try {
-      const { restored } = await importTenantBackup(host, new Uint8Array(buf));
-      return { restored: restored.length, host };
+      // skipped: zip entries refused by the media allowlist/signature check.
+      const { restored, skipped } = await importTenantBackup(host, new Uint8Array(buf));
+      return { restored: restored.length, skipped, host };
     } catch (err) {
       reply.code(400);
       return { error: (err as Error).message };

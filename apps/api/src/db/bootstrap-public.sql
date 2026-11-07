@@ -179,6 +179,8 @@ ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "tenant_hosts" text[] DEFA
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "extra_permissions" text[] DEFAULT '{}' NOT NULL;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_secret" text;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_enabled" boolean DEFAULT false NOT NULL;
+-- TOTP replay guard: last accepted 30s time step (users-roles.ts's consumeTotpStep).
+ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "totp_last_step" integer;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "auth_version" integer DEFAULT 1 NOT NULL;
 ALTER TABLE "public"."users" ADD COLUMN IF NOT EXISTS "entra_object_id" text;
 CREATE UNIQUE INDEX IF NOT EXISTS "users_entra_object_id_uidx" ON "public"."users" ("entra_object_id") WHERE "entra_object_id" IS NOT NULL;

@@ -42,14 +42,16 @@ function totpCodeAt(secretBase32: string, timeStepCounter: number): string {
 
 // Accepts the current 30s step and one step either side (±30s clock drift
 // tolerance) — a real authenticator app and this server's clock are rarely
-// perfectly in sync.
-export function verifyTotpCode(secretBase32: string, code: string, now = Date.now()): boolean {
-  if (!/^\d{6}$/.test(code)) return false;
+// perfectly in sync. Returns the matched time step, not just true: the
+// replay guard (consumeTotpStep, routes/auth.ts) records it so the same code
+// is accepted only once.
+export function matchTotpStep(secretBase32: string, code: unknown, now = Date.now()): number | null {
+  if (typeof code !== "string" || !/^\d{6}$/.test(code)) return null;
   const counter = Math.floor(now / 1000 / 30);
   for (const delta of [0, -1, 1]) {
-    if (timingSafeEqual(Buffer.from(totpCodeAt(secretBase32, counter + delta)), Buffer.from(code))) return true;
+    if (timingSafeEqual(Buffer.from(totpCodeAt(secretBase32, counter + delta)), Buffer.from(code))) return counter + delta;
   }
-  return false;
+  return null;
 }
 
 export function totpAuthUri(secretBase32: string, email: string): string {

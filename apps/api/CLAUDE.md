@@ -314,6 +314,12 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   never fires when the client disconnects first, so dropped requests leaked their client and 5 of
   them hung every later request for that tenant (pool `max: 5`, no connect timeout) — found by the
   2026-11-05 live test.
+- Tenant pools also set `connectionTimeoutMillis` (`TENANT_POOL_CONNECT_TIMEOUT_MS`, 10s, hardcoded
+  like `max`). A request that can't get a client in time (pool exhausted, DB/PgBouncer not
+  answering) fails with `TenantDbUnavailableError`, which `plugins/tenant.ts` turns into a 503 with
+  `Retry-After: 5` and a warn log. The error carries `statusCode: 503`, so other callers of
+  `getTenantConnection` also get a 503 from Fastify. The control-plane pool still has no connect
+  timeout.
 - This makes tenant DB isolation real (a compromised or buggy query against one tenant's `req.db`
   cannot see another tenant's rows — separate database, not just a `WHERE tenant_host = ...` filter),
   on top of the RLS `app.authenticated` session-variable gate already enforced per connection.
@@ -340,14 +346,32 @@ Loaded when working under apps/api/. See the repo root CLAUDE.md for cross-cutti
   check never depends on either of those changing shape. `GET /api/portal/tenants` (the Multisite list)
   already returns `maintenanceMode` on every row for free, since it's a plain `db.select()` off the
   `tenants` table with no explicit column list.
-- **Backup/restore/clone dumps `site_chrome` too** (`backup.ts`'s `exportTenantBackup`/
-  `exportTenantDesignClone`/`importTenantBackup`) — `pages.headerId`/`footerId` are real FKs into
-  `site_chrome`, and the dump originally only ever covered `pages`/`posts`/`media`/`mediaFolders`, so
-  promoting a clone into a brand-new (empty `site_chrome`) tenant 400'd on the very first page insert
-  (`pages_header_id_site_chrome_id_fk`). Fixed by adding `siteChrome` to both export functions' `tables`
-  and to `importTenantBackup`'s delete/insert order (insert `site_chrome` before `pages`, since pages
-  reference it) — an older backup without this key still restores fine (`siteChrome = []` default, same
-  optional-key convention as `mediaFolders`).
+- **Backup/restore/clone covers every tenant table** (`backup.ts`'s `BACKUP_TABLES`, 2026-11-06,
+  audit §3.3). It used to dump 6 of 12. Menus, events, symbols, design templates and revisions
+  were missing, so a promoted clone's Menu/Symbol/Event List elements rendered empty.
+  - **Order.** `BACKUP_TABLES` lists each table with its `backup.json` key, in FK-safe insert
+    order. Delete runs in reverse.
+  - **Drift test.** `backup-manifest.test.ts` fails if a tenant migration creates a table missing
+    from the list, or if the order would insert a row before its FK target.
+  - **Old zips.** `pages`/`posts`/`media` are required. A missing optional key means that table is
+    left untouched (it used to be wiped for `mediaFolders`/`siteChrome`/`categories`), so a zip
+    from older code still restores.
+  - **Revisions merge.** Deleting pages/posts cascades `page_revisions`/`post_revisions` away (the
+    FK action bypasses RLS, and they have no DELETE policy). Restore reads them first, then
+    re-inserts existing + backup revisions (`mergeRevisions`: backup wins on the same id, only
+    rows whose page/post survives). Restoring never erases rollback history.
+  - **Batching.** Inserts go in 500-row batches (`insertRows`), under Postgres's 65,535-parameter
+    cap.
+  - **Size.** Export refuses a `backup.json` over the restore's 64 MB manifest limit, and counts
+    it into the 128 MB uncompressed cap.
+  - **Design clone.** It also carries `menus`/`symbols`, because its intact header/footer
+    layouts reference them by id.
+- **Restore media gate** (2026-11-06, audit §3.4). Restore writes zip entries onto the public
+  `/uploads/` tree. It used to accept any name that passed `isValidMediaKey`, so a crafted zip
+  could plant `x.html`/`.svg` that ran on the API origin. `isRestorableMediaFile` now applies
+  `POST /api/media`'s own check (`matchesAllowedMediaSignature(contentTypeFor(name), bytes)`, no
+  second list) to both `media/` and legacy `uploads/` entries. The one exception is the normalize
+  job's `.moved-to` marker. Refused entries come back as `skipped` in the restore response.
 - **Clone delete** — `DELETE /api/portal/clones/:id` (superadmin) drops the in-memory `cloneStore` entry
   (`backup.ts`'s `deleteClone`) and, if the clone was staged (`meta.stagingHost` set — `stageClone`'s own
   `createTenant` call already made that a real tenant+DB+Caddy route), also deletes that staging tenant
@@ -438,9 +462,11 @@ callouts before assuming any of this is speculative hardening.
   caller never gets a fresh timing oracle either) — 5 failed attempts per email OR per ip within 15
   minutes trips a 429. Old rows are pruned lazily on every write (24h retention), no separate cleanup
   cron. **Only correct because `req.ip` actually resolves the real visitor** — `index.ts`'s `Fastify()`
-  sets `trustProxy: true`, safe here specifically because the api container publishes no host port (only
+  sets `trustProxy` only when `TRUST_PROXY === "true"`. `docker-compose.release.yml` sets it, and
+  that is safe there specifically because the api container publishes no host port (only
   reachable via Caddy/another container on `ucms-net`), so the connecting peer can never be an external
-  attacker forging `X-Forwarded-For`. The other half is Caddy itself correctly resolving the real client
+  attacker forging `X-Forwarded-For`. A bare-metal install behind its own reverse proxy must set it
+  too, or every visitor is `127.0.0.1` and shares one per-IP login budget. The other half is Caddy itself correctly resolving the real client
   IP in the first place — see `proxy-sync.ts`'s `TRUSTED_PROXY_MODE` (`unset` = safe default for a
   direct-connection deployment with no CDN in front, e.g. a government agency's own policy; `"cloudflare"`
   once Cloudflare is genuinely proxying the domain's DNS, so Caddy trusts `X-Forwarded-For` only from
@@ -453,10 +479,44 @@ callouts before assuming any of this is speculative hardening.
   table's own schema.ts comment for the intended scope (superadmin-answerable "who did this",
   not a full change-data-capture log). `insertAuditLog(entry)` is the one write path; there's no
   read/viewer UI yet — a fast-follow if this becomes a real ask, not built speculatively now.
+- **Who must use MFA — current behaviour (`routes/auth.ts`'s `POST /api/auth/login`). This
+  supersedes the older history below, which described a superadmin exemption that no longer
+  exists.**
+  - **Superadmin password login always requires TOTP.** This holds in every environment, with no
+    exemption. A superadmin without TOTP is forced through enrollment at login. Entra-only mode's
+    break-glass (`isPasswordLoginAllowed`) still allows the superadmin's password, but that login
+    still needs the code. Recovery for a lost device is another superadmin's MFA reset
+    (`setUserTotpEnabled(id, false)`) or the database.
+  - **Every other user** gets `mfaRequired = NODE_ENV === "production" || platformSettings.mfaRequired`.
+    `isMfaSetupRequired(totpEnabled, mfaRequired)` (2 args) forces enrollment when it is required and
+    not yet enrolled. An account that has already enrolled is always challenged.
+  - **Production pins the switches on.** `GET` reports `mfaEnabled`/`mfaRequired` as true,
+    `PUT /api/portal/login-settings` refuses to turn either off, and `totp-disable` returns 403.
+    `registerSessionRefresh` (`plugins/auth.ts`) ignores any session without `mfaVerified`.
+  - **Risk (audit §3.13).** All of the production-only enforcement keys off
+    `NODE_ENV === "production"`. The Dockerfile and both compose files set it. A bare-metal or
+    hand-run deploy without it silently falls back to "superadmin plus the platform setting", and
+    `mfaVerified` is then not checked.
 - **MFA (TOTP).** Implemented via `node:crypto` only — no otplib/speakeasy dependency for a standard
-  RFC 6238 6-digit/30-second code (`generateTotpSecret`/`verifyTotpCode`/`totpAuthUri` in `db/auth.ts`).
-  `verifyTotpCode` is verified against RFC 6238 Appendix B's official SHA1 test vector in
-  `auth.test.ts`, not just self-consistency with its own encoder. Two-level toggle, deliberately:
+  RFC 6238 6-digit/30-second code (`generateTotpSecret`/`matchTotpStep`/`totpAuthUri` in `db/auth.ts`).
+  `matchTotpStep` is verified against RFC 6238 Appendix B's official SHA1 test vector in
+  `auth.test.ts`, not just self-consistency with its own encoder. It returns the matched 30s time
+  step (current ±1 for drift) or null.
+  **Replay guard (2026-11-06, audit §8.4).** A code used to be reusable inside its ~90s window. Now
+  every code-taking route goes through `acceptTotpCode` (`routes/auth.ts`): `totp-verify`,
+  `totp-setup-verify`, `totp-confirm`, the re-enroll check in `totp-setup`, and `totp-disable`.
+  - **How.** `consumeTotpStep(userId, step)` (`tenant-pool/users-roles.ts`) stores the step in
+    `users.totp_last_step` (added by a `bootstrap-public.sql` `ALTER`). It is one conditional
+    `UPDATE ... WHERE totp_last_step IS NULL OR totp_last_step < $step RETURNING`. Of two
+    concurrent requests with the same code only one matches, and a code from an older step than
+    the last accepted one fails too.
+  - **On failure.** A reused code is a failed login attempt and returns "this code was already
+    used — wait for the next one".
+  - **Reset.** `setUserTotpSecret` and `setUserTotpEnabled(false)` reset the column to null. A new
+    secret's codes are unrelated, so re-enrolling inside the same 30s still works.
+  - **Testing.** Any client logging in twice with one secret inside 30s, such as the e2e fixture
+    across workers or reruns, must wait for the next step.
+  Two-level toggle, deliberately:
   `platformSettings.mfaEnabled` is the instance-wide master switch (Settings tab's "Login Methods"
   card, superadmin-only) — while off, MFA is invisible everywhere; while on, the Security tab's
   enrollment flow becomes available to every user. `users.totpEnabled`/`totpSecret` is the per-user
@@ -465,7 +525,9 @@ callouts before assuming any of this is speculative hardening.
   current state (turning the instance switch off doesn't silently stop enforcing a user's own already-
   confirmed MFA — `setUserTotpEnabled(id, false)` is the only way to drop that, and it also clears the
   secret so a future re-enable needs a fresh enrollment, not a silently-reactivated old one).
-  **Login flow**: password-only login is unchanged when `totpEnabled` is false. When true,
+  **Login flow**: a password-only session is only issued when MFA isn't required for that user
+  (never a superadmin, never in production — see "Who must use MFA" above) and `totpEnabled` is
+  false. When `totpEnabled` is true,
   `POST /api/auth/login` returns `{ mfaRequired: true, pendingToken }` instead of a real session — a
   5-minute-TTL `SessionPayload` with a new `pendingMfa: true` flag, rejected by every other route
   (`requireTenantAuth`/`verifySuperadmin`/`verifyAnyUser` in `plugins/auth.ts`, same treatment as the
@@ -493,14 +555,14 @@ callouts before assuming any of this is speculative hardening.
   only ever *offers* enrollment (Security tab); nothing ever forces an account to actually finish it, so
   an account can go a long time "protected" on paper while `totpEnabled` stays false. A second,
   independent instance-wide switch closes that: `platformSettings.mfaRequired` (off by default, same
-  Settings card, disabled/greyed out unless `mfaEnabled` is also on). While on, any non-superadmin
-  account without TOTP enrolled yet is forced through enrollment as an unskippable step of `POST
-  /api/auth/login` itself — `isMfaSetupRequired(role, totpEnabled, mfaRequired)` (`db/auth.ts`, unit-
+  Settings card, disabled/greyed out unless `mfaEnabled` is also on). While on, any account without
+  TOTP enrolled yet is forced through enrollment as an unskippable step of `POST
+  /api/auth/login` itself — `isMfaSetupRequired(totpEnabled, mfaRequired)` (`db/auth.ts`, unit-
   tested, same pure-function convention as `isPasswordLoginAllowed`) gates a new branch that generates
   a secret (`generateTotpSecret`/`setUserTotpSecret`, same as voluntary `totp-setup`) and returns
-  `{ mfaSetupRequired: true, pendingToken, secret, otpauthUri }` instead of a session. superadmin is
-  exempt (break-glass, same reasoning as `entraOnly` above) so whoever flips this switch on can't lock
-  themselves out. The `pendingToken` reuses the *existing* `pendingMfa: true` flag rather than a new
+  `{ mfaSetupRequired: true, pendingToken, secret, otpauthUri }` instead of a session. The original
+  2026-09-12 design exempted superadmin from this as a break-glass; the code has since gone the
+  other way and always requires it for superadmin (see "Who must use MFA" above). The `pendingToken` reuses the *existing* `pendingMfa: true` flag rather than a new
   one — every route already rejects it (see above), so this needed zero extra plumbing. `POST
   /api/auth/totp-setup-verify` (new) exchanges it for a real session: same rate-limited shape as
   `totp-verify`, except a correct code here also calls `setUserTotpEnabled(id, true)` since this call
@@ -528,6 +590,13 @@ callouts before assuming any of this is speculative hardening.
   already did it: extension comes from a server-controlled `MEDIA_EXT_BY_MIME` map keyed on the
   ALLOWED-listed mimetypes, never the client's own filename — `ALLOWED_MEDIA_TYPES` (the old separate
   allowlist) was folded into this same map so there's one source of truth instead of two.
+  `matchesAllowedMediaSignature` (`file-validation.ts`) then checks the bytes against the declared
+  type.
+  - **OOXML (2026-11-06, audit §3.12).** `.docx`/`.xlsx`/`.pptx` must also be a real Office Open
+    XML package: `[Content_Types].xml` plus a `word/`/`xl/`/`ppt/` part, read from the zip central
+    directory without inflating anything. The ZIP magic alone let a plain zip be stored as
+    `.docx`. Legacy `.doc`/`.xls`/`.ppt` still share one OLE2 magic and are not told apart.
+  - **Restore.** Backup restore reuses this same check (see "Restore media gate").
 - **Media location phase 1 (2026-10-11).** New uploads are stored at
   `tenants/<tenantId>/<yyyy>/<mm>/<slug>-<8hex>.<ext>` (storage.ts's `tenantMediaPrefix`/
   `mediaDatePath`/`mediaStem` — keyed by the tenant's immutable registry id, never its hostname)
@@ -688,8 +757,9 @@ callouts before assuming any of this is speculative hardening.
     directly) anything that isn't a recognized, safely-shaped value for its key: hex color, CSS length,
     an exact enum match (mirroring Designer.tsx's own `options: [...]` arrays), a scheme-checked URL, or
     (for `bgImage`/gallery `images`, which land in a raw `url(...)`, not a safe attribute) a URL with no
-    quote/semicolon/paren/brace/whitespace. `html` (the Custom HTML element) is deliberately exempt — a raw
-    HTML/CSS/JS embed is an intentional, documented trust boundary, not a gap to close. The legacy
+    quote/semicolon/paren/brace/whitespace. `html` (the Custom HTML element) is exempt here, but it is
+    not a raw embed: apps/frontend's `sanitize-custom-html.ts` strips it at render time to a strict
+    allowlist (no `script`/`style`/`iframe`, no `style` attribute; lists in `@ucms/element-style`). The legacy
     BlockBuilder's `hero` block gets the same `imageUrl` check (also a raw `url(...)`); `HeroBlock.astro`
     additionally got its own render-time `safeImageUrl` guard as defense-in-depth (it previously had none
     at all, unlike `SectionBlock.astro`'s `bgImage`/`safeUrl`), for any row written before this validator

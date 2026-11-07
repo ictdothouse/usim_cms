@@ -80,7 +80,13 @@ function totpCode(secretBase32: string, now = Date.now()): string {
 }
 
 async function exchangeTotp(ctx: APIRequestContext, route: string, pendingToken: string, secret: string): Promise<SessionCreds> {
-  const res = await ctx.post(route, { data: { pendingToken, code: totpCode(secret) } });
+  let res = await ctx.post(route, { data: { pendingToken, code: totpCode(secret) } });
+  // The API refuses a code already spent in this 30s step (another worker, or
+  // a rerun moments ago), so wait for the next step and try once more.
+  if (!res.ok() && /already used/.test(await res.text())) {
+    await new Promise((resolve) => setTimeout(resolve, 30_000 - (Date.now() % 30_000) + 500));
+    res = await ctx.post(route, { data: { pendingToken, code: totpCode(secret) } });
+  }
   if (!res.ok()) throw new Error(`seedDesignerPage: ${route} failed (${res.status()}): ${await res.text()}`);
   return {
     cookieValue: extractCookieValue(res.headers()["set-cookie"]),

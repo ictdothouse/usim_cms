@@ -15,7 +15,8 @@ const ADMIN_PORT = new URL(ADMIN_URL).port || "5173";
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 30_000,
+  // Headroom for seed.ts waiting out a TOTP step the API refuses to reuse.
+  timeout: 60_000,
   use: {
     baseURL: ADMIN_URL,
   },

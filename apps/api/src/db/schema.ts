@@ -637,6 +637,10 @@ export const users = pgTable("users", {
   // but never confirmed, and login ignores it entirely.
   totpSecret: text("totp_secret"),
   totpEnabled: boolean("totp_enabled").notNull().default(false),
+  // Last accepted TOTP time step (unix seconds / 30). A code is accepted only
+  // for a newer step, so it can't be replayed (consumeTotpStep). Reset to null
+  // whenever the secret changes.
+  totpLastStep: integer("totp_last_step"),
   // Monotonic credential/authorization revision; increment on password,
   // MFA, role, permission, or tenant-binding changes to revoke old sessions.
   authVersion: integer("auth_version").notNull().default(1),

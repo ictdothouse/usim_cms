@@ -8,7 +8,7 @@ import {
   verifySession,
   SESSION_TTL_MS,
   generateTotpSecret,
-  verifyTotpCode,
+  matchTotpStep,
   totpAuthUri,
   base32Encode,
   isMfaSetupRequired,
@@ -80,9 +80,23 @@ test("verifySession accepts a token that has not yet expired", () => {
 // which is mathematically just the last 6 digits of the same computation —
 // "287082" — so a match here proves the HMAC/counter/truncation logic is
 // correct, not just self-consistent with its own encoder.
-test("verifyTotpCode matches the RFC 6238 official SHA1 test vector", () => {
+test("matchTotpStep matches the RFC 6238 official SHA1 test vector", () => {
   const secret = base32Encode(Buffer.from("12345678901234567890", "ascii"));
-  assert.equal(verifyTotpCode(secret, "287082", 59_000), true);
+  assert.equal(matchTotpStep(secret, "287082", 59_000), 1, "59s is time step 1");
+});
+
+// The replay guard (consumeTotpStep) stores the returned step, so it must be
+// the step the code was minted for — not "now" — or a code from the previous
+// step could be spent a second time after the clock ticks over.
+test("matchTotpStep returns the step a drift-window code belongs to", () => {
+  const secret = generateTotpSecret();
+  const now = 1_800_000_015_000; // mid-step
+  const step = Math.floor(now / 30_000);
+  assert.equal(matchTotpStep(secret, computeCodeForTest(secret, now, 0), now), step);
+  assert.equal(matchTotpStep(secret, computeCodeForTest(secret, now, -1), now), step - 1);
+  assert.equal(matchTotpStep(secret, computeCodeForTest(secret, now, 1), now), step + 1);
+  assert.equal(matchTotpStep(secret, computeCodeForTest(secret, now, -2), now), null, "outside the ±1 window");
+  assert.equal(matchTotpStep(secret, Number(computeCodeForTest(secret, now, 0)), now), null, "non-string body value");
 });
 
 test("totpAuthUri builds a well-formed otpauth:// URI", () => {
@@ -90,25 +104,25 @@ test("totpAuthUri builds a well-formed otpauth:// URI", () => {
   assert.match(totpAuthUri(secret, "x@y.com"), /^otpauth:\/\/totp\/UCMS%3Ax%40y\.com\?secret=[A-Z2-7]+&issuer=UCMS/);
 });
 
-test("verifyTotpCode rejects a wrong-length code outright", () => {
+test("matchTotpStep rejects a wrong-length code outright", () => {
   const secret = generateTotpSecret();
-  assert.equal(verifyTotpCode(secret, "12345"), false);
-  assert.equal(verifyTotpCode(secret, "1234567"), false);
+  assert.equal(matchTotpStep(secret, "12345"), null);
+  assert.equal(matchTotpStep(secret, "1234567"), null);
 });
 
-test("verifyTotpCode round-trips a freshly generated secret", () => {
+test("matchTotpStep round-trips a freshly generated secret", () => {
   const secret = generateTotpSecret();
   const now = Date.now();
-  // Re-derive the same code verifyTotpCode itself would accept, via the
+  // Re-derive the same code matchTotpStep itself would accept, via the
   // public API only (no reach into private helpers) — proves generate +
   // verify agree with each other for a real, random secret.
-  const accepted = [-1, 0, 1].some((stepOffset) => verifyTotpCode(secret, computeCodeForTest(secret, now, stepOffset), now));
+  const accepted = [-1, 0, 1].some((stepOffset) => matchTotpStep(secret, computeCodeForTest(secret, now, stepOffset), now) !== null);
   assert.equal(accepted, true);
 });
 
 function computeCodeForTest(secret: string, now: number, stepOffset: number): string {
   // Independent re-derivation (own base32 decode + HMAC call) of the code
-  // verifyTotpCode should accept for a random secret, so the round-trip test
+  // matchTotpStep should accept for a random secret, so the round-trip test
   // above isn't just asserting the function agrees with itself.
   const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   const clean = secret.toUpperCase().replace(/[^A-Z2-7]/g, "");
