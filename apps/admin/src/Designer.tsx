@@ -118,14 +118,13 @@ export default function Designer({
   // selection was too visually noisy (user feedback). The small "Npx" badge
   // itself still always shows once selected; only the colored band is gated.
   // Declared ahead of the useUndoRedo() call below, which needs its setter.
-  const [hoverBand, setHoverBand] = useState<string | null>(null);
+  const [, setHoverBand] = useState<string | null>(null);
   const {
     rawBlocks, canUndo, canRedo,
     mutate,
     setRawBlocksDirectly,
     undo,
     redo,
-    draggingBand,
   } = useUndoRedo(clone((page.layout as Block[] | undefined) ?? []), setDirty, setSel, bumpStructural, setHoverBand);
   const [activeLeftTab, setActiveLeftTab] = useState<"elements" | "layers" | "settings">("elements");
   // Sprint 2: below `lg` the palette/inspector asides become off-canvas
@@ -179,7 +178,7 @@ export default function Designer({
 
   const {
     blocks,
-    pageSettings, setPageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
+    pageSettings, setPageGap, setPageContentWidth, setPagePaddingX, setPageCanvasColor, setPageThemePreset, themePresets,
     pageSeo, setPageSeo, loadRestoredPage,
     siteMultilangEnabled, pageMultilangEnabled, setPageMultilangEnabled,
     siteLanguages, pageLanguage, setPageLanguage,

@@ -1,6 +1,10 @@
 // Run inside a live API container by scripts/monitor-access.sh. Update only
 // the named monitor route; preserve the current blue/green and tenant routes.
 import http from "node:http";
+import process from "node:process";
+import console from "node:console";
+import { Buffer } from "node:buffer";
+import { URL } from "node:url";
 
 const base = new URL(process.env.CADDY_ADMIN_URL || "http://proxy:2019");
 const mode = process.env.MONITOR_ACCESS_MODE;

@@ -216,6 +216,7 @@ const pagesAfterRead = (items: unknown[], req: FastifyRequest) => {
   // Designer-minted preview token may see it.
   const showDraft = isElevatedRequest(req);
   return (items as Record<string, unknown>[]).map((raw) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- drops draft from the copy
     const item = showDraft ? raw : (({ draft: _draft, ...rest }) => rest)(raw);
     const layout = item.layout;
     if (!Array.isArray(layout) || !layout.some((b) => (b as { type?: string })?.type === "hero")) return item;
@@ -834,6 +835,7 @@ const siteChromeBeforeChange = async (data: unknown, args: AccessArgs, req: Fast
 // draft (migration 0034) is dropped here for anyone but an admin session or
 // a Designer-minted preview token.
 const siteChromeAfterRead = (items: unknown[], req: FastifyRequest) =>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- drops draft from the copy
   isElevatedRequest(req) ? items : (items as Record<string, unknown>[]).map(({ draft: _draft, ...rest }) => rest);
 
 export const siteChromeCollection: CollectionConfig = {

@@ -3,6 +3,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
+import { Buffer } from "node:buffer";
+/* global structuredClone */
 
 export const USERS_FILE = process.env.MONITOR_USERS_FILE || "/etc/ucms-monitor-users.json";
 const N = 1 << 17;
@@ -90,6 +93,8 @@ function writeStore(store, initial = false) {
     authCache.clear();
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
+    // A leftover temp copy of the password hashes must not pass silently.
+    // eslint-disable-next-line no-unsafe-finally
     try { fs.unlinkSync(temp); } catch (error) { if (error.code !== "ENOENT") throw error; }
   }
 }
