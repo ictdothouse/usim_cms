@@ -924,9 +924,25 @@ function stackActions(key, label, testable) {
   } else {
     html += "<button class=\\"secondary\\" data-action=\\"stack-update\\" data-stack-key=\\"" + key + "\\" data-stack-label=\\"" + safeLabel + "\\">Update</button>";
   }
-  html += "<span class=\\"muted\\" id=\\"stackMsg-" + key + "\\"></span>";
+  const last = stackMsgs[key];
+  html += "<span class=\\"muted\\" id=\\"stackMsg-" + key + "\\"" +
+    (last && last.color ? " style=\\"color:" + last.color + "\\"" : "") + ">" +
+    (last ? escapeHtml(last.text) : "") + "</span>";
   html += "</div>";
   return html;
+}
+
+// Last Test/Update result per item. A finished run re-renders the whole grid
+// (pollDeployLog -> refreshVersions), which used to wipe the message the
+// moment it appeared, so stackActions renders it back from here.
+const stackMsgs = {};
+function setStackMsg(key, text, color) {
+  stackMsgs[key] = { text: text, color: color || "" };
+  const msg = document.getElementById("stackMsg-" + key);
+  if (msg) {
+    msg.style.color = color || "";
+    msg.textContent = text;
+  }
 }
 
 let lastVersionsData = null;
@@ -987,22 +1003,12 @@ async function stackTest(key, btn) {
   const origText = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Testing…";
-  const msg = document.getElementById("stackMsg-" + key);
-  if (msg) {
-    msg.style.color = "";
-    msg.textContent = key === "deps" ? "checking for outdated packages…" : "pulling image + staging boot-test…";
-  }
+  setStackMsg(key, key === "deps" ? "checking for outdated packages…" : "pulling image + staging boot-test…");
   try {
     const r = await api("/api/stack/" + key + "/test", { method: "POST" });
-    if (msg) {
-      msg.style.color = "#2e7d32";
-      msg.textContent = "✓ " + (r.message || "test passed");
-    }
+    setStackMsg(key, "✓ " + (r.message || "test passed"), "#2e7d32");
   } catch (e) {
-    if (msg) {
-      msg.style.color = "#d32f2f";
-      msg.textContent = "✗ " + e.message;
-    }
+    setStackMsg(key, "✗ " + e.message, "#d32f2f");
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
@@ -1021,15 +1027,15 @@ async function stackTest(key, btn) {
 // whatever's currently on screen.
 async function pollStackMsg(key, label) {
   const tick = async () => {
-    const msg = document.getElementById("stackMsg-" + key);
     try {
       const st = await api("/api/pull/status");
       if (st.running) {
-        if (msg) msg.textContent = "updating " + label + "… (see Deployments for the live log)";
+        setStackMsg(key, "updating " + label + "… (see Deployments for the live log)");
         setTimeout(tick, 2000);
-      } else if (msg) {
-        msg.style.color = st.exitCode === 0 ? "#2e7d32" : "#d32f2f";
-        msg.textContent = st.exitCode === 0 ? "✓ updated" : "✗ failed (exit " + st.exitCode + ") — see Deployments log";
+      } else if (st.exitCode === 0) {
+        setStackMsg(key, "✓ finished — see Deployments log", "#2e7d32");
+      } else {
+        setStackMsg(key, "✗ failed (exit " + st.exitCode + ") — see Deployments log", "#d32f2f");
       }
     } catch (e) {
       setTimeout(tick, 2000);
@@ -1055,11 +1061,7 @@ async function stackUpdate(key, label, btn) {
   btn.disabled = true;
   const origText = btn.textContent;
   btn.textContent = "Updating…";
-  const msg = document.getElementById("stackMsg-" + key);
-  if (msg) {
-    msg.style.color = "";
-    msg.textContent = "starting…";
-  }
+  setStackMsg(key, "starting…");
   try {
     await api("/api/stack/" + key + "/update", {
       method: "POST",
@@ -1070,10 +1072,7 @@ async function stackUpdate(key, label, btn) {
     refresh();
     pollStackMsg(key, label);
   } catch (e) {
-    if (msg) {
-      msg.style.color = "#d32f2f";
-      msg.textContent = "✗ " + e.message;
-    }
+    setStackMsg(key, "✗ " + e.message, "#d32f2f");
     btn.disabled = false;
     btn.textContent = origText;
   }
