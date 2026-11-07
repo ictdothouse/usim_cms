@@ -2267,6 +2267,11 @@ EOF
   echo "     Credentials are stored in /etc/ucms-monitor.env (root-only)."
   echo "   PostgreSQL:   $([ "$DB_MANAGED" = "true" ] && echo "installed by this script" || echo "reusing your existing cluster")"
   echo ""
+  echo " Public access: put your own reverse proxy on THIS box in front of the"
+  echo " ports above. It must set X-Forwarded-For (nginx: proxy_set_header"
+  echo " X-Forwarded-For \$proxy_add_x_forwarded_for; Caddy/Apache do it already),"
+  echo " or a client could send its own and fake its IP to the login rate limit."
+  echo ""
   echo " Sign in with the superadmin account created by this installer."
   echo "================================================================"
 }
